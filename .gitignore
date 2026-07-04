@@ -39,6 +39,10 @@ yarn-error.log*
 # artefactos de experimentos locales (ids de pruebas contra APIs externas)
 scripts/.apollo_test_*
 
+# la DB real vive un nivel arriba (../isps.db); si algo corre sqlite3 con ruta
+# relativa por accidente aquí, crea este archivo vacío fantasma. Nunca es la DB real.
+/isps.db
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
