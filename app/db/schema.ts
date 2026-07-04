@@ -37,6 +37,7 @@ export const contacto = sqliteTable('contacto', {
   email: text('email'),
   notas: text('notas'),
   esPrincipal: integer('es_principal').notNull().default(0),
+  fuente: text('fuente').notNull(),
 });
 
 export const empresaUsuarios = sqliteTable('empresa_usuarios', {

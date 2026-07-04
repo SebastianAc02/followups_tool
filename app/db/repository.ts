@@ -1,6 +1,7 @@
 import { and, eq, lte, isNotNull, desc, sql } from 'drizzle-orm';
 import { db } from './index';
 import { empresa, contacto, empresaUsuarios, toque, syncCambios } from './schema';
+import { registrarToqueSchema, type RegistrarToqueInput } from './validation';
 
 // Único punto de acceso a datos. El resto de la app no toca SQL ni la DB directo.
 
@@ -90,42 +91,76 @@ export function getCuenta(id: string) {
 }
 
 // Registrar un toque: escribe el evento (toque) y actualiza el estado actual (empresa). Atómico.
-export function registrarToque(input: {
-  idEmpresa: string;
-  resultado: string;
-  quePaso?: string;
-  proximoFollowUp?: string;
-  proximoCanal?: string;
-  usuarios?: number;
-  crm?: string;
-  pasarela?: string;
-}) {
+// La regla de negocio (4 salidas cerradas, razonPerdida obligatoria si contesto_no) es de
+// DOMINIO y se enforza aquí con Zod, no en la UI: cualquier caller futuro (ingest worker,
+// EnvioAdapter) pasa por esta misma garantía. `.parse()` lanza si el input no cumple.
+export function registrarToque(input: RegistrarToqueInput) {
+  const parsed = registrarToqueSchema.parse(input);
   const ahora = new Date().toISOString();
+
   db.transaction((tx) => {
+    // KDM opcional: upsert en contacto ANTES del insert del toque, para poder enlazar
+    // toque.idContacto. Matching: mismo idEmpresa + mismo telefono exacto si viene telefono;
+    // si no hay telefono, no hay match posible (el nombre no es clave confiable) -> insertar.
+    let idContacto: number | null = null;
+    if (parsed.kdm) {
+      const { nombre, telefono } = parsed.kdm;
+      const existente = telefono
+        ? tx
+            .select({ idContacto: contacto.idContacto })
+            .from(contacto)
+            .where(and(eq(contacto.idEmpresa, parsed.idEmpresa), eq(contacto.telefono, telefono)))
+            .get()
+        : undefined;
+
+      if (existente) {
+        idContacto = existente.idContacto;
+        const sets: Record<string, unknown> = { esKeyDecisionMaker: 1 };
+        if (nombre) sets.nombre = nombre;
+        tx.update(contacto).set(sets).where(eq(contacto.idContacto, idContacto)).run();
+      } else {
+        const inserted = tx
+          .insert(contacto)
+          .values({
+            idEmpresa: parsed.idEmpresa,
+            nombre,
+            telefono: telefono ?? null,
+            esKeyDecisionMaker: 1,
+            esPrincipal: 0,
+            fuente: 'cockpit',
+          })
+          .run();
+        idContacto = Number(inserted.lastInsertRowid);
+      }
+    }
+
     tx.insert(toque)
       .values({
-        idEmpresa: input.idEmpresa,
+        idEmpresa: parsed.idEmpresa,
+        idContacto,
         fecha: ahora,
-        canal: 'llamada',
-        resultado: input.resultado,
-        quePaso: input.quePaso ?? null,
-        proximoFollowUpFecha: input.proximoFollowUp ?? null,
+        canal: parsed.canal,
+        resultado: parsed.resultado,
+        quePaso: parsed.quePaso ?? null,
+        proximoFollowUpFecha: parsed.proximoFollowUp ?? null,
+        razonPerdida: parsed.razonPerdida ?? null,
+        objecion: parsed.objecion ?? null,
         fuente: 'cockpit',
         createdAt: ahora,
       })
       .run();
 
     const sets: Record<string, unknown> = { updatedAt: sql`datetime('now')` };
-    if (input.proximoFollowUp) sets.proximoFollowUpFecha = input.proximoFollowUp;
-    if (input.proximoCanal) sets.proximoCanal = input.proximoCanal;
-    if (input.crm) sets.crmSoftware = input.crm;
-    if (input.pasarela) sets.pasarelaActual = input.pasarela;
-    tx.update(empresa).set(sets).where(eq(empresa.idEmpresa, input.idEmpresa)).run();
+    if (parsed.proximoFollowUp) sets.proximoFollowUpFecha = parsed.proximoFollowUp;
+    if (parsed.proximoCanal) sets.proximoCanal = parsed.proximoCanal;
+    if (parsed.crm) sets.crmSoftware = parsed.crm;
+    if (parsed.pasarela) sets.pasarelaActual = parsed.pasarela;
+    tx.update(empresa).set(sets).where(eq(empresa.idEmpresa, parsed.idEmpresa)).run();
 
-    if (input.usuarios != null && !Number.isNaN(input.usuarios)) {
+    if (parsed.usuarios != null && !Number.isNaN(parsed.usuarios)) {
       tx.insert(empresaUsuarios)
-        .values({ idEmpresa: input.idEmpresa, usuariosEstimados: input.usuarios })
-        .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: { usuariosEstimados: input.usuarios } })
+        .values({ idEmpresa: parsed.idEmpresa, usuariosEstimados: parsed.usuarios })
+        .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: { usuariosEstimados: parsed.usuarios } })
         .run();
     }
 
@@ -135,9 +170,9 @@ export function registrarToque(input: {
         corrida: 'cockpit',
         fuente: 'cockpit',
         entidad: 'toque',
-        idRegistro: input.idEmpresa,
+        idRegistro: parsed.idEmpresa,
         accion: 'insert',
-        detalle: `${input.resultado} -> next ${input.proximoFollowUp ?? '-'}`,
+        detalle: `${parsed.resultado} -> next ${parsed.proximoFollowUp ?? '-'}`,
       })
       .run();
   });

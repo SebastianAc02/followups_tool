@@ -3,8 +3,11 @@
 import { useState } from "react";
 import { registrarToqueAction } from "./actions";
 
+// Puente temporal: el formulario viejo (2 salidas) todavía no distingue reunión de
+// seguimiento (eso es V1.3). "contesto" mapea al valor mas honesto disponible hoy en el
+// enum cerrado de 4 salidas: contesto_no. V1.3 reemplaza esto con las 4 salidas reales.
 const OUTCOMES = [
-  { v: "contesto", l: "Contestó" },
+  { v: "contesto_no", l: "Contestó" },
   { v: "no_contesto", l: "No contestó" },
 ];
 
