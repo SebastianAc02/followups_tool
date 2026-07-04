@@ -75,6 +75,30 @@ un toque perdido invisible; bloqueada y visible es un pendiente accionable (cons
 mandarle a todos los contactos por defecto (quema la base; multipersona es opt-in).
 **Costo aceptado.** Un estado más en `inscripcion` y su rama en el motor.
 
+### B1.c · Ownership en dos niveles: persona (empresa.owner) vs campaña (campana.owner)
+
+**Decisión.** `empresa.owner` es la atribución de HOY, a nivel persona, y sigue existiendo
+tal cual (Fase 2 la lee de la sesión, sin cambios). Pero 1737/1959 empresas (89%, verificado
+contra isps.db 2026-07-04) NO tienen owner: sobre todo frío nunca tocado (1433 con
+estado_notion vacío), y también un tramo ya en funnel (lead/on_hold/firma_pago). Esas
+empresas NO entran a la cola personal de nadie en v1, ni antes ni después de Fase 2: eso ya
+pasa hoy y es correcto (nadie las ha tocado todavía). Cuando F3 (Fase 4) inscriba un
+segmento en una campaña masiva, la atribución de ESA masa de leads es la campaña, no una
+persona: `campana.owner` (ya en el Anexo, línea "campana: ... owner ...") es el responsable
+de ejecutar los toques de esa campaña completa, sin escribir nada en `empresa.owner`. Un
+mismo humano puede ser owner de campañas distintas (Sebastián en tier1/2/3 frío, Felipe en
+las suyas).
+**Por qué.** Evita el error de modelar "toda empresa tiene un owner-persona" como
+invariante permanente: rompería en cuanto exista una campaña masiva sobre miles de leads
+frías. Mantiene el core simple ahora (Fase 2 no toca esto) y deja la costura donde ya
+estaba prevista (Anexo de campana), sin inventar tabla nueva.
+**Alternativa rechazada.** Backfill de `empresa.owner` al owner de la campaña al inscribir:
+mezclaría atribución individual real con atribución masiva temporal, y se perdería en
+cuanto la empresa saliera de la campaña o entrara a otra.
+**Costo aceptado.** La cola personal (`colaDelDia`) y el panel de campaña (Fase 4/5) son dos
+vistas distintas sobre el mismo pipeline; no se resuelve con un solo filtro `owner`. Se
+construye en Fase 4, no ahora.
+
 ### B5 · Evolución y deuda (diferido y costuras)
 
 | Diferido | Costura que queda HOY |
