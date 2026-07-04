@@ -31,8 +31,11 @@ export const contacto = sqliteTable('contacto', {
   nombre: text('nombre'),
   apellido: text('apellido'),
   cargo: text('cargo'),
+  cargoCategoria: text('cargo_categoria'),
+  esKeyDecisionMaker: integer('es_key_decision_maker').notNull().default(0),
   telefono: text('telefono'),
   email: text('email'),
+  notas: text('notas'),
   esPrincipal: integer('es_principal').notNull().default(0),
 });
 
@@ -55,6 +58,8 @@ export const toque = sqliteTable('toque', {
   transcriptProveedor: text('transcript_proveedor'),
   transcriptId: text('transcript_id'),
   transcriptUrl: text('transcript_url'),
+  razonPerdida: text('razon_perdida'),
+  objecion: text('objecion'),
   fuente: text('fuente').notNull(),
   createdAt: text('created_at'),
 });
