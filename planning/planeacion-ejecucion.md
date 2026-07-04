@@ -10,8 +10,9 @@ tablero operativo: qué sigue AHORA, en qué orden, con qué gate.
 
 ## Próxima acción (lo único que importa ahora mismo)
 
-> **Arrancar Fase 1 (F0, cerrar el core).** G0 ya está verde: Apollo verificado. La
-> siguiente pieza es la deuda del core de la que todo cuelga.
+> **Fase 1 construida y revisada, pendiente de que Sebastián la revise y mergee.** Rama
+> `fase-1-cerrar-el-core` (12 commits sobre main, ya pusheada a GitHub), CodeRabbit en 0
+> hallazgos. Tras el merge: arrancar Fase 2 (Auth, B3).
 
 G0 cerrado el 2026-07-03: las 5 pruebas de lectura pasaron; `usage_stats` confirmó crear
 contactos/empresas, add_contact_ids, gestionar/frenar secuencias y leer tracking. Y la prueba
@@ -40,10 +41,13 @@ Regla: un gate rojo detiene solo lo que depende de él. Las fases independientes
 
 - [x] **Fase 0 · P0 Apollo (G0). ✅** Solo lectura. Corrido 2026-07-03: G0 verde, supuesto
       sostenido. Resultados y decisión en experimento-apollo.md.
-- [ ] **Fase 1 · F0 cerrar el core.** ALTER a `toque` (razon_perdida, objecion), 4 salidas
-      validadas en código, KDM a `contacto`, canal real, tap WhatsApp/correo, contadores del
-      día. Reflejar en schema.ts las columnas reales usadas. Migración con dry-run + apply.
-      Demo: registro "contestó-no" con razón Precio y el KDM queda en contacto.
+- [x] **Fase 1 · F0 cerrar el core. ✅ (construida, pendiente merge a main).** ALTER a
+      `toque` (razon_perdida, objecion), 4 salidas validadas con Zod dentro del Repository,
+      KDM a `contacto` (upsert por empresa+teléfono), canal real del toque, tap de
+      WhatsApp/correo desde la cola, contadores del día por canal/resultado. Migración con
+      dry-run + apply. Demo verificada en vivo contra isps.db real (con limpieza posterior):
+      "no sigue" con razón Precio y el KDM queda en contacto. 8/8 tests, CodeRabbit 0
+      hallazgos. Rama `fase-1-cerrar-el-core`, 12 commits sobre main.
 - [ ] **Fase 2 · Auth (B3).** Better Auth email+password, owner=email, flag admin, tablas en
       la misma SQLite. Demo: login de Sebastián y Felipe; sin sesión no se ve nada.
 - [ ] **Fase 3 · F1 conectores + ingest Granola + outbox Notion.** Tabla `conector`
@@ -129,3 +133,31 @@ las fronteras ya están fijadas por la constitución).
   "lista cuando". Verificado contra isps.db que contacto ya tiene es_key_decision_maker y
   cargo_categoria, y que a toque le faltan razon_perdida y objecion (el ALTER de V1.1 es
   real). NINGUNA tarea ejecutada; se retoma por V1.1 cuando Sebastián dé el arranque.
+- 2026-07-03 · Ejecutada la Fase 1 completa (V1.1 a V1.6) vía subagent-driven-development:
+  un implementador + revisión de spec compliance + revisión de calidad por tarea, con fix y
+  re-verificación cuando el reviewer encontró issues. Repo conectado a
+  github.com/SebastianAc02/followups_tool (no existía remote antes). Walking skeleton
+  commiteado en main (818e541); la Fase 1 vive en la rama `fase-1-cerrar-el-core`.
+  - V1.1: ALTER a toque (razon_perdida, objecion), idempotente por PRAGMA, no por captura de
+    excepción. Aprobado sin issues.
+  - V1.2: registrarToque con Zod dentro del Repository (no solo la UI), enum cerrado de 4
+    salidas, upsert de KDM por empresa+teléfono en la misma transacción. Fix tras review:
+    normalización de telefono="" movida al schema de dominio, drift de test-helpers.ts vs
+    schema.ts corregido. Hallazgo falso (no bug real): PRAGMA table_info no mostraba
+    usuarios_efectivos por ser columna GENERATED STORED en isps.db; confirmado con
+    `.schema` que sí existe y el diseño es correcto.
+  - V1.3: UI real de las 4 salidas, razón condicional, objeción, KDM. Placeholder temporal
+    de V1.2 removido. Fix tras review: rename canal->proximoCanal en CaptureForm para
+    claridad (sin cambio de comportamiento).
+  - V1.4: tap de WhatsApp/correo desde la cola (resultado fijo no_contesto, decisión
+    confirmada con Sebastián). Reestructuración de la fila (Link + form hermanos, nunca
+    anidados) para no romper HTML. Aprobado sin fixes.
+  - V1.5: contadoresHoy (por canal y por resultado), alcance acotado a propósito sin
+    inventar taxonomía warm/cold/reactivación (eso es Fase 7). Fix tras review: documentado
+    y testeado el comportamiento con datos legado (total incluye, buckets no).
+  - V1.6: cierre de fase. Instalado y autenticado CodeRabbit CLI (no estaba disponible).
+    2 hallazgos reales: ruta de DB hardcodeada en scripts de migración (ahora lee
+    ISPS_DB_PATH) y bug de zona horaria en el cálculo de "mañana" (mezclaba hora local con
+    UTC vía toISOString; nuevo app/lib/date-utils.ts corrige esto en ambos lugares que lo
+    tenían). Re-corrida de CodeRabbit: 0 hallazgos. 8/8 tests. Rama dejada sin mergear a
+    pedido de Sebastián, para que la revise localmente primero.

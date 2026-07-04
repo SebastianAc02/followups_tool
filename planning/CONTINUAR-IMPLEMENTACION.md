@@ -15,11 +15,13 @@ retomar sin perder contexto. Última sesión: 2026-07-03.
 
 ## Próxima acción
 
-**Arrancar la Fase 1 (F0, cerrar el core) por `planning/tasks-v2.md`, empezando por V1.1.**
-La lista de tareas delegables ya está generada (2026-07-03), una tarea por delegación, con
-"lista cuando", archivos y routing de skills por tarea. Ninguna se ha ejecutado. La deuda de
-la que cuelga todo: canal real del toque, las 4 salidas del resultado, razón de pérdida,
-objeción, KDM a `contacto`, tap de WhatsApp/correo, contadores del día.
+**Fase 1 completa (V1.1 a V1.6), pendiente de que Sebastián la revise y mergee a main.**
+Vive en la rama `fase-1-cerrar-el-core` (12 commits sobre main, ya pusheada a
+github.com/SebastianAc02/followups_tool). Cada tarea pasó por spec compliance + code
+quality review, con fixes aplicados donde hizo falta; CodeRabbit corrió al cierre con 0
+hallazgos (tras corregir 2: ruta de DB hardcodeada en scripts de migración, y un bug de
+zona horaria en el cálculo de "mañana"). 8/8 tests. Detalle completo en la bitácora de
+`planeacion-ejecucion.md`. Tras el merge: arrancar Fase 2 (Auth, B3) por `tasks-v2.md`.
 
 ## Qué leer, en orden
 
