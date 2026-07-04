@@ -314,3 +314,12 @@ Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decisio
 - [ ] **S2 · Decisión buzón/seat con Camilo.** Para enviar como Sebastián y no como Camilo.
   Es de negocio, no de código; solo bloquea la identidad de envío en producción, no la
   construcción de la Fase 5.
+- [ ] **S3 · Drift silencioso entre test-helpers.ts y schema.ts.** `app/db/test-helpers.ts`
+  duplica a mano el DDL de las tablas reales para las pruebas de Repository, y puede
+  desincronizarse en silencio de `app/db/schema.ts` (Drizzle). Ya pasó en V1.2: la columna
+  `usuarios_reales` en test-helpers.ts vs `usuarios_efectivos` en schema.ts, corregido en el
+  fix de code review de esa tarea. El comentario de buena fe en test-helpers.ts no evitó el
+  drift; el mecanismo de duplicación sigue existiendo para toda tabla nueva que se agregue
+  ahí. No se implementa la solución de fondo ahora (generar el DDL desde schema.ts, o un
+  test de smoke que compare `PRAGMA table_info` de isps.db real contra test-helpers.ts):
+  queda anotada para que alguien la tome después.

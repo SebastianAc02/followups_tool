@@ -120,6 +120,29 @@ test('caso 4: resultado fuera de las 4 salidas lanza error y no inserta nada', (
   raw.close();
 });
 
+test('caso 5: kdm con telefono="" se comporta igual que sin telefono (normaliza en el schema, no lanza)', () => {
+  seedEmpresa('emp-5');
+
+  registrarToque({
+    idEmpresa: 'emp-5',
+    canal: 'llamada',
+    resultado: 'contesto_sigue_seguimiento',
+    kdm: { nombre: 'Alguien', telefono: '' },
+  } as any);
+
+  const raw = leerRaw();
+  const toqueRow = raw.prepare('SELECT * FROM toque WHERE id_empresa = ?').get('emp-5') as any;
+  assert.ok(toqueRow.id_contacto, 'el toque debe enlazar a un contacto');
+
+  const contactoRow = raw
+    .prepare('SELECT * FROM contacto WHERE id_contacto = ?')
+    .get(toqueRow.id_contacto) as any;
+  assert.equal(contactoRow.nombre, 'Alguien');
+  assert.equal(contactoRow.telefono, null, 'sin telefono real, debe insertar sin buscar match');
+  assert.equal(contactoRow.es_key_decision_maker, 1);
+  raw.close();
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

@@ -32,7 +32,7 @@ export async function registrarToqueAction(formData: FormData) {
   // todavia, se usa un placeholder explicito para no romper la demo basica. V1.3 agrega el
   // campo real y este placeholder deja de generarse.
   if (resultado === "contesto_no" && !razonPerdida) {
-    razonPerdida = "Sin especificar (pendiente UI V1.3)";
+    razonPerdida = "[PLACEHOLDER-V1.2] Sin especificar (pendiente UI V1.3)";
   }
   const kdmNombre = String(formData.get("kdmNombre") ?? "").trim() || undefined;
   const kdmTelefono = String(formData.get("kdmTelefono") ?? "").trim() || undefined;

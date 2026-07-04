@@ -18,7 +18,14 @@ export type Resultado = (typeof RESULTADOS)[number];
 
 export const kdmSchema = z.object({
   nombre: z.string().min(1),
-  telefono: z.string().min(1).optional(),
+  // Normaliza "" a undefined ANTES de exigir min(1): la garantía "string vacío = no vino
+  // telefono" vive aquí, en el dominio, no en cada caller (server action, ingest worker de
+  // Fase 3, EnvioAdapter de Fase 5).
+  telefono: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? undefined : v))
+    .optional(),
 });
 
 export const registrarToqueSchema = z

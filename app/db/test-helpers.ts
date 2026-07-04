@@ -1,7 +1,9 @@
 // Helpers SOLO para pruebas de Repository. No se usa en runtime de la app.
 // Crea una DB SQLite de prueba (archivo temporal) con el subset de tablas reales
-// que necesita registrarToque, replicando las columnas relevantes de isps.db
-// (verificado con PRAGMA table_info contra isps.db real, 2026-07-03).
+// que necesita registrarToque, replicando a mano las columnas relevantes de isps.db.
+// DDL verificado columna por columna contra app/db/schema.ts (Drizzle), no contra
+// isps.db directo. Esta duplicación puede desincronizarse en silencio: ver S3 en
+// planning/tasks-v2.md.
 
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -49,9 +51,7 @@ export function crearDbPrueba() {
       telefono TEXT,
       email TEXT,
       notas TEXT,
-      fuente TEXT NOT NULL,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      fuente TEXT NOT NULL
     );
 
     CREATE TABLE toque (
@@ -76,8 +76,7 @@ export function crearDbPrueba() {
     CREATE TABLE empresa_usuarios (
       id_empresa TEXT PRIMARY KEY,
       usuarios_estimados REAL,
-      usuarios_reales REAL,
-      actualizado_en TEXT DEFAULT (datetime('now'))
+      usuarios_efectivos REAL
     );
 
     CREATE TABLE sync_cambios (
