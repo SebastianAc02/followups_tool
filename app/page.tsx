@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { colaDelDia } from "./db/repository";
-import { repartirAction } from "./actions";
+import { repartirAction, registrarTapAction } from "./actions";
 
 const OWNERS = [
   { key: "Sebastian Acosta Molina", label: "Sebastián" },
@@ -65,33 +65,41 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
           const sev = dias > 0 ? "overdue" : "today";
           const accion = ACCION[c.canal ?? "llamada"] ?? "Llamar";
           return (
-            <Link className="row" key={c.id} href={`/llamada/${c.id}`}>
-              <div>
-                <div className="l1">
-                  <span className={`dot ${sev}`} aria-hidden="true" />
-                  <span className="emp">{c.empresa}</span>
-                  {c.estado && ESTADO_PILL[c.estado] && (
-                    <span className={`pill ${ESTADO_PILL[c.estado].c}`}>{ESTADO_PILL[c.estado].l}</span>
-                  )}
-                  {c.contacto && (
-                    <span className="contact">
-                      {c.contacto}
-                      {c.cargo ? ` · ${c.cargo}` : ""}
-                    </span>
-                  )}
+            <div className="row-wrap" key={c.id}>
+              <Link className="row" href={`/llamada/${c.id}`}>
+                <div>
+                  <div className="l1">
+                    <span className={`dot ${sev}`} aria-hidden="true" />
+                    <span className="emp">{c.empresa}</span>
+                    {c.estado && ESTADO_PILL[c.estado] && (
+                      <span className={`pill ${ESTADO_PILL[c.estado].c}`}>{ESTADO_PILL[c.estado].l}</span>
+                    )}
+                    {c.contacto && (
+                      <span className="contact">
+                        {c.contacto}
+                        {c.cargo ? ` · ${c.cargo}` : ""}
+                      </span>
+                    )}
+                  </div>
+                  <div className="l2">
+                    <span>usuarios <b className="mono">{c.usuarios != null ? Math.round(c.usuarios) : "—"}</b></span>
+                    <span>CRM <b>{c.crm ?? "—"}</b></span>
+                    <span>pasarela <b>{c.pasarela ?? "—"}</b></span>
+                  </div>
+                  {c.proximoPaso && <div className="paso">{c.proximoPaso}</div>}
                 </div>
-                <div className="l2">
-                  <span>usuarios <b className="mono">{c.usuarios != null ? Math.round(c.usuarios) : "—"}</b></span>
-                  <span>CRM <b>{c.crm ?? "—"}</b></span>
-                  <span>pasarela <b>{c.pasarela ?? "—"}</b></span>
+                <div className="right">
+                  <div className={`when ${sev}`}>{dias > 0 ? `vencido ${dias}d` : "hoy"}</div>
+                  <div className="call-cta">{accion} →</div>
                 </div>
-                {c.proximoPaso && <div className="paso">{c.proximoPaso}</div>}
-              </div>
-              <div className="right">
-                <div className={`when ${sev}`}>{dias > 0 ? `vencido ${dias}d` : "hoy"}</div>
-                <div className="call-cta">{accion} →</div>
-              </div>
-            </Link>
+              </Link>
+              <form className="tap-row" action={registrarTapAction}>
+                <input type="hidden" name="idEmpresa" value={c.id} />
+                <input name="objecion" placeholder="Objeción (opcional)" className="tap-objecion" />
+                <button type="submit" name="canal" value="whatsapp" className="tap-btn">WhatsApp</button>
+                <button type="submit" name="canal" value="correo" className="tap-btn">Correo</button>
+              </form>
+            </div>
           );
         })
       )}

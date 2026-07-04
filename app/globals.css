@@ -67,12 +67,34 @@ a { color: inherit; text-decoration: none; }
 .rep-btn:hover { opacity: .9; }
 
 /* Filas */
+.row-wrap { border-bottom: 1px solid var(--line); }
+.row-wrap .row { border-bottom: none; }
+
 .row {
   display: grid; grid-template-columns: 1fr auto; gap: 16px;
-  padding: 16px 14px; border-bottom: 1px solid var(--line); align-items: start;
+  padding: 16px 14px; align-items: start;
   border-radius: 12px; transition: background .14s;
 }
 .row:hover { background: var(--hover); }
+
+/* Tap de WhatsApp/correo (F0.2): hermano del <Link>, no anidado en él. */
+.tap-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 0 14px 14px;
+}
+.tap-objecion {
+  flex: 1; min-width: 140px; font-family: inherit; font-size: 12.5px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px;
+  padding: 7px 11px;
+}
+.tap-objecion::placeholder { color: var(--faint); }
+.tap-objecion:focus { outline: none; border-color: var(--ink-soft); box-shadow: 0 0 0 3px var(--ring); }
+.tap-btn {
+  font-family: inherit; font-size: 12px; font-weight: 500; color: var(--ink-soft); cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 999px;
+  padding: 7px 14px; transition: background .14s, color .14s, border-color .14s;
+}
+.tap-btn:hover { background: var(--surface-2); color: var(--ink); border-color: var(--muted); }
 
 .l1 { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
