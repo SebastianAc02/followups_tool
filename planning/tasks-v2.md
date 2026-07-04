@@ -25,6 +25,12 @@ Reglas que ninguna tarea rompe:
   superficie nueva grande (calendario Fase 4, panel Fase 7) suma `impeccable` +
   `frontend-design`.
 
+Corrección (detectada en V1.3, 2026-07-03): el proyecto NO usa Tailwind CSS (confirmado en
+package.json). Es CSS a mano en `app/globals.css` con variables custom (`--ink`, `--surface`,
+`--line-strong`, etc.) y clases explícitas. Toda mención de `tailwindcss-development` o
+`tailwind-css-patterns` más abajo en este archivo (V1.3, V3.8, V4.7) es un error de la
+primera pasada del plan: en UI, sigue el patrón de globals.css, no instales Tailwind.
+
 Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decision_maker`,
 `cargo_categoria`, `es_gerente`, `es_dueno`, `notas`. `toque` NO tiene `razon_perdida` ni
 `objecion` (el ALTER de V1.1 es real). `toque.id_contacto` ya existe.
