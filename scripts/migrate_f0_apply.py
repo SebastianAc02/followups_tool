@@ -3,10 +3,11 @@ Migracion F0 (V1.1) APPLY: ALTER a toque (razon_perdida, objecion). Idempotente
 (si la columna ya existe, no revienta). No destructivo, columnas nullable.
 Log en sync_cambios con corrida=migrate-f0-<timestamp>.
 """
+import os
 import sqlite3
 from datetime import datetime
 
-DB = '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db'
+DB = os.environ.get('ISPS_DB_PATH', '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db')
 
 ALTERS = [
     ('toque', 'razon_perdida', 'TEXT'),

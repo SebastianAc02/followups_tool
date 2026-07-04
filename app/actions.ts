@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { repartirFollowups, registrarToque } from "./db/repository";
+import { plusDias } from "./lib/date-utils";
 
 export async function repartirAction(formData: FormData) {
   const owner = String(formData.get("owner") ?? "");
@@ -27,9 +28,7 @@ export async function registrarTapAction(formData: FormData) {
 
   const objecion = String(formData.get("objecion") ?? "").trim() || undefined;
 
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const proximoFollowUp = d.toISOString().slice(0, 10);
+  const proximoFollowUp = plusDias(1);
 
   registrarToque({ idEmpresa, canal, resultado: "no_contesto", proximoFollowUp, objecion });
 

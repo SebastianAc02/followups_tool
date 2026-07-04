@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { registrarToqueAction } from "./actions";
 import { RESULTADO_LABELS, RESULTADOS, type Resultado } from "../../db/validation";
+import { plusDias } from "../../lib/date-utils";
 
 const OUTCOMES: { v: Resultado; l: string }[] = RESULTADOS.map((v) => ({
   v,
@@ -17,11 +18,7 @@ const CANALES = [
 
 const CHIPS: [string, number][] = [["+1d", 1], ["+3d", 3], ["+1sem", 7]];
 
-function plus(days: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+const plus = plusDias;
 
 export default function CaptureForm({ idEmpresa }: { idEmpresa: string }) {
   const [outcome, setOutcome] = useState<Resultado | "">("");

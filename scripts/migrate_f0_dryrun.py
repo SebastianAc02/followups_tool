@@ -4,9 +4,10 @@ Agrega razon_perdida y objecion a toque para reflejar en Drizzle. No destructivo
 (columnas nullable). contacto ya tiene cargo_categoria/es_key_decision_maker/notas
 en la DB real, esas solo se reflejan en schema.ts (no requieren ALTER).
 """
+import os
 import sqlite3
 
-DB = '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db'
+DB = os.environ.get('ISPS_DB_PATH', '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db')
 
 ALTERS = [
     ('toque', 'razon_perdida', 'TEXT'),
