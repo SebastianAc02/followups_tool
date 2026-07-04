@@ -26,20 +26,20 @@ function plus(days: number) {
 export default function CaptureForm({ idEmpresa }: { idEmpresa: string }) {
   const [outcome, setOutcome] = useState<Resultado | "">("");
   const [fecha, setFecha] = useState(plus(3));
-  const [canal, setCanal] = useState("llamada");
+  const [proximoCanal, setProximoCanal] = useState("llamada");
   const [toqueCanal, setToqueCanal] = useState("llamada");
 
   function pick(v: Resultado) {
     setOutcome(v);
     setFecha(plus(v === "no_contesto" ? 1 : 5));
-    if (v === "no_contesto") setCanal("whatsapp");
+    if (v === "no_contesto") setProximoCanal("whatsapp");
   }
 
   return (
     <form action={registrarToqueAction} className="capture">
       <input type="hidden" name="idEmpresa" value={idEmpresa} />
       <input type="hidden" name="resultado" value={outcome} />
-      <input type="hidden" name="canal" value={canal} />
+      <input type="hidden" name="canal" value={proximoCanal} />
 
       <div className="section-label">Canal de este toque</div>
       <div className="seg">
@@ -83,7 +83,7 @@ export default function CaptureForm({ idEmpresa }: { idEmpresa: string }) {
           <div className="section-label">Próximo toque</div>
           <div className="seg">
             {CANALES.map((c) => (
-              <button type="button" key={c.v} className={`seg-btn ${canal === c.v ? "on" : ""}`} onClick={() => setCanal(c.v)}>
+              <button type="button" key={c.v} className={`seg-btn ${proximoCanal === c.v ? "on" : ""}`} onClick={() => setProximoCanal(c.v)}>
                 {c.l}
               </button>
             ))}
