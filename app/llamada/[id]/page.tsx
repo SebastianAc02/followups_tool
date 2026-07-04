@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getCuenta } from "../../db/repository";
 import CaptureForm from "./CaptureForm";
 import { RESULTADO_LABELS } from "../../db/validation";
+import { requireSession } from "../../lib/session";
 
 // Resultados que cuentan como "algo bueno pasó" (verde --done vía .pos). El resto (incluido
 // el legado "contesto" que ya no se genera pero puede existir en toques históricos) es .neg.
@@ -24,6 +25,7 @@ function Field({ label, value }: { label: string; value: string | number | null 
 }
 
 export default async function Llamada({ params }: { params: Promise<{ id: string }> }) {
+  await requireSession();
   const { id } = await params;
   const { emp, contactos, toques } = getCuenta(id);
 

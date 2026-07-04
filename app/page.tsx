@@ -2,6 +2,8 @@ import Link from "next/link";
 import { colaDelDia, contadoresHoy } from "./db/repository";
 import { repartirAction, registrarTapAction } from "./actions";
 import { RESULTADO_LABELS, CANALES, RESULTADOS } from "./db/validation";
+import { requireSession } from "./lib/session";
+import SignOutButton from "./SignOutButton";
 
 const OWNERS = [
   { key: "Sebastian Acosta Molina", label: "Sebastián" },
@@ -29,8 +31,12 @@ function diasVencido(fechaISO: string, hoyISO: string) {
 }
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ owner?: string }> }) {
+  const usuario = await requireSession();
   const sp = await searchParams;
-  const owner = sp.owner ?? OWNERS[0].key;
+  // Pipeline compartido (B3 v1): cualquier autenticado puede MIRAR la cola de otro por
+  // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0].
+  const owner = sp.owner ?? usuario.owner;
+  const esPropia = owner === usuario.owner;
   const hoy = new Date().toISOString().slice(0, 10);
   const cola = colaDelDia(hoy, owner);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
@@ -51,6 +57,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
         </div>
         <div className="h-meta">
           <span className="mono">{cola.length}</span> hoy · <span className="mono">{vencidos}</span> vencidos
+          {" · "}
+          <SignOutButton email={usuario.email} />
         </div>
       </div>
 
@@ -73,13 +81,14 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
         </div>
       )}
 
-      <form action={repartirAction} className="repartir">
-        <input type="hidden" name="owner" value={owner} />
-        <span className="rep-label">¿Atrasado? Reparte tus follow-ups</span>
-        <input name="porDia" type="number" min={1} defaultValue={10} className="pordia mono" aria-label="follow-ups por día" />
-        <span className="rep-unit">por día</span>
-        <button className="rep-btn">Repartir</button>
-      </form>
+      {esPropia && (
+        <form action={repartirAction} className="repartir">
+          <span className="rep-label">¿Atrasado? Reparte tus follow-ups</span>
+          <input name="porDia" type="number" min={1} defaultValue={10} className="pordia mono" aria-label="follow-ups por día" />
+          <span className="rep-unit">por día</span>
+          <button className="rep-btn">Repartir</button>
+        </form>
+      )}
 
       {cola.length === 0 ? (
         <div className="empty">Sin follow-ups para hoy. Buen trabajo.</div>

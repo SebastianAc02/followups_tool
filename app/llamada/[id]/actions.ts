@@ -4,8 +4,10 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { registrarToque } from "../../db/repository";
 import { registrarToqueSchema } from "../../db/validation";
+import { requireSession } from "../../lib/session";
 
 export async function registrarToqueAction(formData: FormData) {
+  await requireSession();
   const idEmpresa = String(formData.get("idEmpresa") ?? "");
   const resultado = String(formData.get("resultado") ?? "");
   if (!idEmpresa || !resultado) return;
