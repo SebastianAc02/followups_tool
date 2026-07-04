@@ -1,8 +1,8 @@
 # Tareas v2 · lista de delegación a agentes
 
-Estado: GENERADA, NO EJECUTADA. Ninguna tarea arrancó. Se ejecuta una tarea por delegación,
-en orden, cuando Sebastián dé el arranque. El tasks.md viejo es del walking skeleton (T1 a T6
-ya construidos); esta lista implementa el alcance v2.
+Estado (2026-07-04): Fase 1 (V1.1-V1.6) EJECUTADA y MERGEADA a main. Fase 2 en arranque,
+empezar por V2.1. Se ejecuta una tarea por delegación, en orden. El tasks.md viejo es del
+walking skeleton (T1 a T6 ya construidos); esta lista implementa el alcance v2.
 
 ## Cómo usa esto un agente
 
@@ -37,50 +37,35 @@ Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decisio
 
 ---
 
-## Fase 1 · F0 cerrar el core (deuda primero)
+## Fase 1 · F0 cerrar el core (deuda primero) — ✅ COMPLETA, MERGEADA A MAIN (2026-07-04)
 
-- [ ] **V1.1 · Migración: ALTER a toque + reflejar schema.**
-  Script `scripts/migrate_f0_dryrun.py` + `scripts/migrate_f0_apply.py` (patrón seed_*):
-  `ALTER TABLE toque ADD COLUMN razon_perdida TEXT` y `ADD COLUMN objecion TEXT`.
-  En `app/db/schema.ts`: agregar esas dos columnas a `toque` y reflejar en `contacto` las
-  columnas reales que se van a usar (`esKeyDecisionMaker`, `cargoCategoria`, `notas`).
-  Lista cuando: dry-run imprime lo que haría sin tocar nada, apply corre idempotente (si la
-  columna ya existe no revienta), la app arranca y lee igual que antes.
+- [x] **V1.1 · Migración: ALTER a toque + reflejar schema.** Hecho: `scripts/migrate_f0_*.py`
+  idempotentes por PRAGMA (no por captura de excepción); `toque.razonPerdida`/`objecion` y
+  `contacto.esKeyDecisionMaker`/`cargoCategoria`/`notas`/`fuente` reflejados en schema.ts.
 
-- [ ] **V1.2 · Repository: registrar toque completo (B1.a).**
-  En `app/db/repository.ts` + `app/actions.ts`: `registrarToque` recibe canal real
-  (llamada/whatsapp/correo), resultado con las 4 salidas (contesto-reunion /
-  contesto-sigo-follow-up / contesto-no / no-contesto), razon_perdida (obligatoria si
-  contesto-no), objecion opcional, y KDM opcional (nombre + telefono). Validación con Zod en
-  la server action (dependencia justificada en plan-claude-v2 B1.a). El KDM NO va al toque:
-  upsert en `contacto` con es_key_decision_maker=1 y el toque enlaza por id_contacto.
-  Lista cuando: prueba de Repository registra contesto-no con razón Precio y el KDM queda
-  como fila en contacto enlazada al toque; un resultado fuera de las 4 salidas es rechazado.
+- [x] **V1.2 · Repository: registrar toque completo (B1.a).** Hecho: enum cerrado de 4
+  salidas + Zod DENTRO de `registrarToque` (no solo en la UI, para que cualquier caller
+  futuro obtenga la misma garantía); upsert de KDM en `contacto` (match por empresa+teléfono
+  exacto si viene teléfono, si no inserta directo) en la misma transacción. 5 tests TDD.
 
-- [ ] **V1.3 · UI: cerrar el toque con canal, salidas, razón, objeción y KDM.**
-  En la ficha (`app/llamada/`): selector de canal del toque actual, las 4 salidas, campo de
-  razón de pérdida que aparece solo en contesto-no, campo de objeción, captura de KDM
-  (nombre + tel) cuando el gatekeeper pasa el número. Skills: taste-skill +
-  tailwindcss-development.
-  Lista cuando: desde la pantalla registro la demo de la fase (contesto-no, razón Precio,
-  KDM capturado) sin tocar la DB a mano.
+- [x] **V1.3 · UI: cerrar el toque con canal, salidas, razón, objeción y KDM.** Hecho (sin
+  Tailwind, ver corrección arriba): selector de canal del toque, las 4 salidas con labels
+  compartidos (`RESULTADO_LABELS` en validation.ts), razón condicional a "no sigue" con
+  `required`, objeción y KDM siempre visibles. Verificado en vivo contra isps.db real.
 
-- [ ] **V1.4 · Tap de WhatsApp / correo (F0.2).**
-  Un tap registra toque con canal whatsapp o correo, sin pasar por Granola. Reusa
-  `registrarToque` de V1.2; captura objeción fuerte si la hay.
-  Lista cuando: un tap crea el toque con canal correcto y la cola avanza.
+- [x] **V1.4 · Tap de WhatsApp / correo (F0.2).** Hecho: tap de un click desde la cola del
+  día (fila reestructurada con Link + form hermanos, nunca anidados). Decisión confirmada
+  con Sebastián: `resultado` de un tap siempre `no_contesto` (no se agregó 5to valor al enum).
 
-- [ ] **V1.5 · Contadores del día (F0.3 mínimo).**
-  En la misma pantalla de la cola: toques de hoy por tipo y por canal, y las 4 salidas del
-  día. Solo lectura vía Repository. El tablero grande se difiere a Fase 7.
-  Lista cuando: registro un toque y el contador sube sin recargar a mano.
+- [x] **V1.5 · Contadores del día (F0.3 mínimo).** Hecho: `contadoresHoy` por canal y por
+  resultado, agregado en memoria (volumen bajo). Documentado y testeado el caso de datos
+  legado fuera del enum (total los incluye, los buckets no).
 
-- [ ] **V1.6 · Cierre de fase 1.**
-  qa-test-planner sobre lo construido, completar pruebas que falten, correr la demo completa
-  y pasar /code-review. Marcar la fase en planeacion-ejecucion.md con bitácora.
-  Lista cuando: demo verde, pruebas verdes, /code-review sin hallazgos bloqueantes.
+- [x] **V1.6 · Cierre de fase 1.** Hecho: CodeRabbit CLI instalado y corrido (0 hallazgos
+  tras corregir ruta de DB hardcodeada en scripts y un bug de zona horaria en el cálculo de
+  "mañana", nuevo `app/lib/date-utils.ts`). 8/8 tests. Mergeada a main fast-forward.
 
-## Fase 2 · Auth (B3)
+## Fase 2 · Auth (B3) — SIGUIENTE, empezar por V2.1
 
 - [ ] **V2.1 · Better Auth: instalación y tablas.**
   Better Auth email + password, tablas generadas por su CLI en la MISMA SQLite (isps.db) vía

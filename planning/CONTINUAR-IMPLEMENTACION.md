@@ -1,7 +1,7 @@
 # Continuar la implementación · punto de entrada para la próxima sesión
 
 Empieza AQUÍ. Este doc dice en qué estado quedó todo y qué archivos leer, en orden, para
-retomar sin perder contexto. Última sesión: 2026-07-03.
+retomar sin perder contexto. Última sesión: 2026-07-04.
 
 ## Dónde estamos
 
@@ -10,18 +10,20 @@ retomar sin perder contexto. Última sesión: 2026-07-03.
   Professional habilita todo el CRUD de cadencia por API (crear secuencia, pasos, copy, editar
   copy, A/B, crear contactos en bloque, asignar a secuencia, frenar, archivar). El supuesto más
   riesgoso del plan se sostiene. Se puede construir.
-- **Nada de código de producto todavía.** Lo construido hasta hoy es el walking skeleton previo
-  (cola del día, ficha, registrar toque manual). El alcance v2 arranca por la Fase 1.
+- **Fase 1 (F0 cerrar el core) MERGEADA A MAIN.** El core ya no es el walking skeleton viejo:
+  canal real del toque, las 4 salidas cerradas validadas con Zod dentro del Repository, KDM a
+  `contacto`, tap de WhatsApp/correo, contadores del día. 8/8 tests y tsc limpios en main.
+  Repo en github.com/SebastianAc02/followups_tool (main al día).
 
 ## Próxima acción
 
-**Fase 1 completa (V1.1 a V1.6), pendiente de que Sebastián la revise y mergee a main.**
-Vive en la rama `fase-1-cerrar-el-core` (12 commits sobre main, ya pusheada a
-github.com/SebastianAc02/followups_tool). Cada tarea pasó por spec compliance + code
-quality review, con fixes aplicados donde hizo falta; CodeRabbit corrió al cierre con 0
-hallazgos (tras corregir 2: ruta de DB hardcodeada en scripts de migración, y un bug de
-zona horaria en el cálculo de "mañana"). 8/8 tests. Detalle completo en la bitácora de
-`planeacion-ejecucion.md`. Tras el merge: arrancar Fase 2 (Auth, B3) por `tasks-v2.md`.
+**Arrancar Fase 2 (Auth, B3) por `planning/tasks-v2.md`, empezando por V2.1.** Better Auth
+email+password, owner=email, flag admin, tablas en la misma SQLite. Orden: V2.1
+(instalación+tablas) -> V2.2 (gate de sesión, owner viene de la sesión no hardcodeado) ->
+V2.3 (alta de Sebastián y Felipe + flag admin) -> V2.4 (cierre: demo + pruebas +
+/code-review). Detalle completo de cómo se ejecutó la Fase 1 (decisiones, fixes de review,
+un hallazgo falso positivo sobre una columna GENERATED de SQLite) en la bitácora de
+`planeacion-ejecucion.md`.
 
 ## Qué leer, en orden
 

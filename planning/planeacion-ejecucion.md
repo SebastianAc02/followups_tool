@@ -4,15 +4,15 @@ Documento vivo. Desde aquí se ejecuta. Cada vez que se cierra un paso, se marca
 en la bitácora. El plan de arquitectura completo vive en plan-claude-v2.md; este es el
 tablero operativo: qué sigue AHORA, en qué orden, con qué gate.
 
-Última actualización: 2026-07-03.
+Última actualización: 2026-07-04.
 
 ---
 
 ## Próxima acción (lo único que importa ahora mismo)
 
-> **Fase 1 construida y revisada, pendiente de que Sebastián la revise y mergee.** Rama
-> `fase-1-cerrar-el-core` (12 commits sobre main, ya pusheada a GitHub), CodeRabbit en 0
-> hallazgos. Tras el merge: arrancar Fase 2 (Auth, B3).
+> **Arrancar Fase 2 (Auth, B3) por `planning/tasks-v2.md`, empezando por V2.1.** Fase 1
+> mergeada a main el 2026-07-04 (fast-forward, sin conflictos); rama `fase-1-cerrar-el-core`
+> borrada local y remota. main tiene 8/8 tests y tsc limpios post-merge.
 
 G0 cerrado el 2026-07-03: las 5 pruebas de lectura pasaron; `usage_stats` confirmó crear
 contactos/empresas, add_contact_ids, gestionar/frenar secuencias y leer tracking. Y la prueba
@@ -41,15 +41,17 @@ Regla: un gate rojo detiene solo lo que depende de él. Las fases independientes
 
 - [x] **Fase 0 · P0 Apollo (G0). ✅** Solo lectura. Corrido 2026-07-03: G0 verde, supuesto
       sostenido. Resultados y decisión en experimento-apollo.md.
-- [x] **Fase 1 · F0 cerrar el core. ✅ (construida, pendiente merge a main).** ALTER a
-      `toque` (razon_perdida, objecion), 4 salidas validadas con Zod dentro del Repository,
-      KDM a `contacto` (upsert por empresa+teléfono), canal real del toque, tap de
-      WhatsApp/correo desde la cola, contadores del día por canal/resultado. Migración con
-      dry-run + apply. Demo verificada en vivo contra isps.db real (con limpieza posterior):
-      "no sigue" con razón Precio y el KDM queda en contacto. 8/8 tests, CodeRabbit 0
-      hallazgos. Rama `fase-1-cerrar-el-core`, 12 commits sobre main.
-- [ ] **Fase 2 · Auth (B3).** Better Auth email+password, owner=email, flag admin, tablas en
-      la misma SQLite. Demo: login de Sebastián y Felipe; sin sesión no se ve nada.
+- [x] **Fase 1 · F0 cerrar el core. ✅ MERGEADA A MAIN (2026-07-04).** ALTER a `toque`
+      (razon_perdida, objecion), 4 salidas validadas con Zod dentro del Repository, KDM a
+      `contacto` (upsert por empresa+teléfono), canal real del toque, tap de WhatsApp/correo
+      desde la cola, contadores del día por canal/resultado. Migración con dry-run + apply.
+      Demo verificada en vivo contra isps.db real (con limpieza posterior): "no sigue" con
+      razón Precio y el KDM queda en contacto. 8/8 tests, CodeRabbit 0 hallazgos. Merge
+      fast-forward sin conflictos; rama `fase-1-cerrar-el-core` borrada.
+- [ ] **Fase 2 · Auth (B3). SIGUIENTE.** Better Auth email+password, owner=email, flag admin,
+      tablas en la misma SQLite. Demo: login de Sebastián y Felipe; sin sesión no se ve nada.
+      Tareas: V2.1 (instalación+tablas) -> V2.2 (gate de sesión) -> V2.3 (usuarios+flag admin)
+      -> V2.4 (cierre). Ver `planning/tasks-v2.md`.
 - [ ] **Fase 3 · F1 conectores + ingest Granola + outbox Notion.** Tabla `conector`
       (AES-256-GCM), tabla `outbox`, worker (B7) con heartbeat, GranolaAdapter, matcher a cola
       de revisión, idempotencia (B4), pantalla de estado de conectores. Demo: reunión real de
@@ -161,3 +163,7 @@ las fronteras ya están fijadas por la constitución).
     UTC vía toISOString; nuevo app/lib/date-utils.ts corrige esto en ambos lugares que lo
     tenían). Re-corrida de CodeRabbit: 0 hallazgos. 8/8 tests. Rama dejada sin mergear a
     pedido de Sebastián, para que la revise localmente primero.
+- 2026-07-04 · Mergeada Fase 1 a main: fast-forward limpio (818e541..d9777e2), sin
+  conflictos. Verificado 8/8 tests + tsc en main post-merge. Push a origin/main, rama
+  `fase-1-cerrar-el-core` borrada local y remota. Próxima acción: Fase 2 (Auth), empezando
+  por V2.1.
