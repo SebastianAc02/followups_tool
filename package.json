@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --experimental-loader ./scripts/resolve-ts-ext.mjs --test app/db/*.test.ts"
+    "test": "node --experimental-strip-types --experimental-loader ./scripts/resolve-ts-ext.mjs --test app/db/*.test.ts app/lib/*.test.ts"
   },
   "dependencies": {
     "better-auth": "^1.6.23",
