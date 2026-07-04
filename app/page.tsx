@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { colaDelDia } from "./db/repository";
+import { colaDelDia, contadoresHoy } from "./db/repository";
 import { repartirAction, registrarTapAction } from "./actions";
+import { RESULTADO_LABELS, CANALES, RESULTADOS } from "./db/validation";
 
 const OWNERS = [
   { key: "Sebastian Acosta Molina", label: "Sebastián" },
@@ -9,6 +10,9 @@ const OWNERS = [
 ];
 
 const ACCION: Record<string, string> = { llamada: "Llamar", whatsapp: "WhatsApp", correo: "Correo" };
+const CANAL_LABEL: Record<string, string> = { llamada: "llamadas", whatsapp: "whatsapp", correo: "correos" };
+const CANALES_ORDEN = CANALES;
+const RESULTADOS_ORDEN = RESULTADOS;
 
 const ESTADO_PILL: Record<string, { l: string; c: string }> = {
   reunion_agendada: { l: "reunión", c: "hot" },
@@ -30,6 +34,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
   const hoy = new Date().toISOString().slice(0, 10);
   const cola = colaDelDia(hoy, owner);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
+  const contadores = contadoresHoy(hoy, owner);
 
   return (
     <div className="wrap">
@@ -48,6 +53,25 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
           <span className="mono">{cola.length}</span> hoy · <span className="mono">{vencidos}</span> vencidos
         </div>
       </div>
+
+      {contadores.total > 0 && (
+        <div className="counters">
+          <div className="counters-row">
+            {CANALES_ORDEN.map((canal) => (
+              <span key={canal}>
+                <span className="mono">{contadores.porCanal[canal]}</span> {CANAL_LABEL[canal]}
+              </span>
+            ))}
+          </div>
+          <div className="counters-row">
+            {RESULTADOS_ORDEN.map((resultado) => (
+              <span key={resultado}>
+                <span className="mono">{contadores.porResultado[resultado]}</span> {RESULTADO_LABELS[resultado].toLowerCase()}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <form action={repartirAction} className="repartir">
         <input type="hidden" name="owner" value={owner} />

@@ -51,6 +51,11 @@ a { color: inherit; text-decoration: none; }
 .switch a:hover { background: var(--surface); }
 .switch a.on { color: #0a0a0b; background: var(--white); border-color: var(--white); }
 
+/* Contadores del día (F0.3 mínimo) */
+.counters { display: flex; flex-direction: column; gap: 4px; margin-bottom: 22px; }
+.counters-row { font-size: 12.5px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+.counters-row .mono { color: var(--ink-soft); }
+
 /* Repartir */
 .repartir {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

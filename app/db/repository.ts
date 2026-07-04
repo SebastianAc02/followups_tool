@@ -1,7 +1,14 @@
 import { and, eq, lte, isNotNull, desc, sql } from 'drizzle-orm';
 import { db } from './index';
 import { empresa, contacto, empresaUsuarios, toque, syncCambios } from './schema';
-import { registrarToqueSchema, type RegistrarToqueInput } from './validation';
+import {
+  registrarToqueSchema,
+  type RegistrarToqueInput,
+  CANALES,
+  RESULTADOS,
+  type Canal,
+  type Resultado,
+} from './validation';
 
 // Único punto de acceso a datos. El resto de la app no toca SQL ni la DB directo.
 
@@ -176,6 +183,39 @@ export function registrarToque(input: RegistrarToqueInput) {
       })
       .run();
   });
+}
+
+export type ContadoresHoy = {
+  porCanal: Record<Canal, number>;
+  porResultado: Record<Resultado, number>;
+  total: number;
+};
+
+// Contadores del día (F0.3 mínimo): toques de HOY de un owner, por canal y por resultado.
+// Solo lectura. El toque no tiene owner directo, se filtra vía JOIN a empresa.owner (mismo
+// filtro que colaDelDia). `toque.fecha` es un datetime ISO completo, se compara solo la
+// parte de fecha con substr(fecha, 1, 10).
+export function contadoresHoy(hoy: string, owner: string): ContadoresHoy {
+  const filas = db
+    .select({ canal: toque.canal, resultado: toque.resultado })
+    .from(toque)
+    .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
+    .where(and(eq(empresa.owner, owner), sql`substr(${toque.fecha}, 1, 10) = ${hoy}`))
+    .all();
+
+  const porCanal = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
+  const porResultado = Object.fromEntries(RESULTADOS.map((r) => [r, 0])) as Record<Resultado, number>;
+
+  for (const fila of filas) {
+    if (fila.canal && (CANALES as readonly string[]).includes(fila.canal)) {
+      porCanal[fila.canal as Canal] += 1;
+    }
+    if (fila.resultado && (RESULTADOS as readonly string[]).includes(fila.resultado)) {
+      porResultado[fila.resultado as Resultado] += 1;
+    }
+  }
+
+  return { porCanal, porResultado, total: filas.length };
 }
 
 // Repartir el backlog de follow-ups de un owner: N por día hábil, lo más caliente primero.
