@@ -95,6 +95,37 @@ test('contadoresHoy devuelve todo en cero cuando no hay toques hoy', () => {
   assert.equal(resultado.porResultado.no_contesto, 0);
 });
 
+test('contadoresHoy: un toque con resultado legado ("contesto", pre-V1.2) cuenta en total pero no en ningun bucket de resultado', () => {
+  const OWNER_D = 'Legado Owner';
+  seedEmpresa('emp-d1', OWNER_D);
+
+  // 2 toques normales de HOY, valores del enum actual.
+  seedToque('emp-d1', `${HOY}T09:00:00.000Z`, 'llamada', 'contesto_reunion');
+  seedToque('emp-d1', `${HOY}T10:00:00.000Z`, 'whatsapp', 'no_contesto');
+
+  // 1 toque de HOY con resultado LEGADO ('contesto', valor pre-V1.2 visto en V1.3) pero
+  // canal RECONOCIDO ('llamada'). Esto aisla el problema: el canal reconocido SI debe
+  // contarse en porCanal, mientras que el resultado no reconocido NO debe contarse en
+  // ningun bucket de porResultado.
+  seedToque('emp-d1', `${HOY}T11:00:00.000Z`, 'llamada', 'contesto');
+
+  const resultado = contadoresHoy(HOY, OWNER_D);
+
+  // (a) total incluye el toque legado: 2 normales + 1 legado = 3.
+  assert.equal(resultado.total, 3);
+
+  // (c) el canal del toque legado es reconocido ('llamada'), así que SI se cuenta en
+  // porCanal con normalidad: 2 llamadas (la normal + la del legado) + 1 whatsapp.
+  assert.equal(resultado.porCanal.llamada, 2);
+  assert.equal(resultado.porCanal.whatsapp, 1);
+
+  // (b) la suma de porResultado es MENOR que total en exactamente 1: el resultado legado
+  // "contesto" no matchea ningún valor de RESULTADOS y no incrementa ningún bucket.
+  const sumaPorResultado = Object.values(resultado.porResultado).reduce((a, b) => a + b, 0);
+  assert.equal(sumaPorResultado, resultado.total - 1);
+  assert.equal(sumaPorResultado, 2);
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

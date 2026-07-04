@@ -206,6 +206,13 @@ export function contadoresHoy(hoy: string, owner: string): ContadoresHoy {
   const porCanal = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
   const porResultado = Object.fromEntries(RESULTADOS.map((r) => [r, 0])) as Record<Resultado, number>;
 
+  // Decisión a propósito: `total` cuenta TODOS los toques de hoy del owner, incluyendo
+  // cualquier valor legado de canal/resultado que no esté en el enum actual (ej. el
+  // "contesto" viejo pre-V1.2 visto en V1.3). Los buckets de porCanal/porResultado solo
+  // cuentan los valores reconocidos del enum actual, así que un toque con valor legado
+  // sube el total pero no incrementa ningún bucket. Esto puede verse como un descuadre
+  // (total > suma de buckets), pero es intencional: perder de vista un toque real del día
+  // (no contarlo en total) sería peor que un descuadre visible entre el total y sus buckets.
   for (const fila of filas) {
     if (fila.canal && (CANALES as readonly string[]).includes(fila.canal)) {
       porCanal[fila.canal as Canal] += 1;
