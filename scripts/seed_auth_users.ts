@@ -25,25 +25,31 @@ const USUARIOS = [
 
 async function main() {
   const db = new Database(DB_PATH);
-  for (const u of USUARIOS) {
-    const password = process.env[u.passwordEnv];
-    if (!u.email || !password) {
-      console.error(`Falta ${u.passwordEnv} o el email de ${u.nombre}. No se crea.`);
-      continue;
+  try {
+    for (const u of USUARIOS) {
+      const password = process.env[u.passwordEnv];
+      if (!u.email || !password) {
+        console.error(`Falta ${u.passwordEnv} o el email de ${u.nombre}. No se crea.`);
+        continue;
+      }
+      try {
+        await auth.api.signUpEmail({ body: { email: u.email, password, name: u.nombre } });
+        console.log(`Creado: ${u.email}`);
+      } catch (e) {
+        console.log(`${u.email} ya existia o fallo el alta: ${(e as Error).message}`);
+      }
+      // owner y admin son input:false: solo se setean aqui, nunca desde el cliente.
+      const r = db
+        .prepare('UPDATE "user" SET "owner" = ?, "admin" = ? WHERE "email" = ?')
+        .run(u.owner, u.admin, u.email);
+      console.log(`  owner/admin seteados (${r.changes} fila)`);
     }
-    try {
-      await auth.api.signUpEmail({ body: { email: u.email, password, name: u.nombre } });
-      console.log(`Creado: ${u.email}`);
-    } catch (e) {
-      console.log(`${u.email} ya existia o fallo el alta: ${(e as Error).message}`);
-    }
-    // owner y admin son input:false: solo se setean aqui, nunca desde el cliente.
-    const r = db
-      .prepare('UPDATE "user" SET "owner" = ?, "admin" = ? WHERE "email" = ?')
-      .run(u.owner, u.admin, u.email);
-    console.log(`  owner/admin seteados (${r.changes} fila)`);
+  } finally {
+    db.close();
   }
-  db.close();
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

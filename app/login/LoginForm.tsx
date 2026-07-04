@@ -13,18 +13,23 @@ export default function LoginForm() {
     e.preventDefault();
     setError(null);
     setEnviando(true);
-    const form = new FormData(e.currentTarget);
-    const { error } = await authClient.signIn.email({
-      email: String(form.get('email') ?? ''),
-      password: String(form.get('password') ?? ''),
-    });
-    setEnviando(false);
-    if (error) {
-      setError('Correo o password incorrectos');
-      return;
+    try {
+      const form = new FormData(e.currentTarget);
+      const { error } = await authClient.signIn.email({
+        email: String(form.get('email') ?? ''),
+        password: String(form.get('password') ?? ''),
+      });
+      if (error) {
+        setError('Correo o password incorrectos');
+        return;
+      }
+      router.push('/');
+      router.refresh();
+    } catch {
+      setError('Error de conexión. Intenta de nuevo.');
+    } finally {
+      setEnviando(false);
     }
-    router.push('/');
-    router.refresh();
   }
 
   return (
