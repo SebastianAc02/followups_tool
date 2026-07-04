@@ -2,14 +2,12 @@
 
 import { useState } from "react";
 import { registrarToqueAction } from "./actions";
+import { RESULTADO_LABELS, RESULTADOS, type Resultado } from "../../db/validation";
 
-// Puente temporal: el formulario viejo (2 salidas) todavía no distingue reunión de
-// seguimiento (eso es V1.3). "contesto" mapea al valor mas honesto disponible hoy en el
-// enum cerrado de 4 salidas: contesto_no. V1.3 reemplaza esto con las 4 salidas reales.
-const OUTCOMES = [
-  { v: "contesto_no", l: "Contestó" },
-  { v: "no_contesto", l: "No contestó" },
-];
+const OUTCOMES: { v: Resultado; l: string }[] = RESULTADOS.map((v) => ({
+  v,
+  l: RESULTADO_LABELS[v],
+}));
 
 const CANALES = [
   { v: "llamada", l: "Llamada" },
@@ -26,11 +24,12 @@ function plus(days: number) {
 }
 
 export default function CaptureForm({ idEmpresa }: { idEmpresa: string }) {
-  const [outcome, setOutcome] = useState("");
+  const [outcome, setOutcome] = useState<Resultado | "">("");
   const [fecha, setFecha] = useState(plus(3));
   const [canal, setCanal] = useState("llamada");
+  const [toqueCanal, setToqueCanal] = useState("llamada");
 
-  function pick(v: string) {
+  function pick(v: Resultado) {
     setOutcome(v);
     setFecha(plus(v === "no_contesto" ? 1 : 5));
     if (v === "no_contesto") setCanal("whatsapp");
@@ -42,7 +41,17 @@ export default function CaptureForm({ idEmpresa }: { idEmpresa: string }) {
       <input type="hidden" name="resultado" value={outcome} />
       <input type="hidden" name="canal" value={canal} />
 
-      <div className="outcomes2">
+      <div className="section-label">Canal de este toque</div>
+      <div className="seg">
+        {CANALES.map((c) => (
+          <button type="button" key={c.v} className={`seg-btn ${toqueCanal === c.v ? "on" : ""}`} onClick={() => setToqueCanal(c.v)}>
+            {c.l}
+          </button>
+        ))}
+      </div>
+      <input type="hidden" name="toqueCanal" value={toqueCanal} />
+
+      <div className="outcomes2 outcomes4">
         {OUTCOMES.map((o) => (
           <button type="button" key={o.v} className={`oc2 ${outcome === o.v ? "on" : ""}`} onClick={() => pick(o.v)}>
             {o.l}
@@ -58,6 +67,18 @@ export default function CaptureForm({ idEmpresa }: { idEmpresa: string }) {
             <label>Pasarela<input name="pasarela" placeholder="—" /></label>
           </div>
           <label className="full">Qué pasó<textarea name="quePaso" rows={2} placeholder="En una línea, para que cualquiera lo entienda" /></label>
+
+          {outcome === "contesto_no" && (
+            <label className="full">Razón de pérdida<input name="razonPerdida" placeholder="Precio, timing, sin presupuesto..." required /></label>
+          )}
+
+          <label className="full">Objeción<input name="objecion" placeholder="Opcional" /></label>
+
+          <div className="section-label">¿Te pasaron el contacto del gerente?</div>
+          <div className="grid3 kdm-grid">
+            <label>Nombre KDM<input name="kdmNombre" placeholder="Opcional" /></label>
+            <label>Teléfono KDM<input name="kdmTelefono" placeholder="Opcional" /></label>
+          </div>
 
           <div className="section-label">Próximo toque</div>
           <div className="seg">

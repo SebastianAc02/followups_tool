@@ -1,6 +1,17 @@
 import Link from "next/link";
 import { getCuenta } from "../../db/repository";
 import CaptureForm from "./CaptureForm";
+import { RESULTADO_LABELS } from "../../db/validation";
+
+// Resultados que cuentan como "algo bueno pasó" (verde --done vía .pos). El resto (incluido
+// el legado "contesto" que ya no se genera pero puede existir en toques históricos) es .neg.
+const RESULTADOS_POSITIVOS = new Set(["contesto_reunion", "contesto_sigue_seguimiento"]);
+
+function labelResultado(resultado: string | null | undefined, canal: string | null | undefined) {
+  if (!resultado) return canal ?? "toque";
+  if (resultado === "contesto") return "Contestó"; // valor legado pre-V1.2
+  return RESULTADO_LABELS[resultado as keyof typeof RESULTADO_LABELS] ?? canal ?? resultado;
+}
 
 function Field({ label, value }: { label: string; value: string | number | null | undefined }) {
   const has = value !== null && value !== undefined && value !== "";
@@ -61,8 +72,8 @@ export default async function Llamada({ params }: { params: Promise<{ id: string
           <div className="section-label">Toques anteriores</div>
           {toques.map((t, i) => (
             <div className="tq" key={i}>
-              <span className={`tq-res ${t.resultado === "no_contesto" ? "neg" : "pos"}`}>
-                {t.resultado === "no_contesto" ? "No contestó" : t.resultado === "contesto" ? "Contestó" : t.canal ?? "toque"}
+              <span className={`tq-res ${RESULTADOS_POSITIVOS.has(t.resultado ?? "") ? "pos" : "neg"}`}>
+                {labelResultado(t.resultado, t.canal)}
               </span>
               <span className="tq-txt">{t.quePaso ?? "—"}</span>
               <span className="tq-date mono">{(t.fecha ?? "").slice(0, 10)}</span>

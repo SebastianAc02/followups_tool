@@ -10,8 +10,8 @@ export async function registrarToqueAction(formData: FormData) {
   const resultado = String(formData.get("resultado") ?? "");
   if (!idEmpresa || !resultado) return;
 
-  // Canal REAL de este toque. El formulario actual (CaptureForm, V1.1) todavía no tiene un
-  // selector propio para esto -> puente temporal a 'llamada' hasta V1.3, que sí lo agrega.
+  // Canal REAL de este toque. CaptureForm (V1.3) siempre lo manda con un selector visible;
+  // el default "llamada" solo cubre el caso defensivo de un FormData incompleto.
   const canal = String(formData.get("toqueCanal") ?? "llamada").trim() || "llamada";
 
   const quePaso = String(formData.get("quePaso") ?? "").trim() || undefined;
@@ -22,18 +22,9 @@ export async function registrarToqueAction(formData: FormData) {
   const crm = String(formData.get("crm") ?? "").trim() || undefined;
   const pasarela = String(formData.get("pasarela") ?? "").trim() || undefined;
 
-  // Campos de V1.3 (razón de pérdida, objeción, KDM): el formulario actual no los manda
-  // todavía, pero si llegan (formularios futuros o pruebas manuales) se leen aquí.
-  let razonPerdida = String(formData.get("razonPerdida") ?? "").trim() || undefined;
+  const razonPerdida = String(formData.get("razonPerdida") ?? "").trim() || undefined;
   const objecion = String(formData.get("objecion") ?? "").trim() || undefined;
 
-  // Puente temporal V1.1->V1.3: CaptureForm hoy solo tiene 2 salidas y mapea "Contestó" a
-  // contesto_no (el enum cerrado exige razonPerdida ahi). Sin campo de razón en la UI
-  // todavia, se usa un placeholder explicito para no romper la demo basica. V1.3 agrega el
-  // campo real y este placeholder deja de generarse.
-  if (resultado === "contesto_no" && !razonPerdida) {
-    razonPerdida = "[PLACEHOLDER-V1.2] Sin especificar (pendiente UI V1.3)";
-  }
   const kdmNombre = String(formData.get("kdmNombre") ?? "").trim() || undefined;
   const kdmTelefono = String(formData.get("kdmTelefono") ?? "").trim() || undefined;
   const kdm = kdmNombre ? { nombre: kdmNombre, telefono: kdmTelefono } : undefined;

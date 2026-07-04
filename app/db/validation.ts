@@ -16,6 +16,16 @@ export const RESULTADOS = [
 ] as const;
 export type Resultado = (typeof RESULTADOS)[number];
 
+// Labels legibles de las 4 salidas (voz-onepay: sin emojis, sin em dash, directo).
+// Un solo export reusable: CaptureForm.tsx (botones) y page.tsx (historial de toques) lo
+// comparten para no duplicar el mapeo de texto en dos lugares.
+export const RESULTADO_LABELS: Record<Resultado, string> = {
+  contesto_reunion: 'Reunión agendada',
+  contesto_sigue_seguimiento: 'Sigue en follow-up',
+  contesto_no: 'No sigue',
+  no_contesto: 'No contestó',
+};
+
 export const kdmSchema = z.object({
   nombre: z.string().min(1),
   // Normaliza "" a undefined ANTES de exigir min(1): la garantía "string vacío = no vino
