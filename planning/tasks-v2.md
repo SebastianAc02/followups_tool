@@ -1,8 +1,10 @@
 # Tareas v2 · lista de delegación a agentes
 
-Estado (2026-07-04): Fase 1 (V1.1-V1.6) EJECUTADA y MERGEADA a main. Fase 2 en arranque,
-empezar por V2.1. Se ejecuta una tarea por delegación, en orden. El tasks.md viejo es del
-walking skeleton (T1 a T6 ya construidos); esta lista implementa el alcance v2.
+Estado (2026-07-04): Fase 1 (V1.1-V1.6) EJECUTADA y MERGEADA a main. Fase 2 (V2.1-V2.4)
+EJECUTADA en la rama `fase2-auth`, sin mergear (pendiente de revisión de Sebastián). Fase 3
+es la siguiente, empezar por V3.1. Se ejecuta una tarea por delegación, en orden. El
+tasks.md viejo es del walking skeleton (T1 a T6 ya construidos); esta lista implementa el
+alcance v2.
 
 ## Cómo usa esto un agente
 
@@ -65,24 +67,31 @@ Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decisio
   tras corregir ruta de DB hardcodeada en scripts y un bug de zona horaria en el cálculo de
   "mañana", nuevo `app/lib/date-utils.ts`). 8/8 tests. Mergeada a main fast-forward.
 
-## Fase 2 · Auth (B3) — SIGUIENTE, empezar por V2.1
+## Fase 2 · Auth (B3) — ✅ COMPLETA EN RAMA `fase2-auth` (2026-07-04), sin mergear
 
-- [ ] **V2.1 · Better Auth: instalación y tablas.**
-  Better Auth email + password, tablas generadas por su CLI en la MISMA SQLite (isps.db) vía
-  Drizzle. Dependencia justificada en B3. Variables de entorno en `.env.local` gitignored.
-  Lista cuando: las tablas de auth existen en isps.db y el server arranca con auth montado.
+- [x] **V2.1 · Better Auth: instalación y tablas.** Hecho: `npm install better-auth`;
+  `app/lib/auth.ts` (email+password, `disableSignUp` salvo `ALLOW_SIGNUP=1`,
+  additionalFields `owner`/`admin` con `input:false`); schema generado por la CLI en
+  `app/db/auth-schema.ts`, mergeado en `app/db/index.ts`. DDL de las 4 tablas generado con
+  `drizzle-kit generate` (no transcrito a mano) y aplicado con
+  `scripts/migrate_auth_dryrun.py` / `_apply.py`, idempotente, verificado en isps.db real.
 
-- [ ] **V2.2 · Gate de sesión + owner = email.**
-  Sin sesión no se ve nada (middleware o layout guard). El owner de empresa/toque se toma de
-  la sesión, no hardcodeado. Todos los autenticados ven el pipeline compartido (v1).
-  Lista cuando: sin login redirige; con login la cola filtra por el owner de la sesión.
+- [x] **V2.2 · Gate de sesión + owner = email.** Hecho, con un ajuste sobre B3 (documentado
+  como B1.c en plan-claude-v2.md): owner=email no aplicaba porque `empresa.owner` guarda
+  nombres, no emails, y la tabla maestra no se migra; se agregó un campo `owner` propio en
+  `user` con ese mapeo (`app/lib/session-user.ts`, TDD). `requireSession()` en
+  `app/lib/session.ts` gatea página y actions; owner sale de la sesión, ya no del form.
 
-- [ ] **V2.3 · Usuarios día 1 + flag admin.**
-  Alta de Sebastián y Felipe (script o pantalla mínima) y flag `admin` (habilita Fase 7).
-  Lista cuando: ambos entran con su password; el flag admin se lee de la sesión.
+- [x] **V2.3 · Usuarios día 1 + flag admin.** Hecho para Sebastián (admin=1) vía
+  `scripts/seed_auth_users.ts`, verificado con login real en el navegador. Felipe pendiente
+  de que dé su email y password (mismo script, `SEED_EMAIL_FELIPE`/`SEED_PASSWORD_FELIPE`);
+  no bloquea el cierre de la fase.
 
-- [ ] **V2.4 · Cierre de fase 2.** Pruebas + demo (login de ambos, sin sesión nada) +
-  /code-review + bitácora.
+- [x] **V2.4 · Cierre de fase 2.** 10/10 tests, tsc limpio. CodeRabbit: 2 hallazgos reales
+  corregidos (catch de red en LoginForm, cierre garantizado de DB en el seed) y 1 descartado
+  (ruta de DB hardcodeada, mismo patrón aceptado en Fase 1). Demo verificada en vivo: sin
+  sesión redirige a `/login`; login/logout reales; signup por API deshabilitado. Bitácora en
+  planeacion-ejecucion.md. Rama sin mergear, pendiente de revisión de Sebastián.
 
 ## Fase 3 · F1 conectores + ingest Granola + outbox Notion
 

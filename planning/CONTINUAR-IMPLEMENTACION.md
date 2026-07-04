@@ -14,16 +14,28 @@ retomar sin perder contexto. Última sesión: 2026-07-04.
   canal real del toque, las 4 salidas cerradas validadas con Zod dentro del Repository, KDM a
   `contacto`, tap de WhatsApp/correo, contadores del día. 8/8 tests y tsc limpios en main.
   Repo en github.com/SebastianAc02/followups_tool (main al día).
+- **Fase 2 (Auth, B3) COMPLETA en la rama `fase2-auth`, SIN MERGEAR** (pendiente de que
+  Sebastián la revise localmente, mismo patrón que Fase 1). Better Auth email+password,
+  tablas generadas por su CLI en la misma isps.db, gate de sesión en toda página/action,
+  owner sale de la sesión (ya no hardcodeado ni del form), flag admin. Refinamiento sobre B3
+  (documentado como B1.c en plan-claude-v2.md): `empresa.owner` guarda nombres, no emails, y
+  la mayoría de empresas (89%, verificado) no tiene owner individual porque son leads en
+  frío; la atribución de una campaña masiva (Fase 4) será `campana.owner`, un concepto
+  aparte. Solo Sebastián tiene cuenta real (admin=1); Felipe se agrega con
+  `scripts/seed_auth_users.ts` cuando dé su email y password. 10/10 tests, tsc limpio,
+  CodeRabbit corrido y con hallazgos resueltos o descartados con razón.
 
 ## Próxima acción
 
-**Arrancar Fase 2 (Auth, B3) por `planning/tasks-v2.md`, empezando por V2.1.** Better Auth
-email+password, owner=email, flag admin, tablas en la misma SQLite. Orden: V2.1
-(instalación+tablas) -> V2.2 (gate de sesión, owner viene de la sesión no hardcodeado) ->
-V2.3 (alta de Sebastián y Felipe + flag admin) -> V2.4 (cierre: demo + pruebas +
-/code-review). Detalle completo de cómo se ejecutó la Fase 1 (decisiones, fixes de review,
-un hallazgo falso positivo sobre una columna GENERATED de SQLite) en la bitácora de
-`planeacion-ejecucion.md`.
+**Arrancar Fase 3 (F1: conectores + ingest Granola + outbox Notion) por
+`planning/tasks-v2.md`, empezando por V3.1.** Orden: V3.1 (migración conector+outbox) ->
+V3.2 (cifrado AES-256-GCM) -> V3.3 (puerto TranscriptAdapter + GranolaAdapter) -> V3.4
+(matcher + cola de revisión) -> V3.5 (worker B7) -> V3.6 (ingest idempotente) -> V3.7
+(outbox a Notion) -> V3.8 (pantalla de conectores) -> V3.9 (cierre). Antes de tocar código:
+mergear (o al menos revisar) la rama `fase2-auth` a main, porque Fase 3 depende de que
+exista sesión (el owner real ya no es hardcodeado). Detalle completo de cómo se ejecutó la
+Fase 2 (decisiones, fixes de review, verificación en vivo con el navegador) en la bitácora
+de `planeacion-ejecucion.md`.
 
 ## Qué leer, en orden
 

@@ -10,9 +10,12 @@ tablero operativo: qué sigue AHORA, en qué orden, con qué gate.
 
 ## Próxima acción (lo único que importa ahora mismo)
 
-> **Arrancar Fase 2 (Auth, B3) por `planning/tasks-v2.md`, empezando por V2.1.** Fase 1
-> mergeada a main el 2026-07-04 (fast-forward, sin conflictos); rama `fase-1-cerrar-el-core`
-> borrada local y remota. main tiene 8/8 tests y tsc limpios post-merge.
+> **Arrancar Fase 3 (F1 conectores + ingest Granola + outbox Notion) por
+> `planning/tasks-v2.md`, empezando por V3.1.** Fase 2 (Auth) completa en la rama
+> `fase2-auth` (sin mergear todavía, pendiente de que Sebastián la revise). Alta real: solo
+> Sebastián (sacostamolin@gmail.com, admin=1) tiene cuenta; Felipe se agrega cuando dé su
+> email y password con `scripts/seed_auth_users.ts` (variables `SEED_EMAIL_FELIPE` +
+> `SEED_PASSWORD_FELIPE`, no bloquea nada). 10/10 tests y tsc limpios en la rama.
 
 G0 cerrado el 2026-07-03: las 5 pruebas de lectura pasaron; `usage_stats` confirmó crear
 contactos/empresas, add_contact_ids, gestionar/frenar secuencias y leer tracking. Y la prueba
@@ -48,11 +51,19 @@ Regla: un gate rojo detiene solo lo que depende de él. Las fases independientes
       Demo verificada en vivo contra isps.db real (con limpieza posterior): "no sigue" con
       razón Precio y el KDM queda en contacto. 8/8 tests, CodeRabbit 0 hallazgos. Merge
       fast-forward sin conflictos; rama `fase-1-cerrar-el-core` borrada.
-- [ ] **Fase 2 · Auth (B3). SIGUIENTE.** Better Auth email+password, owner=email, flag admin,
-      tablas en la misma SQLite. Demo: login de Sebastián y Felipe; sin sesión no se ve nada.
-      Tareas: V2.1 (instalación+tablas) -> V2.2 (gate de sesión) -> V2.3 (usuarios+flag admin)
-      -> V2.4 (cierre). Ver `planning/tasks-v2.md`.
-- [ ] **Fase 3 · F1 conectores + ingest Granola + outbox Notion.** Tabla `conector`
+- [x] **Fase 2 · Auth (B3). ✅ COMPLETA EN RAMA `fase2-auth` (2026-07-04), sin mergear.**
+      Better Auth email+password, tablas generadas por su CLI en la misma isps.db, gate de
+      sesión (`requireSession()`) en toda página y todo server action, owner de la sesión
+      (ya no del formulario ni hardcodeado), flag admin. Refinamiento de B3 (documentado como
+      B1.c en plan-claude-v2.md): owner=email no aplicaba porque `empresa.owner` guarda
+      nombres, no emails; se agregó un campo `owner` propio en la tabla `user` con ese
+      mapeo. Demo verificada en vivo: sin sesión `/` y `/llamada/[id]` redirigen a `/login`;
+      login real de Sebastián (admin=1) entra y ve su cola; password incorrecto muestra error
+      sin trabar el botón; "Salir" cierra sesión; signup por API deshabilitado. Felipe
+      pendiente de sus datos (no bloquea). 10/10 tests, CodeRabbit 2 hallazgos reales
+      corregidos (catch de red en login, cierre garantizado de DB en el script de seed) y 1
+      descartado (ruta de DB hardcodeada: mismo patrón ya aceptado en Fase 1).
+- [ ] **Fase 3 · F1 conectores + ingest Granola + outbox Notion. SIGUIENTE.** Tabla `conector`
       (AES-256-GCM), tabla `outbox`, worker (B7) con heartbeat, GranolaAdapter, matcher a cola
       de revisión, idempotencia (B4), pantalla de estado de conectores. Demo: reunión real de
       Granola aparece como toque con resumen; una inventada cae en la cola.
@@ -167,3 +178,45 @@ las fronteras ya están fijadas por la constitución).
   conflictos. Verificado 8/8 tests + tsc en main post-merge. Push a origin/main, rama
   `fase-1-cerrar-el-core` borrada local y remota. Próxima acción: Fase 2 (Auth), empezando
   por V2.1.
+- 2026-07-04 · Antes de arrancar Fase 2, Sebastián planteó que la gran mayoría de empresas
+  (verificado: 1737/1959, 89%) no tiene `owner` individual (frío nunca tocado), y que la
+  atribución de una campaña masiva (Fase 4) es la campaña misma, no una persona por empresa.
+  Documentado como B1.c en plan-claude-v2.md: `empresa.owner` (persona, hoy) y
+  `campana.owner` (campaña, Fase 4) son dos niveles distintos; no bloquea Fase 2, la cola
+  personal sigue igual. Guardado como memoria de proyecto para no perderlo entre sesiones.
+- 2026-07-04 · Ejecutada la Fase 2 completa (V2.1 a V2.4) inline, sesión a sesión con
+  checkpoint (sin subagentes, a pedido de Sebastián), en la rama `fase2-auth`:
+  - V2.1: `npm install better-auth`; `app/lib/auth.ts` (email+password, `disableSignUp`
+    salvo `ALLOW_SIGNUP=1`, additionalFields `owner`/`admin` con `input:false`). Schema
+    generado con `npx @better-auth/cli generate` -> `app/db/auth-schema.ts`, mergeado en
+    `app/db/index.ts`. DDL de las 4 tablas (user/session/account/verification) generado con
+    `drizzle-kit generate` contra un config temporal apuntando a auth-schema.ts (no
+    transcrito a mano, para no arriesgar un NOT NULL o DEFAULT mal copiado) y pegado
+    verbatim en `scripts/migrate_auth_apply.py` (+ `_dryrun.py`), mismo patrón dry-run+apply
+    de F0. Verificado en isps.db real: apply corrido dos veces, idempotente. Server arranca
+    y `/api/auth/ok` responde `{"ok":true}` (verificado con el navegador de preview).
+  - V2.2: `app/lib/session-user.ts` (mapeo puro sesión->{email,owner,admin}, TDD, 2 tests
+    nuevos, 10/10 en total) + `app/lib/session.ts` (`requireSession()`, redirect a `/login`
+    sin sesión) + pantalla de login (`app/login/`, CSS a mano siguiendo las variables de
+    globals.css, sin Tailwind) + `SignOutButton`. Gate agregado a `page.tsx`,
+    `llamada/[id]/page.tsx` y sus server actions; owner ya no viene del `<input hidden>` del
+    form sino de la sesión; "Repartir" solo se muestra si estás viendo tu propia cola.
+    Verificado en vivo: sin sesión, `/` y `/llamada/x` redirigen a `/login` (fetch con
+    redirect:follow confirmado en consola del navegador).
+  - V2.3: `scripts/seed_auth_users.ts`. Sebastián dio el password directo en el chat; se
+    corrió con `ALLOW_SIGNUP=1` solo para ese proceso puntual (el server sigue con signup
+    deshabilitado, confirmado con un POST directo a `/api/auth/sign-up/email` que devuelve
+    `EMAIL_PASSWORD_SIGN_UP_DISABLED`). Verificado en isps.db: fila de Sebastián con
+    admin=1. Login real en el navegador: entra, ve su cola (26 hoy / 26 vencidos), "Salir"
+    cierra sesión y vuelve a `/login`. Felipe no tenía datos listos; se deja para cuando los
+    dé, con el mismo script (no bloquea el cierre de fase).
+  - V2.4: CodeRabbit (`--base main`) encontró 3 hallazgos. 2 reales corregidos: LoginForm no
+    tenía try/catch (un error de red dejaba el botón en "Entrando..." para siempre, sin
+    mensaje) y `seed_auth_users.ts` no garantizaba `db.close()` ni salía con código de error
+    si algo fallaba a mitad de camino. 1 descartado: ruta de DB hardcodeada en los scripts
+    nuevos, porque sigue EXACTAMENTE el patrón que quedó aceptado en el cierre de Fase 1
+    (commit c2abd80: env var + mismo fallback, igual que app/db/index.ts). Re-verificado en
+    el navegador: password incorrecto muestra error sin trabar el botón; password correcto
+    entra normal. 10/10 tests, tsc limpio. Rama `fase2-auth` dejada sin mergear (mismo
+    patrón que Fase 1: Sebastián la revisa localmente primero). Próxima acción: Fase 3
+    (conectores + ingest Granola + outbox Notion), empezando por V3.1.
