@@ -1,6 +1,24 @@
-import { registrarHeartbeatConector, outboxPendientes, marcarOutboxEnviado, marcarOutboxFallido } from '../db/repository';
+import {
+  registrarHeartbeatConector,
+  outboxPendientes,
+  marcarOutboxEnviado,
+  marcarOutboxFallido,
+  pasoInscripcionesPendientes,
+  marcarPasoInscripcionEnviando,
+  marcarPasoInscripcionEnviada,
+  marcarPasoInscripcionFallo,
+  campanasConSecuencia,
+  resolverDestinatarioPorEmail,
+  guardarEventoTracking,
+  pausarInscripcion,
+  marcarDestinatarioSalio,
+  quedanDestinatariosActivos,
+} from '../db/repository';
 import { drenarOutbox } from '../core/outbox';
+import { pushPendientes } from '../core/push';
+import { pollTracking } from '../core/tracking';
 import { crearNotionAdapter } from '../adapters/notion';
+import { crearApolloAdapter } from '../adapters/apollo';
 
 // B7: proceso Node aparte (npm run worker), no un setInterval dentro de Next, el
 // dev server de Next se reinicia con hot reload/deploys y se llevaria el timer con
@@ -19,7 +37,42 @@ async function tareaOutbox(): Promise<void> {
   );
 }
 
-const TAREAS: Tarea[] = [{ nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox }];
+// V5.4: push reanudable de cadencias por Apollo. Aislada de outbox (si Apollo esta
+// caido, Notion sigue drenando igual, y viceversa -- mismo principio del comentario
+// de arriba en ejecutarCiclo).
+async function tareaPush(): Promise<void> {
+  await pushPendientes(
+    {
+      pendientes: pasoInscripcionesPendientes,
+      marcarEnviando: marcarPasoInscripcionEnviando,
+      marcarEnviada: marcarPasoInscripcionEnviada,
+      marcarFallo: marcarPasoInscripcionFallo,
+    },
+    crearApolloAdapter(),
+  );
+}
+
+// V5.5: poll de tracking + reply detection. Heartbeat propio ('apollo-tracking', no
+// 'apollo') para que un fallo aca no pise el heartbeat de tareaPush en el mismo ciclo.
+async function tareaTracking(): Promise<void> {
+  await pollTracking(
+    {
+      campanasConSecuencia,
+      resolverDestinatario: resolverDestinatarioPorEmail,
+      guardarEvento: guardarEventoTracking,
+      pausarInscripcion,
+      marcarDestinatarioSalio,
+      quedanDestinatariosActivos,
+    },
+    crearApolloAdapter(),
+  );
+}
+
+const TAREAS: Tarea[] = [
+  { nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox },
+  { nombre: 'push', proveedorHeartbeat: 'apollo', ejecutar: tareaPush },
+  { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: tareaTracking },
+];
 
 // Aislado a proposito: si una tarea truena, se loguea en su propio heartbeat y el
 // ciclo sigue con las demas. Con una sola tarea hoy el efecto es chico, pero define

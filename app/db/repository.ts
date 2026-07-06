@@ -19,6 +19,7 @@ import {
   inscripcion,
   destinatario,
   pasoInscripcion,
+  eventoTracking,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -26,6 +27,8 @@ import type { CadenciaParseada } from '../core/cadencia-parser';
 import { elegirDestinatarioDefault } from '../core/inscripcion';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
+import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
+import type { EventoProveedor } from '../core/ports/envio';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
@@ -588,6 +591,7 @@ export function crearCadencia(parseada: CadenciaParseada): number {
           diaOffset: paso.diaOffset,
           canal: paso.canal,
           objetivo: paso.objetivo ?? null,
+          esManual: paso.esManual ? 1 : 0,
           createdAt: ahora,
         })
         .run();
@@ -1172,10 +1176,14 @@ export function pasoInscripcionesPendientes(ahora: string = new Date().toISOStri
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
     .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
     .where(
       and(
         inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
         isNotNull(campana.proveedorCampanaId),
+        // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
+        // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
+        eq(pasoCadencia.esManual, 0),
         sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
         sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
       ),
@@ -1211,4 +1219,130 @@ export function marcarPasoInscripcionFallo(idPasoInscripcion: number, intentos: 
     .set({ estado: 'fallo', intentos, proximoIntento })
     .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
     .run();
+}
+
+// V5.6: cola de revision de pasos manuales (Tier 1). A diferencia de
+// pasoInscripcionesPendientes, NO filtra por backoff ni por MAX_INTENTOS -- un
+// manual sin revisar simplemente ESPERA, "aparece atrasado" (se calcula comparando
+// fechaProgramada contra hoy en el llamador), nunca se descarta por reintentos.
+export function pasosManualesPendientes() {
+  return db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+      email: contacto.email,
+      nombre: contacto.nombre,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      canal: pasoInscripcion.canal,
+      idEmpresa: empresa.idEmpresa,
+      empresaNombre: empresa.nombreOficial,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .where(and(eq(pasoInscripcion.estado, 'pendiente'), eq(pasoCadencia.esManual, 1)))
+    .all();
+}
+
+// Aprobar un paso manual: fechaEnviada es la fecha REAL en que Sebastian lo mando
+// (no necesariamente hoy si aprueba con retraso), y es esa fecha real la que el
+// motor de fechas usa para re-anclar el siguiente paso (B6), no la fechaProgramada
+// original. proveedor='manual' distingue de un envio real por Apollo en el mismo
+// campo que usa marcarPasoInscripcionEnviada.
+export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: string) {
+  db.update(pasoInscripcion)
+    .set({ estado: 'enviada', proveedor: 'manual', fechaEnviada })
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .run();
+}
+
+// V5.5: poll de tracking + reply detection.
+export function campanasConSecuencia(): CampanaConSecuencia[] {
+  return db
+    .select({ idCampana: campana.idCampana, proveedorCampanaId: campana.proveedorCampanaId })
+    .from(campana)
+    .where(isNotNull(campana.proveedorCampanaId))
+    .all()
+    .map((c) => ({ idCampana: c.idCampana, proveedorCampanaId: c.proveedorCampanaId as string }));
+}
+
+// Resuelve por (proveedorCampanaId, email): el envio 'enviada' MAS RECIENTE de ese
+// destinatario en esa campana (el id de mensaje real de Apollo no se conoce en
+// nuestro lado, ver core/ports/envio.ts -- el email es el unico correlator estable).
+export function resolverDestinatarioPorEmail(proveedorCampanaId: string, email: string): DestinatarioResuelto | null {
+  const fila = db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idDestinatario: pasoInscripcion.idDestinatario,
+      idInscripcion: destinatario.idInscripcion,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(
+      and(
+        eq(campana.proveedorCampanaId, proveedorCampanaId),
+        eq(contacto.email, email),
+        eq(pasoInscripcion.estado, 'enviada'),
+      ),
+    )
+    .orderBy(desc(pasoInscripcion.fechaEnviada))
+    .limit(1)
+    .get();
+  return fila ?? null;
+}
+
+// Idempotente (search-first, mismo idioma que crearPasoInscripcionPendiente): el
+// indice unico de proveedor_evento_id (V5.1) es el respaldo final ante una carrera.
+export function guardarEventoTracking(idPasoInscripcion: number, evento: EventoProveedor): 'insertado' | 'duplicado' {
+  const existente = db
+    .select({ id: eventoTracking.idEvento })
+    .from(eventoTracking)
+    .where(eq(eventoTracking.proveedorEventoId, evento.proveedorEventoId))
+    .get();
+  if (existente) return 'duplicado';
+
+  db.insert(eventoTracking)
+    .values({
+      idPasoInscripcion,
+      tipo: evento.tipo,
+      canal: evento.canal,
+      proveedorEventoId: evento.proveedorEventoId,
+      detalle: JSON.stringify(evento.detalle),
+      fechaEvento: evento.fechaEvento,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
+  return 'insertado';
+}
+
+// pausada es un estado nuevo (no 'finalizada'): B6 pide que una reply o un
+// agotamiento de destinatarios frene la cadencia de inmediato, con motivo visible;
+// agendaEnSeco solo lee estado='activa', asi que pausada sale sola del calculo.
+export function pausarInscripcion(idInscripcion: number, motivo: string) {
+  const ahora = new Date().toISOString();
+  db.update(inscripcion)
+    .set({ estado: 'pausada', motivoFin: motivo, fechaFin: ahora, updatedAt: ahora })
+    .where(eq(inscripcion.idInscripcion, idInscripcion))
+    .run();
+}
+
+export function marcarDestinatarioSalio(idDestinatario: number) {
+  db.update(destinatario).set({ estado: 'salio' }).where(eq(destinatario.idDestinatario, idDestinatario)).run();
+}
+
+export function quedanDestinatariosActivos(idInscripcion: number): boolean {
+  const fila = db
+    .select({ c: sql<number>`count(*)` })
+    .from(destinatario)
+    .where(and(eq(destinatario.idInscripcion, idInscripcion), eq(destinatario.estado, 'activo')))
+    .get();
+  return (fila?.c ?? 0) > 0;
 }
