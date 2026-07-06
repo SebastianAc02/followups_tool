@@ -1,4 +1,5 @@
-import { and, eq, lte, isNotNull, isNull, desc, sql } from 'drizzle-orm';
+import { and, eq, lte, isNotNull, isNull, inArray, notInArray, desc, sql, type SQL } from 'drizzle-orm';
+import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { db } from './index';
 import {
   empresa,
@@ -12,6 +13,7 @@ import {
   cadencia,
   pasoCadencia,
   versionPaso,
+  segmento,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -22,6 +24,9 @@ import {
   registrarToqueSchema,
   type RegistrarToqueInput,
   cadenciaParseadaSchema,
+  definicionSegmentoSchema,
+  type DefinicionSegmento,
+  type CampoSegmento,
   CANALES,
   RESULTADOS,
   type Canal,
@@ -638,4 +643,92 @@ export function getCadencia(idCadencia: number) {
     .all();
 
   return { cadencia: cab, pasos };
+}
+
+// V4.3: whitelist campo de dominio -> columna real. numerico marca las columnas
+// enteras: sus valores llegan como string (JSON) y se coercen a numero para que el
+// IN compare bien contra la afinidad INTEGER de la columna. Este mapa es la unica
+// puerta: un campo que no este aca ni siquiera llega (Zod lo rechaza antes), pero el
+// mapa garantiza que solo columnas conocidas entran a la consulta.
+const COLUMNA_SEGMENTO: Record<CampoSegmento, { col: SQLiteColumn; numerico: boolean }> = {
+  estado: { col: empresa.estadoNotion, numerico: false },
+  categoria: { col: empresa.categoria, numerico: false },
+  estado_comercial: { col: empresa.estadoComercial, numerico: false },
+  prioridad: { col: empresa.prioridadComercial, numerico: true },
+  es_cliente: { col: empresa.esCliente, numerico: true },
+  ciudad: { col: empresa.ciudadPrincipal, numerico: false },
+  owner: { col: empresa.owner, numerico: false },
+};
+
+// Traduce una definicion YA validada a un WHERE de drizzle. Las condiciones se ANDean.
+// El switch (no ifs sueltos) deja que TS estreche cada rama: en 'en'/'no_en' sabe que
+// existe c.valores; en 'es_null'/'no_null' que no.
+function compilarSegmento(def: DefinicionSegmento): SQL | undefined {
+  const conds = def.condiciones.map((c): SQL => {
+    const { col, numerico } = COLUMNA_SEGMENTO[c.campo];
+    switch (c.op) {
+      case 'es_null':
+        return isNull(col);
+      case 'no_null':
+        return isNotNull(col);
+      case 'en':
+        return inArray(col, numerico ? c.valores.map(Number) : c.valores);
+      case 'no_en':
+        return notInArray(col, numerico ? c.valores.map(Number) : c.valores);
+    }
+  });
+  return and(...conds);
+}
+
+// V4.3: corre un filtro (aun sin guardar) y devuelve las empresas que caen. Valida la
+// definicion primero: un filtro corrupto no consulta nada.
+export function empresasDeSegmento(def: DefinicionSegmento) {
+  const val = definicionSegmentoSchema.parse(def);
+  return db
+    .select({ id: empresa.idEmpresa, nombre: empresa.nombreOficial, estado: empresa.estadoNotion, categoria: empresa.categoria })
+    .from(empresa)
+    .where(compilarSegmento(val))
+    .orderBy(empresa.nombreOficial)
+    .all();
+}
+
+export function contarSegmento(def: DefinicionSegmento): number {
+  const val = definicionSegmentoSchema.parse(def);
+  const fila = db.select({ n: sql<number>`count(*)` }).from(empresa).where(compilarSegmento(val)).get();
+  return fila?.n ?? 0;
+}
+
+// V4.3: guarda el filtro compilado como JSON en segmento.definicion. descripcionNatural
+// es opcional (el lenguaje natural lo llena Fase 6, aca solo se persiste si viene).
+export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }): number {
+  const val = definicionSegmentoSchema.parse(input.definicion);
+  const ahora = new Date().toISOString();
+  const ins = db
+    .insert(segmento)
+    .values({
+      nombre: input.nombre,
+      definicion: JSON.stringify(val),
+      descripcionNatural: input.descripcionNatural ?? null,
+      createdAt: ahora,
+      updatedAt: ahora,
+    })
+    .run();
+  return Number(ins.lastInsertRowid);
+}
+
+export function listarSegmentos() {
+  return db
+    .select({ id: segmento.idSegmento, nombre: segmento.nombre, descripcionNatural: segmento.descripcionNatural })
+    .from(segmento)
+    .orderBy(desc(segmento.idSegmento))
+    .all();
+}
+
+// V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el
+// puente que V4.5 usa para inscribir "todas las empresas de este segmento".
+export function empresasDeSegmentoGuardado(idSegmento: number) {
+  const fila = db.select({ definicion: segmento.definicion }).from(segmento).where(eq(segmento.idSegmento, idSegmento)).get();
+  if (!fila) return null;
+  const def = definicionSegmentoSchema.parse(JSON.parse(fila.definicion));
+  return empresasDeSegmento(def);
 }

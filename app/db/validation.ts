@@ -64,6 +64,37 @@ export const cadenciaParseadaSchema = z.object({
 
 export type CadenciaParseadaInput = z.infer<typeof cadenciaParseadaSchema>;
 
+// V4.3: lenguaje de segmentacion sobre la base propia. definicion es JSON con
+// condiciones ANDeadas; cada campo es de esta whitelist cerrada (nombres de DOMINIO,
+// no de columna: el Repository mapea nombre->columna). Zod rechaza cualquier campo u
+// operador fuera de este set ANTES de tocar la DB, asi no hay SQL libre ni inyeccion.
+export const CAMPOS_SEGMENTO = [
+  'estado', // empresa.estado_notion (on_hold, oportunidad, lead...)
+  'categoria', // isp / utility / otro
+  'estado_comercial',
+  'prioridad', // empresa.prioridad_comercial (el "tier", numerico)
+  'es_cliente', // 0 / 1
+  'ciudad',
+  'owner',
+] as const;
+export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
+
+const condicionEnSchema = z.object({
+  campo: z.enum(CAMPOS_SEGMENTO),
+  op: z.enum(['en', 'no_en']),
+  valores: z.array(z.string().min(1)).min(1, 'la condicion en/no_en necesita al menos un valor'),
+});
+const condicionNullSchema = z.object({
+  campo: z.enum(CAMPOS_SEGMENTO),
+  op: z.enum(['es_null', 'no_null']),
+});
+
+export const definicionSegmentoSchema = z.object({
+  condiciones: z.array(z.union([condicionEnSchema, condicionNullSchema])).min(1, 'un segmento necesita al menos una condicion'),
+});
+
+export type DefinicionSegmento = z.infer<typeof definicionSegmentoSchema>;
+
 export const registrarToqueSchema = z
   .object({
     idEmpresa: z.string().min(1),
