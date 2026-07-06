@@ -1,6 +1,8 @@
 import { and, eq, lte, isNotNull, isNull, desc, sql } from 'drizzle-orm';
 import { db } from './index';
-import { empresa, contacto, empresaUsuarios, toque, syncCambios, conector, empresaAlias } from './schema';
+import { empresa, contacto, empresaUsuarios, toque, syncCambios, conector, empresaAlias, outbox } from './schema';
+import type { CambioNotion } from '../core/ports/sync';
+import type { FilaOutbox } from '../core/outbox';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
@@ -13,6 +15,31 @@ import {
 } from './validation';
 
 // Único punto de acceso a datos. El resto de la app no toca SQL ni la DB directo.
+
+// Tipo de la transaccion en curso (lo que drizzle pasa dentro de db.transaction()),
+// distinto del tipo de `db`: usarlo explicito evita que un insert "se escape" a una
+// conexion fuera de la transaccion del caller.
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// V3.7: encola un cambio a Notion DENTRO de la misma transaccion que lo origino
+// (patron outbox: si el proceso muere entre "cambie la DB" y "avise a Notion", el
+// aviso no se pierde -- esta en la misma transaccion o no esta ninguno de los dos).
+function encolarOutboxNotion(tx: Tx, idEmpresa: string, cambio: Omit<CambioNotion, 'notionPageId'>) {
+  const emp = tx.select({ notionPageId: empresa.notionPageId }).from(empresa).where(eq(empresa.idEmpresa, idEmpresa)).get();
+  if (!emp?.notionPageId) return; // sin pagina de Notion enlazada todavia, nada que sincronizar
+
+  const payload: CambioNotion = { notionPageId: emp.notionPageId, ...cambio };
+  tx.insert(outbox)
+    .values({
+      entidad: 'empresa',
+      idRegistro: idEmpresa,
+      payload: JSON.stringify(payload),
+      estado: 'aprobado',
+      intentos: 0,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
+}
 
 // Calor de la cuenta (prioridad): lo más cerca del cierre, primero.
 const calorDesc = sql`(CASE ${empresa.estadoNotion}
@@ -172,6 +199,16 @@ export function registrarToque(input: RegistrarToqueInput) {
     if (parsed.crm) sets.crmSoftware = parsed.crm;
     if (parsed.pasarela) sets.pasarelaActual = parsed.pasarela;
     tx.update(empresa).set(sets).where(eq(empresa.idEmpresa, parsed.idEmpresa)).run();
+
+    // V3.7: outbox en la MISMA transaccion que el cambio (patron outbox). Si la empresa
+    // no tiene notion_page_id todavia (nadie la enlazo a mano, ver nota en V3.1b/V3.7)
+    // no hay a donde sincronizar -- se omite en silencio, no es un error.
+    if (parsed.proximoFollowUp || parsed.quePaso) {
+      encolarOutboxNotion(tx, parsed.idEmpresa, {
+        proximoPaso: parsed.quePaso,
+        fechaProximoPaso: parsed.proximoFollowUp,
+      });
+    }
 
     if (parsed.usuarios != null && !Number.isNaN(parsed.usuarios)) {
       tx.insert(empresaUsuarios)
@@ -369,15 +406,25 @@ export function leerToqueTranscript(idToque: number): { transcriptId: string | n
 }
 
 export function escribirTranscriptCompleto(idToque: number, sesion: SesionTranscript) {
-  db.update(toque)
-    .set({
-      transcriptProveedor: sesion.proveedor,
-      transcriptId: sesion.transcriptId,
-      transcriptUrl: sesion.url,
-      quePaso: sesion.resumen,
-    })
-    .where(eq(toque.idToque, idToque))
-    .run();
+  db.transaction((tx) => {
+    tx.update(toque)
+      .set({
+        transcriptProveedor: sesion.proveedor,
+        transcriptId: sesion.transcriptId,
+        transcriptUrl: sesion.url,
+        quePaso: sesion.resumen,
+      })
+      .where(eq(toque.idToque, idToque))
+      .run();
+
+    // V3.7: el resumen confirmado sube a Notion (Notas Discovery) en la misma
+    // transaccion. Solo aca, no en escribirTranscriptSoloPuntero: esa rama nunca
+    // toca quePaso (V3.6), asi que no hay resumen nuevo que sincronizar.
+    if (sesion.resumen) {
+      const t = tx.select({ idEmpresa: toque.idEmpresa }).from(toque).where(eq(toque.idToque, idToque)).get();
+      if (t) encolarOutboxNotion(tx, t.idEmpresa, { notasDiscovery: sesion.resumen });
+    }
+  });
 }
 
 export function escribirTranscriptSoloPuntero(idToque: number, sesion: SesionTranscript) {
@@ -389,4 +436,52 @@ export function escribirTranscriptSoloPuntero(idToque: number, sesion: SesionTra
     })
     .where(eq(toque.idToque, idToque))
     .run();
+}
+
+// V3.7: primitivas de drenado del outbox, usadas por app/core/outbox.ts (deps
+// inyectadas, el core no importa drizzle/better-sqlite3 directo).
+export function outboxPendientes(ahora: string = new Date().toISOString()): FilaOutbox[] {
+  const filas = db
+    .select({ idOutbox: outbox.idOutbox, payload: outbox.payload, intentos: outbox.intentos })
+    .from(outbox)
+    .where(
+      and(
+        eq(outbox.estado, 'aprobado'),
+        sql`(${outbox.proximoIntento} IS NULL OR ${outbox.proximoIntento} <= ${ahora})`,
+      ),
+    )
+    .all();
+
+  return filas.map((f) => ({ idOutbox: f.idOutbox, intentos: f.intentos, payload: JSON.parse(f.payload) as CambioNotion }));
+}
+
+export function marcarOutboxEnviado(idOutbox: number) {
+  const ahora = new Date().toISOString();
+  db.transaction((tx) => {
+    tx.update(outbox).set({ estado: 'enviado' }).where(eq(outbox.idOutbox, idOutbox)).run();
+    tx.insert(syncCambios)
+      .values({ fecha: ahora, corrida: 'worker', fuente: 'notion-outbox', entidad: 'outbox', idRegistro: String(idOutbox), accion: 'enviado', detalle: 'drenado OK' })
+      .run();
+  });
+}
+
+export function marcarOutboxFallido(idOutbox: number, intentos: number, proximoIntento: string | null) {
+  const ahora = new Date().toISOString();
+  db.transaction((tx) => {
+    tx.update(outbox)
+      .set({ estado: proximoIntento ? 'aprobado' : 'fallido', intentos, proximoIntento })
+      .where(eq(outbox.idOutbox, idOutbox))
+      .run();
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'worker',
+        fuente: 'notion-outbox',
+        entidad: 'outbox',
+        idRegistro: String(idOutbox),
+        accion: proximoIntento ? 'reintento-programado' : 'fallido-definitivo',
+        detalle: `intento ${intentos}`,
+      })
+      .run();
+  });
 }

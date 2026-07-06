@@ -553,13 +553,33 @@ test('fallo de red deja la fila pendiente con reintento programado', async () =>
 });
 ```
 
-- [ ] **Paso 2: puerto `SyncAdapter` + NotionAdapter** detrás del puerto (mismo patrón que V3.3).
-- [ ] **Paso 3: implementar drenado** (estado aprobado -> enviado, log en `sync_cambios`).
-- [ ] **Paso 4: Sebastián escribe `calcularProximoIntento`.**
-- [ ] **Paso 5: PAUSA.** Pedir el token real de Notion, guardarlo cifrado, y verificar en
-      vivo con UN registro de prueba acordado antes (base real: mostrar qué va a cambiar y
-      esperar el "dale", regla de notion-real-onepay).
-- [ ] **Paso 6: commit.** `git commit -m "V3.7: outbox transaccional drenado a Notion con backoff"`
+- [x] **Paso 2: puerto `SyncAdapter` + `NotionAdapter`** (`app/core/ports/sync.ts`,
+      `app/adapters/notion.ts`). Tipos de propiedad verificados EN VIVO contra el schema real
+      del "Sales Pipeline" (conector de Notion ya autorizado en esta sesión, sin tocar la key
+      de producción): `Notas Discovery` y `Próximo Paso` son `text`, `Fecha Próximo Paso` es
+      `date`. **`Estado` es tipo `status`** (no texto/select simple) — fuera de alcance de
+      este primer corte a propósito: mapear mal un status en un CRM compartido por todo el
+      equipo es más caro que no sincronizarlo todavía. Base real: `https://api.notion.com`,
+      header `Notion-Version` (valor sin verificar en vivo, pendiente del Paso 5).
+- [x] **Paso 3: drenado implementado** (`app/core/outbox.ts`): estado `aprobado` -> `enviado`
+      o reintento programado, log en `sync_cambios` en ambos casos. Idempotente por
+      construcción (una fila ya `enviado` no vuelve a aparecer en `outboxPendientes`).
+- [x] **Paso 4: `calcularProximoIntento` implementada** — backoff 1min/5min/30min/2h/12h,
+      tope en 12h, 5 intentos antes de `fallido` definitivo (según lo ya acordado en el batch
+      de decisiones de esta sesión).
+- [x] **Repository conectado:** `registrarToque` y `escribirTranscriptCompleto` encolan en
+      `outbox` DENTRO de su propia transacción — pero SOLO si `empresa.notion_page_id` ya
+      está enlazado; si no, se omite en silencio (nada que sincronizar todavía). `tareaOutbox`
+      del worker (V3.5) ahora llama al drenado real. 8 tests nuevos de Repository + outbox,
+      48/48 de la suite completa.
+- [ ] **Paso 5: PAUSA — sigue pendiente, requiere a Sebastián específicamente (no es código):**
+      1. El token real de Notion (integration token, no la API key de Granola). 2. **El
+      enlace inicial `empresa.notion_page_id`**: nunca se construyó el script que vincula cada
+      `empresa` a su página real de Notion (quedó pendiente desde V3.3/V3.4 — hay 4 nombres
+      duplicados reales, no se puede automatizar sin criterio humano para esos casos). Sin
+      ninguna empresa enlazada, el outbox nunca tiene a dónde escribir: el código está
+      completo y probado con dobles, pero cero verificado contra Notion real todavía.
+- [x] **Paso 6: commit.**
 
 ### Tarea V3.8 · Pantalla de conectores
 

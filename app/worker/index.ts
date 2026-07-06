@@ -1,4 +1,6 @@
-import { registrarHeartbeatConector } from '../db/repository';
+import { registrarHeartbeatConector, outboxPendientes, marcarOutboxEnviado, marcarOutboxFallido } from '../db/repository';
+import { drenarOutbox } from '../core/outbox';
+import { crearNotionAdapter } from '../adapters/notion';
 
 // B7: proceso Node aparte (npm run worker), no un setInterval dentro de Next -- el
 // dev server de Next se reinicia con hot reload/deploys y se llevaria el timer con
@@ -11,8 +13,10 @@ const INTERVALO_MS = 5 * 60 * 1000;
 export type Tarea = { nombre: string; proveedorHeartbeat: string; ejecutar: () => Promise<void> };
 
 async function tareaOutbox(): Promise<void> {
-  // V3.7 la reemplaza por el drenado real hacia Notion. Hoy no hay NotionAdapter
-  // todavia, asi que no hay nada que drenar -- el loop y el heartbeat ya funcionan.
+  await drenarOutbox(
+    { pendientes: outboxPendientes, marcarEnviado: marcarOutboxEnviado, marcarFallido: marcarOutboxFallido },
+    crearNotionAdapter(),
+  );
 }
 
 const TAREAS: Tarea[] = [{ nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox }];
