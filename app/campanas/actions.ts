@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { empresasDeSegmento, guardarSegmento } from '../db/repository';
+import { empresasDeSegmento, guardarSegmento, excluirDeSegmento, incluirDeSegmento } from '../db/repository';
 import { definicionSegmentoSchema, type DefinicionSegmento } from '../db/validation';
 import { requireSession } from '../lib/session';
 
@@ -57,4 +57,18 @@ export async function guardarSegmentoAction(nombre: string, def: DefinicionSegme
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo guardar el segmento' };
   }
+}
+
+// Parte 2 campanas: revision de leads. El toggle persiste de inmediato (no hay un
+// "guardar" aparte): excluir/incluir son operaciones idempotentes en el Repository.
+export async function excluirLeadAction(idSegmento: number, idEmpresa: string): Promise<void> {
+  await requireSession();
+  excluirDeSegmento(idSegmento, idEmpresa);
+  revalidatePath(`/campanas/segmentos/${idSegmento}/revision`);
+}
+
+export async function incluirLeadAction(idSegmento: number, idEmpresa: string): Promise<void> {
+  await requireSession();
+  incluirDeSegmento(idSegmento, idEmpresa);
+  revalidatePath(`/campanas/segmentos/${idSegmento}/revision`);
 }

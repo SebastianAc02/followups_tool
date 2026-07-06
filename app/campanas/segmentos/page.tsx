@@ -42,10 +42,10 @@ export default async function Segmentos() {
       ) : (
         <div className="cad-list">
           {segmentos.map((s) => (
-            <div key={s.id} className="cad-item">
+            <Link key={s.id} href={`/campanas/segmentos/${s.id}/revision`} className="cad-item">
               <span className="cad-item-nombre">{s.nombre}</span>
               {s.descripcionNatural && <span className="cad-item-meta">{s.descripcionNatural}</span>}
-            </div>
+            </Link>
           ))}
         </div>
       )}
