@@ -27,6 +27,8 @@ import {
   definicionSegmentoSchema,
   type DefinicionSegmento,
   type CampoSegmento,
+  versionPasoInputSchema,
+  type VersionPasoInput,
   CANALES,
   RESULTADOS,
   type Canal,
@@ -731,4 +733,58 @@ export function empresasDeSegmentoGuardado(idSegmento: number) {
   if (!fila) return null;
   const def = definicionSegmentoSchema.parse(JSON.parse(fila.definicion));
   return empresasDeSegmento(def);
+}
+
+// V4.4: cuelga una version A/B nueva de un paso existente. Si nace default, apaga el
+// default anterior de ese paso EN LA MISMA TRANSACCION (un paso tiene a lo sumo un
+// default). No hay "editar version": iterar copy es agregar, no reescribir la enviada.
+export function agregarVersionPaso(idPaso: number, input: VersionPasoInput): number {
+  const val = versionPasoInputSchema.parse(input);
+  const ahora = new Date().toISOString();
+  return db.transaction((tx) => {
+    if (val.esDefault) {
+      tx.update(versionPaso).set({ esDefault: 0, updatedAt: ahora }).where(eq(versionPaso.idPaso, idPaso)).run();
+    }
+    const ins = tx
+      .insert(versionPaso)
+      .values({
+        idPaso,
+        nombre: val.nombre,
+        asunto: val.asunto ?? null,
+        cuerpo: val.cuerpo ?? null,
+        esDefault: val.esDefault ? 1 : 0,
+        activa: 1,
+        peso: val.peso,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+    return Number(ins.lastInsertRowid);
+  });
+}
+
+// V4.4: versiones activas de un paso, lo que el motor en seco reparte por peso.
+export function versionesActivasDePaso(idPaso: number) {
+  return db
+    .select({
+      id: versionPaso.idVersion,
+      nombre: versionPaso.nombre,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      peso: versionPaso.peso,
+      esDefault: versionPaso.esDefault,
+    })
+    .from(versionPaso)
+    .where(and(eq(versionPaso.idPaso, idPaso), eq(versionPaso.activa, 1)))
+    .orderBy(versionPaso.idVersion)
+    .all();
+}
+
+// V4.4: ajustar peso o apagar/prender una version (peso 0 o activa 0 la sacan del
+// reparto). No toca el copy: para cambiar copy se agrega otra version.
+export function actualizarVersionPaso(idVersion: number, cambios: { peso?: number; activa?: boolean }) {
+  const sets: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if (cambios.peso != null) sets.peso = cambios.peso;
+  if (cambios.activa != null) sets.activa = cambios.activa ? 1 : 0;
+  db.update(versionPaso).set(sets).where(eq(versionPaso.idVersion, idVersion)).run();
 }

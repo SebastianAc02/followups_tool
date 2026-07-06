@@ -95,6 +95,19 @@ export const definicionSegmentoSchema = z.object({
 
 export type DefinicionSegmento = z.infer<typeof definicionSegmentoSchema>;
 
+// V4.4: alta de una version A/B colgada de un paso. peso reparte el trafico en el
+// motor en seco (0 = version apagada, no recibe). Iterar copy = agregar una version,
+// no editar la ya enviada.
+export const versionPasoInputSchema = z.object({
+  nombre: z.string().min(1),
+  asunto: z.string().min(1).optional(),
+  cuerpo: z.string().min(1).optional(),
+  peso: z.number().int().nonnegative().default(1),
+  esDefault: z.boolean().optional(),
+});
+
+export type VersionPasoInput = z.infer<typeof versionPasoInputSchema>;
+
 export const registrarToqueSchema = z
   .object({
     idEmpresa: z.string().min(1),
