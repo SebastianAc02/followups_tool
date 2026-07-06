@@ -3,7 +3,7 @@ import { colaDelDia, contadoresHoy } from "../db/repository";
 import { repartirAction, registrarTapAction } from "../actions";
 import { RESULTADO_LABELS, CANALES, RESULTADOS } from "../db/validation";
 import { requireSession } from "../lib/session";
-import SignOutButton from "../SignOutButton";
+import TopNav from "../TopNav";
 
 const OWNERS = [
   { key: "Sebastian Acosta Molina", label: "Sebastián" },
@@ -44,6 +44,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
 
   return (
     <div className="wrap">
+      <TopNav email={usuario.email} />
       <div className="head">
         <div>
           <div className="h-title">Toques del día</div>
@@ -57,8 +58,6 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
         </div>
         <div className="h-meta">
           <span className="mono">{cola.length}</span> hoy · <span className="mono">{vencidos}</span> vencidos
-          {" · "}
-          <SignOutButton email={usuario.email} />
         </div>
       </div>
 
