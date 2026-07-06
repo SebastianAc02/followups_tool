@@ -1,6 +1,7 @@
 import { and, eq, lte, isNotNull, desc, sql } from 'drizzle-orm';
 import { db } from './index';
-import { empresa, contacto, empresaUsuarios, toque, syncCambios } from './schema';
+import { empresa, contacto, empresaUsuarios, toque, syncCambios, conector } from './schema';
+import { cifrar, descifrar } from '../lib/crypto';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -265,4 +266,29 @@ export function repartirFollowups(owner: string, porDia: number) {
   });
 
   return { total: rows.length, porDia, hasta: dias[dias.length - 1] ?? null };
+}
+
+// V3.2: la credencial SIEMPRE se cifra antes de tocar disco y se descifra solo al
+// leerla server-side. Ningun caller (adaptador, UI) ve ni maneja el texto plano fuera
+// de estas dos funciones.
+export function guardarCredencialConector(proveedor: string, credencial: string) {
+  const credencialCiphertext = cifrar(credencial);
+  const ahora = new Date().toISOString();
+  db.insert(conector)
+    .values({ proveedor, credencialCiphertext, estado: 'activo', createdAt: ahora, updatedAt: ahora })
+    .onConflictDoUpdate({
+      target: conector.proveedor,
+      set: { credencialCiphertext, estado: 'activo', updatedAt: ahora },
+    })
+    .run();
+}
+
+export function leerCredencialConector(proveedor: string): string | null {
+  const fila = db
+    .select({ credencialCiphertext: conector.credencialCiphertext })
+    .from(conector)
+    .where(eq(conector.proveedor, proveedor))
+    .get();
+  if (!fila?.credencialCiphertext) return null;
+  return descifrar(fila.credencialCiphertext);
 }

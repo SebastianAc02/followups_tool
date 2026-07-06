@@ -89,6 +89,28 @@ export function crearDbPrueba() {
       accion TEXT,
       detalle TEXT
     );
+
+    CREATE TABLE conector (
+      id_conector INTEGER PRIMARY KEY AUTOINCREMENT,
+      proveedor TEXT NOT NULL UNIQUE,
+      credencial_ciphertext TEXT,
+      estado TEXT NOT NULL DEFAULT 'sin_credencial',
+      ultima_corrida TEXT,
+      ultimo_resultado TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE outbox (
+      id_outbox INTEGER PRIMARY KEY AUTOINCREMENT,
+      entidad TEXT NOT NULL,
+      id_registro TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      estado TEXT NOT NULL DEFAULT 'aprobado',
+      intentos INTEGER NOT NULL DEFAULT 0,
+      proximo_intento TEXT,
+      created_at TEXT
+    );
   `);
 
   sqlite.close();
