@@ -1296,11 +1296,17 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
     .get();
   if (!fila) throw new Error(`paso_inscripcion ${idPasoInscripcion} no existe`);
 
+  // Idempotente (hallazgo real de /code-review): sin el WHERE estado='pendiente', un
+  // doble llamado (doble click, retry) sobreescribia fechaEnviada Y duplicaba el toque.
+  // El update solo afecta la fila si TODAVIA esta pendiente; si ya se aprobo antes,
+  // res.changes queda en 0 y no se inserta un segundo toque.
   db.transaction((tx) => {
-    tx.update(pasoInscripcion)
+    const res = tx
+      .update(pasoInscripcion)
       .set({ estado: 'enviada', proveedor: 'manual', fechaEnviada })
-      .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+      .where(and(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion), eq(pasoInscripcion.estado, 'pendiente')))
       .run();
+    if (res.changes === 0) return;
     tx.insert(toque)
       .values({
         idEmpresa: fila.idEmpresa,

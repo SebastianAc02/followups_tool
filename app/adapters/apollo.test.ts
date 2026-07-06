@@ -95,11 +95,16 @@ test('enviarPaso truena si no hay buzon configurado (decision de negocio S2 pend
   delete process.env.APOLLO_MAILBOX_ID;
   const adapter = crearApolloAdapter();
 
-  await assert.rejects(
-    () => adapter.enviarPaso('seq-1', { email: 'ana@empresa.com', nombre: null }, { asunto: null, cuerpo: 'x', canal: 'correo' }),
-    /APOLLO_MAILBOX_ID/,
-  );
-  process.env.APOLLO_MAILBOX_ID = 'buzon-test-1';
+  // finally (hallazgo real de /code-review): si assert.rejects fallara, la env var
+  // quedaria borrada y filtraria el fallo a los tests siguientes del archivo.
+  try {
+    await assert.rejects(
+      () => adapter.enviarPaso('seq-1', { email: 'ana@empresa.com', nombre: null }, { asunto: null, cuerpo: 'x', canal: 'correo' }),
+      /APOLLO_MAILBOX_ID/,
+    );
+  } finally {
+    process.env.APOLLO_MAILBOX_ID = 'buzon-test-1';
+  }
 });
 
 test('sacarDestinatario resuelve el contacto por email y llama remove_or_stop_contact_ids (ruta plana, verificada en vivo)', async (t) => {

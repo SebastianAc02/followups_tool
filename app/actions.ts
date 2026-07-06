@@ -45,7 +45,7 @@ export async function registrarTapAction(formData: FormData) {
 export async function aprobarPasoManualAction(formData: FormData) {
   await requireSession();
   const idPasoInscripcion = Number(formData.get("idPasoInscripcion"));
-  if (!idPasoInscripcion) return;
+  if (!Number.isFinite(idPasoInscripcion) || idPasoInscripcion <= 0) return;
   const cuerpoFinal = String(formData.get("cuerpoFinal") ?? "").trim() || undefined;
 
   aprobarPasoManual(idPasoInscripcion, new Date().toISOString(), cuerpoFinal);
