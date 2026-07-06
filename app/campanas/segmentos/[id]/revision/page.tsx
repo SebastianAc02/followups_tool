@@ -30,6 +30,10 @@ export default async function RevisionSegmento({ params }: { params: Promise<{ i
       </p>
 
       <RevisionLeads idSegmento={idSegmento} empresas={revision} />
+
+      <Link href="/campanas/nueva" className="save" style={{ display: 'inline-block', marginTop: 24, textDecoration: 'none' }}>
+        Continuar: crear campaña
+      </Link>
     </div>
   );
 }
