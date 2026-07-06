@@ -29,6 +29,7 @@ import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
 import type { EventoProveedor } from '../core/ports/envio';
+import { restarUnDia } from '../core/actividad';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
@@ -1471,4 +1472,66 @@ export function quedanDestinatariosActivos(idInscripcion: number): boolean {
     .where(and(eq(destinatario.idInscripcion, idInscripcion), eq(destinatario.estado, 'activo')))
     .get();
   return (fila?.c ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Fase 7 (V7.1): agregaciones de SOLO LECTURA para el panel de actividad.
+// Ninguna escribe ni filtra por owner (el panel ve a todo el equipo). La regla
+// de la ventana del promedio vive en app/core/actividad.ts, no aqui ni en la UI.
+// `toque.fecha` puede ser ISO (app) o legado formato Notion ("June 25, 2026"); se
+// compara solo substr(fecha,1,10), asi el legado no-ISO cae fuera de las ventanas.
+
+const enRango = (desde: string, hasta: string): SQL =>
+  sql`substr(${toque.fecha}, 1, 10) >= ${desde} AND substr(${toque.fecha}, 1, 10) <= ${hasta}`;
+
+export function contarToquesEnRango(desde: string, hasta: string): number {
+  const r = db.select({ n: sql<number>`count(*)` }).from(toque).where(enRango(desde, hasta)).get();
+  return r?.n ?? 0;
+}
+
+export function contarToquesEnDia(hoy: string): number {
+  const ayer = restarUnDia(hoy);
+  return contarToquesEnRango(ayer, ayer);
+}
+
+export function leadsTocadosEnRango(desde: string, hasta: string): number {
+  const r = db.select({ n: sql<number>`count(distinct ${toque.idEmpresa})` }).from(toque).where(enRango(desde, hasta)).get();
+  return r?.n ?? 0;
+}
+
+export function toquesPorCanal(desde: string, hasta: string): Record<Canal, number> {
+  const filas = db.select({ canal: toque.canal, n: sql<number>`count(*)` }).from(toque)
+    .where(enRango(desde, hasta)).groupBy(toque.canal).all();
+  const out = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
+  for (const f of filas) if (f.canal && f.canal in out) out[f.canal as Canal] = f.n;
+  return out;
+}
+
+export function toquesPorResultado(desde: string, hasta: string): Record<Resultado, number> {
+  const filas = db.select({ resultado: toque.resultado, n: sql<number>`count(*)` }).from(toque)
+    .where(enRango(desde, hasta)).groupBy(toque.resultado).all();
+  const out = Object.fromEntries(RESULTADOS.map((r) => [r, 0])) as Record<Resultado, number>;
+  for (const f of filas) if (f.resultado && f.resultado in out) out[f.resultado as Resultado] = f.n;
+  return out;
+}
+
+export function campanasActivas(): number {
+  const r = db.select({ n: sql<number>`count(distinct ${inscripcion.idCampana})` })
+    .from(inscripcion).where(eq(inscripcion.estado, 'activa')).get();
+  return r?.n ?? 0;
+}
+
+export function inscripcionesActivas(): number {
+  const r = db.select({ n: sql<number>`count(*)` }).from(inscripcion).where(eq(inscripcion.estado, 'activa')).get();
+  return r?.n ?? 0;
+}
+
+export function empresasPorCadencia(): { cadencia: string; empresas: number }[] {
+  return db.select({ cadencia: cadencia.nombre, empresas: sql<number>`count(distinct ${inscripcion.idEmpresa})` })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
+    .where(eq(inscripcion.estado, 'activa'))
+    .groupBy(cadencia.nombre)
+    .all();
 }
