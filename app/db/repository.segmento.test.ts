@@ -10,8 +10,17 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { empresasDeSegmento, contarSegmento, guardarSegmento, empresasDeSegmentoGuardado, listarSegmentos, valoresDistintosCampo } =
-  await import('./repository.ts');
+const {
+  empresasDeSegmento,
+  contarSegmento,
+  guardarSegmento,
+  empresasDeSegmentoGuardado,
+  listarSegmentos,
+  valoresDistintosCampo,
+  empresasParaRevision,
+  excluirDeSegmento,
+  incluirDeSegmento,
+} = await import('./repository.ts');
 
 function seed() {
   const raw = new Database(dbPath);
@@ -157,6 +166,74 @@ test('valoresDistintosCampo devuelve valores unicos ordenados sin null', () => {
 test('valoresDistintosCampo rechaza campos numericos (rango, no dropdown)', () => {
   assert.throws(() => valoresDistintosCampo('usuarios'));
   assert.throws(() => valoresDistintosCampo('prioridad'));
+});
+
+// Parte 2 campanas: revision de leads. Un segmento nuevo, sin exclusiones todavia,
+// sobre el mismo seed on_hold (e1..e4).
+test('empresasParaRevision devuelve todas las del segmento con excluida=false', () => {
+  const idSegmento = guardarSegmento({
+    nombre: 'revision-1',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  const revision = empresasParaRevision(idSegmento);
+  assert.ok(revision);
+  assert.deepEqual(
+    revision.map((e) => e.id).sort(),
+    ['e1', 'e2', 'e3', 'e4'],
+  );
+  assert.ok(revision.every((e) => e.excluida === false));
+});
+
+test('excluirDeSegmento marca una empresa como excluida en empresasParaRevision', () => {
+  const idSegmento = guardarSegmento({
+    nombre: 'revision-2',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  excluirDeSegmento(idSegmento, 'e4');
+  const revision = empresasParaRevision(idSegmento);
+  assert.ok(revision);
+  const e4 = revision.find((e) => e.id === 'e4');
+  assert.equal(e4?.excluida, true);
+  assert.equal(revision.find((e) => e.id === 'e1')?.excluida, false);
+});
+
+test('excluirDeSegmento es idempotente (excluir dos veces no truena ni duplica)', () => {
+  const idSegmento = guardarSegmento({
+    nombre: 'revision-3',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  excluirDeSegmento(idSegmento, 'e2');
+  excluirDeSegmento(idSegmento, 'e2');
+  const revision = empresasParaRevision(idSegmento);
+  assert.ok(revision);
+  assert.equal(revision.filter((e) => e.id === 'e2' && e.excluida).length, 1);
+});
+
+test('incluirDeSegmento deshace una exclusion (toggle de vuelta)', () => {
+  const idSegmento = guardarSegmento({
+    nombre: 'revision-4',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  excluirDeSegmento(idSegmento, 'e3');
+  incluirDeSegmento(idSegmento, 'e3');
+  const revision = empresasParaRevision(idSegmento);
+  assert.ok(revision);
+  assert.equal(revision.find((e) => e.id === 'e3')?.excluida, false);
+});
+
+test('las exclusiones de un segmento no afectan a otro segmento (aislamiento)', () => {
+  const idA = guardarSegmento({
+    nombre: 'revision-5a',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  const idB = guardarSegmento({
+    nombre: 'revision-5b',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  excluirDeSegmento(idA, 'e1');
+  const revision = empresasParaRevision(idB);
+  assert.ok(revision);
+  assert.equal(revision.find((e) => e.id === 'e1')?.excluida, false);
 });
 
 test.after(() => {

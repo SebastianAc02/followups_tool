@@ -165,6 +165,14 @@ export function crearDbPrueba() {
       updated_at TEXT
     );
 
+    CREATE TABLE segmento_exclusion (
+      id_exclusion INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_segmento INTEGER NOT NULL,
+      id_empresa TEXT NOT NULL,
+      created_at TEXT,
+      UNIQUE(id_segmento, id_empresa)
+    );
+
     CREATE TABLE campana (
       id_campana INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL,
@@ -172,6 +180,7 @@ export function crearDbPrueba() {
       id_segmento INTEGER NOT NULL,
       estado TEXT NOT NULL DEFAULT 'borrador',
       owner TEXT,
+      proveedor_campana_id TEXT,
       created_at TEXT,
       updated_at TEXT
     );
@@ -199,6 +208,46 @@ export function crearDbPrueba() {
       estado TEXT NOT NULL DEFAULT 'activo',
       created_at TEXT
     );
+
+    CREATE TABLE paso_inscripcion (
+      id_paso_inscripcion INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_destinatario INTEGER NOT NULL,
+      id_paso INTEGER NOT NULL,
+      id_version INTEGER NOT NULL,
+      id_toque INTEGER,
+      canal TEXT NOT NULL,
+      proveedor TEXT,
+      proveedor_mensaje_id TEXT,
+      estado TEXT NOT NULL DEFAULT 'pendiente',
+      fecha_programada TEXT,
+      fecha_enviada TEXT,
+      intentos INTEGER NOT NULL DEFAULT 0,
+      proximo_intento TEXT,
+      created_at TEXT
+    );
+
+    CREATE UNIQUE INDEX ux_paso_inscripcion_destinatario_paso
+      ON paso_inscripcion(id_destinatario, id_paso);
+
+    CREATE TABLE evento_tracking (
+      id_evento INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_paso_inscripcion INTEGER NOT NULL,
+      tipo TEXT NOT NULL,
+      canal TEXT NOT NULL,
+      proveedor_evento_id TEXT NOT NULL,
+      detalle TEXT,
+      fecha_evento TEXT,
+      created_at TEXT
+    );
+
+    CREATE UNIQUE INDEX ux_evento_tracking_proveedor_evento_id
+      ON evento_tracking(proveedor_evento_id);
+
+    CREATE INDEX ix_evento_tracking_paso_inscripcion
+      ON evento_tracking(id_paso_inscripcion);
+
+    CREATE INDEX ix_evento_tracking_fecha_evento
+      ON evento_tracking(fecha_evento);
   `);
 
   sqlite.close();

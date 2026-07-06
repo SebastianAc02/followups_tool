@@ -14,6 +14,7 @@ import {
   pasoCadencia,
   versionPaso,
   segmento,
+  segmentoExclusion,
   campana,
   inscripcion,
   destinatario,
@@ -784,6 +785,39 @@ export function empresasDeSegmentoGuardado(idSegmento: number) {
   if (!fila) return null;
   const def = definicionSegmentoSchema.parse(JSON.parse(fila.definicion));
   return empresasDeSegmento(def);
+}
+
+// Parte 2 campanas: excluir/incluir es un toggle idempotente sobre la fila unica
+// (id_segmento, id_empresa). Excluir dos veces no duplica (ON CONFLICT DO NOTHING);
+// incluir de vuelta borra la fila si existe (no truena si ya estaba incluida).
+export function excluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+  db.insert(segmentoExclusion)
+    .values({ idSegmento, idEmpresa, createdAt: new Date().toISOString() })
+    .onConflictDoNothing()
+    .run();
+}
+
+export function incluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+  db.delete(segmentoExclusion)
+    .where(and(eq(segmentoExclusion.idSegmento, idSegmento), eq(segmentoExclusion.idEmpresa, idEmpresa)))
+    .run();
+}
+
+// Parte 2 campanas: la pantalla de revision necesita TODAS las empresas del segmento,
+// cada una marcada si ya esta excluida (para pintar el toggle en su estado real). No
+// filtra las excluidas: las deja ver para poder des-excluirlas antes de "continuar".
+export function empresasParaRevision(idSegmento: number) {
+  const empresas = empresasDeSegmentoGuardado(idSegmento);
+  if (!empresas) return null;
+  const excluidas = new Set(
+    db
+      .select({ idEmpresa: segmentoExclusion.idEmpresa })
+      .from(segmentoExclusion)
+      .where(eq(segmentoExclusion.idSegmento, idSegmento))
+      .all()
+      .map((f) => f.idEmpresa),
+  );
+  return empresas.map((e) => ({ ...e, excluida: excluidas.has(e.id) }));
 }
 
 // V4.4: cuelga una version A/B nueva de un paso existente. Si nace default, apaga el

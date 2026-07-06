@@ -173,6 +173,20 @@ export const segmento = sqliteTable('segmento', {
   updatedAt: text('updated_at'),
 });
 
+// Parte 2 campanas: revision de leads de un segmento ANTES de crear la campana (la
+// campana ni existe todavia en este punto del flujo). Excluir es "esta no va, a
+// priori": UNIQUE(id_segmento, id_empresa) hace que excluir/incluir sea un toggle
+// idempotente (insert / delete de la misma fila), no un historial que crece.
+export const segmentoExclusion = sqliteTable('segmento_exclusion', {
+  idExclusion: integer('id_exclusion').primaryKey({ autoIncrement: true }),
+  idSegmento: integer('id_segmento').notNull(),
+  idEmpresa: text('id_empresa').notNull(),
+  createdAt: text('created_at'),
+});
+
+// proveedorCampanaId (V5.2): id de la secuencia en Apollo (emailer_campaign_id),
+// distinto del idCampana interno. Nace null; el EnvioAdapter la crea (crearCampanaExterna)
+// la primera vez que la campana necesita enviar.
 export const campana = sqliteTable('campana', {
   idCampana: integer('id_campana').primaryKey({ autoIncrement: true }),
   nombre: text('nombre').notNull(),
@@ -180,6 +194,7 @@ export const campana = sqliteTable('campana', {
   idSegmento: integer('id_segmento').notNull(),
   estado: text('estado').notNull().default('borrador'),
   owner: text('owner'),
+  proveedorCampanaId: text('proveedor_campana_id'),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });
@@ -208,5 +223,40 @@ export const destinatario = sqliteTable('destinatario', {
   idInscripcion: integer('id_inscripcion').notNull(),
   idContacto: integer('id_contacto').notNull(),
   estado: text('estado').notNull().default('activo'),
+  createdAt: text('created_at'),
+});
+
+// paso_inscripcion (el motor / "toques de hoy"): un envio por destinatario y paso
+// (indice unico id_destinatario+id_paso, B6). idToque enlaza al toque materializado
+// cuando se ejecuta; proveedorMensajeId es el id de Apollo para cruzar tracking.
+export const pasoInscripcion = sqliteTable('paso_inscripcion', {
+  idPasoInscripcion: integer('id_paso_inscripcion').primaryKey({ autoIncrement: true }),
+  idDestinatario: integer('id_destinatario').notNull(),
+  idPaso: integer('id_paso').notNull(),
+  idVersion: integer('id_version').notNull(),
+  idToque: integer('id_toque'),
+  canal: text('canal').notNull(),
+  proveedor: text('proveedor'),
+  proveedorMensajeId: text('proveedor_mensaje_id'),
+  estado: text('estado').notNull().default('pendiente'),
+  fechaProgramada: text('fecha_programada'),
+  fechaEnviada: text('fecha_enviada'),
+  // Backoff (V5.4, mismo patron que outbox): intentos cuenta cuantas veces se
+  // intento; proximoIntento es desde cuando vale la pena reintentar (null = ya).
+  intentos: integer('intentos').notNull().default(0),
+  proximoIntento: text('proximo_intento'),
+  createdAt: text('created_at'),
+});
+
+// evento_tracking (append-only, la unica que crece). Idempotente por
+// proveedorEventoId (indice unico, V5.5): el mismo evento de Apollo nunca se duplica.
+export const eventoTracking = sqliteTable('evento_tracking', {
+  idEvento: integer('id_evento').primaryKey({ autoIncrement: true }),
+  idPasoInscripcion: integer('id_paso_inscripcion').notNull(),
+  tipo: text('tipo').notNull(),
+  canal: text('canal').notNull(),
+  proveedorEventoId: text('proveedor_evento_id').notNull(),
+  detalle: text('detalle'),
+  fechaEvento: text('fecha_evento'),
   createdAt: text('created_at'),
 });
