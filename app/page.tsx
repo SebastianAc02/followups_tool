@@ -1,147 +1,122 @@
 import Link from "next/link";
-import { colaDelDia, contadoresHoy } from "./db/repository";
-import { repartirAction, registrarTapAction } from "./actions";
-import { RESULTADO_LABELS, CANALES, RESULTADOS } from "./db/validation";
+import { colaDelDia, contadoresHoy, listarCadencias, estadoConector } from "./db/repository";
+import { CANALES } from "./db/validation";
 import { requireSession } from "./lib/session";
-import SignOutButton from "./SignOutButton";
+import TopNav from "./TopNav";
 
-const OWNERS = [
-  { key: "Sebastian Acosta Molina", label: "Sebastián" },
-  { key: "Felipe Castro", label: "Felipe" },
-  { key: "Thomas Schumacher", label: "Thomas" },
+const CANAL_LABEL: Record<string, string> = { llamada: "llamadas", whatsapp: "whatsapp", correo: "correos" };
+
+// Estados "calientes" del pipeline. Mismas claves que ESTADO_PILL en /cola; se cuentan
+// en memoria sobre la cola del dia, sin query nueva.
+const PIPELINE_CALIENTE: { estado: string; label: string }[] = [
+  { estado: "reunion_agendada", label: "reuniones" },
+  { estado: "oportunidad", label: "oportunidades" },
+  { estado: "cierre_documentacion", label: "cierres" },
+  { estado: "enviar_contrato", label: "contratos" },
 ];
 
-const ACCION: Record<string, string> = { llamada: "Llamar", whatsapp: "WhatsApp", correo: "Correo" };
-const CANAL_LABEL: Record<string, string> = { llamada: "llamadas", whatsapp: "whatsapp", correo: "correos" };
-const CANALES_ORDEN = CANALES;
-const RESULTADOS_ORDEN = RESULTADOS;
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
-const ESTADO_PILL: Record<string, { l: string; c: string }> = {
-  reunion_agendada: { l: "reunión", c: "hot" },
-  oportunidad: { l: "oportunidad", c: "hot" },
-  cierre_documentacion: { l: "cierre", c: "hot" },
-  enviar_contrato: { l: "contrato", c: "hot" },
-  contacto_iniciado: { l: "contactado", c: "warm" },
-  lead: { l: "lead", c: "warm" },
-  on_hold: { l: "on hold", c: "cold" },
-};
-
-function diasVencido(fechaISO: string, hoyISO: string) {
-  return Math.round((Date.parse(hoyISO) - Date.parse(fechaISO)) / 86400000);
+function fechaLarga(d: Date) {
+  return `${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
 }
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ owner?: string }> }) {
+export default async function Dashboard() {
   const usuario = await requireSession();
-  const sp = await searchParams;
-  // Pipeline compartido (B3 v1): cualquier autenticado puede MIRAR la cola de otro por
-  // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0].
-  const owner = sp.owner ?? usuario.owner;
-  const esPropia = owner === usuario.owner;
-  const hoy = new Date().toISOString().slice(0, 10);
+  const owner = usuario.owner;
+
+  const ahora = new Date();
+  const hoy = ahora.toISOString().slice(0, 10);
+  const ayerDate = new Date(ahora);
+  ayerDate.setDate(ayerDate.getDate() - 1);
+  const ayer = ayerDate.toISOString().slice(0, 10);
+
   const cola = colaDelDia(hoy, owner);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
-  const contadores = contadoresHoy(hoy, owner);
+  const hechoHoy = contadoresHoy(hoy, owner);
+  const hechoAyer = contadoresHoy(ayer, owner);
+
+  const pipeline = PIPELINE_CALIENTE.map((p) => ({
+    ...p,
+    n: cola.filter((c) => c.estado === p.estado).length,
+  })).filter((p) => p.n > 0);
+
+  const cadenciasActivas = listarCadencias().filter((c) => c.activa).length;
+  const conectados = [estadoConector("granola", usuario.id), estadoConector("notion")].filter(
+    (e) => e.tieneCredencial,
+  ).length;
 
   return (
     <div className="wrap">
-      <div className="head">
-        <div>
-          <div className="h-title">Toques del día</div>
-          <div className="switch">
-            {OWNERS.map((o) => (
-              <Link key={o.key} href={`/?owner=${encodeURIComponent(o.key)}`} className={o.key === owner ? "on" : ""}>
-                {o.label}
-              </Link>
-            ))}
-          </div>
+      <TopNav email={usuario.email} />
+
+      <div className="dash-date">{fechaLarga(ahora)}</div>
+
+      <div className="kpi-row">
+        <div className="kpi">
+          <div className="kpi-num mono">{cola.length}</div>
+          <div className="kpi-label">hoy</div>
         </div>
-        <div className="h-meta">
-          <span className="mono">{cola.length}</span> hoy · <span className="mono">{vencidos}</span> vencidos
-          {" · "}
-          <Link href="/toque-independiente">Agregar toque</Link>
-          {" · "}
-          <Link href="/cadencias">Cadencias</Link>
-          {" · "}
-          <Link href="/conectores">Conectores</Link>
-          {" · "}
-          <SignOutButton email={usuario.email} />
+        <div className="kpi">
+          <div className="kpi-num mono">{vencidos}</div>
+          <div className="kpi-label">vencidos</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-num mono">{hechoAyer.total}</div>
+          <div className="kpi-label">ayer</div>
         </div>
       </div>
 
-      {contadores.total > 0 && (
-        <div className="counters">
-          <div className="counters-row">
-            {CANALES_ORDEN.map((canal) => (
-              <span key={canal}>
-                <span className="mono">{contadores.porCanal[canal]}</span> {CANAL_LABEL[canal]}
-              </span>
-            ))}
-          </div>
-          <div className="counters-row">
-            {RESULTADOS_ORDEN.map((resultado) => (
-              <span key={resultado}>
-                <span className="mono">{contadores.porResultado[resultado]}</span> {RESULTADO_LABELS[resultado].toLowerCase()}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {esPropia && (
-        <form action={repartirAction} className="repartir">
-          <span className="rep-label">¿Atrasado? Reparte tus follow-ups</span>
-          <input name="porDia" type="number" min={1} defaultValue={10} className="pordia mono" aria-label="follow-ups por día" />
-          <span className="rep-unit">por día</span>
-          <button className="rep-btn">Repartir</button>
-        </form>
-      )}
-
-      {cola.length === 0 ? (
-        <div className="empty">Sin follow-ups para hoy. Buen trabajo.</div>
+      {cola.length > 0 ? (
+        <Link href="/cola" className="cta-primary">
+          Entrar a los toques ({cola.length} hoy) →
+        </Link>
       ) : (
-        cola.map((c) => {
-          const dias = diasVencido(c.fecha!, hoy);
-          const sev = dias > 0 ? "overdue" : "today";
-          const accion = ACCION[c.canal ?? "llamada"] ?? "Llamar";
-          return (
-            <div className="row-wrap" key={c.id}>
-              <Link className="row" href={`/llamada/${c.id}`}>
-                <div>
-                  <div className="l1">
-                    <span className={`dot ${sev}`} aria-hidden="true" />
-                    <span className="emp">{c.empresa}</span>
-                    {c.estado && ESTADO_PILL[c.estado] && (
-                      <span className={`pill ${ESTADO_PILL[c.estado].c}`}>{ESTADO_PILL[c.estado].l}</span>
-                    )}
-                    {c.contacto && (
-                      <span className="contact">
-                        {c.contacto}
-                        {c.cargo ? ` · ${c.cargo}` : ""}
-                      </span>
-                    )}
-                  </div>
-                  <div className="l2">
-                    <span>usuarios <b className="mono">{c.usuarios != null ? Math.round(c.usuarios) : "—"}</b></span>
-                    <span>CRM <b>{c.crm ?? "—"}</b></span>
-                    <span>pasarela <b>{c.pasarela ?? "—"}</b></span>
-                  </div>
-                  {c.proximoPaso && <div className="paso">{c.proximoPaso}</div>}
-                </div>
-                <div className="right">
-                  <div className={`when ${sev}`}>{dias > 0 ? `vencido ${dias}d` : "hoy"}</div>
-                  <div className="call-cta">{accion} →</div>
-                </div>
-              </Link>
-              <form className="tap-row" action={registrarTapAction}>
-                <input type="hidden" name="idEmpresa" value={c.id} />
-                <input name="objecion" placeholder="Objeción (opcional)" className="tap-objecion" />
-                <button type="submit" name="canal" value="whatsapp" className="tap-btn">WhatsApp</button>
-                <button type="submit" name="canal" value="correo" className="tap-btn">Correo</button>
-              </form>
-            </div>
-          );
-        })
+        <div className="cta-empty">Sin follow-ups para hoy. Buen trabajo.</div>
       )}
+
+      <div className="dash-cols">
+        <div className="dash-col">
+          <div className="section-label">Hoy hiciste</div>
+          {hechoHoy.total === 0 ? (
+            <div className="dash-muted">Nada todavía.</div>
+          ) : (
+            CANALES.map((canal) => (
+              <div key={canal} className="dash-line">
+                <span className="mono">{hechoHoy.porCanal[canal]}</span> {CANAL_LABEL[canal]}
+              </div>
+            ))
+          )}
+        </div>
+        <div className="dash-col">
+          <div className="section-label">Pipeline en cola</div>
+          {pipeline.length === 0 ? (
+            <div className="dash-muted">Nada caliente en cola.</div>
+          ) : (
+            pipeline.map((p) => (
+              <div key={p.estado} className="dash-line">
+                <span className="mono">{p.n}</span> {p.label}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="nav-cards">
+        <Link href="/toque-independiente" className="nav-card">
+          <span className="nav-card-title">Agregar toque</span>
+          <span className="nav-card-meta">manual</span>
+        </Link>
+        <Link href="/cadencias" className="nav-card">
+          <span className="nav-card-title">Cadencias</span>
+          <span className="nav-card-meta mono">{cadenciasActivas} activas</span>
+        </Link>
+        <Link href="/conectores" className="nav-card">
+          <span className="nav-card-title">Conectores</span>
+          <span className="nav-card-meta mono">{conectados} conectados</span>
+        </Link>
+      </div>
     </div>
   );
 }
