@@ -99,6 +99,55 @@ test('valor no numerico en un campo numerico (prioridad) falla explicito, no en 
   );
 });
 
+// Parte 1 campanas: seed de usuarios para probar el operador entre.
+// e1=12000, e2=5000, e3=800; e4..e7 SIN fila (sin dato de usuarios).
+function seedUsuarios() {
+  const raw = new Database(dbPath);
+  const ins = raw.prepare('INSERT INTO empresa_usuarios (id_empresa, usuarios_estimados) VALUES (?, ?)');
+  ins.run('e1', 12000);
+  ins.run('e2', 5000);
+  ins.run('e3', 800);
+  raw.close();
+}
+seedUsuarios();
+
+test('entre sobre usuarios: 3000..10000 devuelve solo e2', () => {
+  const def = { condiciones: [{ campo: 'usuarios' as const, op: 'entre' as const, desde: 3000, hasta: 10000 }] };
+  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id), ['e2']);
+  assert.equal(contarSegmento(def), 1);
+});
+
+test('entre excluye empresas sin dato de usuarios (NULL no matchea rango)', () => {
+  // e4 es on_hold pero no tiene fila en empresa_usuarios: con entre queda fuera
+  const def = {
+    condiciones: [
+      { campo: 'estado' as const, op: 'en' as const, valores: ['on_hold'] },
+      { campo: 'usuarios' as const, op: 'entre' as const, desde: 0, hasta: 999999 },
+    ],
+  };
+  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e1', 'e2', 'e3']);
+});
+
+test('entre sobre prioridad (campo numerico ya existente) funciona', () => {
+  const def = { condiciones: [{ campo: 'prioridad' as const, op: 'entre' as const, desde: 4, hasta: 6 }] };
+  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e2', 'e3', 'e6']);
+});
+
+test('entre con desde > hasta se rechaza en validacion', () => {
+  const def = { condiciones: [{ campo: 'usuarios', op: 'entre', desde: 100, hasta: 5 }] } as never;
+  assert.throws(() => empresasDeSegmento(def));
+});
+
+test('entre sobre campo de texto (ciudad) se rechaza en validacion', () => {
+  const def = { condiciones: [{ campo: 'ciudad', op: 'entre', desde: 1, hasta: 2 }] } as never;
+  assert.throws(() => empresasDeSegmento(def));
+});
+
+test('es_null sobre usuarios encuentra las empresas sin dato', () => {
+  const def = { condiciones: [{ campo: 'usuarios' as const, op: 'es_null' as const }] };
+  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e4', 'e5', 'e6', 'e7']);
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

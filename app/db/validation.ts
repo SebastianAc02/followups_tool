@@ -76,8 +76,12 @@ export const CAMPOS_SEGMENTO = [
   'es_cliente', // 0 / 1
   'ciudad',
   'owner',
+  'usuarios', // empresa_usuarios.usuarios_estimados (via LEFT JOIN)
 ] as const;
 export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
+
+// Parte 1 campanas: subset de campos donde un rango numerico tiene sentido.
+export const CAMPOS_SEGMENTO_NUMERICOS = ['prioridad', 'es_cliente', 'usuarios'] as const;
 
 const condicionEnSchema = z.object({
   campo: z.enum(CAMPOS_SEGMENTO),
@@ -89,8 +93,25 @@ const condicionNullSchema = z.object({
   op: z.enum(['es_null', 'no_null']),
 });
 
+// Parte 1 campanas: operador de rango, solo sobre campos numericos (usuarios,
+// prioridad, es_cliente). refine corre DESPUES de que desde/hasta ya son numeros
+// validos, mismo patron que el superRefine de registrarToqueSchema mas abajo.
+const condicionEntreSchema = z
+  .object({
+    campo: z.enum(CAMPOS_SEGMENTO_NUMERICOS),
+    op: z.literal('entre'),
+    desde: z.number(),
+    hasta: z.number(),
+  })
+  .refine((c) => c.desde <= c.hasta, {
+    message: "'desde' no puede ser mayor que 'hasta' en una condicion entre",
+    path: ['desde'],
+  });
+
 export const definicionSegmentoSchema = z.object({
-  condiciones: z.array(z.union([condicionEnSchema, condicionNullSchema])).min(1, 'un segmento necesita al menos una condicion'),
+  condiciones: z
+    .array(z.union([condicionEnSchema, condicionNullSchema, condicionEntreSchema]))
+    .min(1, 'un segmento necesita al menos una condicion'),
 });
 
 export type DefinicionSegmento = z.infer<typeof definicionSegmentoSchema>;

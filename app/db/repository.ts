@@ -1,4 +1,4 @@
-import { and, eq, lte, isNotNull, isNull, inArray, notInArray, desc, sql, type SQL } from 'drizzle-orm';
+import { and, eq, lte, isNotNull, isNull, inArray, notInArray, between, desc, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { db } from './index';
 import {
@@ -17,12 +17,14 @@ import {
   campana,
   inscripcion,
   destinatario,
+  pasoInscripcion,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
 import type { CadenciaParseada } from '../core/cadencia-parser';
 import { elegirDestinatarioDefault } from '../core/inscripcion';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
+import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
@@ -667,6 +669,7 @@ const COLUMNA_SEGMENTO: Record<CampoSegmento, { col: SQLiteColumn; numerico: boo
   es_cliente: { col: empresa.esCliente, numerico: true },
   ciudad: { col: empresa.ciudadPrincipal, numerico: false },
   owner: { col: empresa.owner, numerico: false },
+  usuarios: { col: empresaUsuarios.usuariosEstimados, numerico: true },
 };
 
 // Coerce los valores de una condicion a numero cuando el campo es numerico (prioridad,
@@ -696,18 +699,30 @@ function compilarSegmento(def: DefinicionSegmento): SQL | undefined {
         return inArray(col, coercer(c.valores, numerico, c.campo));
       case 'no_en':
         return notInArray(col, coercer(c.valores, numerico, c.campo));
+      case 'entre':
+        // NULL nunca matchea un rango (semantica SQL): empresa sin dato queda fuera.
+        // La UI avisa cuantas quedaron fuera; aca no se inventa un default.
+        return between(col, c.desde, c.hasta);
     }
   });
   return and(...conds);
 }
 
 // V4.3: corre un filtro (aun sin guardar) y devuelve las empresas que caen. Valida la
-// definicion primero: un filtro corrupto no consulta nada.
+// definicion primero: un filtro corrupto no consulta nada. LEFT JOIN a empresa_usuarios
+// es gratis (join sobre PK) y necesario para el campo 'usuarios' del segmento.
 export function empresasDeSegmento(def: DefinicionSegmento) {
   const val = definicionSegmentoSchema.parse(def);
   return db
-    .select({ id: empresa.idEmpresa, nombre: empresa.nombreOficial, estado: empresa.estadoNotion, categoria: empresa.categoria })
+    .select({
+      id: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      estado: empresa.estadoNotion,
+      categoria: empresa.categoria,
+      usuarios: empresaUsuarios.usuariosEstimados,
+    })
     .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
     .where(compilarSegmento(val))
     .orderBy(empresa.nombreOficial)
     .all();
@@ -715,7 +730,12 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
 
 export function contarSegmento(def: DefinicionSegmento): number {
   const val = definicionSegmentoSchema.parse(def);
-  const fila = db.select({ n: sql<number>`count(*)` }).from(empresa).where(compilarSegmento(val)).get();
+  const fila = db
+    .select({ n: sql<number>`count(*)` })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(compilarSegmento(val))
+    .get();
   return fila?.n ?? 0;
 }
 
@@ -1033,4 +1053,100 @@ export function agendaEnSeco(hoy: string, config: ConfigCalendario) {
     }
   }
   return agenda;
+}
+
+// V5.4: push reanudable (B6). crearPasoInscripcionPendiente es search-first (chequea
+// antes de insertar) con el indice unico id_destinatario+id_paso (V5.1) como respaldo
+// final -- correr dos veces con el mismo par nunca crea una segunda fila.
+export function crearPasoInscripcionPendiente(input: {
+  idDestinatario: number;
+  idPaso: number;
+  idVersion: number;
+  canal: string;
+  fechaProgramada?: string;
+}): number {
+  const existente = db
+    .select({ id: pasoInscripcion.idPasoInscripcion })
+    .from(pasoInscripcion)
+    .where(and(eq(pasoInscripcion.idDestinatario, input.idDestinatario), eq(pasoInscripcion.idPaso, input.idPaso)))
+    .get();
+  if (existente) return existente.id;
+
+  const ahora = new Date().toISOString();
+  const resultado = db
+    .insert(pasoInscripcion)
+    .values({
+      idDestinatario: input.idDestinatario,
+      idPaso: input.idPaso,
+      idVersion: input.idVersion,
+      canal: input.canal,
+      estado: 'pendiente',
+      fechaProgramada: input.fechaProgramada ?? ahora,
+      createdAt: ahora,
+    })
+    .run();
+  return Number(resultado.lastInsertRowid);
+}
+
+// Filas listas para push: pendiente o fallo (con backoff cumplido), por debajo de
+// MAX_INTENTOS, y solo de campanas que ya tienen secuencia externa creada (una
+// campana sin proveedor_campana_id no tiene a donde empujar; se salta en vez de
+// gastar un intento fallido en ella).
+export function pasoInscripcionesPendientes(ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
+  const filas = db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      intentos: pasoInscripcion.intentos,
+      canal: pasoInscripcion.canal,
+      email: contacto.email,
+      nombre: contacto.nombre,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      proveedorCampanaId: campana.proveedorCampanaId,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
+    .where(
+      and(
+        inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
+        isNotNull(campana.proveedorCampanaId),
+        sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
+        sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
+      ),
+    )
+    .all();
+
+  return filas.map((f) => ({
+    idPasoInscripcion: f.idPasoInscripcion,
+    proveedorCampanaId: f.proveedorCampanaId as string,
+    destinatario: { email: f.email ?? '', nombre: f.nombre },
+    paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
+    intentos: f.intentos,
+  }));
+}
+
+// enviando es un estado transitorio informativo (no lo lee ninguna query de
+// reintento): si el worker muere justo entre marcarlo y recibir la respuesta de
+// Apollo, la fila queda en 'enviando' y no se reintenta sola -- mismo tipo de riesgo
+// que ya acepta B7 (el worker no promete exactly-once), no bloquea V5.4.
+export function marcarPasoInscripcionEnviando(idPasoInscripcion: number) {
+  db.update(pasoInscripcion).set({ estado: 'enviando' }).where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion)).run();
+}
+
+export function marcarPasoInscripcionEnviada(idPasoInscripcion: number, proveedorMensajeId: string, fechaEnviada: string) {
+  db.update(pasoInscripcion)
+    .set({ estado: 'enviada', proveedor: 'apollo', proveedorMensajeId, fechaEnviada })
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .run();
+}
+
+export function marcarPasoInscripcionFallo(idPasoInscripcion: number, intentos: number, proximoIntento: string | null) {
+  db.update(pasoInscripcion)
+    .set({ estado: 'fallo', intentos, proximoIntento })
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .run();
 }
