@@ -84,3 +84,30 @@ export const syncCambios = sqliteTable('sync_cambios', {
   accion: text('accion'),
   detalle: text('detalle'),
 });
+
+// V3.1: credenciales de conectores externos (Granola, Notion). credencialCiphertext
+// nunca guarda texto plano (V3.2 cifra antes de escribir vía Repository).
+export const conector = sqliteTable('conector', {
+  idConector: integer('id_conector').primaryKey({ autoIncrement: true }),
+  proveedor: text('proveedor').notNull().unique(),
+  credencialCiphertext: text('credencial_ciphertext'),
+  estado: text('estado').notNull().default('sin_credencial'),
+  ultimaCorrida: text('ultima_corrida'),
+  ultimoResultado: text('ultimo_resultado'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
+// V3.1: patron outbox. Se escribe en la MISMA transaccion que el cambio real; el
+// worker (V3.5/V3.7) drena hacia Notion con reintentos, nunca la app llama a Notion
+// directo.
+export const outbox = sqliteTable('outbox', {
+  idOutbox: integer('id_outbox').primaryKey({ autoIncrement: true }),
+  entidad: text('entidad').notNull(),
+  idRegistro: text('id_registro').notNull(),
+  payload: text('payload').notNull(),
+  estado: text('estado').notNull().default('aprobado'),
+  intentos: integer('intentos').notNull().default(0),
+  proximoIntento: text('proximo_intento'),
+  createdAt: text('created_at'),
+});
