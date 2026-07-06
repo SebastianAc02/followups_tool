@@ -46,3 +46,6 @@ scripts/.apollo_test_*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# worktrees aislados (superpowers:using-git-worktrees)
+/.worktrees/
