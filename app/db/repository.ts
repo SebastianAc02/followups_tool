@@ -22,6 +22,7 @@ import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
 import type { CadenciaParseada } from '../core/cadencia-parser';
 import { elegirDestinatarioDefault } from '../core/inscripcion';
+import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
@@ -966,4 +967,43 @@ export function destinatariosDeInscripcion(idInscripcion: number) {
     .from(destinatario)
     .where(eq(destinatario.idInscripcion, idInscripcion))
     .all();
+}
+
+// V4.8: agenda EN SECO. Para cada inscripcion activa, calcula que paso toca a la fecha
+// `hoy` con el motor (V4.6), SIN materializar ni enviar nada (Fase 5 hace eso). En Fase 4
+// no existe historial de ejecuciones (paso_inscripcion se puebla en Fase 5), asi que se
+// corre con ejecutados=[]: el motor devuelve el primer paso cuando su fecha llega. Pasar
+// `hoy` = manana muestra "los toques de manana en seco".
+export function agendaEnSeco(hoy: string, config: ConfigCalendario) {
+  const activas = db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      idCadencia: campana.idCadencia,
+      anchor: inscripcion.fechaInscripcion,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(eq(inscripcion.estado, 'activa'))
+    .all();
+
+  const agenda: { idEmpresa: string; empresa: string; orden: number; fecha: string }[] = [];
+  for (const a of activas) {
+    const pasos = db
+      .select({ orden: pasoCadencia.orden, diaOffset: pasoCadencia.diaOffset })
+      .from(pasoCadencia)
+      .where(eq(pasoCadencia.idCadencia, a.idCadencia))
+      .all();
+
+    // fecha_inscripcion se guarda como ISO datetime completo; el motor trabaja con
+    // fecha "YYYY-MM-DD", por eso el slice(0, 10).
+    const anchor = (a.anchor ?? hoy).slice(0, 10);
+    const debido = proximoPasoDebido(pasos, { anchor, ejecutados: [] }, hoy, config);
+    if (debido) {
+      agenda.push({ idEmpresa: a.idEmpresa, empresa: a.empresa, orden: debido.orden, fecha: debido.fechaObjetivo });
+    }
+  }
+  return agenda;
 }
