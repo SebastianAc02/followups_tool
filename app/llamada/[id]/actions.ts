@@ -70,7 +70,7 @@ function sumarHoras(iso: string, horas: number): string {
 }
 
 // V3.4: busca en Granola por los terminos de esta empresa/contacto, en una ventana
-// de tiempo alrededor del toque. No persiste nada -- el buscar es de solo lectura,
+// de tiempo alrededor del toque. No persiste nada, el buscar es de solo lectura,
 // solo confirmarGrabacionAction escribe.
 export async function buscarGrabacionAction(idToque: number): Promise<CandidataOFusion[]> {
   const sesion = await requireSession();

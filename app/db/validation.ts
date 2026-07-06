@@ -26,7 +26,7 @@ export const RESULTADO_LABELS: Record<Resultado, string> = {
   no_contesto: 'No contestó',
 };
 
-// V3.4: variantes de "hubo conversacion real" -- disparan la busqueda en Granola.
+// V3.4: variantes de "hubo conversacion real", disparan la busqueda en Granola.
 // no_contesto nunca la dispara (nunca hubo con quien hablar, nada que buscar).
 export const RESULTADOS_CONTESTO: readonly Resultado[] = ['contesto_reunion', 'contesto_sigue_seguimiento', 'contesto_no'];
 

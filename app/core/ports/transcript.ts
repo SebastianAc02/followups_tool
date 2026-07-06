@@ -12,12 +12,12 @@ export type SesionTranscript = {
 
 export interface TranscriptAdapter {
   // Un solo metodo: el core entrega TERMINOS de busqueda (nombre de empresa, alias,
-  // telefono si se conoce -- el orden no importa) y una ventana de tiempo; recibe
+  // telefono si se conoce, el orden no importa) y una ventana de tiempo; recibe
   // SesionTranscript ya completas (resumen incluido). El adaptador decide COMO buscar
   // (verificado en vivo contra Granola: el telefono NO es un campo estructurado, a
   // veces aparece como texto libre en el resumen y a veces no; el nombre de empresa
   // si aparece consistentemente en el titulo). El core no necesita saber cual termino
-  // "vale mas" -- eso es conocimiento del proveedor, no del dominio.
+  // "vale mas", eso es conocimiento del proveedor, no del dominio.
   // La API real de Granola tambien separa "listar" (metadata, sin resumen) de "traer
   // detalle" (con resumen); ese encadenamiento de dos llamadas es responsabilidad del
   // adaptador (V3.3 paso 4), el core nunca lo ve.

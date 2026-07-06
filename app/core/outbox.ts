@@ -10,7 +10,7 @@ export type OutboxDeps = {
 
 // Backoff exponencial con tope: reintentos agresivos golpean rate limits de Notion,
 // tibios dejan la fila pendiente dias si el laptop duerme. 5 intentos (~14h en total)
-// antes de marcar fallido definitivo -- despues de eso, Sebastian tiene que revisar
+// antes de marcar fallido definitivo, despues de eso, Sebastian tiene que revisar
 // a mano por que Notion no acepta el cambio (token vencido, pagina borrada, etc.).
 const ESCALONES_MINUTOS = [1, 5, 30, 120, 720];
 export const MAX_INTENTOS = ESCALONES_MINUTOS.length;

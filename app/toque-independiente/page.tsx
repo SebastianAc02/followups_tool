@@ -4,7 +4,7 @@ import { requireSession } from "../lib/session";
 
 // V3.9: registrar un toque con alguien que NO es lead de la cola (cliente existente
 // u otra relacion). No hay lógica nueva de dominio: busca la empresa y manda a la
-// MISMA ficha /llamada/[id] que ya usa registrarToque para cualquier lead -- ese
+// MISMA ficha /llamada/[id] que ya usa registrarToque para cualquier lead, ese
 // toque queda igual que cualquier otro, solo que no nació desde la cola del día.
 export default async function ToqueIndependiente({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   await requireSession();

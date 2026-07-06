@@ -13,7 +13,7 @@ function depsFalsos(estadoInicial: { transcriptId: string | null; quePaso: strin
     },
     escribirSoloPuntero: (_idToque, sesion) => {
       estado.transcriptId = sesion.transcriptId;
-      // quePaso NO se toca -- ese es justo el punto de esta rama.
+      // quePaso NO se toca, ese es justo el punto de esta rama.
     },
   };
   return { deps, estado };

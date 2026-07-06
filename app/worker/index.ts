@@ -2,7 +2,7 @@ import { registrarHeartbeatConector, outboxPendientes, marcarOutboxEnviado, marc
 import { drenarOutbox } from '../core/outbox';
 import { crearNotionAdapter } from '../adapters/notion';
 
-// B7: proceso Node aparte (npm run worker), no un setInterval dentro de Next -- el
+// B7: proceso Node aparte (npm run worker), no un setInterval dentro de Next, el
 // dev server de Next se reinicia con hot reload/deploys y se llevaria el timer con
 // el. Catch-up-first: la primera pasada corre YA al arrancar (antes de programar la
 // espera), porque el laptop pasa apagado de noche y todo lo atrasado se procesa de

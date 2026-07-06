@@ -3,7 +3,7 @@
 // Forma verificada en vivo contra la API real el 2026-07-06: base
 // public-api.granola.ai, list = {notes, hasMore, cursor} con NoteSummary (sin
 // resumen), detail = Note completo con summary_text/web_url. El telefono NO es un
-// campo estructurado -- por eso el matching es por terminos de texto, no por
+// campo estructurado, por eso el matching es por terminos de texto, no por
 // telefono a secas.
 import test from 'node:test';
 import assert from 'node:assert/strict';

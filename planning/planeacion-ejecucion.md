@@ -10,12 +10,12 @@ tablero operativo: qué sigue AHORA, en qué orden, con qué gate.
 
 ## Próxima acción (lo único que importa ahora mismo)
 
-> **Arrancar Fase 3 (F1 conectores + ingest Granola + outbox Notion) por
-> `planning/tasks-v2.md`, empezando por V3.1.** Fase 2 (Auth) completa en la rama
-> `fase2-auth` (sin mergear todavía, pendiente de que Sebastián la revise). Alta real: solo
-> Sebastián (sacostamolin@gmail.com, admin=1) tiene cuenta; Felipe se agrega cuando dé su
-> email y password con `scripts/seed_auth_users.ts` (variables `SEED_EMAIL_FELIPE` +
-> `SEED_PASSWORD_FELIPE`, no bloquea nada). 10/10 tests y tsc limpios en la rama.
+> **Arrancar Fase 4 (F3 sin envío: tablas de cadencia, import CSV/MD, segmentos, A/B,
+> constructor de calendario, motor probado EN SECO).** Fase 3 cerrada y mergeada a main
+> (2026-07-06), V3.1-V3.9, 52/52 tests. Antes de escribir código de Fase 4: (a) rotar las
+> dos API keys de Granola que quedaron expuestas en el chat de la sesión de Fase 3 (Sebastián,
+> pendiente); (b) decidir el token de Notion + el enlace `empresa.notion_page_id` cuando haya
+> espacio (no bloquea Fase 4, son cosas separadas).
 
 G0 cerrado el 2026-07-03: las 5 pruebas de lectura pasaron; `usage_stats` confirmó crear
 contactos/empresas, add_contact_ids, gestionar/frenar secuencias y leer tracking. Y la prueba
@@ -63,10 +63,21 @@ Regla: un gate rojo detiene solo lo que depende de él. Las fases independientes
       pendiente de sus datos (no bloquea). 10/10 tests, CodeRabbit 2 hallazgos reales
       corregidos (catch de red en login, cierre garantizado de DB en el script de seed) y 1
       descartado (ruta de DB hardcodeada: mismo patrón ya aceptado en Fase 1).
-- [ ] **Fase 3 · F1 conectores + ingest Granola + outbox Notion. SIGUIENTE.** Tabla `conector`
-      (AES-256-GCM), tabla `outbox`, worker (B7) con heartbeat, GranolaAdapter, matcher a cola
-      de revisión, idempotencia (B4), pantalla de estado de conectores. Demo: reunión real de
-      Granola aparece como toque con resumen; una inventada cae en la cola.
+- [x] **Fase 3 · F1 conectores + ingest Granola + outbox Notion. ✅ MERGEADA A MAIN (2026-07-06),
+      V3.1 a V3.9 cerradas.** Tabla `conector` (AES-256-GCM, personal para Granola vía
+      `idUsuario`, global para Notion), tabla `outbox`, worker (B7) con heartbeat y
+      catch-up-first, GranolaAdapter + puerto `TranscriptAdapter`, matcher on-demand
+      (`agruparCandidatas`) disparado al confirmar un toque `contesto_*` (rediseñado: el
+      matching original por teléfono no sobrevivió al dato real, quedó por nombre de
+      empresa/alias + teléfono como término extra), `NotionAdapter` + puerto `SyncAdapter`
+      con backoff, pantalla `/conectores`, toque independiente `/toque-independiente`.
+      Verificado con sesión real de Sebastián (no simulada): guardado cifrado confirmado en
+      la DB real, 3 bugs reales encontrados y corregidos en el camino (env var de cifrado
+      faltante, `page_size` real de Granola es 30 no 100, nombre de empresa necesita quitar
+      sufijo legal para matchear). 52/52 tests, tsc limpio. `/code-review` corrido, hallazgos
+      en la bitácora abajo. Pendiente real (no bloquea Fase 4): token de Notion + script de
+      enlace `empresa.notion_page_id` (hay 4 nombres duplicados reales, necesita criterio
+      humano). Detalle completo en `plan-fase3.md`.
 - [ ] **Fase 4 · F3 sin envío.** Tablas grupo 1 y 2 del Anexo (cadencia/paso/version_paso/
       segmento/campana/inscripcion con índice único parcial/destinatario). Import CSV/MD,
       segmentos guardados, A/B, constructor calendario con corrimiento. Motor probado EN SECO.

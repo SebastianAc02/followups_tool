@@ -26,9 +26,15 @@ export function agruparCandidatas(candidatas: SesionTranscript[], fechaToque: st
   const ordenadas = [...conContenido].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
 
   const resultado: CandidataOFusion[] = [];
+  // Fecha real de la ULTIMA sesion vista en la cadena (no la del contenido que "gana"):
+  // si A (largo, gana) se funde con B (corto, pierde), el resultado guarda el resumen
+  // de A pero la proxima comparacion tiene que seguir siendo contra la hora real de B,
+  // o una C poco despues de B (pero lejos de A) no encadenaria.
+  let ultimaFechaEnCadena: string | null = null;
+
   for (const sesion of ordenadas) {
     const anterior = resultado[resultado.length - 1];
-    const seFusiona = anterior && minutosEntre(sesion.fecha, anterior.fecha) <= FUSION_MINUTOS;
+    const seFusiona = anterior && ultimaFechaEnCadena !== null && minutosEntre(sesion.fecha, ultimaFechaEnCadena) <= FUSION_MINUTOS;
 
     if (seFusiona) {
       const anteriorGana = (anterior.resumen?.length ?? 0) >= (sesion.resumen?.length ?? 0);
@@ -38,6 +44,7 @@ export function agruparCandidatas(candidatas: SesionTranscript[], fechaToque: st
     } else {
       resultado.push({ ...sesion, fusionadaDe: [sesion.transcriptId] });
     }
+    ultimaFechaEnCadena = sesion.fecha;
   }
 
   return resultado.sort((a, b) => minutosEntre(a.fecha, fechaToque) - minutosEntre(b.fecha, fechaToque));

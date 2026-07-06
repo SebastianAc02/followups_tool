@@ -8,7 +8,7 @@ const GRANOLA_API_BASE = process.env.GRANOLA_API_BASE_URL ?? 'https://public-api
 // Nota real por telefono (2026-07-06): la API NO tiene campo de telefono en ningun
 // lado (schema completo revisado: Note, NoteDetail, User, CalendarEvent, Speaker).
 // A veces aparece como texto libre dentro de summary_text ("Phone: +57 318 315
-// 4417"), pero no en todas las notas -- depende de si Granola genero una seccion de
+// 4417"), pero no en todas las notas, depende de si Granola genero una seccion de
 // contacto. Por eso el matching es por TERMINOS de texto (empresa/alias/telefono,
 // cualquiera vale), nunca solo por telefono.
 
@@ -85,6 +85,23 @@ async function llamarGranola<T>(path: string, apiKey: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Rate limit real documentado (research-conectores.md): rafaga 25 req/5s, sostenido
+// 5 req/s. Traer detalles de a lotes chicos evita golpear el limite en una ventana
+// con muchas candidatas, y una nota que falla no debe abortar las demas.
+const LOTE_DETALLES = 5;
+
+async function traerDetallesEnLotes(notas: NotaResumen[], apiKey: string): Promise<NotaDetalle[]> {
+  const detalles: NotaDetalle[] = [];
+  for (let i = 0; i < notas.length; i += LOTE_DETALLES) {
+    const lote = notas.slice(i, i + LOTE_DETALLES);
+    const resultados = await Promise.allSettled(lote.map((n) => llamarGranola<NotaDetalle>(`/v1/notes/${n.id}`, apiKey)));
+    for (const r of resultados) {
+      if (r.status === 'fulfilled') detalles.push(r.value);
+    }
+  }
+  return detalles;
+}
+
 async function listarNotasEnVentana(apiKey: string, desde: string, hasta: string): Promise<NotaResumen[]> {
   const resultado: NotaResumen[] = [];
   let cursor: string | null = null;
@@ -92,11 +109,16 @@ async function listarNotasEnVentana(apiKey: string, desde: string, hasta: string
   for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
     // page_size maximo real verificado en vivo: 30 (la doc no lo aclara, la API
     // rechaza con 400 VALIDATION_ERROR por encima de eso).
-    const query = new URLSearchParams({ created_after: desde, page_size: '30' });
+    // created_before ACOTA la ventana del lado del servidor (el spec la tiene, no
+    // se estaba usando): sin esto, /v1/notes devuelve todo desde `desde` hasta HOY
+    // en orden descendente, y una ventana vieja (varios dias atras) nunca se
+    // alcanza dentro de MAX_PAGINAS si el equipo genero muchas notas nuevas desde
+    // entonces -- el filtro local por `hasta` no evitaba ese salto, solo lo escondia.
+    const query = new URLSearchParams({ created_after: desde, created_before: hasta, page_size: '30' });
     if (cursor) query.set('cursor', cursor);
 
     const lista: ListaNotas = await llamarGranola<ListaNotas>(`/v1/notes?${query}`, apiKey);
-    resultado.push(...lista.notes.filter((n) => n.created_at <= hasta));
+    resultado.push(...lista.notes);
 
     if (!lista.hasMore || !lista.cursor) break;
     cursor = lista.cursor;
@@ -119,12 +141,11 @@ export function crearGranolaAdapter(idUsuario: string): TranscriptAdapter {
       // completo que se necesita comparar contra el resumen.
       const enVentana = await listarNotasEnVentana(apiKey, desde, hasta);
 
-      // Paso 2 (detalle): trae el resumen real por cada candidata en la ventana.
-      // Deliberadamente NO se pide ?include=transcript (la constitucion pide el
-      // resumen, nunca el transcript literal).
-      const detalles = await Promise.all(
-        enVentana.map((n) => llamarGranola<NotaDetalle>(`/v1/notes/${n.id}`, apiKey)),
-      );
+      // Paso 2 (detalle): trae el resumen real por cada candidata en la ventana, en
+      // lotes chicos (no toda la ventana a la vez). Deliberadamente NO se pide
+      // ?include=transcript (la constitucion pide el resumen, nunca el transcript
+      // literal). Una nota que falla se descarta, no aborta la busqueda completa.
+      const detalles = await traerDetallesEnLotes(enVentana, apiKey);
 
       return detalles
         .filter((d) => coincideAlgunTermino(`${d.title ?? ''} ${d.summary_text ?? ''}`, terminos))

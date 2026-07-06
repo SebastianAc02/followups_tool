@@ -23,7 +23,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 // V3.7: encola un cambio a Notion DENTRO de la misma transaccion que lo origino
 // (patron outbox: si el proceso muere entre "cambie la DB" y "avise a Notion", el
-// aviso no se pierde -- esta en la misma transaccion o no esta ninguno de los dos).
+// aviso no se pierde, esta en la misma transaccion o no esta ninguno de los dos).
 function encolarOutboxNotion(tx: Tx, idEmpresa: string, cambio: Omit<CambioNotion, 'notionPageId'>) {
   const emp = tx.select({ notionPageId: empresa.notionPageId }).from(empresa).where(eq(empresa.idEmpresa, idEmpresa)).get();
   if (!emp?.notionPageId) return; // sin pagina de Notion enlazada todavia, nada que sincronizar
@@ -83,7 +83,7 @@ export function colaDelDia(hoy: string, owner: string) {
 }
 
 // V3.9: busca CUALQUIER empresa por nombre, sin restringir por owner ni por
-// proximoFollowUpFecha -- a diferencia de colaDelDia(), que solo trae leads propios
+// proximoFollowUpFecha, a diferencia de colaDelDia(), que solo trae leads propios
 // y vencidos. Sirve para registrar un toque con alguien que no es lead de la cola
 // (cliente existente u otra relacion): la ficha en /llamada/[id] ya funciona para
 // cualquier empresa, solo faltaba una forma de encontrarla fuera de la cola.
@@ -218,7 +218,7 @@ export function registrarToque(input: RegistrarToqueInput) {
 
     // V3.7: outbox en la MISMA transaccion que el cambio (patron outbox). Si la empresa
     // no tiene notion_page_id todavia (nadie la enlazo a mano, ver nota en V3.1b/V3.7)
-    // no hay a donde sincronizar -- se omite en silencio, no es un error.
+    // no hay a donde sincronizar, se omite en silencio, no es un error.
     if (parsed.proximoFollowUp || parsed.quePaso) {
       encolarOutboxNotion(tx, parsed.idEmpresa, {
         proximoPaso: parsed.quePaso,
@@ -359,7 +359,7 @@ export function guardarCredencialConector(proveedor: string, credencial: string,
 
 // V3.5: heartbeat del worker por tarea. Upsert igual que guardarCredencialConector
 // (mismo motivo: SQLite no fusiona NULLs en un UNIQUE index, el lookup explicito es
-// la garantia real). No toca credencialCiphertext -- si la fila no existia, nace con
+// la garantia real). No toca credencialCiphertext, si la fila no existia, nace con
 // estado 'sin_credencial' porque el heartbeat no implica que haya credencial cargada.
 export function registrarHeartbeatConector(proveedor: string, resultado: string, idUsuario?: string) {
   const ahora = new Date().toISOString();
@@ -382,7 +382,7 @@ export type EstadoConector = {
 };
 
 // V3.8: lectura SOLO de estado, para la pantalla de conectores. Nunca descifra ni
-// devuelve la credencial -- ni siquiera enmascarada. "Hay credencial: si/no" es todo
+// devuelve la credencial, ni siquiera enmascarada. "Hay credencial: si/no" es todo
 // lo que el cliente necesita ver.
 export function estadoConector(proveedor: string, idUsuario?: string): EstadoConector {
   const fila = db
@@ -415,8 +415,8 @@ export function leerCredencialConector(proveedor: string, idUsuario?: string): s
 }
 
 // V3.4: arma los terminos de busqueda para el matcher (nombre oficial, normalizado y
-// TODOS los alias de la empresa -- Granola trae el nombre corto/informal, no el legal
-// completo -- mas el telefono del contacto si el toque quedo enlazado a uno) y la
+// TODOS los alias de la empresa, Granola trae el nombre corto/informal, no el legal
+// completo, mas el telefono del contacto si el toque quedo enlazado a uno) y la
 // fecha del toque como centro de la ventana de tiempo.
 export function terminosBusquedaTranscript(idToque: number): { terminos: string[]; fecha: string } | null {
   const t = db

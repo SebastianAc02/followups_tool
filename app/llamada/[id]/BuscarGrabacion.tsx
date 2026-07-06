@@ -41,15 +41,19 @@ export default function BuscarGrabacion({ idEmpresa, idToque }: { idEmpresa: str
 
   if (candidatas === null) {
     return (
-      <button type="button" className="tq-buscar" onClick={buscar} disabled={buscando}>
-        {buscando ? "Buscando..." : "Buscar grabación"}
-      </button>
+      <div className="tq-candidatas">
+        {error && <span className="tq-error">{error}</span>}
+        <button type="button" className="tq-buscar" onClick={buscar} disabled={buscando}>
+          {buscando ? "Buscando..." : "Buscar grabación"}
+        </button>
+      </div>
     );
   }
 
   if (candidatas.length === 0) {
     return (
       <div className="tq-candidatas">
+        {error && <span className="tq-error">{error}</span>}
         <span className="tq-vacio">Todavía no aparece en Granola.</span>
         <button type="button" className="tq-buscar" onClick={buscar} disabled={buscando}>
           {buscando ? "Buscando..." : "Buscar de nuevo"}
