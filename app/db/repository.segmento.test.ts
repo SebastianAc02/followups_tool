@@ -92,6 +92,13 @@ test('un segmento sin condiciones es rechazado', () => {
   assert.throws(() => empresasDeSegmento({ condiciones: [] } as any), /al menos una condicion/);
 });
 
+test('valor no numerico en un campo numerico (prioridad) falla explicito, no en silencio', () => {
+  assert.throws(
+    () => empresasDeSegmento({ condiciones: [{ campo: 'prioridad', op: 'en', valores: ['alta'] }] }),
+    /numerico/,
+  );
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

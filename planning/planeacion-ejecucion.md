@@ -10,12 +10,15 @@ tablero operativo: qué sigue AHORA, en qué orden, con qué gate.
 
 ## Próxima acción (lo único que importa ahora mismo)
 
-> **Arrancar Fase 4 (F3 sin envío: tablas de cadencia, import CSV/MD, segmentos, A/B,
-> constructor de calendario, motor probado EN SECO).** Fase 3 cerrada y mergeada a main
-> (2026-07-06), V3.1-V3.9, 52/52 tests. Antes de escribir código de Fase 4: (a) rotar las
-> dos API keys de Granola que quedaron expuestas en el chat de la sesión de Fase 3 (Sebastián,
-> pendiente); (b) decidir el token de Notion + el enlace `empresa.notion_page_id` cuando haya
-> espacio (no bloquea Fase 4, son cosas separadas).
+> **Arrancar Fase 5 (F3.5 + F4 envío por Apollo y tracking).** Fase 4 cerrada en la rama
+> `fase4-cadencias` (2026-07-06), V4.1-V4.8, 115/115 tests, `/code-review` corrido. Leer
+> `planning/experimento-apollo.md` ANTES (contrato del adaptador, no negociable). Tablas grupo
+> 3 del Anexo (paso_inscripcion, evento_tracking), EnvioAdapter con implementación Apollo,
+> push reanudable (B6), poll de tracking + reply detection. Gate G1 (escritura de Apollo e2e)
+> se prueba DENTRO de la fase. Pendientes sueltos que NO bloquean: (a) rotar las dos API keys
+> de Granola + password expuestas en el chat de Fase 3 (Sebastián); (b) token de Notion +
+> enlace `empresa.notion_page_id` (para que el outbox de Fase 3 escriba de verdad); (c) buzón/
+> seat con Camilo (identidad de envío, solo bloquea producción de Fase 5, no la construcción).
 
 G0 cerrado el 2026-07-03: las 5 pruebas de lectura pasaron; `usage_stats` confirmó crear
 contactos/empresas, add_contact_ids, gestionar/frenar secuencias y leer tracking. Y la prueba
@@ -78,11 +81,20 @@ Regla: un gate rojo detiene solo lo que depende de él. Las fases independientes
       en la bitácora abajo. Pendiente real (no bloquea Fase 4): token de Notion + script de
       enlace `empresa.notion_page_id` (hay 4 nombres duplicados reales, necesita criterio
       humano). Detalle completo en `plan-fase3.md`.
-- [ ] **Fase 4 · F3 sin envío.** Tablas grupo 1 y 2 del Anexo (cadencia/paso/version_paso/
-      segmento/campana/inscripcion con índice único parcial/destinatario). Import CSV/MD,
-      segmentos guardados, A/B, constructor calendario con corrimiento. Motor probado EN SECO.
-      Demo: subo mi cadencia, la veo por días, inscribo "on-hold", veo los toques de mañana sin
-      enviar nada, una sola inscripción activa por empresa.
+- [x] **Fase 4 · F3 sin envío. ✅ COMPLETA EN RAMA `fase4-cadencias` (2026-07-06), V4.1 a V4.8.**
+      7 tablas nuevas (grupos 1 y 2 del Anexo) con índice único parcial `ux_inscripcion_activa`
+      (una activa por empresa; bloqueadas/finalizadas no cuentan). Parser de cadencias CSV/MD
+      puro + Repository (`crearCadencia`, versión default por paso). Segmentos como DSL cerrado
+      a JSON (no SQL libre; whitelist campo->columna; verificado on-hold = 126 vs SQL a mano).
+      A/B por peso con reparto determinista. Inscripción con destinatario default B1.b (KDM >
+      principal > primero con email; sin email nace bloqueada). Motor de fechas EN SECO (la
+      prueba más densa): offsets, días bloqueados, corrimiento bidireccional, re-anclaje a la
+      fecha real (anti-ráfaga por construcción). Constructor `/cadencias` con calendario que
+      corre el motor en el cliente (verificado en navegador con copia de isps.db). Demo de
+      cierre end-to-end contra copia: cadencia real, on-hold 126 -> 8 activas + 118 bloqueadas,
+      una activa por empresa con historial, toques de mañana en seco. 115/115 tests, tsc limpio,
+      `/code-review` con 6 hallazgos (3 corregidos, 2 descartados por precedente, 1 minor
+      truncado en el pager y no re-listado por el cache incremental). Detalle en la bitácora.
 - [ ] **Fase 5 · F3.5 + F4 (requiere G0 verde, y prueba G1 dentro).** Tablas grupo 3
       (paso_inscripcion, evento_tracking), EnvioAdapter con implementación Apollo, poll de
       tracking, reply detection que pausa, B6 completo. Demo: cadencia real en segmento chico;
@@ -231,3 +243,61 @@ las fronteras ya están fijadas por la constitución).
     entra normal. 10/10 tests, tsc limpio. Rama `fase2-auth` dejada sin mergear (mismo
     patrón que Fase 1: Sebastián la revisa localmente primero). Próxima acción: Fase 3
     (conectores + ingest Granola + outbox Notion), empezando por V3.1.
+
+- **2026-07-06 · Fase 4 (F3 sin envío) COMPLETA en rama `fase4-cadencias`.** Sesión
+  straight-through (Sebastián eligió ejecutar V4.1-V4.8 sin pausas de learning, excepción
+  puntual con constraint de tiempo, no cambio permanente de la regla de CLAUDE.md). Un commit
+  por tarea, diff pequeño.
+  - V4.1: `scripts/migrate_f3_*.py` (dry-run + apply, idempotente) crea 7 tablas del Anexo
+    (cadencia, paso_cadencia, version_paso, segmento, campana, inscripcion, destinatario) + el
+    índice único parcial `ux_inscripcion_activa` (`WHERE estado='activa'`). Aplicado a isps.db
+    real, verificado que rechaza la segunda activa y deja convivir bloqueada/finalizada.
+    Reflejado en schema.ts y test-helpers.ts. Nota: el `git add -A` de este commit arrastró
+    sin querer el cambio pre-existente de CLAUDE.md (la sección "Modo learning activo" que
+    Sebastián ya tenía sin commitear); es contenido legítimo, solo aterrizó en un commit ajeno.
+  - V4.2: parser puro `app/core/cadencia-parser.ts` (CSV con comillas/multilínea RFC-4180,
+    Markdown por día/canal/asunto, orden inferido). Validación de dominio con Zod en el
+    Repository (`cadenciaParseadaSchema`), no en el core. `crearCadencia` crea una version_paso
+    default por paso (el copy vive en la versión, no en el paso).
+  - V4.3: segmentos como DSL cerrado a JSON en `segmento.definicion` (condiciones
+    `{campo,op,valores}` ANDeadas; campo de whitelist de dominio que el Repository mapea a
+    columnas reales; valores parametrizados; NO SQL libre). Verificado en vivo contra COPIA de
+    isps.db: segmento on-hold devuelve 126, igual al conteo SQL a mano.
+  - V4.4: A/B por peso. Reparto DETERMINISTA (`app/core/motor-cadencia.ts`, bucketing por
+    índice mod pesoTotal, sin Math.random). `agregarVersionPaso` cuelga una versión nueva y
+    apaga el default anterior en la misma transacción (iterar = agregar, no editar la enviada).
+  - V4.5: inscripción + destinatario default (B1.b). Selector puro `app/core/inscripcion.ts`
+    (KDM > principal > primero con email; sin email -> null -> bloqueada). `inscribirCampana`
+    cierra la activa anterior con `motivo_fin` ANTES de abrir la nueva, en una transacción, así
+    el índice nunca ve dos activas. Idempotente al re-correr. Cubre los 4 defaults + cambio de
+    campaña con historial.
+  - V4.6 (la prueba más densa): motor de fechas EN SECO, puro. `calcularCalendario` (plan
+    ideal: anchor+offset corrido fuera de días bloqueados) y `proximoPasoDebido` (el corazón:
+    ancla cada paso en la fecha REAL del anterior, no en el cronograma absoluto). Anti-ráfaga y
+    re-anclaje CAEN SOLOS de esa decisión: solo hay un paso debido a la vez, un worker caído 10
+    días dispara uno, no los atrasados en ráfaga. 11 casos (offsets, corrimiento en ambas
+    direcciones, semana bloqueada lanza, re-anclaje, anti-ráfaga). Fechas de julio 2026
+    verificadas (07-12 domingo).
+  - V4.7: constructor `/cadencias` (sin Tailwind, patrón globals.css). Import CSV/MD por server
+    action; el motor corre EN EL CLIENTE (es puro) para previsualizar en vivo: línea de tiempo
+    por día (no grid de mes), días sin envío configurables, regla de corrimiento, anotación
+    "corrido de X". Verificado en el navegador contra una COPIA de isps.db con usuario de
+    prueba (test@local.dev, seed en la copia, launch.json con env temporal ya restaurado):
+    bloquear domingo corre el toque de día 6 a lunes (siguiente) o sábado (anterior),
+    recalculando al instante. Link agregado en el nav del home.
+  - V4.8: puente `agendaEnSeco` (motor aplicado a inscripciones activas reales, sin materializar
+    ni enviar; fix real de camino: `fecha_inscripcion` es ISO datetime completo, se recorta a
+    fecha para el motor, mismo bug evitado en Fase 5). `scripts/demo_fase4.ts` corre el flujo
+    completo end-to-end contra una copia: cadencia real -> on-hold 126 -> 8 activas + 118
+    bloqueadas (la mayoría de leads on-hold en frío no tienen contacto con email) -> una activa
+    por empresa con historial -> toques de mañana en seco. `/code-review` (CodeRabbit `--base
+    main`): 6 hallazgos. 3 corregidos: guard duro en la demo contra escribir a isps.db real,
+    validación de `peso` en `actualizarVersionPaso`, y `resolverInscripcionBloqueada` ahora
+    verifica que el contacto pertenezca a la empresa. 2 descartados por precedente (ruta de DB
+    hardcodeada en migraciones, ya aceptado en Fase 1/2; atomicidad de la migración, idempotente
+    por `IF NOT EXISTS` y mismo patrón que f0/f1/auth). Aparte, endurecí el coercer numérico de
+    segmentos (un valor no numérico para `prioridad` fallaba en silencio) como fix proactivo.
+    Un 6º hallazgo minor quedó truncado en el pager del CLI y el cache incremental de CodeRabbit
+    no lo re-listó; a re-verificar en un clon fresco la próxima sesión si se quiere cerrar del
+    todo. 115/115 tests, tsc limpio. Rama `fase4-cadencias` lista para revisión de Sebastián
+    (mismo patrón que fases anteriores: la revisa localmente antes de mergear).

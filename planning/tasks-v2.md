@@ -163,33 +163,38 @@ Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decisio
 - [ ] **V3.9 · Cierre de fase 3.** Las pruebas que importan: idempotencia y matcher. Demo
   (reunión real aparece sola; inventada cae en cola) + /code-review + bitácora.
 
-## Fase 4 · F3 sin envío (modelo de cadencias, motor EN SECO)
+## Fase 4 · F3 sin envío (modelo de cadencias, motor EN SECO) — ✅ COMPLETA EN RAMA `fase4-cadencias` (2026-07-06)
 
-- [ ] **V4.1 · Migración: grupos 1 y 2 del Anexo.**
+Ejecutada straight-through V4.1-V4.8, un commit por tarea. 115/115 tests, tsc limpio,
+`/code-review` corrido (6 hallazgos: 3 corregidos, 2 descartados por precedente, 1 minor
+truncado). Detalle en `planeacion-ejecucion.md`. A diferencia de Fase 3, el desglose de abajo
+SÍ refleja lo construido (se siguió tal cual). Rama sin mergear, para revisión de Sebastián.
+
+- [x] **V4.1 · Migración: grupos 1 y 2 del Anexo.**
   Script dry-run + apply: `cadencia`, `paso_cadencia`, `version_paso`, `segmento`, `campana`,
   `inscripcion` (con índice único parcial: una activa por empresa), `destinatario`. Columnas
   exactas del Anexo de funcionalidades-v2.md. Reflejar en schema.ts.
   Lista cuando: apply idempotente; el índice único parcial rechaza segunda inscripción activa
   de la misma empresa en una prueba SQL.
 
-- [ ] **V4.2 · Repository de cadencias + import CSV/MD (F3.2).**
+- [x] **V4.2 · Repository de cadencias + import CSV/MD (F3.2).**
   Parser de cadencia desde CSV o Markdown (toques con orden, dia_offset, canal, asunto,
   cuerpo) que crea cadencia + pasos + version default. Todo por Repository.
   Lista cuando: importo la cadencia real de Sebastián y queda como template consultable.
 
-- [ ] **V4.3 · Segmentos guardados (F3.1 v1).**
+- [x] **V4.3 · Segmentos guardados (F3.1 v1).**
   Filtros sobre la base propia (tier, estado, on-hold, categoria) con UI de filtros; el
   filtro compilado se guarda como JSON en `segmento.definicion`. El lenguaje natural llega
   en Fase 6, no aquí.
   Lista cuando: guardo "on-hold" como segmento y la lista de empresas que devuelve es la
   esperada contra un conteo SQL a mano.
 
-- [ ] **V4.4 · Versiones A/B del paso (F3.4).**
+- [x] **V4.4 · Versiones A/B del paso (F3.4).**
   Versiones colgadas del mismo paso (version_paso: es_default, activa, peso). Iterar copy =
   nueva versión, no editar la enviada.
   Lista cuando: un paso con 2 versiones reparte según peso en una prueba del motor en seco.
 
-- [ ] **V4.5 · Inscripción + destinatario default (B1.b).**
+- [x] **V4.5 · Inscripción + destinatario default (B1.b).**
   Inscribir un segmento en una campaña: por empresa, destinatarios default en orden KDM,
   luego principal, luego primero con email. Sin ningún email: la inscripción nace
   `bloqueada` y cae en la cola de revisión (mismo patrón F1.4). Una activa por empresa: si
@@ -197,7 +202,7 @@ Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decisio
   Lista cuando: pruebas cubren los 4 defaults (KDM, principal, primero, bloqueada) y el
   cambio de campaña deja historial.
 
-- [ ] **V4.6 · Motor de fechas EN SECO (la prueba más densa del proyecto).**
+- [x] **V4.6 · Motor de fechas EN SECO (la prueba más densa del proyecto).**
   Cálculo de "hoy toca X" por dia_offset relativo, días bloqueados (ej. domingo), regla de
   corrimiento (siguiente o anterior, configurable), re-anclaje al día real cuando un paso se
   atrasa (B6: los atrasados NO se disparan juntos). Sin enviar nada: produce filas
@@ -205,14 +210,14 @@ Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decisio
   Lista cuando: suite cubre offsets, bloqueados, corrimiento en ambas direcciones, re-anclaje
   tras atraso, y worker caído un día no dispara pasos en ráfaga.
 
-- [ ] **V4.7 · Constructor de cadencia con vista calendario (F3.6).**
+- [x] **V4.7 · Constructor de cadencia con vista calendario (F3.6).**
   Superficie nueva grande: taste-skill, luego impeccable (dirección), frontend-design,
   tailwindcss-development + tailwind-css-patterns, build, impeccable (auditoría). Desglose
   por día, días bloqueados configurables, pregunta de corrimiento, preview "así se ve la
   cadencia en acción". Nota de diseño del alcance: NO el típico grid de mes.
   Lista cuando: subo cadencia, la veo día por día, bloqueo domingo y el corrimiento se ve.
 
-- [ ] **V4.8 · Cierre de fase 4.** Demo completa (cadencia real, inscripción on-hold, toques
+- [x] **V4.8 · Cierre de fase 4.** Demo completa (cadencia real, inscripción on-hold, toques
   de mañana en seco, una activa por empresa) + /code-review + bitácora.
 
 ## Fase 5 · F3.5 + F4 envío por Apollo y tracking (leer experimento-apollo.md ANTES)

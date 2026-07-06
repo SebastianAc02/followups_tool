@@ -669,6 +669,18 @@ const COLUMNA_SEGMENTO: Record<CampoSegmento, { col: SQLiteColumn; numerico: boo
   owner: { col: empresa.owner, numerico: false },
 };
 
+// Coerce los valores de una condicion a numero cuando el campo es numerico (prioridad,
+// es_cliente). Un valor no numerico (ej. prioridad='alta' por un typo) se volveria NaN y
+// el IN no matchearia nada en silencio; mejor fallar explicito.
+function coercer(valores: string[], numerico: boolean, campo: string): string[] | number[] {
+  if (!numerico) return valores;
+  const nums = valores.map(Number);
+  if (nums.some((n) => Number.isNaN(n))) {
+    throw new Error(`el campo '${campo}' es numerico: sus valores deben ser numeros, llego [${valores.join(', ')}]`);
+  }
+  return nums;
+}
+
 // Traduce una definicion YA validada a un WHERE de drizzle. Las condiciones se ANDean.
 // El switch (no ifs sueltos) deja que TS estreche cada rama: en 'en'/'no_en' sabe que
 // existe c.valores; en 'es_null'/'no_null' que no.
@@ -681,9 +693,9 @@ function compilarSegmento(def: DefinicionSegmento): SQL | undefined {
       case 'no_null':
         return isNotNull(col);
       case 'en':
-        return inArray(col, numerico ? c.valores.map(Number) : c.valores);
+        return inArray(col, coercer(c.valores, numerico, c.campo));
       case 'no_en':
-        return notInArray(col, numerico ? c.valores.map(Number) : c.valores);
+        return notInArray(col, coercer(c.valores, numerico, c.campo));
     }
   });
   return and(...conds);

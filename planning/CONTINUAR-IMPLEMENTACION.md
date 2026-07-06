@@ -3,7 +3,38 @@
 Empieza AQUÍ. Este doc dice en qué estado quedó todo y qué archivos leer, en orden, para
 retomar sin perder contexto. Última sesión: 2026-07-06.
 
-## Lo último (2026-07-06): FASE 3 CERRADA Y MERGEADA A MAIN (V3.1 a V3.10)
+## Lo último (2026-07-06): FASE 4 COMPLETA EN RAMA `fase4-cadencias` (V4.1 a V4.8)
+
+Sesión straight-through: Sebastián pidió ejecutar TODA la Fase 4 (V4.1-V4.8) sin pausas de
+learning (excepción puntual con constraint de tiempo, no cambio permanente de la regla de
+CLAUDE.md; retomar learning normal en Fase 5 salvo que se repita la señal). Un commit por
+tarea. 115/115 tests, tsc limpio, `/code-review` corrido. Rama SIN mergear, para revisión de
+Sebastián (mismo patrón que fases anteriores). Detalle tarea por tarea en la bitácora de
+`planeacion-ejecucion.md`; acá solo lo que un lector nuevo necesita:
+
+- **El modelo de cadencias entero quedó EN SECO (no manda un solo correo).** 7 tablas nuevas
+  (grupos 1 y 2 del Anexo), parser CSV/MD, segmentos como filtro compilado a JSON, A/B por
+  peso, inscripción con destinatario default (B1.b), motor de fechas, y el constructor
+  `/cadencias` con vista calendario. El envío real es Fase 5.
+- **El motor de fechas (V4.6) es el corazón y quedó probado con 11 casos.** La decisión clave:
+  cada paso se ancla en la fecha REAL del paso anterior, no en el cronograma absoluto. De ahí
+  caen SOLOS el re-anclaje tras atraso y el anti-ráfaga (un worker caído nunca dispara los
+  toques atrasados juntos): solo hay un paso debido a la vez.
+- **Verificación real, no solo tests:** el constructor se probó en el navegador contra una
+  COPIA de isps.db con usuario de prueba (bloquear domingo corre el toque al lunes o sábado en
+  vivo). La demo de cierre (`scripts/demo_fase4.ts`) corre el flujo completo contra una copia:
+  segmento on-hold real (126 empresas) -> 8 activas + 118 bloqueadas (la mayoría de leads en
+  frío no tienen contacto con email) -> toques de mañana en seco.
+- **`/code-review` (CodeRabbit): 6 hallazgos, 3 corregidos** (guard en la demo contra escribir
+  a isps.db real, validación de peso en A/B, chequeo de que el contacto resuelto sea de la
+  empresa), 2 descartados por precedente (ruta de DB hardcodeada; atomicidad de migración
+  idempotente), 1 minor truncado en el pager que el cache incremental no re-listó (a
+  re-verificar en un clon fresco si se quiere cerrar del todo).
+- **isps.db real: solo se le aplicó la migración de V4.1 (las 7 tablas + índice).** Todo lo
+  demás (cadencias demo, inscripciones, usuario de prueba) vivió en copias temporales; la base
+  real quedó con 0 cadencias.
+
+## Lo anterior (2026-07-06): FASE 3 CERRADA Y MERGEADA A MAIN (V3.1 a V3.10)
 
 Sesión con constraint de tiempo fuerte de Sebastián: pidió avanzar sin pausas para que
 escribiera código (solo V3.6 quedó con su parte real, el resto lo tomé yo con las
@@ -153,23 +184,39 @@ V3.7 -> V3.8 -> V3.9 (toque independiente) -> V3.10 (cierre).
   (2026-07-06), V3.1 a V3.10.** Ver "Lo último" arriba para el resumen y `plan-fase3.md`
   para el detalle tarea por tarea. 53/53 tests, tsc limpio, `/code-review` corrido (7
   hallazgos, 6 corregidos). `UsuarioSesion` ahora incluye `id` (antes solo email/owner/admin).
+- **Fase 4 (F3 sin envío: modelo de cadencias, motor EN SECO) COMPLETA EN RAMA
+  `fase4-cadencias` (2026-07-06), V4.1 a V4.8, SIN MERGEAR.** Ver "Lo último" arriba. 7 tablas
+  nuevas + índice único parcial, parser CSV/MD, segmentos a JSON, A/B por peso, inscripción con
+  destinatario default (B1.b), motor de fechas (offsets/bloqueados/corrimiento/re-anclaje/
+  anti-ráfaga), constructor `/cadencias`. Core nuevo: `app/core/cadencia-parser.ts`,
+  `motor-cadencia.ts`, `inscripcion.ts`. 115/115 tests, `/code-review` corrido. Falta que
+  Sebastián la revise y mergee.
 
 ## Próxima acción
 
-**Arrancar Fase 4 (F3 sin envío): tablas grupo 1 y 2 del Anexo de `funcionalidades-v2.md`
-(cadencia/paso/version_paso/segmento/campana/inscripcion con índice único parcial por
-destinatario), import CSV/MD, segmentos guardados, A/B, constructor de calendario con
-corrimiento. Motor probado EN SECO (sin envío real, eso es Fase 5).** Ver `tasks-v2.md` para
-la lista de tareas V4.x (verificar contra `plan-claude-v2.md` si sigue vigente el desglose,
-dado que Fase 3 se rediseñó a medio camino y el mismo cuidado aplica).
+**Primero: revisar y mergear la rama `fase4-cadencias` a main** (mismo patrón que las fases
+anteriores: Sebastián la revisa localmente antes de mergear). Está completa, 115/115 tests.
 
-**Antes de tocar código de Fase 4, dos pendientes sueltos (no bloquean, pero hay que
-resolverlos pronto):**
-1. Sebastián tiene que rotar las dos API keys de Granola y su password que quedaron
-   expuestas en el chat de la sesión de Fase 3.
-2. Decidir el token de Notion + el script de enlace `empresa.notion_page_id` (4 nombres
-   duplicados reales necesitan criterio humano) cuando haya espacio — es lo que falta para
-   que el outbox de Fase 3 realmente escriba a Notion en producción.
+**Después: arrancar Fase 5 (F3.5 + F4 envío por Apollo y tracking).** LEER
+`planning/experimento-apollo.md` ANTES (contrato del adaptador, no negociable). Tablas grupo 3
+del Anexo (`paso_inscripcion` con índice único id_destinatario+id_paso, `evento_tracking`
+append-only), `EnvioAdapter` con implementación Apollo (header `X-Api-Key`, search-first por
+email, no hay DELETE), push reanudable (B6, máquina de estados por destinatario), poll de
+tracking + reply detection que pausa la inscripción. Gate G1 (escritura de Apollo e2e) se
+prueba DENTRO de la fase. Ver `tasks-v2.md` para V5.1-V5.8. Nota: `agendaEnSeco` (V4.8) ya deja
+el motor listo para que Fase 5 materialice `paso_inscripcion`; el bug del anchor (ISO datetime
+completo vs fecha) ya está resuelto ahí.
+
+**Retomar el modo learning normal en Fase 5** (Insights + Tu código + checkpoints) salvo que
+Sebastián repita la señal explícita de constraint de tiempo, como hizo en Fase 3 y Fase 4.
+
+**Pendientes sueltos (no bloquean Fase 5, pero conviene pronto):**
+1. Rotar las dos API keys de Granola y el password que quedaron expuestos en el chat de la
+   sesión de Fase 3.
+2. Token de Notion + script de enlace `empresa.notion_page_id` (4 nombres duplicados reales
+   necesitan criterio humano) — es lo que falta para que el outbox de Fase 3 escriba a Notion.
+3. Buzón/seat con Camilo (identidad de envío como Sebastián, no Camilo): de negocio, solo
+   bloquea la producción de Fase 5, no la construcción.
 
 Aparte, sin bloquear lo anterior: decidir el camino del MCP para el jefe (servidor propio
 vs `mcp-turso-cloud`) cuando haya espacio para eso — no es parte de las 8 fases del roadmap
