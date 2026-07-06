@@ -233,3 +233,105 @@ Pendientes para Fase 5 (con secuencia de prueba nombrada + cleanup verificado): 
 el COPY de los pasos sube por API, y probar create-contact + add_contact_ids de punta a punta.
 Nota operativa: el plan NO expone DELETE de secuencias, solo archivar; los borradores de prueba
 se archivan y, si se quieren eliminar, se borran a mano en la vista Archived.
+
+## V5.3 · Gate G1: escritura e2e contra la cuenta real (corrido 2026-07-06)
+
+Secuencia de prueba nombrada `ZZZ-TEST-BORRAR-V5.3-2026-07-06` (id
+`6a4bd1afbe65ae0018466c6d`), contacto de descarte `sacostamolin@gmail.com` (el propio
+correo de Sebastián, mismo patrón que el incidente de la prueba anterior). Corrido con el
+adaptador REAL del proyecto (`app/adapters/apollo.ts`), no un script aparte, para que la
+prueba ejerza exactamente el código que se va a usar en producción.
+
+**Flujo completo confirmado, en orden:**
+1. `crearCampanaExterna` → `POST /emailer_campaigns` crea la secuencia. ✅
+2. `enviarPaso` → `bulk_create` (dedupe) + `add_contact_ids` inscribe al contacto de
+   descarte. ✅ Sin errores.
+3. **Sin activar la secuencia (`active: false` todo el tiempo), nada se envía**:
+   `leerEventosNuevos` devuelve `[]`. Confirma la garantía de negocio central de F3.5/F4
+   ("no activar = no envía").
+4. `sacarDestinatario` → limpieza. ✅ (con el fix de abajo)
+5. `archivarCampana` → `POST /emailer_campaigns/{id}/archive`. ✅ `archived: true`
+   verificado con un GET after.
+
+### Hallazgo real #1 · `remove_or_stop_contact_ids` NO es como estaba documentado
+
+La forma que traía `experimento-apollo.md` desde antes de probarse en vivo
+(`POST /emailer_campaigns/{id}/remove_or_stop_contact_ids`, anidada con el id en la URL,
+`emailer_campaign_id` en singular) da **404** contra la cuenta real. La forma real,
+descubierta por prueba y error contra los mensajes 422 del propio Apollo (que sí traen
+mensaje útil, a diferencia del 404):
+- Ruta PLANA: `POST /emailer_campaigns/remove_or_stop_contact_ids` (sin el id en la URL).
+- `emailer_campaign_ids` en PLURAL (array), no singular.
+- `mode` es un parámetro REQUERIDO que Apollo no documenta en ningún lado público
+  encontrado. Probado con varios valores (`remove`, `stop`, `mark_as_finished`,
+  `remove_from_sequence`, `unenroll`) — los 5 devuelven 200 sin distinguir error de
+  valor inválido (Apollo no valida el contenido de `mode`, solo que exista). Se
+  verificó el estado final del contacto (`contact_statuses` en 0 tras la llamada) y
+  se dejó fijo en `mode: 'remove'` por ser el más cercano semánticamente a "sacar de
+  secuencia". **Si en el futuro se nota un comportamiento distinto según el mode
+  exacto, este es el punto a revisar primero.**
+- Corregido en `app/adapters/apollo.ts` (`sacarDestinatario`) y su test.
+
+### Hallazgo real #2 · los campos de tracking NO son los que se habían supuesto
+
+`GET /emailer_messages/search` (verificado con mensajes reales históricos de la cuenta,
+no solo con la lista vacía del gate G0) **no tiene** `sent_at`/`opened_at`/`clicked_at`/
+`replied_at`/`bounced_at`. Los campos reales:
+- `to_email` (correlator confirmado, coincidía con la 2da opción ya prevista en el
+  adaptador).
+- `status`: string (`'completed'` cuando se envió, `'failed'` cuando falló/rebotó).
+- `replied`: booleano, **sin fecha propia**.
+- `bounce`: booleano, **sin fecha propia**.
+- `created_at` / `completed_at` / `failed_at` / `due_at`: las únicas fechas reales
+  disponibles en el objeto.
+- No existe NINGÚN campo de apertura/clic con fecha en este endpoint — Apollo solo
+  los expone como FILTRO de búsqueda (`emailer_message_stats[]=opened`), no como dato
+  devuelto en el objeto del mensaje. **Conclusión: no se puede construir un evento
+  "abierto"/"clic" con fecha real desde este endpoint.** Se descartaron esos dos tipos
+  de evento del mapeo (dato que no existe no se inventa); solo quedan `enviado`
+  (de `status`), `respondio` (de `replied`) y `rebota` (de `bounce`), usando
+  `completed_at`/`failed_at` como la mejor aproximación de fecha disponible (no es la
+  fecha exacta del evento, es cuándo terminó de procesarse el mensaje).
+- Corregido en `app/adapters/apollo.ts` (`MensajeApollo`, `mapearAEventos`) y sus tests.
+
+### Hallazgo real #3 · el parámetro de rango de fecha NO filtra nada
+
+Se probaron 8 nombres de parámetro plausibles (`created_after`, `created_at_after`,
+`start_date`, `since`, `date_from`, `created_since`, `due_at_after`, `completed_after`,
+`q_created_after`) contra `GET /emailer_messages/search`: **todos devuelven 200 con el
+mismo resultado que un parámetro inventado sin sentido** (`esto_no_existe_de_verdad`).
+Apollo ignora en silencio cualquier parámetro que no reconoce en vez de dar 400/422 —
+por eso el bug no se habría notado nunca por el código de estado. El único filtro que sí
+funciona de verdad (confirmado con un id real vs. uno inventado) es
+`emailer_campaign_ids[]`. **`leerEventosNuevos` ahora pagina (tope de seguridad, mismo
+patrón que Granola) y filtra la fecha del lado del CLIENTE sobre `created_at`,** no
+confía en ningún parámetro de servidor para eso.
+
+### Hallazgo real #4 · subir copy por API sí funciona (confirmado, no solo documentado)
+
+`POST /emailer_steps` con `wait_mode` en `{day, hour, minute}` (singular; `days`/`hours`/
+`immediately`/`immediate` dan 422 "Wait mode must be valid") crea el paso y auto-crea
+`emailer_touch` + `emailer_template` vacío. `PUT /emailer_templates/{id}` con
+`{subject, body_html}` persiste (verificado con un GET aparte, no solo con la respuesta
+del PUT); Apollo envuelve el HTML en `<html><head></head><body>...</body></html>`
+automáticamente; `{{first_name}}` se conserva intacto en subject y body.
+
+**No se resolvió** (fuera de alcance de este gate, ver nota de diseño en
+`app/core/ports/envio.ts`): cómo se relaciona un `paso_cadencia` propio con un paso de
+Apollo real (`emailer_step` + `wait_mode`/`wait_time`) cuando el motor de fechas propio
+(V4.6) ya decide el timing — la tensión entre "Apollo controla el wait_time de la
+secuencia" y "nuestro propio worker decide cuándo toca cada paso" sigue abierta.
+`enviarPaso` hoy NO crea steps/templates (asume la secuencia externa ya existe con lo que
+necesite, creada aparte); esto es correcto para el alcance actual (backend probado, sin
+materializar aún la agenda completa) pero es lo primero que hay que resolver cuando se
+conecte el envío real de punta a punta.
+
+### Estado del gate G1
+
+**CERRADO / VERDE**, con 2 fixes reales aplicados al adaptador (no hallazgos que solo se
+anotaron, se corrigieron en código: `sacarDestinatario` y `mapearAEventos`/
+`leerEventosNuevos`) y 196/196 tests, tsc limpio. Secuencia de prueba
+`ZZZ-TEST-BORRAR-V5.3-2026-07-06` queda ARCHIVADA en Apollo (no se puede borrar del
+todo por API, mismo límite ya conocido). El contacto de descarte
+(`sacostamolin@gmail.com`) ya existía en la cuenta desde el gate G0, sin cambios nuevos
+que limpiar ahí.

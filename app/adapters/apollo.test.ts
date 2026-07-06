@@ -102,7 +102,7 @@ test('enviarPaso truena si no hay buzon configurado (decision de negocio S2 pend
   process.env.APOLLO_MAILBOX_ID = 'buzon-test-1';
 });
 
-test('sacarDestinatario resuelve el contacto por email y llama remove_or_stop_contact_ids', async (t) => {
+test('sacarDestinatario resuelve el contacto por email y llama remove_or_stop_contact_ids (ruta plana, verificada en vivo)', async (t) => {
   const llamadas: { path: string; body: unknown }[] = [];
   t.mock.method(
     globalThis,
@@ -120,8 +120,10 @@ test('sacarDestinatario resuelve el contacto por email y llama remove_or_stop_co
   const adapter = crearApolloAdapter();
   await adapter.sacarDestinatario('seq-1', 'ana@empresa.com');
 
-  assert.strictEqual(llamadas[1].path, '/emailer_campaigns/seq-1/remove_or_stop_contact_ids');
-  assert.deepEqual(llamadas[1].body, { emailer_campaign_id: 'seq-1', contact_ids: ['contacto-2'] });
+  // Verificado en vivo (V5.3): NO va anidado con el id en la URL (esa forma da
+  // 404); es plano, con emailer_campaign_ids en PLURAL y un mode requerido.
+  assert.strictEqual(llamadas[1].path, '/emailer_campaigns/remove_or_stop_contact_ids');
+  assert.deepEqual(llamadas[1].body, { emailer_campaign_ids: ['seq-1'], contact_ids: ['contacto-2'], mode: 'remove' });
 });
 
 test('archivarCampana llama el endpoint de archive de la secuencia', async (t) => {
@@ -141,7 +143,7 @@ test('archivarCampana llama el endpoint de archive de la secuencia', async (t) =
   assert.strictEqual(pathLlamado, '/emailer_campaigns/seq-1/archive');
 });
 
-test('leerEventosNuevos mapea emailer_messages a eventos con id compuesto mensaje:tipo', async (t) => {
+test('leerEventosNuevos mapea emailer_messages a eventos con id compuesto mensaje:tipo (campos reales verificados en vivo)', async (t) => {
   t.mock.method(
     globalThis,
     'fetch',
@@ -154,10 +156,12 @@ test('leerEventosNuevos mapea emailer_messages a eventos con id compuesto mensaj
           emailer_messages: [
             {
               id: 'msg-1',
-              email: 'ana@empresa.com',
-              sent_at: '2026-07-05T10:00:00Z',
-              opened_at: '2026-07-05T11:00:00Z',
-              replied_at: null,
+              to_email: 'ana@empresa.com',
+              status: 'completed',
+              replied: null,
+              bounce: null,
+              created_at: '2026-07-05T10:00:00Z',
+              completed_at: '2026-07-05T10:05:00Z',
             },
           ],
         },
@@ -168,19 +172,51 @@ test('leerEventosNuevos mapea emailer_messages a eventos con id compuesto mensaj
   const adapter = crearApolloAdapter();
   const eventos = await adapter.leerEventosNuevos('seq-1', '2026-07-01T00:00:00Z');
 
-  assert.strictEqual(eventos.length, 2);
-  assert.deepEqual(
-    eventos.map((e) => e.proveedorEventoId).sort(),
-    ['msg-1:abierto', 'msg-1:enviado'],
-  );
-  assert.ok(eventos.every((e) => e.email === 'ana@empresa.com'));
+  assert.strictEqual(eventos.length, 1);
+  assert.strictEqual(eventos[0].proveedorEventoId, 'msg-1:enviado');
+  assert.strictEqual(eventos[0].email, 'ana@empresa.com');
 });
 
-test('un mensaje sin ningun campo de fecha no produce eventos', async (t) => {
+test('replied y bounce (booleanos, sin fecha propia) usan completed_at/failed_at como aproximacion', async (t) => {
   t.mock.method(
     globalThis,
     'fetch',
-    fetchFalso(() => ({ status: 200, body: { emailer_messages: [{ id: 'msg-2', email: 'x@x.com' }] } })),
+    fetchFalso(() => ({
+      status: 200,
+      body: {
+        emailer_messages: [
+          {
+            id: 'msg-3',
+            to_email: 'beto@empresa.com',
+            status: 'completed',
+            replied: true,
+            bounce: null,
+            created_at: '2026-07-05T10:00:00Z',
+            completed_at: '2026-07-05T12:00:00Z',
+          },
+        ],
+      },
+    })),
+  );
+
+  const adapter = crearApolloAdapter();
+  const eventos = await adapter.leerEventosNuevos('seq-1', '2026-07-01T00:00:00Z');
+
+  assert.deepEqual(
+    eventos.map((e) => e.proveedorEventoId).sort(),
+    ['msg-3:enviado', 'msg-3:respondio'],
+  );
+  assert.ok(eventos.every((e) => e.fechaEvento === '2026-07-05T12:00:00Z'));
+});
+
+test('un mensaje sin status/replied/bounce no produce eventos (nada real que reportar)', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso(() => ({
+      status: 200,
+      body: { emailer_messages: [{ id: 'msg-2', to_email: 'x@x.com', created_at: '2026-07-05T10:00:00Z' }] },
+    })),
   );
 
   const adapter = crearApolloAdapter();
@@ -189,13 +225,33 @@ test('un mensaje sin ningun campo de fecha no produce eventos', async (t) => {
   assert.strictEqual(eventos.length, 0);
 });
 
-test('un mensaje sin NINGUN campo de email conocido se descarta (no hay con que resolver destinatario)', async (t) => {
+test('un mensaje mas viejo que "desde" se filtra del lado del cliente (el server no filtra fecha de verdad)', async (t) => {
   t.mock.method(
     globalThis,
     'fetch',
     fetchFalso(() => ({
       status: 200,
-      body: { emailer_messages: [{ id: 'msg-3', sent_at: '2026-07-05T10:00:00Z' }] },
+      body: {
+        emailer_messages: [
+          { id: 'msg-viejo', to_email: 'viejo@x.com', status: 'completed', created_at: '2026-06-01T00:00:00Z' },
+        ],
+      },
+    })),
+  );
+
+  const adapter = crearApolloAdapter();
+  const eventos = await adapter.leerEventosNuevos('seq-1', '2026-07-01T00:00:00Z');
+
+  assert.strictEqual(eventos.length, 0);
+});
+
+test('un mensaje sin to_email se descarta (no hay con que resolver destinatario)', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso(() => ({
+      status: 200,
+      body: { emailer_messages: [{ id: 'msg-4', status: 'completed', created_at: '2026-07-05T10:00:00Z' }] },
     })),
   );
 

@@ -34,8 +34,13 @@ Detalle e incidente en experimento-apollo.md.
 - **G0 · Apollo verificado (SOLO LECTURA). ✅ VERDE (2026-07-03).** Las 5 pruebas pasaron;
   usage_stats confirmó los endpoints de escritura habilitados sin escribir nada. Salvedad:
   sequences/create por API no habilitado (shell se crea en UI). Bloqueaba Fase 5; liberado.
-- **G1 · Escritura de Apollo probada** (create-contact + add-to-sequence con contacto de
-  descarte que se borra). Ocurre AL construir Fase 5, no antes. Bloquea el envío real.
+- **G1 · Escritura de Apollo probada. ✅ VERDE (2026-07-06).** create-contact + add-to-sequence
+  con contacto de descarte (secuencia `ZZZ-TEST-BORRAR-V5.3-2026-07-06`, archivada al cerrar).
+  2 hallazgos reales corregidos en el adaptador: `remove_or_stop_contact_ids` no era como
+  estaba documentado (ruta plana + plural + `mode` requerido, no anidada), y los campos de
+  tracking no eran los supuestos (sin opened/clicked con fecha real; el filtro de fecha del
+  servidor no filtra nada, se movió a cliente). Copy por API confirmado (PUT persiste,
+  variables se conservan). Detalle completo en experimento-apollo.md.
 - **G2 · Agent SDK headless probado.** Que el ClaudeAdapter corra sobre el plan sin sesión
   interactiva. Bloquea Fase 6; plan B es API con presupuesto chico (el puerto no cambia).
 

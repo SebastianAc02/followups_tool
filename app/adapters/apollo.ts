@@ -41,24 +41,48 @@ async function llamarApollo<T>(path: string, apiKey: string, init: RequestInit =
 type ContactoApollo = { id: string; email: string };
 type BulkCreateRespuesta = { created_contacts?: ContactoApollo[]; existing_contacts?: ContactoApollo[] };
 type CampanaRespuesta = { emailer_campaign?: { id: string }; id?: string };
-// Nombre exacto del campo de email del destinatario: NO verificado en vivo todavia
-// (experimento-apollo.md solo confirmo que el endpoint responde 200 y algunos
-// nombres de campo de estado, la lista estaba vacia -- sin envios reales, nunca se
-// vio una fila real). Se prueban 3 variantes plausibles en orden; esto se confirma
-// de verdad en V5.3 (gate G1) contra un envio real y se ajusta aqui si difiere.
+// Campos verificados en vivo contra la cuenta real (V5.3, gate G1, 2026-07-06) --
+// NO son los que se habian supuesto antes de probar. emailer_messages NO tiene
+// opened_at/clicked_at/replied_at/bounced_at/sent_at: solo status ('completed'
+// cuando se envio, 'failed' cuando fallo/rebota), replied (booleano, SIN fecha
+// propia) y bounce (booleano, SIN fecha propia). to_email es el campo de email
+// real (confirmado, no email/contact_email como se habia adivinado).
 type MensajeApollo = {
   id: string;
-  email?: string;
   to_email?: string;
-  contact_email?: string;
-  emailer_message_stat?: string;
-  bounced_at?: string | null;
-  opened_at?: string | null;
-  clicked_at?: string | null;
-  replied_at?: string | null;
-  sent_at?: string | null;
+  status?: string;
+  replied?: boolean | null;
+  bounce?: boolean | null;
+  created_at?: string | null;
+  completed_at?: string | null;
+  failed_at?: string | null;
 };
 type MensajesRespuesta = { emailer_messages?: MensajeApollo[] };
+
+// Sin pagination.total_entries en la respuesta de este endpoint (verificado en
+// vivo: la clave "pagination" no viene, solo emailer_messages/emailer_steps/
+// num_fetch_result). Se para cuando una pagina trae menos de per_page (senal de
+// que ya no hay mas), con un tope de seguridad -- mismo patron que el adaptador
+// de Granola (MAX_PAGINAS), para no pollear sin limite si una campana tiene
+// miles de mensajes historicos.
+const PER_PAGE_MENSAJES = 100;
+const MAX_PAGINAS_MENSAJES = 10;
+
+async function traerMensajesDeCampana(proveedorCampanaId: string, apiKey: string): Promise<MensajeApollo[]> {
+  const resultado: MensajeApollo[] = [];
+  for (let pagina = 1; pagina <= MAX_PAGINAS_MENSAJES; pagina++) {
+    const query = new URLSearchParams({
+      per_page: String(PER_PAGE_MENSAJES),
+      page: String(pagina),
+      'emailer_campaign_ids[]': proveedorCampanaId,
+    });
+    const data = await llamarApollo<MensajesRespuesta>(`/emailer_messages/search?${query}`, apiKey);
+    const mensajes = data.emailer_messages ?? [];
+    resultado.push(...mensajes);
+    if (mensajes.length < PER_PAGE_MENSAJES) break;
+  }
+  return resultado;
+}
 
 // Identidad de envio (que buzon manda): decision de negocio S2 pendiente con Camilo
 // (hoy solo hay 2 buzones, ambos de el). No bloquea construir el adaptador, si bloquea
@@ -85,27 +109,33 @@ async function resolverContacto(apiKey: string, destinatario: DestinatarioEnvio)
 }
 
 // Mapeo de campos de emailer_messages a nuestro vocabulario de evento_tracking.
-// NOTA (abierta, se confirma en V5.3/gate G1 contra un envio real): los nombres
-// exactos de los campos de fecha/estado en la respuesta real no se han verificado
-// campo por campo (solo su presencia general, experimento-apollo.md linea 96); si
-// difieren, es el unico punto que hay que ajustar aqui.
+// Verificado en vivo (V5.3): NO hay opened/clicked como eventos con fecha propia en
+// este endpoint (Apollo los usa solo como FILTRO de busqueda, emailer_message_stats[],
+// no los devuelve en el objeto). replied y bounce tampoco traen su propia fecha --
+// son booleanos sin timestamp; completed_at/failed_at son la mejor aproximacion
+// disponible. Por eso 'abierto'/'clic' se DESCARTARON del mapeo (dato que no existe
+// no se inventa): solo 'enviado', 'respondio' y 'rebota' son reales.
 function mapearAEventos(mensaje: MensajeApollo): EventoProveedor[] {
-  const eventos: { tipo: string; fecha: string | null | undefined }[] = [
-    { tipo: 'enviado', fecha: mensaje.sent_at },
-    { tipo: 'abierto', fecha: mensaje.opened_at },
-    { tipo: 'clic', fecha: mensaje.clicked_at },
-    { tipo: 'respondio', fecha: mensaje.replied_at },
-    { tipo: 'rebota', fecha: mensaje.bounced_at },
-  ];
-  const email = mensaje.email ?? mensaje.to_email ?? mensaje.contact_email;
+  const email = mensaje.to_email;
   if (!email) return []; // sin email no hay con que resolver el destinatario; se descarta
+
+  const eventos: { tipo: string; fecha: string | null | undefined }[] = [];
+  if (mensaje.status === 'completed') {
+    eventos.push({ tipo: 'enviado', fecha: mensaje.completed_at ?? mensaje.created_at });
+  }
+  if (mensaje.bounce) {
+    eventos.push({ tipo: 'rebota', fecha: mensaje.failed_at ?? mensaje.completed_at });
+  }
+  if (mensaje.replied) {
+    eventos.push({ tipo: 'respondio', fecha: mensaje.completed_at });
+  }
 
   return eventos
     .filter((e) => e.fecha)
     .map((e) => ({
-      // proveedor_evento_id tiene que ser distinto por TIPO de evento del mismo
-      // mensaje (un mensaje puede abrirse Y responderse); el id de Apollo es por
-      // mensaje, no por evento individual, asi que se compone con el tipo.
+      // proveedor_evento_id distinto por TIPO de evento del mismo mensaje (un
+      // mensaje puede enviarse Y responderse); el id de Apollo es por mensaje,
+      // no por evento individual, asi que se compone con el tipo.
       proveedorEventoId: `${mensaje.id}:${e.tipo}`,
       tipo: e.tipo,
       canal: 'correo',
@@ -164,9 +194,19 @@ export function crearApolloAdapter(): EnvioAdapter {
       const apiKey = credencial();
       const contacto = await resolverContacto(apiKey, { email, nombre: null });
 
-      await llamarApollo(`/emailer_campaigns/${proveedorCampanaId}/remove_or_stop_contact_ids`, apiKey, {
+      // Verificado en vivo (V5.3): el endpoint NO va anidado con el id en la URL
+      // (esa forma da 404, a pesar de que asi lo tenia documentado
+      // experimento-apollo.md antes de probarlo). Es plano, `/emailer_campaigns/
+      // remove_or_stop_contact_ids`, con emailer_campaign_ids en PLURAL (array) y
+      // exige ademas un `mode` (probado "remove", el que mejor calza con "sacar
+      // de secuencia" -- Apollo no documenta los valores validos de mode).
+      await llamarApollo('/emailer_campaigns/remove_or_stop_contact_ids', apiKey, {
         method: 'POST',
-        body: JSON.stringify({ emailer_campaign_id: proveedorCampanaId, contact_ids: [contacto.id] }),
+        body: JSON.stringify({
+          emailer_campaign_ids: [proveedorCampanaId],
+          contact_ids: [contacto.id],
+          mode: 'remove',
+        }),
       });
     },
 
@@ -178,15 +218,17 @@ export function crearApolloAdapter(): EnvioAdapter {
 
     async leerEventosNuevos(proveedorCampanaId: string, desde: string): Promise<EventoProveedor[]> {
       const apiKey = credencial();
-      const query = new URLSearchParams({
-        per_page: '100',
-        'emailer_campaign_ids[]': proveedorCampanaId,
-        start_date: desde,
-      });
-      const data = await llamarApollo<MensajesRespuesta>(`/emailer_messages/search?${query}`, apiKey, {
-        method: 'GET',
-      });
-      return (data.emailer_messages ?? []).flatMap(mapearAEventos);
+      // Verificado en vivo (V5.3): ningun nombre de parametro de rango de fecha
+      // (probados: created_after, start_date, since, date_from, created_since,
+      // due_at_after, completed_after) filtra de verdad -- Apollo ignora en
+      // silencio los parametros que no reconoce y devuelve 200 igual, asi que un
+      // parametro mal escrito nunca se habria notado por el status code. El filtro
+      // real que SI funciona es emailer_campaign_ids[] (confirmado); la fecha se
+      // filtra del lado del cliente sobre created_at.
+      const mensajes = await traerMensajesDeCampana(proveedorCampanaId, apiKey);
+      return mensajes
+        .filter((m) => (m.created_at ?? '') >= desde)
+        .flatMap(mapearAEventos);
     },
   };
 }

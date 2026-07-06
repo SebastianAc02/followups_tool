@@ -222,13 +222,14 @@ SÍ refleja lo construido (se siguió tal cual). Rama sin mergear, para revisió
 
 ## Fase 5 · F3.5 + F4 envío por Apollo y tracking (leer experimento-apollo.md ANTES)
 
-**Backend (V5.1, V5.2, V5.4, V5.5, V5.6) + V5.7 completos, 2026-07-06.** A pedido
-explícito de Sebastián: solo backend al inicio (el front de cadencias se está
-rehaciendo en paralelo, ver bitácora); V5.7 sí tocó UI porque es la única pieza que
-unifica cadencias con la cola existente, y se hizo con cuidado de no chocar con la
-sesión paralela (nueva sección en /cola, sin tocar globals.css). V5.3 (escritura real
-de Apollo) en pausa a propósito hasta
-que confirme tocar la cuenta real. V5.7 es la acción inmediata siguiente.
+**V5.1-V5.7 completos, 2026-07-06.** A pedido explícito de Sebastián: solo backend al
+inicio (el front de cadencias se está rehaciendo en paralelo, ver bitácora); V5.7 sí
+tocó UI porque es la única pieza que unifica cadencias con la cola existente, con
+cuidado de no chocar con la sesión paralela (nueva sección en /cola, sin tocar
+globals.css). V5.3 se corrió al final con luz verde explícita: 2 hallazgos reales
+corregidos en el adaptador (`remove_or_stop_contact_ids` no era como estaba
+documentado; los campos de tracking tampoco). Detalle en experimento-apollo.md,
+sección "V5.3 · Gate G1". Solo queda V5.8 (cierre de fase).
 
 - [x] **V5.1 · Migración: grupo 3 del Anexo.**
   `paso_inscripcion` (índice único id_destinatario + id_paso) y `evento_tracking`
@@ -244,8 +245,7 @@ que confirme tocar la cuenta real. V5.7 es la acción inmediata siguiente.
   Lista cuando: pruebas con doble del puerto pasan; el adaptador real autentica y lee (las
   escrituras se prueban en V5.3, no aquí).
 
-- [ ] **V5.3 · Gate G1: escritura de Apollo e2e.** PENDIENTE, en pausa a propósito
-  (necesita luz verde de Sebastián para tocar la cuenta real de Apollo).
+- [x] **V5.3 · Gate G1: escritura de Apollo e2e.**
   Con contacto de descarte: create-contact, add_contact_ids, verificación de que sin aprobar
   no envía, y limpieza (remove_or_stop + archive). Confirmar subida de copy por API.
   Pendiente de negocio buzón/seat NO bloquea esta prueba (se usa el buzón que haya).
