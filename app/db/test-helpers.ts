@@ -104,6 +104,15 @@ export function crearDbPrueba() {
       UNIQUE(proveedor, id_usuario)
     );
 
+    CREATE TABLE empresa_alias (
+      id_alias INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_empresa TEXT NOT NULL,
+      alias TEXT NOT NULL,
+      fuente TEXT NOT NULL,
+      confianza TEXT NOT NULL DEFAULT 'alta',
+      created_at TEXT
+    );
+
     CREATE TABLE outbox (
       id_outbox INTEGER PRIMARY KEY AUTOINCREMENT,
       entidad TEXT NOT NULL,

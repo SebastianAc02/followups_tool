@@ -1,7 +1,8 @@
 import { and, eq, lte, isNotNull, isNull, desc, sql } from 'drizzle-orm';
 import { db } from './index';
-import { empresa, contacto, empresaUsuarios, toque, syncCambios, conector } from './schema';
+import { empresa, contacto, empresaUsuarios, toque, syncCambios, conector, empresaAlias } from './schema';
 import { cifrar, descifrar } from '../lib/crypto';
+import type { SesionTranscript } from '../core/ports/transcript';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -88,7 +89,14 @@ export function getCuenta(id: string) {
     .all();
 
   const toques = db
-    .select({ fecha: toque.fecha, canal: toque.canal, resultado: toque.resultado, quePaso: toque.quePaso })
+    .select({
+      idToque: toque.idToque,
+      fecha: toque.fecha,
+      canal: toque.canal,
+      resultado: toque.resultado,
+      quePaso: toque.quePaso,
+      transcriptId: toque.transcriptId,
+    })
     .from(toque)
     .where(eq(toque.idEmpresa, id))
     .orderBy(desc(toque.idToque))
@@ -304,4 +312,52 @@ export function leerCredencialConector(proveedor: string, idUsuario?: string): s
     .get();
   if (!fila?.credencialCiphertext) return null;
   return descifrar(fila.credencialCiphertext);
+}
+
+// V3.4: arma los terminos de busqueda para el matcher (nombre oficial, normalizado y
+// TODOS los alias de la empresa -- Granola trae el nombre corto/informal, no el legal
+// completo -- mas el telefono del contacto si el toque quedo enlazado a uno) y la
+// fecha del toque como centro de la ventana de tiempo.
+export function terminosBusquedaTranscript(idToque: number): { terminos: string[]; fecha: string } | null {
+  const t = db
+    .select({ idEmpresa: toque.idEmpresa, idContacto: toque.idContacto, fecha: toque.fecha })
+    .from(toque)
+    .where(eq(toque.idToque, idToque))
+    .get();
+  if (!t || !t.fecha) return null;
+
+  const emp = db
+    .select({ nombreOficial: empresa.nombreOficial, nombreNormalizado: empresa.nombreNormalizado })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, t.idEmpresa))
+    .get();
+
+  const alias = db.select({ alias: empresaAlias.alias }).from(empresaAlias).where(eq(empresaAlias.idEmpresa, t.idEmpresa)).all();
+
+  const contactoFila = t.idContacto
+    ? db.select({ telefono: contacto.telefono }).from(contacto).where(eq(contacto.idContacto, t.idContacto)).get()
+    : undefined;
+
+  const terminos = [emp?.nombreOficial, emp?.nombreNormalizado, ...alias.map((a) => a.alias), contactoFila?.telefono].filter(
+    (v): v is string => Boolean(v && v.trim()),
+  );
+
+  return { terminos: [...new Set(terminos)], fecha: t.fecha };
+}
+
+// V3.4: confirma la candidata elegida por Sebastian. Una sola transaccion (aqui de un
+// solo UPDATE): el puntero al proveedor y el resumen cacheado en quePaso -- sin tabla
+// nueva, se reusan las columnas que ya existen en toque. V3.6 refina que pasa si ya
+// habia una confirmacion previa o el humano ya edito quePaso a mano; esta es la
+// escritura simple inicial.
+export function confirmarTranscript(idToque: number, sesion: SesionTranscript) {
+  db.update(toque)
+    .set({
+      transcriptProveedor: sesion.proveedor,
+      transcriptId: sesion.transcriptId,
+      transcriptUrl: sesion.url,
+      quePaso: sesion.resumen,
+    })
+    .where(eq(toque.idToque, idToque))
+    .run();
 }

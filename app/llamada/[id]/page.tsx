@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { getCuenta } from "../../db/repository";
 import CaptureForm from "./CaptureForm";
-import { RESULTADO_LABELS } from "../../db/validation";
+import BuscarGrabacion from "./BuscarGrabacion";
+import { RESULTADO_LABELS, RESULTADOS_CONTESTO, type Resultado } from "../../db/validation";
 import { requireSession } from "../../lib/session";
 
 // Resultados que cuentan como "algo bueno pasó" (verde --done vía .pos). El resto (incluido
@@ -72,13 +73,16 @@ export default async function Llamada({ params }: { params: Promise<{ id: string
       {toques.length > 0 && (
         <>
           <div className="section-label">Toques anteriores</div>
-          {toques.map((t, i) => (
-            <div className="tq" key={i}>
+          {toques.map((t) => (
+            <div className="tq" key={t.idToque}>
               <span className={`tq-res ${RESULTADOS_POSITIVOS.has(t.resultado ?? "") ? "pos" : "neg"}`}>
                 {labelResultado(t.resultado, t.canal)}
               </span>
               <span className="tq-txt">{t.quePaso ?? "—"}</span>
               <span className="tq-date mono">{(t.fecha ?? "").slice(0, 10)}</span>
+              {t.canal === "llamada" && !t.transcriptId && RESULTADOS_CONTESTO.includes(t.resultado as Resultado) && (
+                <BuscarGrabacion idEmpresa={emp.id} idToque={t.idToque} />
+              )}
             </div>
           ))}
         </>

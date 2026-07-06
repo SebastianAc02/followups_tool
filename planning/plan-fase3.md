@@ -374,20 +374,30 @@ test('sesion de otro dia no entra como candidata', () => {
 });
 ```
 
-- [ ] **Paso 2: Sebastián escribe `agruparCandidatas`.** La IA arma el esqueleto alrededor.
-- [ ] **Paso 3: tests verdes.** `npm test`.
-- [ ] **Paso 4: flujo síncrono, sin tabla nueva.** Acción "buscar grabación" (se dispara solo
-      cuando `canal=llamada` y `resultado` es una variante de contestó): llama al
-      TranscriptAdapter por teléfono del contacto + ventana de tiempo, agrupa con
-      `agruparCandidatas`, y devuelve 0, 1 o varias candidatas a la UI. Ninguna se persiste
-      todavía. Acción "confirmar grabación": recibe la candidata elegida y en una sola
-      transacción escribe `transcriptProveedor/transcriptId/transcriptUrl` y el resumen
-      cacheado en el `toque` ya existente. Si no hay candidatas (Granola no la ha procesado
-      aún), la UI ofrece "buscar de nuevo" más tarde; no hay reintento automático de fondo.
-- [ ] **Paso 5: prueba end-to-end del criterio de cierre:** registrar un toque `contesto_*`,
-      buscar, ver la(s) candidata(s), confirmar una, y verificar que el toque queda con el
-      resumen. Un toque `no_contesto` nunca ofrece buscar.
-- [ ] **Paso 6: commit.** `git commit -m "V3.4: matcher de candidatas por telefono con confirmacion manual"`
+- [x] **Paso 2: `agruparCandidatas` implementada** (`app/core/matcher.ts`). Simplificación
+      respecto al borrador: primero se descartan las candidatas SIN contenido real (resumen
+      vacío, no aportan nada para confirmar), y solo entre las que quedan se aplica la fusión
+      a 1 hora (se queda con el resumen más largo). Ventana máxima de 12h respecto a la fecha
+      del toque. Validado contra el caso real de "Janeth Socia Sas" (dos notas a 11 segundos,
+      ambas sin contenido — no llegarían a esta función porque `no_contesto` nunca busca).
+- [x] **Paso 3: tests verdes.** 5 tests en `matcher.test.ts`, incluido el caso real.
+- [x] **Paso 4: flujo síncrono implementado**, ajustado a la UI real (la ruta `/llamada/[id]`
+      es por EMPRESA, no por toque; no existe pantalla de detalle de un toque individual —
+      se colgó del historial "Toques anteriores" que ya existe en esa misma página):
+      - `terminosBusquedaTranscript(idToque)` (Repository): arma términos (nombre oficial,
+        normalizado, todos los `empresa_alias`, teléfono del contacto) + fecha del toque.
+      - `buscarGrabacionAction(idToque)`: solo lectura, ventana de ±12h, usa el
+        `GranolaAdapter` con la credencial del USUARIO EN SESIÓN (no del toque).
+      - `confirmarGrabacionAction(idEmpresa, idToque, candidata)`: escribe con
+        `confirmarTranscript` (Repository) y revalida la página de la empresa.
+      - `BuscarGrabacion.tsx` (client component): botón "Buscar grabación" solo aparece si
+        `canal=llamada`, resultado en `RESULTADOS_CONTESTO` (nueva constante en
+        `validation.ts`) y el toque no tiene `transcriptId` todavía.
+- [ ] **Paso 5: prueba end-to-end en vivo** — PENDIENTE, requiere sesión real (mismo límite
+      que el cierre de Fase 2: la IA no pide ni maneja la contraseña de Sebastián). Verificado
+      hasta donde se pudo sin login: compila sin errores (`tsc` limpio), la ruta responde y
+      redirige a `/login` sin crashear, 32/32 tests unitarios verdes, sin violación de capas.
+- [x] **Paso 6: commit.**
 
 ### Tarea V3.5 · Worker B7 con heartbeat (solo outbox)
 

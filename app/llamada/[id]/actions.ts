@@ -2,9 +2,11 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { registrarToque } from "../../db/repository";
+import { registrarToque, terminosBusquedaTranscript, confirmarTranscript } from "../../db/repository";
 import { registrarToqueSchema } from "../../db/validation";
 import { requireSession } from "../../lib/session";
+import { crearGranolaAdapter } from "../../adapters/granola";
+import { agruparCandidatas, type CandidataOFusion } from "../../core/matcher";
 
 export async function registrarToqueAction(formData: FormData) {
   await requireSession();
@@ -52,4 +54,34 @@ export async function registrarToqueAction(formData: FormData) {
 
   revalidatePath("/");
   redirect("/");
+}
+
+const VENTANA_HORAS = 12;
+
+function sumarHoras(iso: string, horas: number): string {
+  return new Date(new Date(iso).getTime() + horas * 60 * 60 * 1000).toISOString();
+}
+
+// V3.4: busca en Granola por los terminos de esta empresa/contacto, en una ventana
+// de tiempo alrededor del toque. No persiste nada -- el buscar es de solo lectura,
+// solo confirmarGrabacionAction escribe.
+export async function buscarGrabacionAction(idToque: number): Promise<CandidataOFusion[]> {
+  const sesion = await requireSession();
+  const datos = terminosBusquedaTranscript(idToque);
+  if (!datos || datos.terminos.length === 0) return [];
+
+  const adapter = crearGranolaAdapter(sesion.id);
+  const desde = sumarHoras(datos.fecha, -VENTANA_HORAS);
+  const hasta = sumarHoras(datos.fecha, VENTANA_HORAS);
+  const candidatas = await adapter.buscarCandidatas(datos.terminos, desde, hasta);
+
+  return agruparCandidatas(candidatas, datos.fecha);
+}
+
+// V3.4: escribe la candidata elegida por Sebastian. Nunca se llama sola -- siempre
+// despues de que el humano confirmo en la UI cual de las candidatas es la correcta.
+export async function confirmarGrabacionAction(idEmpresa: string, idToque: number, candidata: CandidataOFusion) {
+  await requireSession();
+  confirmarTranscript(idToque, candidata);
+  revalidatePath(`/llamada/${idEmpresa}`);
 }
