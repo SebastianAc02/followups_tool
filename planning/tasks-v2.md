@@ -222,13 +222,18 @@ SÍ refleja lo construido (se siguió tal cual). Rama sin mergear, para revisió
 
 ## Fase 5 · F3.5 + F4 envío por Apollo y tracking (leer experimento-apollo.md ANTES)
 
-- [ ] **V5.1 · Migración: grupo 3 del Anexo.**
+**Backend (V5.1, V5.2, V5.4, V5.5, V5.6) completo, 2026-07-06.** A pedido explícito
+de Sebastián: solo backend, sin UI (el front de cadencias se está rehaciendo en
+paralelo, ver bitácora). V5.3 (escritura real de Apollo) en pausa a propósito hasta
+que confirme tocar la cuenta real. V5.7 es la acción inmediata siguiente.
+
+- [x] **V5.1 · Migración: grupo 3 del Anexo.**
   `paso_inscripcion` (índice único id_destinatario + id_paso) y `evento_tracking`
   (append-only, proveedor_evento_id para idempotencia, índices por id_paso_inscripcion y
   fecha_evento). Reflejar en schema.ts.
   Lista cuando: apply idempotente; el índice único rechaza duplicado en prueba.
 
-- [ ] **V5.2 · Puerto EnvioAdapter + implementación Apollo.**
+- [x] **V5.2 · Puerto EnvioAdapter + implementación Apollo.**
   design-patterns primero. Contrato de experimento-apollo.md al pie: header `X-Api-Key` (no
   Bearer), `add_contact_ids` exige emailer_campaign_id en el CUERPO + mailbox id,
   search-first por email antes de crear contacto (no gasta créditos ni duplica), no existe
@@ -236,35 +241,36 @@ SÍ refleja lo construido (se siguió tal cual). Rama sin mergear, para revisió
   Lista cuando: pruebas con doble del puerto pasan; el adaptador real autentica y lee (las
   escrituras se prueban en V5.3, no aquí).
 
-- [ ] **V5.3 · Gate G1: escritura de Apollo e2e.**
+- [ ] **V5.3 · Gate G1: escritura de Apollo e2e.** PENDIENTE, en pausa a propósito
+  (necesita luz verde de Sebastián para tocar la cuenta real de Apollo).
   Con contacto de descarte: create-contact, add_contact_ids, verificación de que sin aprobar
   no envía, y limpieza (remove_or_stop + archive). Confirmar subida de copy por API.
   Pendiente de negocio buzón/seat NO bloquea esta prueba (se usa el buzón que haya).
   Lista cuando: el flujo e2e corrió contra la cuenta real y quedó anotado en
   experimento-apollo.md; G1 marcado en planeacion-ejecucion.md.
 
-- [ ] **V5.4 · Push reanudable (B6).**
+- [x] **V5.4 · Push reanudable (B6).**
   Máquina de estados por destinatario en paso_inscripcion (pendiente, enviando, enviada,
   fallo). Sin lote transaccional: la corrida siguiente retoma pendiente/fallo con backoff.
   Idempotencia por índice único + search-first. Tarea del worker.
   Lista cuando: prueba de fallo a mitad de lote de N reanuda solo los que faltan, sin
   duplicar ni contacto ni envío.
 
-- [ ] **V5.5 · Poll de tracking + reply detection.**
+- [x] **V5.5 · Poll de tracking + reply detection.**
   Tarea del worker: emailer_messages/search a evento_tracking (idempotente por
   proveedor_evento_id). Reply de CUALQUIER destinatario pausa la inscripción de inmediato
   (ningún paso futuro sale). Bounce pasa el destinatario a `salio`; si todos salieron, la
   inscripción se pausa con motivo_fin visible.
   Lista cuando: pruebas de reply, bounce y doble poll (mismo evento no se duplica) pasan.
 
-- [ ] **V5.6 · Manual email Tier 1 + freno manual.**
+- [x] **V5.6 · Manual email Tier 1 + freno manual.**
   El paso manual es un FLAG del paso, no una rama de código. Sin revisar: la cadencia ESPERA,
   el paso aparece atrasado, y los offsets siguientes se re-anclan a la fecha real de envío.
   Freno manual de la inscripción tras una llamada.
   Lista cuando: prueba de manual sin revisar 3 días no dispara nada; al aprobar, el
   siguiente paso se calcula desde la fecha real.
 
-- [ ] **V5.7 · Cola del día unificada.**
+- [ ] **V5.7 · Cola del día unificada.** EN CURSO (siguiente accion inmediata).
   Los toques automatizados de hoy (paso_inscripcion) y los manuales conviven en la misma
   cola, con los atrasados visibles.
   Lista cuando: la demo de la fase se ve en una sola pantalla.
