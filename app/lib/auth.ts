@@ -8,8 +8,9 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: 'sqlite' }),
   emailAndPassword: {
     enabled: true,
-    // Alta de usuarios solo por script (V2.3). Sin ALLOW_SIGNUP=1 nadie se registra solo.
-    disableSignUp: process.env.ALLOW_SIGNUP !== '1',
+    // V6: registro self-service real via /register (organizacion-repository controla que
+    // solo se pueda tomar un nombre libre). Ya no depende de ALLOW_SIGNUP.
+    disableSignUp: false,
   },
   user: {
     additionalFields: {
