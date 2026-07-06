@@ -765,6 +765,18 @@ export function listarSegmentos() {
     .all();
 }
 
+// Parte 1 campanas: valores unicos de un campo de texto para poblar el dropdown del
+// builder (estilo Apollo). Solo campos de texto: los numericos se filtran por rango,
+// no por lista, y ademas usuarios vive en otra tabla.
+export function valoresDistintosCampo(campo: CampoSegmento): string[] {
+  const { col, numerico } = COLUMNA_SEGMENTO[campo];
+  if (numerico) {
+    throw new Error(`el campo '${campo}' es numerico: se filtra por rango, no por lista de valores`);
+  }
+  const filas = db.selectDistinct({ v: col }).from(empresa).where(isNotNull(col)).orderBy(col).all();
+  return filas.map((f) => String(f.v));
+}
+
 // V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el
 // puente que V4.5 usa para inscribir "todas las empresas de este segmento".
 export function empresasDeSegmentoGuardado(idSegmento: number) {

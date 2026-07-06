@@ -10,7 +10,8 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { empresasDeSegmento, contarSegmento, guardarSegmento, empresasDeSegmentoGuardado, listarSegmentos } = await import('./repository.ts');
+const { empresasDeSegmento, contarSegmento, guardarSegmento, empresasDeSegmentoGuardado, listarSegmentos, valoresDistintosCampo } =
+  await import('./repository.ts');
 
 function seed() {
   const raw = new Database(dbPath);
@@ -146,6 +147,16 @@ test('entre sobre campo de texto (ciudad) se rechaza en validacion', () => {
 test('es_null sobre usuarios encuentra las empresas sin dato', () => {
   const def = { condiciones: [{ campo: 'usuarios' as const, op: 'es_null' as const }] };
   assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e4', 'e5', 'e6', 'e7']);
+});
+
+test('valoresDistintosCampo devuelve valores unicos ordenados sin null', () => {
+  assert.deepEqual(valoresDistintosCampo('estado'), ['on_hold', 'oportunidad']);
+  assert.deepEqual(valoresDistintosCampo('categoria'), ['isp', 'utility']);
+});
+
+test('valoresDistintosCampo rechaza campos numericos (rango, no dropdown)', () => {
+  assert.throws(() => valoresDistintosCampo('usuarios'));
+  assert.throws(() => valoresDistintosCampo('prioridad'));
 });
 
 test.after(() => {
