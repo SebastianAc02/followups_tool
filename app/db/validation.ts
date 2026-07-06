@@ -54,6 +54,13 @@ export const pasoParseadoSchema = z.object({
   asunto: z.string().min(1).optional(),
   cuerpo: z.string().min(1).optional(),
   objetivo: z.string().min(1).optional(),
+  // esManual (V5.6): paso que espera revision humana antes de contar como enviado
+  // (Tier 1). Default false: todo paso que no lo diga explicito es automatico.
+  esManual: z.boolean().optional().default(false),
+  // Parte 3 campanas: variables/firmaApollo salen del parser ([corchetes]/[[firma]]);
+  // default vacio/false para callers que arman el paso a mano (tests, CSV sin copy).
+  variables: z.array(z.string()).optional().default([]),
+  firmaApollo: z.boolean().optional().default(false),
 });
 
 export const cadenciaParseadaSchema = z.object({

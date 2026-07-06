@@ -75,6 +75,38 @@ test('crearCadencia rechaza una cadencia sin pasos', () => {
   assert.throws(() => crearCadencia({ nombre: 'Vacia', pasos: [] }), /al menos un paso/);
 });
 
+// Parte 3 campanas: firmaApollo y variables (del parser) se persisten en la version
+// default y getCadencia los expone listos para la pantalla del toque.
+test('crearCadencia persiste firmaApollo y variables; getCadencia los expone', () => {
+  const id = crearCadencia({
+    nombre: 'Con copy personalizado',
+    pasos: [
+      {
+        orden: 1,
+        diaOffset: 0,
+        canal: 'correo',
+        asunto: 'Hola [nombre]',
+        cuerpo: 'Somos [empresa].',
+        variables: ['nombre', 'empresa'],
+        firmaApollo: true,
+      },
+    ],
+  });
+
+  const t = getCadencia(id);
+  assert.ok(t);
+  assert.deepEqual(t!.pasos[0].variables, ['nombre', 'empresa']);
+  assert.equal(t!.pasos[0].firmaApollo, true);
+});
+
+test('crearCadencia sin variables/firmaApollo (paso armado a mano) defaultea vacio/false', () => {
+  const id = crearCadencia({ nombre: 'Sin copy extra', pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada' }] });
+  const t = getCadencia(id);
+  assert.ok(t);
+  assert.deepEqual(t!.pasos[0].variables, []);
+  assert.equal(t!.pasos[0].firmaApollo, false);
+});
+
 test('listarCadencias trae el conteo de pasos de cada una', () => {
   const filas = listarCadencias();
   const outbound = filas.find((f) => f.nombre === 'ISP outbound');

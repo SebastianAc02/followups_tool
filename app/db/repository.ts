@@ -602,6 +602,8 @@ export function crearCadencia(parseada: CadenciaParseada): number {
           esDefault: 1,
           activa: 1,
           peso: 1,
+          firmaApollo: paso.firmaApollo ? 1 : 0,
+          variables: paso.variables.length > 0 ? JSON.stringify(paso.variables) : null,
           createdAt: ahora,
           updatedAt: ahora,
         })
@@ -637,7 +639,7 @@ export function getCadencia(idCadencia: number) {
   const cab = db.select().from(cadencia).where(eq(cadencia.idCadencia, idCadencia)).get();
   if (!cab) return null;
 
-  const pasos = db
+  const filas = db
     .select({
       idPaso: pasoCadencia.idPaso,
       orden: pasoCadencia.orden,
@@ -647,12 +649,22 @@ export function getCadencia(idCadencia: number) {
       idVersion: versionPaso.idVersion,
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
+      firmaApollo: versionPaso.firmaApollo,
+      variables: versionPaso.variables,
     })
     .from(pasoCadencia)
     .leftJoin(versionPaso, and(eq(versionPaso.idPaso, pasoCadencia.idPaso), eq(versionPaso.esDefault, 1)))
     .where(eq(pasoCadencia.idCadencia, idCadencia))
     .orderBy(pasoCadencia.orden)
     .all();
+
+  // Parte 3 campanas: variables viaja como JSON en la columna; se parsea de vuelta a
+  // array aca (unico punto de lectura), asi el caller nunca toca JSON.parse directo.
+  const pasos = filas.map((f) => ({
+    ...f,
+    firmaApollo: f.firmaApollo === 1,
+    variables: f.variables ? (JSON.parse(f.variables) as string[]) : [],
+  }));
 
   return { cadencia: cab, pasos };
 }
