@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { colaDelDia, contadoresHoy, listarCadencias, estadoConector } from "./db/repository";
+import { colaDelDia, contadoresHoy, listarCadencias, listarCampanas, estadoConector, getCadencia } from "./db/repository";
 import { CANALES } from "./db/validation";
 import { requireSession } from "./lib/session";
 import TopNav from "./TopNav";
@@ -19,7 +19,9 @@ const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "
 const DIAS = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
 
 function fechaLarga(d: Date) {
-  return `${DIAS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
+  const dia = DIAS[d.getDay()];
+  const texto = `${dia} ${d.getDate()} de ${MESES[d.getMonth()]}`;
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
 export default async function Dashboard() {
@@ -42,7 +44,12 @@ export default async function Dashboard() {
     n: cola.filter((c) => c.estado === p.estado).length,
   })).filter((p) => p.n > 0);
 
-  const cadenciasActivas = listarCadencias().filter((c) => c.activa).length;
+  const cadencias = listarCadencias();
+  const cadenciaTop = cadencias.find((c) => c.activa);
+  const pasosTop = cadenciaTop ? getCadencia(cadenciaTop.id)?.pasos.slice(0, 5) ?? [] : [];
+
+  const campanasActivas = listarCampanas().filter((c) => c.estado === "activa").length;
+
   const conectados = [estadoConector("granola", usuario.id), estadoConector("notion")].filter(
     (e) => e.tieneCredencial,
   ).length;
@@ -51,33 +58,43 @@ export default async function Dashboard() {
     <div className="wrap">
       <TopNav email={usuario.email} />
 
-      <div className="dash-date">{fechaLarga(ahora)}</div>
-
-      <div className="kpi-row">
-        <div className="kpi">
-          <div className="kpi-num mono">{cola.length}</div>
-          <div className="kpi-label">hoy</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-num mono">{vencidos}</div>
-          <div className="kpi-label">vencidos</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi-num mono">{hechoAyer.total}</div>
-          <div className="kpi-label">ayer</div>
-        </div>
-      </div>
+      <div className="dash-masthead">{fechaLarga(ahora)}</div>
 
       {cola.length > 0 ? (
-        <Link href="/cola" className="cta-primary">
-          Entrar a los toques ({cola.length} hoy) →
-        </Link>
+        <p className="dash-brief">
+          <span className="mono dash-brief-num">{cola.length}</span> follow-ups para hoy
+          {vencidos > 0 && (
+            <>
+              , <span className="mono dash-brief-num overdue">{vencidos}</span> ya vencidos
+            </>
+          )}
+          .{" "}
+          {hechoAyer.total > 0 && (
+            <>
+              Ayer cerraste <span className="mono dash-brief-num done">{hechoAyer.total}</span>.
+            </>
+          )}
+        </p>
       ) : (
-        <div className="cta-empty">Sin follow-ups para hoy. Buen trabajo.</div>
+        <p className="dash-brief">
+          Sin follow-ups para hoy. Buen trabajo.
+          {hechoAyer.total > 0 && (
+            <>
+              {" "}
+              Ayer cerraste <span className="mono dash-brief-num done">{hechoAyer.total}</span>.
+            </>
+          )}
+        </p>
+      )}
+
+      {cola.length > 0 && (
+        <Link href="/cola" className="cta-primary">
+          Entrar a los toques →
+        </Link>
       )}
 
       <div className="dash-cols">
-        <div className="dash-col">
+        <div className="dash-col-quiet">
           <div className="section-label">Hoy hiciste</div>
           {hechoHoy.total === 0 ? (
             <div className="dash-muted">Nada todavía.</div>
@@ -89,7 +106,7 @@ export default async function Dashboard() {
             ))
           )}
         </div>
-        <div className="dash-col">
+        <div className="dash-col-quiet">
           <div className="section-label">Pipeline en cola</div>
           {pipeline.length === 0 ? (
             <div className="dash-muted">Nada caliente en cola.</div>
@@ -103,18 +120,33 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      <div className="nav-cards">
-        <Link href="/toque-independiente" className="nav-card">
-          <span className="nav-card-title">Agregar toque</span>
-          <span className="nav-card-meta">manual</span>
-        </Link>
-        <Link href="/cadencias" className="nav-card">
-          <span className="nav-card-title">Cadencias</span>
-          <span className="nav-card-meta mono">{cadenciasActivas} activas</span>
-        </Link>
-        <Link href="/conectores" className="nav-card">
-          <span className="nav-card-title">Conectores</span>
-          <span className="nav-card-meta mono">{conectados} conectados</span>
+      <Link href="/campanas" className="dash-campanas">
+        <div className="dash-campanas-head">
+          <span className="section-label">Campañas</span>
+          <span className="dash-campanas-count mono">{campanasActivas} activas</span>
+        </div>
+        {pasosTop.length > 0 ? (
+          <>
+            <div className="dash-campanas-nombre">{cadenciaTop!.nombre}</div>
+            <div className="nav-cad-timeline">
+              {pasosTop.map((p, i) => (
+                <span key={p.idPaso} style={{ display: "contents" }}>
+                  {i > 0 && <span className="nav-cad-line" />}
+                  <span className="nav-cad-dot" data-canal={p.canal ?? undefined} />
+                </span>
+              ))}
+            </div>
+            <span className="nav-cad-days mono">{pasosTop.map((p) => `D${p.diaOffset}`).join(" · ")}</span>
+          </>
+        ) : (
+          <div className="dash-muted">Sin campañas todavía.</div>
+        )}
+      </Link>
+
+      <div className="dash-utility">
+        <Link href="/toque-independiente">Agregar un toque manual</Link>
+        <Link href="/conectores">
+          Conectores <span className="mono">({conectados} {conectados === 1 ? "conectado" : "conectados"})</span>
         </Link>
       </div>
     </div>
