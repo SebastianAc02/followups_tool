@@ -1,7 +1,96 @@
 # Continuar la implementación · punto de entrada para la próxima sesión
 
 Empieza AQUÍ. Este doc dice en qué estado quedó todo y qué archivos leer, en orden, para
-retomar sin perder contexto. Última sesión: 2026-07-04.
+retomar sin perder contexto. Última sesión: 2026-07-05.
+
+## Lo último (2026-07-04, sesión de la tarde): Turso para el jefe + Fase 3 en pausa
+
+A media tarea de diseñar el matcher de Fase 3 (ver más abajo), Sebastián pidió subir de
+prioridad el deploy de la base a Turso para darle acceso de solo lectura a su jefe por MCP.
+Se hizo, quedó funcionando, y el diseño del matcher se dejó a medias (ver sección siguiente).
+Detalle completo de cómo se resolvió cada parte en la bitácora de `planeacion-ejecucion.md`;
+aquí solo el estado y lo que falta.
+
+**Turso: HECHO, con matices.**
+- Base creada (`isps-onepay`, org de Sebastián, grupo `aws-us-east-1`), cargada con un dump
+  de HOY de `isps.db` (1959 empresas, 213 contactos, 181 toques, 3247 alias, 1835 sync_cambios).
+  Verificado byte a byte contra el local (ñ, tildes, dobles espacios, saltos de línea): idéntico.
+- **Es una foto fija, NO queda en vivo.** La app y los scripts siguen escribiendo solo al
+  archivo local. El jefe fue avisado explícitamente de que es "un primer vistazo, se pone
+  100% en vivo esta semana" — no darlo por sentado como producción real sin refrescarlo.
+- **Pendiente, si se quiere mantener fresco sin hacer el corte completo:** un script de
+  "push" repetible (dry-run/apply, mismo patrón del proyecto) que vacíe y recargue las
+  tablas de Turso desde `isps.db`, reusando la MISMA base/URL/token (para que el jefe no
+  tenga que tocar su config de Claude cada vez). Tres niveles posibles, de menor a mayor
+  esfuerzo: push manual bajo demanda, push automático por cron/launchd, o el corte completo
+  a escritura en vivo (swap de `app/db/index.ts` + reescribir los scripts Python de
+  migración/seed que hoy usan `sqlite3.connect()` directo — ninguno le habla a Turso).
+  Nada de esto se construyó todavía, solo se dejó diseñado en la conversación.
+- **Notas técnicas para quien retome esto:** el flag `--from-file` de `turso db create`
+  reportó éxito pero NO importó nada (bug real del CLI, base quedó vacía). El fix fue
+  generar un dump plano (`sqlite3 isps.db .dump`) y cargarlo con `turso db shell isps-onepay
+  < dump.sql`. Ese dump usa `unistr('...')` para escapar saltos de línea (sqlite3 3.51+),
+  que Turso no soporta — hubo que decodificarlo a string plano antes de cargar. El script
+  que hace esa conversión no quedó en el repo (era un ajuste puntual de scratchpad); si se
+  vuelve a necesitar (para el "push" repetible de arriba), hay que rehacerlo o pedírmelo.
+
+**MCP para el jefe: EN PAUSA, sin resolver.**
+- El paquete `mcp-turso` (nbbaier) tiene DOS bugs confirmados en vivo: (1) el bin de npm no
+  trae shebang (`#!/usr/bin/env node`), así que `npx -y mcp-turso` lo ejecuta con bash en
+  vez de node, y si hay ImageMagick instalado (como en la máquina de Sebastián) dispara su
+  comando `import` por accidente; (2) aun cargándolo directo con `node` (saltándose el bug
+  del shebang), se conecta bien a Turso pero se cae con un "Unhandled rejection" vacío justo
+  después y se cierra solo. No es un problema de credenciales ni de la base — es el paquete.
+- Decisión pendiente, NO tomada: (a) probar `mcp-turso-cloud` (spences10) — pide un token de
+  API de TODA la organización de Turso, no solo esta base, más alcance del ideal; o
+  (b) escribir un servidor MCP propio, chico (50-80 líneas), con el SDK oficial
+  `@modelcontextprotocol/sdk` + `@libsql/client` — la recomendación en la mesa, dado que ya
+  se descartaron dos bugs de un paquete de terceros. Retomar preguntando a Sebastián cuál
+  prefiere antes de escribir código.
+
+## Fase 3 (matcher de Granola): diseño a medias, NO tocar código todavía
+
+Antes de la interrupción de Turso, se estaba refinando el algoritmo real del matcher/ingest
+(V3.4 + V3.6 de `tasks-v2.md`) contra datos reales de Granola (verificados en vivo con el
+conector MCP de Granola ya conectado). Decisiones YA confirmadas por Sebastián:
+
+- **Teléfono manda siempre** sobre el nombre del título de Granola (se extrae de
+  `private_notes` o, si no hay contacto conocido, del título mismo) para matchear contra
+  `contacto.telefono`.
+- **Bloques de 15 minutos:** sesiones del mismo teléfono separadas por menos de 15 min se
+  agrupan como el mismo bloque de intentos de hoy (para no mezclar con la llamada de otro día).
+- **Fusión a 1 hora:** dos sesiones CON contenido real del mismo teléfono a menos de 1 hora
+  de diferencia se tratan como la MISMA llamada real partida por Granola en dos documentos —
+  se fusionan en un solo toque, no dos (invariante: nunca dos toques por la misma sesión).
+
+**Pregunta SIN responder, bloquea seguir con V3.4/V3.6:** cómo detectar que una sesión NO
+tuvo contenido real (buzón de voz, no contestó). La data real muestra que Granola casi
+nunca deja el campo `summary` literalmente vacío para llamadas fallidas — casi siempre
+escribe un párrafo describiendo el fracaso (en español o inglés, sin patrón de texto fijo).
+Recomendación dada, sin confirmar: tratar como "sin contenido" cualquier resumen que incluya
+el pie de página en cursiva que Granola agrega cuando no hay conversación real ("*No hay
+contenido que resumir*" / "*Granola es más útil con...*" o su equivalente en inglés), no
+solo el placeholder literal "No summary".
+
+**Actualización 2026-07-04, sesión siguiente: diseño del matcher CERRADO y `plan-fase3.md`
+YA reescrito.** La pregunta del "vacío" quedó resuelta de raíz, no con un heurístico de
+texto: el matching es on-demand, no de fondo. Se dispara solo cuando Sebastián registra un
+toque `canal=llamada` con `resultado` en variante de "contestó" (`contesto_reunion`,
+`contesto_sigue_seguimiento`, `contesto_no`); busca en Granola por teléfono del contacto en
+una ventana de tiempo cerca del toque, agrupa candidatas (bloques de 15 min, fusión a 1
+hora), y SIEMPRE pide confirmación de Sebastián antes de guardar el resumen — incluso con
+una sola candidata obvia. `no_contesto` nunca toca Granola; si dejó correo de voz, va como
+texto libre en `quePaso` (sin columna nueva). Consecuencia: no hace falta worker de fondo ni
+tabla de candidatos pendientes para esto; el worker de V3.5 queda dedicado solo al drenado
+de outbox a Notion. Detalle completo y el porqué de cada decisión en la sección "Decisión de
+diseño" de `plan-fase3.md`, justo antes de la Tarea 0a. También se agregó una tarea nueva,
+V3.9 (antes del cierre V3.10): un botón "agregar toque" independiente de la cola del día,
+para contactos que no son leads — pedido explícito de Sebastián, dejado para el final a
+propósito porque no bloquea nada del resto.
+
+Con esto, ya se puede arrancar Fase 3 por `plan-fase3.md` en orden: Tarea 0a (mergear
+`fase2-auth`) -> Tarea 0b (tour guiado) -> V3.1 -> V3.2 -> V3.3 -> V3.4 -> V3.5 -> V3.6 ->
+V3.7 -> V3.8 -> V3.9 (toque independiente) -> V3.10 (cierre).
 
 ## Dónde estamos
 
@@ -14,8 +103,9 @@ retomar sin perder contexto. Última sesión: 2026-07-04.
   canal real del toque, las 4 salidas cerradas validadas con Zod dentro del Repository, KDM a
   `contacto`, tap de WhatsApp/correo, contadores del día. 8/8 tests y tsc limpios en main.
   Repo en github.com/SebastianAc02/followups_tool (main al día).
-- **Fase 2 (Auth, B3) COMPLETA en la rama `fase2-auth`, SIN MERGEAR** (pendiente de que
-  Sebastián la revise localmente, mismo patrón que Fase 1). Better Auth email+password,
+- **Fase 2 (Auth, B3) COMPLETA Y MERGEADA A MAIN** (commit `05f9d39`; este doc decía
+  "SIN MERGEAR" pero eso ya estaba viejo — corregido 2026-07-05 al ejecutar la Tarea 0a de
+  Fase 3: no había rama `fase2-auth` que mergear, main ya la tenía). Better Auth email+password,
   tablas generadas por su CLI en la misma isps.db, gate de sesión en toda página/action,
   owner sale de la sesión (ya no hardcodeado ni del form), flag admin. Refinamiento sobre B3
   (documentado como B1.c en plan-claude-v2.md): `empresa.owner` guarda nombres, no emails, y
@@ -27,15 +117,33 @@ retomar sin perder contexto. Última sesión: 2026-07-04.
 
 ## Próxima acción
 
-**Arrancar Fase 3 (F1: conectores + ingest Granola + outbox Notion) por
-`planning/tasks-v2.md`, empezando por V3.1.** Orden: V3.1 (migración conector+outbox) ->
-V3.2 (cifrado AES-256-GCM) -> V3.3 (puerto TranscriptAdapter + GranolaAdapter) -> V3.4
-(matcher + cola de revisión) -> V3.5 (worker B7) -> V3.6 (ingest idempotente) -> V3.7
-(outbox a Notion) -> V3.8 (pantalla de conectores) -> V3.9 (cierre). Antes de tocar código:
-mergear (o al menos revisar) la rama `fase2-auth` a main, porque Fase 3 depende de que
-exista sesión (el owner real ya no es hardcodeado). Detalle completo de cómo se ejecutó la
-Fase 2 (decisiones, fixes de review, verificación en vivo con el navegador) en la bitácora
-de `planeacion-ejecucion.md`.
+**Actualizada 2026-07-05 — diseño del matcher CERRADO, `plan-fase3.md` reescrito, Tarea 0a
+CERRADA.** Todo lo pendiente de antes (pregunta del "vacío", reescribir V3.4/V3.6, mergear
+`fase2-auth`) ya se hizo — ver "Lo último" y "Fase 3" arriba para el detalle completo.
+
+**Lo único pendiente para arrancar Fase 3 de verdad:** Tarea 0b, el tour guiado (solo
+lectura, 30-45 min, pedido explícito de Sebastián) por `app/db/schema.ts`,
+`app/db/repository.ts`, el flujo completo de un toque, y las tablas de Better Auth — antes
+de escribir una línea de código de Fase 3. Se dejó para la siguiente sesión a pedido de
+Sebastián (2026-07-05, fin de sesión).
+
+Después del tour, orden de ejecución por `plan-fase3.md`: V3.1 (migración conector+outbox)
+-> V3.2 (cifrado AES-256-GCM) -> V3.3 (puerto TranscriptAdapter + GranolaAdapter) -> V3.4
+(matcher de candidatas por teléfono + confirmación) -> V3.5 (worker, solo outbox) -> V3.6
+(confirmación repetible) -> V3.7 (outbox a Notion) -> V3.8 (pantalla de conectores) -> V3.9
+(toque independiente, feature nueva dejada para el final) -> V3.10 (cierre de fase).
+
+**Nota de proceso:** en esta sesión salió feedback explícito de Sebastián sobre CÓMO
+trabajar, no solo qué construir — ya está en CLAUDE.md ("Modo learning activo") y en la
+memoria de la IA: mantener el formato de Insights/Tu código/checkpoints incluso cuando pide
+ir rápido ("rápido" es apretar el loop de preguntas, no botar el formato).
+
+Aparte, sin bloquear lo anterior: decidir el camino del MCP para el jefe (servidor propio
+vs `mcp-turso-cloud`) cuando haya espacio para eso — no es parte de las 8 fases del roadmap
+original, es infraestructura transversal que se coló por prioridad de negocio.
+
+Detalle completo de cómo se ejecutó la Fase 2 (decisiones, fixes de review, verificación en
+vivo con el navegador) en la bitácora de `planeacion-ejecucion.md`.
 
 ## Qué leer, en orden
 
@@ -72,6 +180,14 @@ Sebastián), `planning/research-conectores.md` (research de Apollo/Granola/Lemli
   con Camilo, no en código.
 - **Experimento Apollo más detallado (futuro):** envío real e2e, tracking poblando, sending
   schedules. Va antes de dar por cerrada la Fase 5, no antes de empezarla.
+- **Pull Notion -> DB (nightly/semanal), pedido explícito de Sebastián (2026-07-05):** hoy
+  `CLAUDE.md` dice "Fuera de v1: sync de dos vías" y eso sigue siendo cierto para lo que se
+  construye en Fase 3 (V3.7 es DB -> Notion únicamente, vía outbox). Sebastián quiere,
+  DESPUÉS, que Notion también pueble la DB de vuelta (una corrida nocturna o semanal). No se
+  construye todavía porque él mismo marcó DB -> Notion como lo prioritario ahora. Cuando se
+  retome: es un cambio real al invariante de la constitución, hay que actualizar `CLAUDE.md`
+  a propósito (no como efecto colateral de una tarea), y pensar reconciliación (qué gana si
+  DB y Notion cambiaron el mismo campo entre corridas).
 
 ## El criterio (si se retoma la skill criterion-plan)
 

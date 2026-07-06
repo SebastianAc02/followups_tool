@@ -21,6 +21,10 @@ export const empresa = sqliteTable('empresa', {
   proximoFollowUpFecha: text('proximo_follow_up_fecha'),
   proximoPaso: text('proximo_paso'),
   proximoCanal: text('proximo_canal'),
+  // V3.1b: enlace directo a la pagina real de Notion. Se llena una vez (script de
+  // enlace, V3.7) y de ahi en adelante el sync escribe por ID, nunca busca por nombre
+  // (hay nombres normalizados duplicados reales en la base).
+  notionPageId: text('notion_page_id'),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });
@@ -85,11 +89,14 @@ export const syncCambios = sqliteTable('sync_cambios', {
   detalle: text('detalle'),
 });
 
-// V3.1: credenciales de conectores externos (Granola, Notion). credencialCiphertext
-// nunca guarda texto plano (V3.2 cifra antes de escribir vía Repository).
+// V3.1 + V3.1b: credenciales de conectores externos. Granola es PERSONAL (cada
+// usuario conecta su propia cuenta grabadora): una fila por (proveedor, idUsuario).
+// Notion es GLOBAL (un solo CRM para todos, solo admin lo edita): idUsuario NULL.
+// credencialCiphertext nunca guarda texto plano (V3.2 cifra antes de escribir).
 export const conector = sqliteTable('conector', {
   idConector: integer('id_conector').primaryKey({ autoIncrement: true }),
-  proveedor: text('proveedor').notNull().unique(),
+  proveedor: text('proveedor').notNull(),
+  idUsuario: text('id_usuario'),
   credencialCiphertext: text('credencial_ciphertext'),
   estado: text('estado').notNull().default('sin_credencial'),
   ultimaCorrida: text('ultima_corrida'),

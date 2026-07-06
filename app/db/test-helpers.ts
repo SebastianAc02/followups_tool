@@ -35,6 +35,7 @@ export function crearDbPrueba() {
       proximo_follow_up_fecha TEXT,
       proximo_paso TEXT,
       proximo_canal TEXT,
+      notion_page_id TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -92,13 +93,15 @@ export function crearDbPrueba() {
 
     CREATE TABLE conector (
       id_conector INTEGER PRIMARY KEY AUTOINCREMENT,
-      proveedor TEXT NOT NULL UNIQUE,
+      proveedor TEXT NOT NULL,
+      id_usuario TEXT,
       credencial_ciphertext TEXT,
       estado TEXT NOT NULL DEFAULT 'sin_credencial',
       ultima_corrida TEXT,
       ultimo_resultado TEXT,
       created_at TEXT,
-      updated_at TEXT
+      updated_at TEXT,
+      UNIQUE(proveedor, id_usuario)
     );
 
     CREATE TABLE outbox (

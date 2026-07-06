@@ -35,4 +35,24 @@ test('leerCredencialConector devuelve null si el proveedor no tiene credencial',
   assert.strictEqual(leerCredencialConector('no-existe'), null);
 });
 
+test('dos usuarios tienen cada uno su propia credencial de granola sin pisarse', () => {
+  guardarCredencialConector('granola', 'key-sebastian', 'user-sebastian');
+  guardarCredencialConector('granola', 'key-felipe', 'user-felipe');
+
+  assert.strictEqual(leerCredencialConector('granola', 'user-sebastian'), 'key-sebastian');
+  assert.strictEqual(leerCredencialConector('granola', 'user-felipe'), 'key-felipe');
+});
+
+test('guardar credencial global (sin idUsuario) dos veces actualiza la misma fila, no duplica', () => {
+  guardarCredencialConector('notion', 'token-viejo');
+  guardarCredencialConector('notion', 'token-nuevo');
+
+  assert.strictEqual(leerCredencialConector('notion'), 'token-nuevo');
+
+  const raw = new Database(dbPath);
+  const n = (raw.prepare("SELECT count(*) as n FROM conector WHERE proveedor = 'notion'").get() as { n: number }).n;
+  raw.close();
+  assert.strictEqual(n, 1);
+});
+
 test.after(() => borrarDbPrueba(dbPath));
