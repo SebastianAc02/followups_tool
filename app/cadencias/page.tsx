@@ -26,7 +26,7 @@ export default async function Cadencias({ searchParams }: { searchParams: Promis
   return (
     <div className="wrap">
       <Link href="/" className="back">
-        ← Cola
+        ← Inicio
       </Link>
       <div className="h-title" style={{ marginBottom: 24 }}>
         Cadencias

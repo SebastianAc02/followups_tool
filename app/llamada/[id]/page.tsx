@@ -33,7 +33,7 @@ export default async function Llamada({ params }: { params: Promise<{ id: string
   if (!emp) {
     return (
       <div className="wrap">
-        <Link href="/" className="back">← Cola</Link>
+        <Link href="/cola" className="back">← Cola</Link>
         <p className="empty">Cuenta no encontrada.</p>
       </div>
     );
@@ -43,7 +43,7 @@ export default async function Llamada({ params }: { params: Promise<{ id: string
 
   return (
     <div className="wrap">
-      <Link href="/" className="back">← Cola</Link>
+      <Link href="/cola" className="back">← Cola</Link>
 
       <div className="call-head">
         <h1 className="call-title">{emp.nombre}</h1>
