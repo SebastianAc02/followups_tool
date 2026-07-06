@@ -11,6 +11,17 @@ export type PasoParseado = {
   asunto?: string;
   cuerpo?: string;
   objetivo?: string;
+  // Parte 3 campanas: variables = nombres [entre-corchetes] hallados en asunto/cuerpo
+  // (personalizacion), en orden de primera aparicion, sin repetidos. firmaApollo = si
+  // el copy trae la directiva [[firma]] (se quita del texto, no es una variable).
+  // Opcionales (como asunto/cuerpo/objetivo): un caller que arma el paso a mano
+  // (tests, scripts) no esta obligado a pasarlos; el Repository los defaultea.
+  variables?: string[];
+  firmaApollo?: boolean;
+  // esManual (V5.6): paso que espera revision humana (Tier 1) antes de contar como
+  // enviado. Opcional (default false en el Repository): igual que arriba, un caller
+  // que no pasa el campo simplemente obtiene un paso automatico.
+  esManual?: boolean;
 };
 
 export type CadenciaParseada = {
@@ -18,6 +29,46 @@ export type CadenciaParseada = {
   descripcion?: string;
   pasos: PasoParseado[];
 };
+
+// Directiva de firma: DOBLE corchete, para no confundirse con una variable de
+// personalizacion de un solo corchete. Sin flag /g: .test()/.replace() no arrastran
+// lastIndex entre llamadas (evita el bug clasico de regex global con estado).
+const FIRMA_DIRECTIVA = /\[\[\s*firma\s*\]\]/i;
+
+function limpiarFirma(texto: string): { texto: string; firmaApollo: boolean } {
+  const firmaApollo = FIRMA_DIRECTIVA.test(texto);
+  return { texto: texto.replace(FIRMA_DIRECTIVA, '').trim(), firmaApollo };
+}
+
+// Corre DESPUES de limpiar la firma: asi "[[firma]]" nunca se cuela como variable
+// "firma" (un solo corchete interior SI matchea el patron de variable).
+function extraerVariables(texto: string): string[] {
+  const vistas = new Set<string>();
+  const out: string[] = [];
+  for (const m of texto.matchAll(/\[([^[\]]+)\]/g)) {
+    const nombre = m[1].trim();
+    if (!vistas.has(nombre)) {
+      vistas.add(nombre);
+      out.push(nombre);
+    }
+  }
+  return out;
+}
+
+// Punto unico donde CSV y Markdown procesan asunto/cuerpo: quita [[firma]] de ambos,
+// junta el flag, y extrae las variables del texto YA limpio.
+function procesarCopy(asunto: string | undefined, cuerpo: string | undefined): { asunto?: string; cuerpo?: string; variables: string[]; firmaApollo: boolean } {
+  const rAsunto = asunto != null ? limpiarFirma(asunto) : null;
+  const rCuerpo = cuerpo != null ? limpiarFirma(cuerpo) : null;
+  const asuntoLimpio = rAsunto ? rAsunto.texto || undefined : undefined;
+  const cuerpoLimpio = rCuerpo ? rCuerpo.texto || undefined : undefined;
+  return {
+    asunto: asuntoLimpio,
+    cuerpo: cuerpoLimpio,
+    variables: extraerVariables(`${asuntoLimpio ?? ''}\n${cuerpoLimpio ?? ''}`),
+    firmaApollo: Boolean(rAsunto?.firmaApollo || rCuerpo?.firmaApollo),
+  };
+}
 
 // --- CSV -------------------------------------------------------------------
 
@@ -103,14 +154,19 @@ export function parsearCadenciaCsv(texto: string, meta: { nombre: string; descri
 
   const pasos: PasoParseado[] = filas.slice(1).map((f, k) => {
     const orden = iOrden >= 0 && (f[iOrden] ?? '').trim() ? entero(f[iOrden], `orden (fila ${k + 2})`) : k + 1;
+    const asuntoCrudo = iAsunto >= 0 ? (f[iAsunto] ?? '').trim() || undefined : undefined;
+    // cuerpo se preserva tal cual (solo se recorta el borde), puede ser multilinea.
+    const cuerpoCrudo = iCuerpo >= 0 ? (f[iCuerpo] ?? '').trim() || undefined : undefined;
+    const copy = procesarCopy(asuntoCrudo, cuerpoCrudo);
     return {
       orden,
       diaOffset: entero(f[iOffset], `dia_offset (fila ${k + 2})`),
       canal: (f[iCanal] ?? '').trim(),
-      asunto: iAsunto >= 0 ? (f[iAsunto] ?? '').trim() || undefined : undefined,
-      // cuerpo se preserva tal cual (solo se recorta el borde), puede ser multilinea.
-      cuerpo: iCuerpo >= 0 ? (f[iCuerpo] ?? '').trim() || undefined : undefined,
+      asunto: copy.asunto,
+      cuerpo: copy.cuerpo,
       objetivo: iObjetivo >= 0 ? (f[iObjetivo] ?? '').trim() || undefined : undefined,
+      variables: copy.variables,
+      firmaApollo: copy.firmaApollo,
     };
   });
 
@@ -145,12 +201,17 @@ export function parsearCadenciaMarkdown(texto: string): CadenciaParseada {
     if (!mDia) throw new Error(`Paso sin "Día N" en el encabezado: "${heading}"`);
     const canal = (partes[1] ?? '').trim();
     if (!canal) throw new Error(`Paso sin canal en el encabezado: "${heading}"`);
+    const asuntoCrudo = partes.slice(2).join(' · ').trim() || undefined;
+    const cuerpoCrudo = cuerpo.join('\n').trim() || undefined;
+    const copy = procesarCopy(asuntoCrudo, cuerpoCrudo);
     pasos.push({
       orden: pasos.length + 1,
       diaOffset: Number(mDia[1]),
       canal,
-      asunto: partes.slice(2).join(' · ').trim() || undefined,
-      cuerpo: cuerpo.join('\n').trim() || undefined,
+      asunto: copy.asunto,
+      cuerpo: copy.cuerpo,
+      variables: copy.variables,
+      firmaApollo: copy.firmaApollo,
     });
     heading = null;
     cuerpo = [];

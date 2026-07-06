@@ -157,6 +157,12 @@ export const versionPaso = sqliteTable('version_paso', {
   esDefault: integer('es_default').notNull().default(0),
   activa: integer('activa').notNull().default(1),
   peso: integer('peso').notNull().default(1),
+  // Parte 3 campanas: firmaApollo es el flag "incluir firma" que puso el parser
+  // (directiva [[firma]] en el markdown, ver cadencia-parser.ts). variables es el
+  // JSON de los nombres [entre-corchetes] detectados en asunto/cuerpo, para que la
+  // UI del toque sepa que personalizar sin volver a parsear texto.
+  firmaApollo: integer('firma_apollo').notNull().default(0),
+  variables: text('variables'),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });

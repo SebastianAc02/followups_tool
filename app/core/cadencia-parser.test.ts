@@ -17,7 +17,16 @@ test('CSV: encabezado + pasos, orden explicito, columnas en cualquier orden', ()
   assert.equal(cad.nombre, 'ISP outbound');
   assert.equal(cad.descripcion, 'cadencia de prueba');
   assert.equal(cad.pasos.length, 2);
-  assert.deepEqual(cad.pasos[0], { orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Primer toque', cuerpo: 'Hola queria presentarme', objetivo: undefined });
+  assert.deepEqual(cad.pasos[0], {
+    orden: 1,
+    diaOffset: 0,
+    canal: 'correo',
+    asunto: 'Primer toque',
+    cuerpo: 'Hola queria presentarme',
+    objetivo: undefined,
+    variables: [],
+    firmaApollo: false,
+  });
   assert.equal(cad.pasos[1].asunto, undefined, 'asunto vacio en whatsapp queda undefined');
   assert.equal(cad.pasos[1].canal, 'whatsapp');
 });
@@ -65,8 +74,60 @@ test('Markdown: titulo + descripcion + pasos por dia/canal/asunto, orden inferid
   assert.equal(cad.nombre, 'Cadencia ISP');
   assert.equal(cad.descripcion, 'Esta es la descripcion\nen dos lineas');
   assert.equal(cad.pasos.length, 2);
-  assert.deepEqual(cad.pasos[0], { orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Me presento', cuerpo: 'Hola, soy Sebastian.\nTrabajo con ISPs.' });
-  assert.deepEqual(cad.pasos[1], { orden: 2, diaOffset: 3, canal: 'whatsapp', asunto: undefined, cuerpo: 'Segui por aca, avisame.' });
+  assert.deepEqual(cad.pasos[0], {
+    orden: 1,
+    diaOffset: 0,
+    canal: 'correo',
+    asunto: 'Me presento',
+    cuerpo: 'Hola, soy Sebastian.\nTrabajo con ISPs.',
+    variables: [],
+    firmaApollo: false,
+  });
+  assert.deepEqual(cad.pasos[1], {
+    orden: 2,
+    diaOffset: 3,
+    canal: 'whatsapp',
+    asunto: undefined,
+    cuerpo: 'Segui por aca, avisame.',
+    variables: [],
+    firmaApollo: false,
+  });
+});
+
+// Parte 3 campanas: personalizacion ([variable]) y firma Apollo ([[firma]]).
+test('Markdown: [variable] se detecta y NO se borra del cuerpo (se muestra resaltada en la UI)', () => {
+  const md = ['# C', '## Día 0 · correo · Hola [nombre]', 'Hola [nombre], somos de [empresa_propia].'].join('\n');
+  const cad = parsearCadenciaMarkdown(md);
+  assert.equal(cad.pasos[0].cuerpo, 'Hola [nombre], somos de [empresa_propia].');
+  assert.deepEqual(cad.pasos[0].variables, ['nombre', 'empresa_propia']);
+});
+
+test('Markdown: variable repetida en asunto y cuerpo aparece una sola vez', () => {
+  const md = ['# C', '## Día 0 · correo · Hola [nombre]', 'Que tal, [nombre].'].join('\n');
+  const cad = parsearCadenciaMarkdown(md);
+  assert.deepEqual(cad.pasos[0].variables, ['nombre']);
+});
+
+test('Markdown: [[firma]] activa firmaApollo y se quita del cuerpo (no es variable)', () => {
+  const md = ['# C', '## Día 0 · correo · Asunto', 'Cuerpo del correo.', '[[firma]]'].join('\n');
+  const cad = parsearCadenciaMarkdown(md);
+  assert.equal(cad.pasos[0].firmaApollo, true);
+  assert.equal(cad.pasos[0].cuerpo, 'Cuerpo del correo.');
+  assert.deepEqual(cad.pasos[0].variables, []);
+});
+
+test('Markdown: sin [[firma]] el paso nace firmaApollo=false', () => {
+  const md = ['# C', '## Día 0 · correo · Asunto', 'Cuerpo sin firma.'].join('\n');
+  const cad = parsearCadenciaMarkdown(md);
+  assert.equal(cad.pasos[0].firmaApollo, false);
+});
+
+test('CSV: tambien detecta variables y firma en asunto/cuerpo', () => {
+  const csv = 'dia_offset,canal,asunto,cuerpo\n0,correo,Hola [nombre],"Cuerpo [nombre].\n[[firma]]"';
+  const cad = parsearCadenciaCsv(csv, { nombre: 'X' });
+  assert.deepEqual(cad.pasos[0].variables, ['nombre']);
+  assert.equal(cad.pasos[0].firmaApollo, true);
+  assert.equal(cad.pasos[0].cuerpo, 'Cuerpo [nombre].');
 });
 
 test('Markdown: acepta "|" como separador ademas de "·"', () => {

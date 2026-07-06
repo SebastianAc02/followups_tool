@@ -152,6 +152,8 @@ export function crearDbPrueba() {
       es_default INTEGER NOT NULL DEFAULT 0,
       activa INTEGER NOT NULL DEFAULT 1,
       peso INTEGER NOT NULL DEFAULT 1,
+      firma_apollo INTEGER NOT NULL DEFAULT 0,
+      variables TEXT,
       created_at TEXT,
       updated_at TEXT
     );
