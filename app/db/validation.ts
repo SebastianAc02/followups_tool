@@ -42,6 +42,28 @@ export const kdmSchema = z.object({
     .optional(),
 });
 
+// V4.2: validacion de dominio de una cadencia parseada, antes de persistirla. El
+// parser (app/core/cadencia-parser.ts) solo hace estructura; aqui se cierra la regla:
+// canal es una de las 4 salidas conocidas, offsets enteros no negativos, al menos un
+// paso. Vive junto al Repository (misma fuente de verdad que registrarToqueSchema),
+// no en el core, para que el parser siga puro.
+export const pasoParseadoSchema = z.object({
+  orden: z.number().int().nonnegative(),
+  diaOffset: z.number().int().nonnegative(),
+  canal: z.enum(CANALES),
+  asunto: z.string().min(1).optional(),
+  cuerpo: z.string().min(1).optional(),
+  objetivo: z.string().min(1).optional(),
+});
+
+export const cadenciaParseadaSchema = z.object({
+  nombre: z.string().min(1),
+  descripcion: z.string().min(1).optional(),
+  pasos: z.array(pasoParseadoSchema).min(1, 'una cadencia necesita al menos un paso'),
+});
+
+export type CadenciaParseadaInput = z.infer<typeof cadenciaParseadaSchema>;
+
 export const registrarToqueSchema = z
   .object({
     idEmpresa: z.string().min(1),

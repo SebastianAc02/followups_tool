@@ -1,13 +1,27 @@
 import { and, eq, lte, isNotNull, isNull, desc, sql } from 'drizzle-orm';
 import { db } from './index';
-import { empresa, contacto, empresaUsuarios, toque, syncCambios, conector, empresaAlias, outbox } from './schema';
+import {
+  empresa,
+  contacto,
+  empresaUsuarios,
+  toque,
+  syncCambios,
+  conector,
+  empresaAlias,
+  outbox,
+  cadencia,
+  pasoCadencia,
+  versionPaso,
+} from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
+import type { CadenciaParseada } from '../core/cadencia-parser';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
+  cadenciaParseadaSchema,
   CANALES,
   RESULTADOS,
   type Canal,
@@ -530,4 +544,98 @@ export function marcarOutboxFallido(idOutbox: number, intentos: number, proximoI
       })
       .run();
   });
+}
+
+// V4.2: crea una cadencia template desde una estructura ya parseada (CSV o Markdown, ver
+// app/core/cadencia-parser.ts). Valida con Zod ANTES de escribir (misma garantia de
+// dominio que registrarToque: canal cerrado, offsets enteros, al menos un paso). Por cada
+// paso crea su version_paso default, que es donde vive el copy (asunto/cuerpo): el paso
+// solo guarda orden/dia/canal/objetivo. Todo en una transaccion; devuelve id_cadencia.
+export function crearCadencia(parseada: CadenciaParseada): number {
+  const val = cadenciaParseadaSchema.parse(parseada);
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    const insCad = tx
+      .insert(cadencia)
+      .values({ nombre: val.nombre, descripcion: val.descripcion ?? null, activa: 1, createdAt: ahora, updatedAt: ahora })
+      .run();
+    const idCadencia = Number(insCad.lastInsertRowid);
+
+    for (const paso of val.pasos) {
+      const insPaso = tx
+        .insert(pasoCadencia)
+        .values({
+          idCadencia,
+          orden: paso.orden,
+          diaOffset: paso.diaOffset,
+          canal: paso.canal,
+          objetivo: paso.objetivo ?? null,
+          createdAt: ahora,
+        })
+        .run();
+      const idPaso = Number(insPaso.lastInsertRowid);
+
+      tx.insert(versionPaso)
+        .values({
+          idPaso,
+          nombre: 'default',
+          asunto: paso.asunto ?? null,
+          cuerpo: paso.cuerpo ?? null,
+          esDefault: 1,
+          activa: 1,
+          peso: 1,
+          createdAt: ahora,
+          updatedAt: ahora,
+        })
+        .run();
+    }
+
+    return idCadencia;
+  });
+}
+
+// V4.2: lista las cadencias como templates, con el conteo de pasos de cada una. Para la
+// pantalla de "mis cadencias" (V4.7) y para elegir cadencia al armar una campana (V4.5).
+export function listarCadencias() {
+  return db
+    .select({
+      id: cadencia.idCadencia,
+      nombre: cadencia.nombre,
+      descripcion: cadencia.descripcion,
+      activa: cadencia.activa,
+      pasos: sql<number>`count(${pasoCadencia.idPaso})`,
+    })
+    .from(cadencia)
+    .leftJoin(pasoCadencia, eq(pasoCadencia.idCadencia, cadencia.idCadencia))
+    .groupBy(cadencia.idCadencia)
+    .orderBy(desc(cadencia.idCadencia))
+    .all();
+}
+
+// V4.2: la cadencia como template consultable: cabecera + pasos en orden, cada uno con
+// su copy default (asunto/cuerpo de la version es_default). Un LEFT JOIN por si algun
+// paso quedara sin version default (no deberia pasar por crearCadencia, pero no revienta).
+export function getCadencia(idCadencia: number) {
+  const cab = db.select().from(cadencia).where(eq(cadencia.idCadencia, idCadencia)).get();
+  if (!cab) return null;
+
+  const pasos = db
+    .select({
+      idPaso: pasoCadencia.idPaso,
+      orden: pasoCadencia.orden,
+      diaOffset: pasoCadencia.diaOffset,
+      canal: pasoCadencia.canal,
+      objetivo: pasoCadencia.objetivo,
+      idVersion: versionPaso.idVersion,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+    })
+    .from(pasoCadencia)
+    .leftJoin(versionPaso, and(eq(versionPaso.idPaso, pasoCadencia.idPaso), eq(versionPaso.esDefault, 1)))
+    .where(eq(pasoCadencia.idCadencia, idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+
+  return { cadencia: cab, pasos };
 }
