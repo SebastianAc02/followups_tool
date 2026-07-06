@@ -58,6 +58,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
         <div className="h-meta">
           <span className="mono">{cola.length}</span> hoy · <span className="mono">{vencidos}</span> vencidos
           {" · "}
+          <Link href="/toque-independiente">Agregar toque</Link>
+          {" · "}
           <Link href="/conectores">Conectores</Link>
           {" · "}
           <SignOutButton email={usuario.email} />

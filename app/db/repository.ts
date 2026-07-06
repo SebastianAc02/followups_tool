@@ -82,6 +82,22 @@ export function colaDelDia(hoy: string, owner: string) {
     .all();
 }
 
+// V3.9: busca CUALQUIER empresa por nombre, sin restringir por owner ni por
+// proximoFollowUpFecha -- a diferencia de colaDelDia(), que solo trae leads propios
+// y vencidos. Sirve para registrar un toque con alguien que no es lead de la cola
+// (cliente existente u otra relacion): la ficha en /llamada/[id] ya funciona para
+// cualquier empresa, solo faltaba una forma de encontrarla fuera de la cola.
+export function buscarEmpresasPorNombre(query: string) {
+  const termino = `%${query.trim()}%`;
+  return db
+    .select({ id: empresa.idEmpresa, nombre: empresa.nombreOficial, ciudad: empresa.ciudadPrincipal, esCliente: empresa.esCliente })
+    .from(empresa)
+    .where(sql`${empresa.nombreOficial} LIKE ${termino} COLLATE NOCASE`)
+    .orderBy(empresa.nombreOficial)
+    .limit(20)
+    .all();
+}
+
 export function getCuenta(id: string) {
   const emp = db
     .select({

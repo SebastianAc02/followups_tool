@@ -637,13 +637,19 @@ otra relación) — no debe alterar los contadores ni la cadencia de leads en se
 
 **Pasos:**
 
-- [ ] **Paso 1:** confirmar con Sebastián dónde vive el botón (ficha de empresa, o una
-      pantalla nueva de "buscar empresa y agregar toque").
-- [ ] **Paso 2:** reusar `registrarToque` del Repository (Fase 1) sin nueva lógica de
-      dominio; el toque queda igual que cualquier otro, solo que no nació desde la cola.
-- [ ] **Paso 3:** verificar que no afecta `colaDelDia()` ni los contadores por tipo/canal
-      de forma indebida.
-- [ ] **Paso 4: commit.** `git commit -m "V3.9: boton de toque independiente fuera de la cola"`
+- [x] **Paso 1: decidido** (constraint de tiempo de Sebastián, decisión tomada directo):
+      pantalla nueva `/toque-independiente` con búsqueda por nombre (`buscarEmpresasPorNombre`,
+      sin filtro de owner/follow-up) que enlaza a la MISMA ficha `/llamada/[id]` que ya existe
+      — no hizo falta tocar esa ficha, `getCuenta(id)` ya funcionaba para cualquier empresa,
+      no solo las de la cola.
+- [x] **Paso 2: cero lógica de dominio nueva.** `CaptureForm`/`registrarToqueAction`/
+      `registrarToque` sin ningún cambio, reusados tal cual.
+- [x] **Paso 3: verificado con test + en vivo.** Test de Repository confirma que un cliente
+      sin owner/follow-up no aparece en `colaDelDia()` ni en `contadoresHoy()` de nadie.
+      Verificado también en pantalla real (sesión de Sebastián): búsqueda "digital" trajo 20+
+      empresas reales, clic en una (`@DIGITAL GROUP SAS`, fuera de cualquier cola hoy) abrió
+      la ficha completa con el `CaptureForm` listo, igual que cualquier lead.
+- [x] **Paso 4: commit.**
 
 ### Tarea V3.10 · Cierre de fase 3
 
