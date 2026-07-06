@@ -4,21 +4,21 @@ Documento vivo. Desde aquí se ejecuta. Cada vez que se cierra un paso, se marca
 en la bitácora. El plan de arquitectura completo vive en plan-claude-v2.md; este es el
 tablero operativo: qué sigue AHORA, en qué orden, con qué gate.
 
-Última actualización: 2026-07-04.
+Última actualización: 2026-07-06.
 
 ---
 
 ## Próxima acción (lo único que importa ahora mismo)
 
-> **Arrancar Fase 5 (F3.5 + F4 envío por Apollo y tracking).** Fase 4 cerrada en la rama
-> `fase4-cadencias` (2026-07-06), V4.1-V4.8, 115/115 tests, `/code-review` corrido. Leer
-> `planning/experimento-apollo.md` ANTES (contrato del adaptador, no negociable). Tablas grupo
-> 3 del Anexo (paso_inscripcion, evento_tracking), EnvioAdapter con implementación Apollo,
-> push reanudable (B6), poll de tracking + reply detection. Gate G1 (escritura de Apollo e2e)
-> se prueba DENTRO de la fase. Pendientes sueltos que NO bloquean: (a) rotar las dos API keys
-> de Granola + password expuestas en el chat de Fase 3 (Sebastián); (b) token de Notion +
-> enlace `empresa.notion_page_id` (para que el outbox de Fase 3 escriba de verdad); (c) buzón/
-> seat con Camilo (identidad de envío, solo bloquea producción de Fase 5, no la construcción).
+> **Arrancar Fase 6 (F5 + F6 IA sobre el plan).** Fase 5 cerrada en la rama
+> `fase4-cadencias` (2026-07-06), V5.1-V5.8, 210/210 tests, `/code-review` corrido, G0 y G1
+> verdes. Empezar por V6.1 (Gate G2: spike de Agent SDK headless) antes de construir el
+> ClaudeAdapter. Pendientes sueltos que NO bloquean: (a) rotar las dos API keys de Granola +
+> password expuestas en el chat de Fase 3 (Sebastián); (b) token de Notion + enlace
+> `empresa.notion_page_id` (para que el outbox de Fase 3 escriba de verdad); (c) buzón/seat
+> con Camilo (identidad de envío real, solo bloquea producción, no bloqueó construir/probar
+> Fase 5); (d) V5.7 quedó backend-friendly pero su UI (`/cola`) puede necesitar reconciliarse
+> con el rediseño del front de cadencias que corre en paralelo (Campanas P1-P4, dashboard).
 
 G0 cerrado el 2026-07-03: las 5 pruebas de lectura pasaron; `usage_stats` confirmó crear
 contactos/empresas, add_contact_ids, gestionar/frenar secuencias y leer tracking. Y la prueba
@@ -100,10 +100,25 @@ Regla: un gate rojo detiene solo lo que depende de él. Las fases independientes
       una activa por empresa con historial, toques de mañana en seco. 115/115 tests, tsc limpio,
       `/code-review` con 6 hallazgos (3 corregidos, 2 descartados por precedente, 1 minor
       truncado en el pager y no re-listado por el cache incremental). Detalle en la bitácora.
-- [ ] **Fase 5 · F3.5 + F4 (requiere G0 verde, y prueba G1 dentro).** Tablas grupo 3
-      (paso_inscripcion, evento_tracking), EnvioAdapter con implementación Apollo, poll de
-      tracking, reply detection que pausa, B6 completo. Demo: cadencia real en segmento chico;
-      una respuesta pausa la inscripción sola.
+- [x] **Fase 5 · F3.5 + F4 (G0 y G1 verdes). ✅ COMPLETA EN RAMA `fase4-cadencias` (2026-07-06),
+      V5.1 a V5.8.** A pedido explícito de Sebastián, backend puro salvo V5.7 (única pieza
+      de UI: unifica la cola). Tabla grupo 3 del Anexo (`paso_inscripcion` con índice único
+      id_destinatario+id_paso; `evento_tracking` append-only idempotente por
+      proveedor_evento_id). Puerto `EnvioAdapter` + adaptador real de Apollo (contrato
+      verificado en vivo, 2 hallazgos reales que exigieron corregir el código: la ruta de
+      `remove_or_stop_contact_ids` no era como estaba documentada, y los campos de tracking
+      tampoco — no hay opened/clicked con fecha real en este endpoint, el filtro de fecha del
+      servidor no filtra nada). Push reanudable con backoff (B6, mismo patrón que outbox).
+      Poll de tracking + reply detection: un reply pausa la inscripción de inmediato, un
+      bounce saca al destinatario y pausa si ya no quedan activos (estado nuevo `pausada`).
+      Manual email Tier 1 como FLAG del paso (`paso_cadencia.es_manual`), nunca lo dispara el
+      push automático; al aprobar, la fecha real re-ancla el siguiente paso. Cola unificada en
+      `/cola` (automático informativo + manual con botón "Aprobar"), construida con cuidado de
+      no chocar con la sesión paralela que rehace el front. Gate G1 corrido contra la cuenta
+      real con secuencia de descarte (archivada al cerrar). `/code-review`: 3 hallazgos reales
+      corregidos (idempotencia de `aprobarPasoManual`, validación de input, cleanup de test) y
+      5 descartados por precedente (ruta de DB hardcodeada, mismo criterio de Fases 1/2/4).
+      210/210 tests, tsc limpio. Detalle completo en experimento-apollo.md y tasks-v2.md.
 - [ ] **Fase 6 · F5 + F6 IA (prueba G2 dentro).** ClaudeAdapter vía Agent SDK, extracción de
       borradores, flujo borrador -> aprobar -> outbox. Evals en evals.md antes de darla por
       lista. Demo: llega reunión y el borrador completo espera revisión.

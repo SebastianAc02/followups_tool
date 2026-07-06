@@ -220,16 +220,20 @@ SÍ refleja lo construido (se siguió tal cual). Rama sin mergear, para revisió
 - [x] **V4.8 · Cierre de fase 4.** Demo completa (cadencia real, inscripción on-hold, toques
   de mañana en seco, una activa por empresa) + /code-review + bitácora.
 
-## Fase 5 · F3.5 + F4 envío por Apollo y tracking (leer experimento-apollo.md ANTES)
+## Fase 5 · F3.5 + F4 envío por Apollo y tracking (leer experimento-apollo.md ANTES) — ✅ COMPLETA EN RAMA `fase4-cadencias` (2026-07-06)
 
-**V5.1-V5.7 completos, 2026-07-06.** A pedido explícito de Sebastián: solo backend al
-inicio (el front de cadencias se está rehaciendo en paralelo, ver bitácora); V5.7 sí
-tocó UI porque es la única pieza que unifica cadencias con la cola existente, con
-cuidado de no chocar con la sesión paralela (nueva sección en /cola, sin tocar
-globals.css). V5.3 se corrió al final con luz verde explícita: 2 hallazgos reales
-corregidos en el adaptador (`remove_or_stop_contact_ids` no era como estaba
-documentado; los campos de tracking tampoco). Detalle en experimento-apollo.md,
-sección "V5.3 · Gate G1". Solo queda V5.8 (cierre de fase).
+**V5.1-V5.8 completos.** A pedido explícito de Sebastián: solo backend al inicio (el
+front de cadencias se está rehaciendo en paralelo, ver bitácora); V5.7 sí tocó UI
+porque es la única pieza que unifica cadencias con la cola existente, con cuidado de
+no chocar con la sesión paralela (nueva sección en /cola, sin tocar globals.css). V5.3
+se corrió al final con luz verde explícita: 2 hallazgos reales corregidos en el
+adaptador (`remove_or_stop_contact_ids` no era como estaba documentado; los campos de
+tracking tampoco). `/code-review` (CodeRabbit) sobre todo lo de Fase 5: 3 hallazgos
+reales corregidos (idempotencia de `aprobarPasoManual`, validación débil en
+`aprobarPasoManualAction`, cleanup de test sin `finally`) y 5 descartados por
+precedente (ruta de DB hardcodeada en scripts de migración, mismo criterio ya aceptado
+en Fases 1/2/4). 210/210 tests, tsc limpio. Detalle completo en experimento-apollo.md
+(sección "V5.3 · Gate G1") y planeacion-ejecucion.md.
 
 - [x] **V5.1 · Migración: grupo 3 del Anexo.**
   `paso_inscripcion` (índice único id_destinatario + id_paso) y `evento_tracking`
@@ -278,7 +282,7 @@ sección "V5.3 · Gate G1". Solo queda V5.8 (cierre de fase).
   cola, con los atrasados visibles.
   Lista cuando: la demo de la fase se ve en una sola pantalla.
 
-- [ ] **V5.8 · Cierre de fase 5.** Pruebas que importan: reanudación a mitad de lote e
+- [x] **V5.8 · Cierre de fase 5.** Pruebas que importan: reanudación a mitad de lote e
   idempotencia de eventos. Demo (cadencia real en segmento chico; una respuesta pausa sola)
   + /code-review + bitácora.
 
