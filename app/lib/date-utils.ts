@@ -14,3 +14,24 @@ export function plusDias(dias: number): string {
   d.setDate(d.getDate() + dias);
   return fechaLocalISO(d);
 }
+
+// Parsea "YYYY-MM-DD" a un Date en medianoche LOCAL (no UTC). new Date("2026-07-06")
+// interpreta el string como UTC, lo que puede correr el dia -+1 al leer getDay()/getDate()
+// segun el huso. Armar el Date desde los componentes lo mantiene en fecha local.
+export function parseFechaISO(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// Suma (o resta, si es negativo) dias a una fecha "YYYY-MM-DD" y devuelve otra "YYYY-MM-DD".
+// Todo local, sin pasar por UTC.
+export function sumarDias(iso: string, dias: number): string {
+  const d = parseFechaISO(iso);
+  d.setDate(d.getDate() + dias);
+  return fechaLocalISO(d);
+}
+
+// Dia de la semana de una fecha "YYYY-MM-DD": 0=domingo .. 6=sabado (igual que getDay()).
+export function diaSemana(iso: string): number {
+  return parseFechaISO(iso).getDay();
+}
