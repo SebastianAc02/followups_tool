@@ -3,7 +3,40 @@
 Empieza AQUÍ. Este doc dice en qué estado quedó todo y qué archivos leer, en orden, para
 retomar sin perder contexto. Última sesión: 2026-07-06.
 
-## Lo último (2026-07-06): FASE 4 COMPLETA EN RAMA `fase4-cadencias` (V4.1 a V4.8)
+## Lo último (2026-07-06): FASE 7 (PANEL ADMIN) COMPLETA, EN PARALELO A FASE 5
+
+Sebastián pidió avanzar Fase 7 (F2 panel admin) en paralelo a Fase 5, que ya estaba en marcha
+en otra sesión sobre el mismo repo. Para no interferir: worktree aislado
+(`.worktrees/fase7-panel`, rama `fase7-panel` desde el tip de `fase4-cadencias`, que ya tiene
+las tablas de cadencia que el panel necesita leer). El trabajo de Fase 5 sin commitear que
+había en el directorio original (EnvioAdapter Apollo, migraciones f5_2/f5_4) NUNCA se tocó
+desde este worktree. Brainstorming previo con Sebastián reformuló el norte del panel: de
+"follow-ups perdidos/semana" (defensivo, el KPI original de F2) a throughput ofensivo — toques
+ayer + promedio diario. Detalle en `spec-fase7-panel.md` y `plan-fase7.md`; bitácora completa
+en `planeacion-ejecucion.md`.
+
+- **La definición del promedio es de Sebastián, con constraint de tiempo explícito** (pidió
+  terminar la fase de inicio a fin él mismo esta vez, excepción puntual al modo learning):
+  ventana de 7 días HÁBILES hacia atrás, denominador fijo (nunca se diluye por fin de semana
+  sin trabajar), pero un toque de sábado/domingo dentro del rango SÍ suma al numerador (bonus).
+- **8 queries de solo lectura nuevas en el Repository, ninguna filtra por owner** (el panel es
+  agregado, ve a todo el equipo). Reutilizan el patrón `substr(fecha,1,10)` de `contadoresHoy`
+  (Fase 1): los 181 toques históricos de Notion con `fecha` tipo "June 25, 2026" quedan fuera
+  de las ventanas del panel de forma natural y a propósito.
+- **Ruta `/panel` gateada por `admin`.** Verificación en navegador bloqueada porque el harness
+  detecta la sesión de Fase 5 ya corriendo un dev server sobre el mismo proyecto (bloqueo por
+  identidad de repo, no de puerto; ajustar `launch.json` no lo destraba). Se verificó con
+  `tsc --noEmit` limpio y lectura estática cuidadosa contra las queries reales en su lugar.
+- **`/code-review` (CodeRabbit `--base fase4-cadencias`): 0 hallazgos.** 129/129 tests, tsc
+  limpio. Rama `fase7-panel` en su propio worktree, sin mergear, lista para que Sebastián la
+  revise. **Ojo al mergear:** nace de `fase4-cadencias`, no de `main` — coordinar el orden con
+  el merge de Fase 4 y con lo que Fase 5 termine produciendo en esa misma rama base.
+- **Diferido a propósito, no construido:** desglose "por persona" (`toque` no tiene owner
+  directo; se filtraría por `empresa.owner`, vacío en el 89% de las empresas), tiles de
+  envío/tracking (Fase 5) y de IA (Fase 6). Sin placeholders vacíos: se agregan cuando esas
+  fases cierren.
+
+## Lo anterior (2026-07-06): FASE 4 COMPLETA EN RAMA `fase4-cadencias` (V4.1 a V4.8)
 
 Sesión straight-through: Sebastián pidió ejecutar TODA la Fase 4 (V4.1-V4.8) sin pausas de
 learning (excepción puntual con constraint de tiempo, no cambio permanente de la regla de
@@ -191,24 +224,41 @@ V3.7 -> V3.8 -> V3.9 (toque independiente) -> V3.10 (cierre).
   anti-ráfaga), constructor `/cadencias`. Core nuevo: `app/core/cadencia-parser.ts`,
   `motor-cadencia.ts`, `inscripcion.ts`. 115/115 tests, `/code-review` corrido. Falta que
   Sebastián la revise y mergee.
+- **Fase 5 (F3.5 + F4 envío por Apollo y tracking) EN PROGRESO, en otra sesión, sobre
+  `fase4-cadencias`.** No se tocó desde este worktree. Al cerrar Fase 7 se observó en el
+  directorio original (sin commitear): `app/adapters/apollo.ts` + `apollo.test.ts`,
+  `app/core/ports/envio.ts`, migraciones `scripts/migrate_f5_2_*` y `migrate_f5_4_*`, y 2
+  commits nuevos sobre reforma de dashboard/campañas. Estado real de avance: confirmar con
+  Sebastián, esta nota es solo lo que quedó visible al pasar por ahí.
+- **Fase 7 (F2 panel admin) COMPLETA EN WORKTREE `fase7-panel`, SIN MERGEAR.** Ver "Lo
+  último" arriba. Nace de `fase4-cadencias`. 129/129 tests, `/code-review` con 0 hallazgos.
 
 ## Próxima acción
 
-**Primero: revisar y mergear la rama `fase4-cadencias` a main** (mismo patrón que las fases
-anteriores: Sebastián la revisa localmente antes de mergear). Está completa, 115/115 tests.
+**Coordinar el orden de merge de tres ramas que cuelgan de `fase4-cadencias`:** la propia
+`fase4-cadencias` (completa, sin mergear a main), Fase 5 (en progreso en otra sesión, sobre
+esa misma rama) y `fase7-panel` (completa, en worktree aparte, también partiendo de
+`fase4-cadencias`). Ninguna de las tres está en `main` todavía. Antes de mergear cualquiera,
+revisar con Sebastián el estado real de Fase 5 (esta sesión no la tocó, solo la vio de pasada)
+para no perder ese trabajo al reordenar ramas.
 
-**Después: arrancar Fase 5 (F3.5 + F4 envío por Apollo y tracking).** LEER
-`planning/experimento-apollo.md` ANTES (contrato del adaptador, no negociable). Tablas grupo 3
-del Anexo (`paso_inscripcion` con índice único id_destinatario+id_paso, `evento_tracking`
-append-only), `EnvioAdapter` con implementación Apollo (header `X-Api-Key`, search-first por
-email, no hay DELETE), push reanudable (B6, máquina de estados por destinatario), poll de
-tracking + reply detection que pausa la inscripción. Gate G1 (escritura de Apollo e2e) se
-prueba DENTRO de la fase. Ver `tasks-v2.md` para V5.1-V5.8. Nota: `agendaEnSeco` (V4.8) ya deja
-el motor listo para que Fase 5 materialice `paso_inscripcion`; el bug del anchor (ISO datetime
-completo vs fecha) ya está resuelto ahí.
+**`fase7-panel` está lista para revisión de Sebastián** (mismo patrón que las fases
+anteriores): panel de actividad en `/panel`, 129/129 tests, `/code-review` con 0 hallazgos.
+No requiere más trabajo salvo que la revisión encuentre algo.
 
-**Retomar el modo learning normal en Fase 5** (Insights + Tu código + checkpoints) salvo que
-Sebastián repita la señal explícita de constraint de tiempo, como hizo en Fase 3 y Fase 4.
+**Cuando se retome Fase 5:** LEER `planning/experimento-apollo.md` ANTES (contrato del
+adaptador, no negociable) si no se ha hecho ya. Tablas grupo 3 del Anexo (`paso_inscripcion`
+con índice único id_destinatario+id_paso, `evento_tracking` append-only), `EnvioAdapter` con
+implementación Apollo (header `X-Api-Key`, search-first por email, no hay DELETE), push
+reanudable (B6, máquina de estados por destinatario), poll de tracking + reply detection que
+pausa la inscripción. Gate G1 (escritura de Apollo e2e) se prueba DENTRO de la fase. Ver
+`tasks-v2.md` para V5.1-V5.8. Nota: `agendaEnSeco` (V4.8) ya deja el motor listo para que
+Fase 5 materialice `paso_inscripcion`; el bug del anchor (ISO datetime completo vs fecha) ya
+está resuelto ahí.
+
+**Retomar el modo learning normal en las próximas fases** (Insights + Tu código +
+checkpoints) salvo que Sebastián repita la señal explícita de constraint de tiempo, como hizo
+en Fase 3, Fase 4 y en la Tarea 1 de Fase 7.
 
 **Pendientes sueltos (no bloquean Fase 5, pero conviene pronto):**
 1. Rotar las dos API keys de Granola y el password que quedaron expuestos en el chat de la

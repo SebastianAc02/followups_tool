@@ -313,20 +313,26 @@ sección "V5.3 · Gate G1". Solo queda V5.8 (cierre de fase).
 
 - [ ] **V6.6 · Cierre de fase 6.** Demo + /code-review + bitácora.
 
-## Fase 7 · F2 panel admin (solo lee)
+## Fase 7 · F2 panel admin (solo lee) ✅ COMPLETA (rama `fase7-panel`, 2026-07-06)
 
-- [ ] **V7.1 · Queries agregadas en el Repository.**
-  KPI norte: follow-ups perdidos por semana (toques con fecha vencida sin registrar). Toques
-  por persona, tipo y canal; connection rate; reuniones agendadas; gerentes conseguidos.
-  Solo lectura.
-  Lista cuando: cada query tiene prueba contra datos sembrados con resultado conocido.
+Norte reformulado con Sebastián antes de construir: no "follow-ups perdidos" (defensivo)
+sino throughput (ofensivo) — toques ayer + promedio diario de 7 días hábiles. Detalle en
+`spec-fase7-panel.md` y `plan-fase7.md`.
 
-- [ ] **V7.2 · UI del panel (flag admin).**
-  Superficie nueva grande: taste-skill, impeccable, frontend-design. Visible solo con flag
-  admin de V2.3. Absorbe lo que F0.3 dejó mínimo en V1.5.
-  Lista cuando: como admin veo el pulso de la semana; sin flag, no existe la ruta.
+- [x] **V7.1 · Queries agregadas en el Repository.**
+  8 queries de solo lectura: `contarToquesEnRango`, `contarToquesEnDia`,
+  `leadsTocadosEnRango`, `toquesPorCanal`, `toquesPorResultado`, `campanasActivas`,
+  `inscripcionesActivas`, `empresasPorCadencia`. Ninguna filtra por owner (agregado, todo el
+  equipo). Módulo core puro `app/core/actividad.ts` para la ventana de 7 días hábiles.
+  Lista cuando: cada query tiene prueba contra datos sembrados con resultado conocido. ✅
 
-- [ ] **V7.3 · Cierre de fase 7 y del alcance v2.** Demo + /code-review + bitácora.
+- [x] **V7.2 · UI del panel (flag admin).**
+  Ruta `/panel`, gate `requireSession()` + redirect si `!admin`. Absorbe lo que F0.3 dejó
+  mínimo en V1.5.
+  Lista cuando: como admin veo el pulso de la semana; sin flag, no existe la ruta. ✅
+
+- [x] **V7.3 · Cierre de fase 7 y del alcance v2.** Demo + /code-review (0 hallazgos) +
+  bitácora. 129/129 tests, tsc limpio. Cierra el alcance v2 completo.
 
 ---
 

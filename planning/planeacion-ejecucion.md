@@ -107,8 +107,15 @@ Regla: un gate rojo detiene solo lo que depende de él. Las fases independientes
 - [ ] **Fase 6 · F5 + F6 IA (prueba G2 dentro).** ClaudeAdapter vía Agent SDK, extracción de
       borradores, flujo borrador -> aprobar -> outbox. Evals en evals.md antes de darla por
       lista. Demo: llega reunión y el borrador completo espera revisión.
-- [ ] **Fase 7 · F2 panel admin.** KPI de follow-ups perdidos/semana, métricas de equipo,
-      flag admin. Solo lee. Demo: entro como admin y veo el pulso de la semana.
+- [x] **Fase 7 · F2 panel admin. ✅ COMPLETA EN RAMA `fase7-panel` (2026-07-06), V7.1-V7.2,
+      construida en worktree aislado en paralelo a Fase 5.** Norte reformulado con Sebastián
+      de "follow-ups perdidos" (defensivo) a throughput (ofensivo): toques ayer + promedio
+      diario. Detalle en `spec-fase7-panel.md` y `plan-fase7.md`. Solo lee: 8 queries nuevas
+      en el Repository (ninguna filtra por owner, el panel ve a todo el equipo agregado) más
+      un módulo core puro (`app/core/actividad.ts`) para la ventana de 7 días hábiles.
+      Ruta `/panel` gateada por `admin`, sin Tailwind (patrón globals.css existente). 129/129
+      tests, tsc limpio, `/code-review` (CodeRabbit `--base fase4-cadencias`): 0 hallazgos.
+      Demo: entro como admin y veo el pulso de la semana. Detalle completo en la bitácora.
 
 ---
 
@@ -306,3 +313,39 @@ las fronteras ya están fijadas por la constitución).
     no lo re-listó; a re-verificar en un clon fresco la próxima sesión si se quiere cerrar del
     todo. 115/115 tests, tsc limpio. Rama `fase4-cadencias` lista para revisión de Sebastián
     (mismo patrón que fases anteriores: la revisa localmente antes de mergear).
+- 2026-07-06 · **Fase 7 (panel admin) construida en paralelo a Fase 5**, por constraint de
+  tiempo explícito de Sebastián (excepción puntual al modo learning: él mismo pidió terminarla
+  de inicio a fin). Aislada en un worktree (`.worktrees/fase7-panel`, rama `fase7-panel` desde
+  el tip de `fase4-cadencias`) para no tocar el trabajo de Fase 5 sin commitear que corría en
+  paralelo en otra sesión sobre el mismo repo. Brainstorming previo con Sebastián reformuló el
+  norte del panel: el KPI original de F2 ("follow-ups perdidos/semana", defensivo) se cambió a
+  throughput ("¿estamos tocando suficiente?", ofensivo) con toques ayer + promedio diario.
+  - V7.1a: módulo core puro `app/core/actividad.ts` (`esDiaHabil`, `restarUnDia`,
+    `promedioDiario`, `ventanaPromedio`). La definición de la ventana es de Sebastián: 7 días
+    HÁBILES hacia atrás (denominador fijo, nunca se diluye por fin de semana), pero los toques
+    de sábado/domingo que caigan dentro del rango de fechas sí suman al numerador (bonus, nunca
+    penaliza). 6/6 tests.
+  - V7.1b: 8 queries de solo lectura en el Repository (`contarToquesEnRango`,
+    `contarToquesEnDia`, `leadsTocadosEnRango`, `toquesPorCanal`, `toquesPorResultado`,
+    `campanasActivas`, `inscripcionesActivas`, `empresasPorCadencia`), ninguna filtra por
+    owner (el panel es agregado, ve a todo el equipo). Reutiliza el patrón
+    `substr(fecha,1,10)` de `contadoresHoy` (Fase 1): los 181 toques históricos sembrados
+    desde Notion tienen `fecha` en formato "June 25, 2026" (no ISO) y quedan fuera de las
+    ventanas del panel de forma natural, a propósito (mide actividad de la era-herramienta).
+    Harness de DB temporal sembrada (primer test de `app/db/*`), 8 casos con resultado
+    conocido. 129/129 tests acumulados.
+  - V7.2: ruta `/panel` (Server Component, gate `requireSession()` + `redirect('/')` si
+    `!admin`). Norte con delta contra el promedio, barras semánticas por canal/resultado
+    (color reutilizando `--done`/`--today`/`--faint` de globals.css, mismo lenguaje que los
+    dots de vencido/hoy en Home), fila de cadencias/campañas con estado vacío explícito.
+    Verificación en navegador bloqueada por el harness (mismo repo que la sesión de Fase 5 ya
+    tenía un dev server corriendo en el puerto del proyecto; el bloqueo es por identidad de
+    proyecto, no de puerto, y no cede ajustando `launch.json`); se verificó en su lugar con
+    `tsc --noEmit` limpio y lectura estática cuidadosa del JSX/CSS contra las queries reales.
+  - Diferido a propósito, no construido: desglose "por persona" (motivo real: `toque` no
+    tiene owner directo, se filtraría por `empresa.owner`, vacío en el 89% de las empresas;
+    sería degenerado hoy), tiles de envío/tracking (Fase 5) e IA (Fase 6).
+  - `/code-review` (CodeRabbit `--base fase4-cadencias`, tras esperar el rate limit del CLI
+    free ~2 minutos): **0 hallazgos**. 129/129 tests, tsc limpio. Rama `fase7-panel` en su
+    worktree, lista para que Sebastián la revise antes de decidir el orden de merge junto con
+    Fase 4/5 (nace de `fase4-cadencias`, no de `main`).
