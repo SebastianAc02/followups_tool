@@ -99,10 +99,18 @@ test('aprobar el manual con la fecha REAL lo saca de la cola de revision', () =>
 
   const db = raw();
   const fila = db.prepare('SELECT estado, proveedor, fecha_enviada FROM paso_inscripcion WHERE id_paso_inscripcion = ?').get(idPasoInscripcion1) as any;
-  db.close();
   assert.strictEqual(fila.estado, 'enviada');
   assert.strictEqual(fila.proveedor, 'manual');
   assert.strictEqual(fila.fecha_enviada, '2026-07-09T15:00:00.000Z');
+
+  // sin cuerpoFinal (firma vieja, compatibilidad): el toque queda con que_paso null,
+  // no truena por no recibir el 3er argumento.
+  const toques = db.prepare('SELECT canal, que_paso, fecha FROM toque WHERE id_empresa = ?').all('e-manual-1') as any[];
+  db.close();
+  assert.equal(toques.length, 1);
+  assert.equal(toques[0].canal, 'llamada');
+  assert.equal(toques[0].que_paso, null);
+  assert.equal(toques[0].fecha, '2026-07-09T15:00:00.000Z');
 });
 
 test('el motor re-ancla el paso 2 desde la fecha REAL de aprobacion, no desde la programada original', () => {
@@ -125,6 +133,37 @@ test('el motor re-ancla el paso 2 desde la fecha REAL de aprobacion, no desde la
   assert.ok(debido);
   assert.strictEqual(debido!.orden, 2);
   assert.strictEqual(debido!.fechaObjetivo, '2026-07-12');
+});
+
+// Parte 4 campanas: aprobar un manual con cuerpoFinal (el texto que Sebastian
+// personalizo antes de mandarlo el mismo) deja un toque en el historial de la
+// empresa -- antes aprobar solo tocaba paso_inscripcion, sin dejar rastro en toque.
+seedEmpresa('e-manual-2', 'manual-cat-2', 'beto@empresa.com');
+const idCadencia2 = crearCadencia({
+  nombre: 'C manual con copy',
+  pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola [nombre]', cuerpo: 'Cuerpo [nombre].', esManual: true }],
+});
+const idSegmento2 = guardarSegmento({ nombre: 'manual-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-2'] }] } });
+const idCampana2 = crearCampana({ nombre: 'Camp manual 2', idCadencia: idCadencia2, idSegmento: idSegmento2 });
+inscribirCampana(idCampana2);
+const idInscripcion2 = historialInscripciones('e-manual-2').find((i) => i.estado === 'activa')!.id;
+const idDestinatario2 = destinatariosDeInscripcion(idInscripcion2)[0].id;
+const { idPaso: idPaso2b, idVersion: idVersion2b } = idsDePaso(idCadencia2, 1);
+const idPasoInscripcion2 = crearPasoInscripcionPendiente({ idDestinatario: idDestinatario2, idPaso: idPaso2b, idVersion: idVersion2b, canal: 'correo' });
+
+test('aprobar un manual con cuerpoFinal deja un toque en el historial de la empresa', () => {
+  aprobarPasoManual(idPasoInscripcion2, '2026-07-09T10:00:00.000Z', 'Cuerpo con Beto ya personalizado.');
+
+  const h = historialInscripciones('e-manual-2');
+  assert.ok(h.length >= 1);
+
+  const db = raw();
+  const toques = db.prepare('SELECT canal, que_paso, fecha FROM toque WHERE id_empresa = ?').all('e-manual-2') as any[];
+  db.close();
+  assert.equal(toques.length, 1);
+  assert.equal(toques[0].canal, 'correo');
+  assert.equal(toques[0].que_paso, 'Cuerpo con Beto ya personalizado.');
+  assert.equal(toques[0].fecha, '2026-07-09T10:00:00.000Z');
 });
 
 test.after(() => {

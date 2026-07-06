@@ -1280,11 +1280,38 @@ export function pasosManualesPendientes() {
 // motor de fechas usa para re-anclar el siguiente paso (B6), no la fechaProgramada
 // original. proveedor='manual' distingue de un envio real por Apollo en el mismo
 // campo que usa marcarPasoInscripcionEnviada.
-export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: string) {
-  db.update(pasoInscripcion)
-    .set({ estado: 'enviada', proveedor: 'manual', fechaEnviada })
+// Parte 4 campanas: cuerpoFinal es el texto que Sebastian personalizo (o dejo tal
+// cual) antes de mandarlo el mismo. Ademas de marcar el paso 'enviada' (igual que
+// antes), deja un toque en el historial de la empresa -- antes aprobar no dejaba
+// rastro alguno en `toque`, invisible para cualquiera que mirara la ficha de la
+// cuenta. cuerpoFinal es opcional (compatibilidad con el caller existente).
+export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: string, cuerpoFinal?: string) {
+  const fila = db
+    .select({ canal: pasoInscripcion.canal, idContacto: destinatario.idContacto, idEmpresa: inscripcion.idEmpresa })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
     .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
-    .run();
+    .get();
+  if (!fila) throw new Error(`paso_inscripcion ${idPasoInscripcion} no existe`);
+
+  db.transaction((tx) => {
+    tx.update(pasoInscripcion)
+      .set({ estado: 'enviada', proveedor: 'manual', fechaEnviada })
+      .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+      .run();
+    tx.insert(toque)
+      .values({
+        idEmpresa: fila.idEmpresa,
+        idContacto: fila.idContacto,
+        fecha: fechaEnviada,
+        canal: fila.canal,
+        quePaso: cuerpoFinal ?? null,
+        fuente: 'cadencia_manual',
+        createdAt: fechaEnviada,
+      })
+      .run();
+  });
 }
 
 // V5.7: cola del dia unificada. Un solo query trae AMBOS tipos de toque de cadencia
@@ -1295,15 +1322,26 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
 // contra una fecha corta 'YYYY-MM-DD' fallaria para las de HOY con hora (mismo bug
 // que ya se evito en el puente de V4.8).
 export function agendaHoyCadencias(hoy: string) {
-  return db
+  const filas = db
     .select({
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idDestinatario: pasoInscripcion.idDestinatario,
       fechaProgramada: pasoInscripcion.fechaProgramada,
       canal: pasoInscripcion.canal,
       esManual: pasoCadencia.esManual,
+      orden: pasoCadencia.orden,
+      diaOffset: pasoCadencia.diaOffset,
       email: contacto.email,
       nombre: contacto.nombre,
       asunto: versionPaso.asunto,
+      // Parte 4 campanas: el manual necesita el copy COMPLETO (no solo asunto) para
+      // poder personalizar antes de aprobar, mas el flag de firma y las variables ya
+      // detectadas por el parser (evita re-parsear texto en la UI).
+      cuerpo: versionPaso.cuerpo,
+      firmaApollo: versionPaso.firmaApollo,
+      variables: versionPaso.variables,
+      idCampana: campana.idCampana,
+      modo: campana.modo,
       idEmpresa: empresa.idEmpresa,
       empresaNombre: empresa.nombreOficial,
     })
@@ -1312,6 +1350,7 @@ export function agendaHoyCadencias(hoy: string) {
     .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
     .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
     .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
     .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
     .where(
@@ -1321,6 +1360,30 @@ export function agendaHoyCadencias(hoy: string) {
       ),
     )
     .orderBy(pasoInscripcion.fechaProgramada)
+    .all();
+
+  return filas.map((f) => ({
+    ...f,
+    firmaApollo: f.firmaApollo === 1,
+    variables: f.variables ? (JSON.parse(f.variables) as string[]) : [],
+  }));
+}
+
+// Parte 4 campanas: "que dias ya se tocaron" de un destinatario -- pasos que YA
+// salieron (estado 'enviada'), ordenados por orden. Es lo que la UI muestra como
+// historial antes del paso pendiente de hoy (en que dia de la cadencia va el lead).
+export function historialPasosDestinatario(idDestinatario: number) {
+  return db
+    .select({
+      orden: pasoCadencia.orden,
+      diaOffset: pasoCadencia.diaOffset,
+      canal: pasoInscripcion.canal,
+      fechaEnviada: pasoInscripcion.fechaEnviada,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .where(and(eq(pasoInscripcion.idDestinatario, idDestinatario), eq(pasoInscripcion.estado, 'enviada')))
+    .orderBy(pasoCadencia.orden)
     .all();
 }
 

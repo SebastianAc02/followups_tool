@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { parsearCadenciaCsv, parsearCadenciaMarkdown } from '../../core/cadencia-parser';
 import { crearCadencia, crearCampana, inscribirCampana, type ResultadoInscripcion } from '../../db/repository';
+import type { ModoCampana } from '../../db/validation';
 import { requireSession } from '../../lib/session';
 
 type PasoPreview = {
@@ -49,6 +50,7 @@ export async function crearCampanaConCadenciaAction(input: {
   formato: 'md' | 'csv';
   contenido: string;
   nombreCsv?: string;
+  modo: ModoCampana;
 }): Promise<CrearCampanaResultado> {
   await requireSession();
   const nombreCampana = input.nombreCampana.trim();
@@ -60,7 +62,7 @@ export async function crearCampanaConCadenciaAction(input: {
         ? parsearCadenciaCsv(input.contenido, { nombre: input.nombreCsv || nombreCampana })
         : parsearCadenciaMarkdown(input.contenido);
     const idCadencia = crearCadencia(parseada);
-    const idCampana = crearCampana({ nombre: nombreCampana, idCadencia, idSegmento: input.idSegmento });
+    const idCampana = crearCampana({ nombre: nombreCampana, idCadencia, idSegmento: input.idSegmento, modo: input.modo });
     const resultado = inscribirCampana(idCampana);
     revalidatePath('/campanas/nueva');
     return { ok: true, idCampana, resultado };

@@ -40,12 +40,32 @@ export async function registrarTapAction(formData: FormData) {
 // V5.7: aprobar un paso manual (Tier 1) desde la cola unificada. fechaEnviada es AHORA
 // (la fecha REAL, no la programada) -- es la que el motor de fechas usa para re-anclar
 // el siguiente paso (B6, V5.6).
+// Parte 4 campanas: cuerpoFinal es el texto (personalizado o tal cual) que Sebastian
+// mando el mismo; queda como toque en el historial de la empresa.
 export async function aprobarPasoManualAction(formData: FormData) {
   await requireSession();
   const idPasoInscripcion = Number(formData.get("idPasoInscripcion"));
   if (!idPasoInscripcion) return;
+  const cuerpoFinal = String(formData.get("cuerpoFinal") ?? "").trim() || undefined;
 
-  aprobarPasoManual(idPasoInscripcion, new Date().toISOString());
+  aprobarPasoManual(idPasoInscripcion, new Date().toISOString(), cuerpoFinal);
+
+  revalidatePath("/cola");
+}
+
+// Parte 4 campanas: aprobar TODO un grupo batch de una (mismo paso, mismo dia, N
+// empresas) con el mismo cuerpoFinal para todas. Reusa aprobarPasoManual por cada
+// id; cada llamada ya es su propia transaccion, no hace falta envolver otra vez.
+export async function aprobarLoteManualAction(formData: FormData) {
+  await requireSession();
+  const ids = formData.getAll("idPasoInscripcion").map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  if (ids.length === 0) return;
+  const cuerpoFinal = String(formData.get("cuerpoFinal") ?? "").trim() || undefined;
+
+  const ahora = new Date().toISOString();
+  for (const id of ids) {
+    aprobarPasoManual(id, ahora, cuerpoFinal);
+  }
 
   revalidatePath("/cola");
 }

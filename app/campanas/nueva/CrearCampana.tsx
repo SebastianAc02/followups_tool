@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { previsualizarCadenciaAction, crearCampanaConCadenciaAction, type PreviewCadencia, type CrearCampanaResultado } from './actions';
+import type { ModoCampana } from '../../db/validation';
 
 const PLACEHOLDER = `# ISP outbound Tier 1
 
@@ -26,6 +27,7 @@ function conVariablesResaltadas(texto: string) {
 export default function CrearCampana({ segmentos }: { segmentos: Segmento[] }) {
   const [idSegmento, setIdSegmento] = useState(segmentos[0]?.id ?? 0);
   const [nombreCampana, setNombreCampana] = useState('');
+  const [modo, setModo] = useState<ModoCampana>('prioritaria');
   const [formato, setFormato] = useState<'md' | 'csv'>('md');
   const [nombreCsv, setNombreCsv] = useState('');
   const [contenido, setContenido] = useState('');
@@ -43,7 +45,7 @@ export default function CrearCampana({ segmentos }: { segmentos: Segmento[] }) {
   async function confirmar() {
     setCargando(true);
     setResultado(
-      await crearCampanaConCadenciaAction({ nombreCampana, idSegmento, formato, contenido, nombreCsv }),
+      await crearCampanaConCadenciaAction({ nombreCampana, idSegmento, formato, contenido, nombreCsv, modo }),
     );
     setCargando(false);
   }
@@ -65,6 +67,20 @@ export default function CrearCampana({ segmentos }: { segmentos: Segmento[] }) {
         Nombre de la campaña
         <input value={nombreCampana} onChange={(e) => setNombreCampana(e.target.value)} placeholder="Tier 1 ISP julio" />
       </label>
+
+      <div className="chips" style={{ marginTop: 12 }}>
+        <button type="button" className={`chip ${modo === 'prioritaria' ? 'on' : ''}`} onClick={() => setModo('prioritaria')}>
+          Prioritaria
+        </button>
+        <button type="button" className={`chip ${modo === 'batch' ? 'on' : ''}`} onClick={() => setModo('batch')}>
+          Batch
+        </button>
+        <span className="conector-desc" style={{ margin: 0 }}>
+          {modo === 'prioritaria'
+            ? 'revisás y personalizás lead por lead antes de mandar'
+            : 'el copy sale igual para todo el grupo del día; podés editarlo antes de confirmar'}
+        </span>
+      </div>
 
       <div className="cad-import-top" style={{ marginTop: 12 }}>
         <select value={formato} onChange={(e) => setFormato(e.target.value as 'md' | 'csv')} className="cad-formato">
