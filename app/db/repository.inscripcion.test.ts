@@ -18,6 +18,7 @@ const {
   inscripcionesBloqueadas,
   destinatariosDeInscripcion,
   resolverInscripcionBloqueada,
+  excluirDeSegmento,
 } = await import('./repository.ts');
 
 // Seed: 4 empresas isp on_hold con distintos perfiles de contactos.
@@ -140,6 +141,23 @@ test('resolver una bloqueada la promueve a activa con su destinatario', () => {
   const activa = h.find((i) => i.id === deBloq!.id);
   assert.equal(activa!.estado, 'activa');
   assert.equal(destinatariosDeInscripcion(deBloq!.id).length, 1);
+});
+
+// Parte 3 campanas: el "esta no va" de la revision de leads (Parte 2) se respeta al
+// inscribir. Va al final del archivo: excluir es permanente para el segmento
+// compartido de este archivo, no debe interferir con las aserciones de arriba.
+test('empresa excluida en la revision de leads no se inscribe en una campana nueva', () => {
+  excluirDeSegmento(idSegmento, 'e-primero');
+  const idCampanaC = crearCampana({ nombre: 'Camp C', idCadencia, idSegmento });
+  const res = inscribirCampana(idCampanaC);
+
+  const hPrimero = historialInscripciones('e-primero');
+  assert.ok(!hPrimero.some((i) => i.idCampana === idCampanaC), 'e-primero excluida no entra a Camp C');
+
+  // las no excluidas si entran (reemplazando su activa de la campana anterior)
+  const hKdm = historialInscripciones('e-kdm');
+  assert.ok(hKdm.some((i) => i.idCampana === idCampanaC && i.estado === 'activa'));
+  assert.ok(res.reemplazos >= 1);
 });
 
 test.after(() => {

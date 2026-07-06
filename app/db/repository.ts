@@ -928,8 +928,12 @@ export type ResultadoInscripcion = {
 export function inscribirCampana(idCampana: number): ResultadoInscripcion {
   const camp = db.select({ idSegmento: campana.idSegmento }).from(campana).where(eq(campana.idCampana, idCampana)).get();
   if (!camp) throw new Error(`campana ${idCampana} no existe`);
-  const empresas = empresasDeSegmentoGuardado(camp.idSegmento);
-  if (!empresas) throw new Error(`segmento ${camp.idSegmento} de la campana no existe`);
+  // Parte 3 campanas: el set curado en la revision (Parte 2) es la fuente real de
+  // a quien inscribir, no el segmento crudo. empresasParaRevision ya trae el flag
+  // excluida por empresa; ese "esta no va" nunca llega a inscripcion.
+  const paraRevision = empresasParaRevision(camp.idSegmento);
+  if (!paraRevision) throw new Error(`segmento ${camp.idSegmento} de la campana no existe`);
+  const empresas = paraRevision.filter((e) => !e.excluida);
 
   const res: ResultadoInscripcion = { inscritas: 0, bloqueadas: 0, reemplazos: 0, saltadas: 0 };
   const ahora = new Date().toISOString();
