@@ -108,6 +108,17 @@ export const versionPasoInputSchema = z.object({
 
 export type VersionPasoInput = z.infer<typeof versionPasoInputSchema>;
 
+// V4.5: una campana es una cadencia aplicada a un segmento. estado nace 'borrador';
+// inscribir la pasa a correr.
+export const campanaInputSchema = z.object({
+  nombre: z.string().min(1),
+  idCadencia: z.number().int().positive(),
+  idSegmento: z.number().int().positive(),
+  owner: z.string().min(1).optional(),
+});
+
+export type CampanaInput = z.infer<typeof campanaInputSchema>;
+
 export const registrarToqueSchema = z
   .object({
     idEmpresa: z.string().min(1),

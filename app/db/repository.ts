@@ -14,10 +14,14 @@ import {
   pasoCadencia,
   versionPaso,
   segmento,
+  campana,
+  inscripcion,
+  destinatario,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
 import type { CadenciaParseada } from '../core/cadencia-parser';
+import { elegirDestinatarioDefault } from '../core/inscripcion';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
@@ -29,6 +33,8 @@ import {
   type CampoSegmento,
   versionPasoInputSchema,
   type VersionPasoInput,
+  campanaInputSchema,
+  type CampanaInput,
   CANALES,
   RESULTADOS,
   type Canal,
@@ -787,4 +793,177 @@ export function actualizarVersionPaso(idVersion: number, cambios: { peso?: numbe
   if (cambios.peso != null) sets.peso = cambios.peso;
   if (cambios.activa != null) sets.activa = cambios.activa ? 1 : 0;
   db.update(versionPaso).set(sets).where(eq(versionPaso.idVersion, idVersion)).run();
+}
+
+// V4.5: una campana = cadencia aplicada a un segmento. Nace en 'borrador'; inscribir la
+// pone a correr.
+export function crearCampana(input: CampanaInput): number {
+  const val = campanaInputSchema.parse(input);
+  const ahora = new Date().toISOString();
+  const ins = db
+    .insert(campana)
+    .values({
+      nombre: val.nombre,
+      idCadencia: val.idCadencia,
+      idSegmento: val.idSegmento,
+      estado: 'borrador',
+      owner: val.owner ?? null,
+      createdAt: ahora,
+      updatedAt: ahora,
+    })
+    .run();
+  return Number(ins.lastInsertRowid);
+}
+
+export type ResultadoInscripcion = {
+  inscritas: number; // con destinatario -> activa
+  bloqueadas: number; // sin email -> cola de revision
+  reemplazos: number; // empresas que salieron de otra campana activa
+  saltadas: number; // ya estaban en esta campana (idempotencia)
+};
+
+// V4.5: inscribe todas las empresas del segmento de la campana. Por cada una:
+//   - si ya esta (activa o bloqueada) en ESTA campana, se salta (re-correr es idempotente)
+//   - si tiene una activa en OTRA campana, la cierra con motivo_fin (una activa por empresa)
+//   - elige destinatario default (B1.b); sin email la inscripcion nace bloqueada
+// Todo en UNA transaccion: cerrar la anterior y abrir la nueva ocurren juntos, asi el
+// indice unico parcial nunca ve dos activas de la misma empresa a la vez.
+export function inscribirCampana(idCampana: number): ResultadoInscripcion {
+  const camp = db.select({ idSegmento: campana.idSegmento }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  if (!camp) throw new Error(`campana ${idCampana} no existe`);
+  const empresas = empresasDeSegmentoGuardado(camp.idSegmento);
+  if (!empresas) throw new Error(`segmento ${camp.idSegmento} de la campana no existe`);
+
+  const res: ResultadoInscripcion = { inscritas: 0, bloqueadas: 0, reemplazos: 0, saltadas: 0 };
+  const ahora = new Date().toISOString();
+
+  db.transaction((tx) => {
+    for (const emp of empresas) {
+      const yaEnEsta = tx
+        .select({ id: inscripcion.idInscripcion })
+        .from(inscripcion)
+        .where(and(eq(inscripcion.idEmpresa, emp.id), eq(inscripcion.idCampana, idCampana), inArray(inscripcion.estado, ['activa', 'bloqueada'])))
+        .get();
+      if (yaEnEsta) {
+        res.saltadas += 1;
+        continue;
+      }
+
+      const activaOtra = tx
+        .select({ id: inscripcion.idInscripcion })
+        .from(inscripcion)
+        .where(and(eq(inscripcion.idEmpresa, emp.id), eq(inscripcion.estado, 'activa')))
+        .get();
+      if (activaOtra) {
+        tx.update(inscripcion)
+          .set({ estado: 'finalizada', motivoFin: 'cambio de campana', fechaFin: ahora, updatedAt: ahora })
+          .where(eq(inscripcion.idInscripcion, activaOtra.id))
+          .run();
+        res.reemplazos += 1;
+      }
+
+      const contactos = tx
+        .select({
+          idContacto: contacto.idContacto,
+          esKeyDecisionMaker: contacto.esKeyDecisionMaker,
+          esPrincipal: contacto.esPrincipal,
+          email: contacto.email,
+        })
+        .from(contacto)
+        .where(eq(contacto.idEmpresa, emp.id))
+        .orderBy(contacto.idContacto)
+        .all();
+
+      const idContactoDest = elegirDestinatarioDefault(
+        contactos.map((c) => ({
+          idContacto: c.idContacto,
+          esKeyDecisionMaker: c.esKeyDecisionMaker === 1,
+          esPrincipal: c.esPrincipal === 1,
+          email: c.email,
+        })),
+      );
+
+      const estado = idContactoDest != null ? 'activa' : 'bloqueada';
+      const ins = tx
+        .insert(inscripcion)
+        .values({ idCampana, idEmpresa: emp.id, estado, pasoActual: 0, fechaInscripcion: ahora, createdAt: ahora, updatedAt: ahora })
+        .run();
+
+      if (idContactoDest != null) {
+        tx.insert(destinatario)
+          .values({ idInscripcion: Number(ins.lastInsertRowid), idContacto: idContactoDest, estado: 'activo', createdAt: ahora })
+          .run();
+        res.inscritas += 1;
+      } else {
+        res.bloqueadas += 1;
+      }
+    }
+  });
+
+  return res;
+}
+
+// V4.5: cola de revision: las inscripciones bloqueadas (sin email) esperando resolucion
+// manual, con el nombre de la empresa.
+export function inscripcionesBloqueadas() {
+  return db
+    .select({
+      id: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      idCampana: inscripcion.idCampana,
+      fecha: inscripcion.fechaInscripcion,
+    })
+    .from(inscripcion)
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(eq(inscripcion.estado, 'bloqueada'))
+    .orderBy(desc(inscripcion.idInscripcion))
+    .all();
+}
+
+// V4.5: resuelve una inscripcion bloqueada eligiendo un contacto a mano. Cierra cualquier
+// activa que la empresa tenga en otra campana (misma regla de una activa) y promueve esta
+// a activa con su destinatario. Mismo patron F1.4 (cola de revision -> resolver).
+export function resolverInscripcionBloqueada(idInscripcion: number, idContacto: number) {
+  const ahora = new Date().toISOString();
+  db.transaction((tx) => {
+    const insc = tx.select({ idEmpresa: inscripcion.idEmpresa, estado: inscripcion.estado }).from(inscripcion).where(eq(inscripcion.idInscripcion, idInscripcion)).get();
+    if (!insc) throw new Error(`inscripcion ${idInscripcion} no existe`);
+    if (insc.estado !== 'bloqueada') throw new Error(`la inscripcion ${idInscripcion} no esta bloqueada (esta ${insc.estado})`);
+
+    const activaOtra = tx.select({ id: inscripcion.idInscripcion }).from(inscripcion).where(and(eq(inscripcion.idEmpresa, insc.idEmpresa), eq(inscripcion.estado, 'activa'))).get();
+    if (activaOtra) {
+      tx.update(inscripcion).set({ estado: 'finalizada', motivoFin: 'cambio de campana', fechaFin: ahora, updatedAt: ahora }).where(eq(inscripcion.idInscripcion, activaOtra.id)).run();
+    }
+
+    tx.update(inscripcion).set({ estado: 'activa', updatedAt: ahora }).where(eq(inscripcion.idInscripcion, idInscripcion)).run();
+    tx.insert(destinatario).values({ idInscripcion, idContacto, estado: 'activo', createdAt: ahora }).run();
+  });
+}
+
+// V4.5: historial completo de inscripciones de una empresa (activas, bloqueadas y
+// finalizadas), en orden. Prueba el invariante "el cambio de campana deja historial".
+export function historialInscripciones(idEmpresa: string) {
+  return db
+    .select({
+      id: inscripcion.idInscripcion,
+      idCampana: inscripcion.idCampana,
+      estado: inscripcion.estado,
+      motivoFin: inscripcion.motivoFin,
+      fechaInscripcion: inscripcion.fechaInscripcion,
+      fechaFin: inscripcion.fechaFin,
+    })
+    .from(inscripcion)
+    .where(eq(inscripcion.idEmpresa, idEmpresa))
+    .orderBy(inscripcion.idInscripcion)
+    .all();
+}
+
+// V4.5: destinatarios (contactos) de una inscripcion.
+export function destinatariosDeInscripcion(idInscripcion: number) {
+  return db
+    .select({ id: destinatario.idDestinatario, idContacto: destinatario.idContacto, estado: destinatario.estado })
+    .from(destinatario)
+    .where(eq(destinatario.idInscripcion, idInscripcion))
+    .all();
 }
