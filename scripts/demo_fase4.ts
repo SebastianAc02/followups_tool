@@ -20,6 +20,14 @@ import {
 } from '../app/db/repository.ts';
 import { plusDias } from '../app/lib/date-utils.ts';
 
+// Guard duro, no solo el comentario de arriba: esta demo hace escrituras reales. Si
+// ISPS_DB_PATH no esta o apunta a un archivo isps.db (la base real), aborta antes de
+// tocar nada. La convencion sola no basta: un env var olvidado mutaria produccion.
+const dbPath = process.env.ISPS_DB_PATH;
+if (!dbPath || /(^|\/)isps\.db$/.test(dbPath)) {
+  throw new Error('ISPS_DB_PATH debe apuntar a una COPIA (nunca isps.db real). Aborta la demo.');
+}
+
 function h(titulo: string) {
   console.log('\n== ' + titulo + ' ==');
 }

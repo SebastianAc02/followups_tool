@@ -65,6 +65,15 @@ test('subir el peso de una version corre el reparto hacia ella (2:1)', () => {
   assert.equal(cuenta.get(versiones[1].id), 2);
 });
 
+test('actualizarVersionPaso rechaza peso negativo o no entero (protege el reparto)', () => {
+  const idPaso = idPasoUnico();
+  const alguna = versionesActivasDePaso(idPaso)[0];
+  assert.throws(() => actualizarVersionPaso(alguna.id, { peso: -1 }), /peso debe ser/);
+  assert.throws(() => actualizarVersionPaso(alguna.id, { peso: 1.5 }), /peso debe ser/);
+  // peso 0 SI se permite (apaga sin borrar)
+  actualizarVersionPaso(alguna.id, { peso: 0 });
+});
+
 test('apagar una version (activa=0) la saca del reparto', () => {
   const idPaso = idPasoUnico();
   const versiones = versionesActivasDePaso(idPaso);

@@ -790,6 +790,12 @@ export function versionesActivasDePaso(idPaso: number) {
 // V4.4: ajustar peso o apagar/prender una version (peso 0 o activa 0 la sacan del
 // reparto). No toca el copy: para cambiar copy se agrega otra version.
 export function actualizarVersionPaso(idVersion: number, cambios: { peso?: number; activa?: boolean }) {
+  // peso alimenta el reparto A/B (elegirVersionPorPeso); un negativo o NaN lo romperia.
+  // 0 SI se permite: es la forma de apagar una version sin borrarla (misma semantica que
+  // activa=false, deja la fila para historial).
+  if (cambios.peso != null && (!Number.isInteger(cambios.peso) || cambios.peso < 0)) {
+    throw new Error('peso debe ser un entero >= 0');
+  }
   const sets: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (cambios.peso != null) sets.peso = cambios.peso;
   if (cambios.activa != null) sets.activa = cambios.activa ? 1 : 0;
@@ -931,6 +937,15 @@ export function resolverInscripcionBloqueada(idInscripcion: number, idContacto: 
     const insc = tx.select({ idEmpresa: inscripcion.idEmpresa, estado: inscripcion.estado }).from(inscripcion).where(eq(inscripcion.idInscripcion, idInscripcion)).get();
     if (!insc) throw new Error(`inscripcion ${idInscripcion} no existe`);
     if (insc.estado !== 'bloqueada') throw new Error(`la inscripcion ${idInscripcion} no esta bloqueada (esta ${insc.estado})`);
+
+    // El contacto elegido a mano DEBE ser de la empresa de la inscripcion: sin FKs fisicas,
+    // un id equivocado adjuntaria un destinatario ajeno (o inexistente) en silencio.
+    const contactoValido = tx
+      .select({ id: contacto.idContacto })
+      .from(contacto)
+      .where(and(eq(contacto.idContacto, idContacto), eq(contacto.idEmpresa, insc.idEmpresa)))
+      .get();
+    if (!contactoValido) throw new Error(`el contacto ${idContacto} no pertenece a la empresa de la inscripcion ${idInscripcion}`);
 
     const activaOtra = tx.select({ id: inscripcion.idInscripcion }).from(inscripcion).where(and(eq(inscripcion.idEmpresa, insc.idEmpresa), eq(inscripcion.estado, 'activa'))).get();
     if (activaOtra) {

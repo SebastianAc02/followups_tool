@@ -112,6 +112,18 @@ test('cambio de campana: la empresa sale de la anterior con motivo_fin y deja hi
   assert.equal(finalizadas.at(-1)!.motivoFin, 'cambio de campana');
 });
 
+test('resolver con un contacto de OTRA empresa es rechazado (no adjunta ajenos)', () => {
+  const deBloq = inscripcionesBloqueadas().find((b) => b.idEmpresa === 'e-bloq');
+  assert.ok(deBloq);
+  // un contacto de e-kdm no pertenece a e-bloq
+  const raw = new Database(dbPath);
+  const ajeno = raw.prepare(`SELECT id_contacto FROM contacto WHERE id_empresa = 'e-kdm' LIMIT 1`).get() as any;
+  raw.close();
+  assert.throws(() => resolverInscripcionBloqueada(deBloq!.id, ajeno.id_contacto), /no pertenece a la empresa/);
+  // sigue bloqueada tras el throw
+  assert.equal(historialInscripciones('e-bloq').find((i) => i.id === deBloq!.id)!.estado, 'bloqueada');
+});
+
 test('resolver una bloqueada la promueve a activa con su destinatario', () => {
   const bloqueadas = inscripcionesBloqueadas();
   const deBloq = bloqueadas.find((b) => b.idEmpresa === 'e-bloq');
