@@ -246,3 +246,61 @@ a { color: inherit; text-decoration: none; }
 }
 .save:hover { opacity: .92; }
 .save:active { transform: scale(.99); }
+
+/* V4.7: constructor de cadencia con vista calendario */
+.cad-import { display: block; }
+.cad-import-top { display: flex; gap: 8px; margin-bottom: 10px; }
+.cad-import-top input { flex: 1; }
+.cad-formato {
+  font-family: inherit; font-size: 13px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line-strong); border-radius: 9px; padding: 10px 12px;
+}
+.cad-import textarea { font-family: var(--font-geist-mono), monospace; font-size: 13px; line-height: 1.5; }
+.cad-import .save { margin-top: 14px; }
+
+.cad-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.cad-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  transition: border-color .14s, background .14s;
+}
+.cad-item:hover { border-color: var(--line-strong); background: var(--hover); }
+.cad-item.on { border-color: var(--line-strong); background: var(--surface-2); }
+.cad-item-nombre { font-weight: 500; font-size: 14px; }
+.cad-item-meta { color: var(--muted); font-size: 12px; }
+
+.cad-constructor { margin-top: 28px; }
+.cad-config {
+  display: flex; gap: 28px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 22px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+}
+.cad-config-block { display: flex; flex-direction: column; gap: 9px; }
+.cad-config-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); }
+.cad-config .chip { width: 34px; padding: 8px 0; text-align: center; }
+
+.cad-preview-head {
+  font-family: var(--font-serif), Georgia, serif; font-size: 19px; font-weight: 500;
+  letter-spacing: -0.01em; margin-bottom: 14px;
+}
+.cad-timeline { display: flex; flex-direction: column; }
+.cad-day {
+  display: grid; grid-template-columns: 96px 1fr; gap: 18px; padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+.cad-day:last-child { border-bottom: 1px solid var(--line); }
+.cad-day-left { display: flex; flex-direction: column; gap: 2px; }
+.cad-day-num { font-size: 13px; font-weight: 600; color: var(--ink); }
+.cad-day-fecha { font-size: 12px; color: var(--muted); }
+.cad-day-dow { font-size: 11px; color: var(--faint); }
+.cad-day-touches { display: flex; flex-direction: column; gap: 9px; }
+.cad-touch { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cad-canal {
+  font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 7px; letter-spacing: 0;
+  background: var(--surface-2); color: var(--ink-soft); text-transform: lowercase;
+}
+.cad-canal-correo { background: var(--today-bg); color: var(--today); }
+.cad-canal-whatsapp { background: rgba(87, 201, 138, 0.13); color: var(--done); }
+.cad-canal-llamada { background: var(--surface-2); color: var(--ink-soft); }
+.cad-touch-asunto { font-size: 13px; color: var(--ink); }
+.cad-touch-shift { font-size: 11px; color: var(--today); background: var(--today-bg); padding: 2px 8px; border-radius: 6px; }
+.cad-preview-meta { color: var(--muted); font-size: 12.5px; margin-top: 14px; }

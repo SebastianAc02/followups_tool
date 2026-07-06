@@ -60,6 +60,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
           {" · "}
           <Link href="/toque-independiente">Agregar toque</Link>
           {" · "}
+          <Link href="/cadencias">Cadencias</Link>
+          {" · "}
           <Link href="/conectores">Conectores</Link>
           {" · "}
           <SignOutButton email={usuario.email} />
