@@ -304,6 +304,23 @@ export function guardarCredencialConector(proveedor: string, credencial: string,
   }
 }
 
+// V3.5: heartbeat del worker por tarea. Upsert igual que guardarCredencialConector
+// (mismo motivo: SQLite no fusiona NULLs en un UNIQUE index, el lookup explicito es
+// la garantia real). No toca credencialCiphertext -- si la fila no existia, nace con
+// estado 'sin_credencial' porque el heartbeat no implica que haya credencial cargada.
+export function registrarHeartbeatConector(proveedor: string, resultado: string, idUsuario?: string) {
+  const ahora = new Date().toISOString();
+  const existente = db.select({ idConector: conector.idConector }).from(conector).where(filtroConector(proveedor, idUsuario)).get();
+
+  if (existente) {
+    db.update(conector).set({ ultimaCorrida: ahora, ultimoResultado: resultado }).where(eq(conector.idConector, existente.idConector)).run();
+  } else {
+    db.insert(conector)
+      .values({ proveedor, idUsuario: idUsuario ?? null, estado: 'sin_credencial', ultimaCorrida: ahora, ultimoResultado: resultado, createdAt: ahora, updatedAt: ahora })
+      .run();
+  }
+}
+
 export function leerCredencialConector(proveedor: string, idUsuario?: string): string | null {
   const fila = db
     .select({ credencialCiphertext: conector.credencialCiphertext })

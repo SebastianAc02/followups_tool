@@ -438,13 +438,26 @@ async function main() {
 }
 ```
 
-- [ ] **Paso 2: Sebastián escribe el manejo de error y el heartbeat.**
-- [ ] **Paso 3: test del heartbeat:** tras un ciclo, `conector.ultima_corrida` y
-      `ultimo_resultado` quedan escritos (incluido el caso de tarea que truena).
-- [ ] **Paso 4: prueba manual del criterio:** matar el worker, crear atraso, arrancarlo,
-      verificar que procesa lo atrasado antes de esperar.
-- [ ] **Paso 5: documentar plist de launchd** en `docs/launchd.md` (sin instalarlo aún).
-- [ ] **Paso 6: commit.** `git commit -m "V3.5: worker con catch-up-first y heartbeat (outbox)"`
+- [x] **Paso 2: política de aislamiento implementada** (aislar, no abortar — decisión ya
+      confirmada en el batch de decisiones de esta sesión). `registrarHeartbeatConector`
+      nueva en el Repository (upsert, mismo patrón que `guardarCredencialConector`: SQLite no
+      fusiona NULLs en el UNIQUE index, lookup explícito). Cada tarea tiene su propio
+      `proveedorHeartbeat` (hoy solo `outbox` → `notion`), así que una tarea rota no pisa el
+      heartbeat de otra cuando se sumen más en fases 4/5.
+- [x] **Paso 3: tests del heartbeat verdes** (3 tests: éxito, error aislado, una rota no
+      bloquea a las demás).
+- [x] **Paso 4: prueba manual contra la DB real** (no simulada): corrí `npm run worker`,
+      maté el proceso a los 2 segundos, y el heartbeat de `notion` ya estaba escrito con
+      `ultimo_resultado='ok'` — confirma catch-up-first de verdad, no solo en el test. De
+      paso until encontré y arreglé un bug real: el script `"worker"` en `package.json` no
+      tenía el `--experimental-loader` que resuelve imports sin extensión (mismo problema que
+      resuelve `scripts/resolve-ts-ext.mjs` para los tests) — sin eso, el worker no arrancaba
+      nunca en producción real, solo bajo el test runner. `tareaOutbox` hoy es un no-op: no
+      hay nada que drenar todavía sin `NotionAdapter` (V3.7).
+- [x] **Paso 5: `docs/launchd.md` documentado** (plist, comandos, nota de que
+      `FOLLOWUPS_CRYPTO_KEY` tiene que ir en `EnvironmentVariables` del plist porque launchd
+      no hereda `.env.local`). Sin instalar.
+- [x] **Paso 6: commit.**
 
 ### Tarea V3.6 · Confirmación repetible: qué es sagrado una vez tocado por humano
 
