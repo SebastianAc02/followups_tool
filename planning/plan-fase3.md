@@ -499,12 +499,18 @@ test('que_paso editado a mano no se pisa en una reconfirmacion', async () => {
 });
 ```
 
-- [ ] **Paso 2: Sebastián escribe la política de reconfirmación** (slot en la rama "ya
-      confirmado antes").
-- [ ] **Paso 3: tests verdes + tsc limpio.**
-- [ ] **Paso 4: checkpoint.** Pregunta: por qué esto ya no necesita un índice único
-      proveedor+transcript_id como en el diseño viejo (¿qué reemplazó esa garantía?).
-- [ ] **Paso 5: commit.** `git commit -m "V3.6: confirmacion repetible respeta ediciones humanas"`
+- [x] **Paso 2: política escrita por Sebastián.** Si `actual.transcriptId === sesion.transcriptId`
+      (misma grabación ya confirmada antes): solo `escribirSoloPuntero` (refresca
+      proveedor/id/url, `quePaso` queda intocable — territorio humano desde la primera
+      confirmación). Cualquier otro caso (primera vez, o grabación distinta elegida a
+      propósito): `escribirCompleto`, se reescribe todo.
+- [x] **Paso 3: tests verdes + tsc limpio.** 4 tests (primera confirmación, doble
+      confirmación misma sesión, edición humana preservada, grabación distinta sí
+      refresca `quePaso`) + 39/39 de la suite completa.
+- [x] **Paso 5: commit.** (Checkpoints formales en pausa por pedido de Sebastián — nota de
+      proceso: la garantía de idempotencia del diseño viejo era un índice único
+      `proveedor+transcript_id`; acá no hace falta porque no hay worker escribiendo a
+      ciegas — cada escritura pasa por esta política antes de tocar la DB.)
 
 ### Tarea V3.7 · Outbox a Notion
 

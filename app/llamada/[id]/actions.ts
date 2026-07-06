@@ -2,11 +2,18 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { registrarToque, terminosBusquedaTranscript, confirmarTranscript } from "../../db/repository";
+import {
+  registrarToque,
+  terminosBusquedaTranscript,
+  leerToqueTranscript,
+  escribirTranscriptCompleto,
+  escribirTranscriptSoloPuntero,
+} from "../../db/repository";
 import { registrarToqueSchema } from "../../db/validation";
 import { requireSession } from "../../lib/session";
 import { crearGranolaAdapter } from "../../adapters/granola";
 import { agruparCandidatas, type CandidataOFusion } from "../../core/matcher";
+import { confirmarTranscript } from "../../core/confirmarTranscript";
 
 export async function registrarToqueAction(formData: FormData) {
   await requireSession();
@@ -78,10 +85,16 @@ export async function buscarGrabacionAction(idToque: number): Promise<CandidataO
   return agruparCandidatas(candidatas, datos.fecha);
 }
 
-// V3.4: escribe la candidata elegida por Sebastian. Nunca se llama sola -- siempre
-// despues de que el humano confirmo en la UI cual de las candidatas es la correcta.
+// V3.4 + V3.6: escribe la candidata elegida por Sebastian. Nunca se llama sola --
+// siempre despues de que el humano confirmo en la UI cual de las candidatas es la
+// correcta. La politica de que se pisa y que no (V3.6) vive en el core; esta funcion
+// solo conecta las dependencias reales.
 export async function confirmarGrabacionAction(idEmpresa: string, idToque: number, candidata: CandidataOFusion) {
   await requireSession();
-  confirmarTranscript(idToque, candidata);
+  confirmarTranscript(idToque, candidata, {
+    leerToque: leerToqueTranscript,
+    escribirCompleto: escribirTranscriptCompleto,
+    escribirSoloPuntero: escribirTranscriptSoloPuntero,
+  });
   revalidatePath(`/llamada/${idEmpresa}`);
 }

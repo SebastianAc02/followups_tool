@@ -362,18 +362,30 @@ export function terminosBusquedaTranscript(idToque: number): { terminos: string[
   return { terminos: [...new Set(terminos)], fecha: t.fecha };
 }
 
-// V3.4: confirma la candidata elegida por Sebastian. Una sola transaccion (aqui de un
-// solo UPDATE): el puntero al proveedor y el resumen cacheado en quePaso -- sin tabla
-// nueva, se reusan las columnas que ya existen en toque. V3.6 refina que pasa si ya
-// habia una confirmacion previa o el humano ya edito quePaso a mano; esta es la
-// escritura simple inicial.
-export function confirmarTranscript(idToque: number, sesion: SesionTranscript) {
+// V3.6: primitivas de bajo nivel para la politica de reconfirmacion (app/core/confirmarTranscript.ts).
+// El core decide CUAL de las dos escrituras usar; estas solo saben ESCRIBIR.
+export function leerToqueTranscript(idToque: number): { transcriptId: string | null } | undefined {
+  return db.select({ transcriptId: toque.transcriptId }).from(toque).where(eq(toque.idToque, idToque)).get();
+}
+
+export function escribirTranscriptCompleto(idToque: number, sesion: SesionTranscript) {
   db.update(toque)
     .set({
       transcriptProveedor: sesion.proveedor,
       transcriptId: sesion.transcriptId,
       transcriptUrl: sesion.url,
       quePaso: sesion.resumen,
+    })
+    .where(eq(toque.idToque, idToque))
+    .run();
+}
+
+export function escribirTranscriptSoloPuntero(idToque: number, sesion: SesionTranscript) {
+  db.update(toque)
+    .set({
+      transcriptProveedor: sesion.proveedor,
+      transcriptId: sesion.transcriptId,
+      transcriptUrl: sesion.url,
     })
     .where(eq(toque.idToque, idToque))
     .run();

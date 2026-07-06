@@ -1,4 +1,5 @@
-// Pruebas de Repository para terminosBusquedaTranscript y confirmarTranscript (V3.4).
+// Pruebas de Repository para terminosBusquedaTranscript y las primitivas de escritura
+// de transcript (V3.4, renombradas en V3.6 al partirse en completo/solo-puntero).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
@@ -7,7 +8,7 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { terminosBusquedaTranscript, confirmarTranscript } = await import('./repository.ts');
+const { terminosBusquedaTranscript, escribirTranscriptCompleto } = await import('./repository.ts');
 
 function seed() {
   const raw = new Database(dbPath);
@@ -48,8 +49,8 @@ test('terminosBusquedaTranscript devuelve null si el toque no existe', () => {
   assert.strictEqual(terminosBusquedaTranscript(999), null);
 });
 
-test('confirmarTranscript escribe el puntero y el resumen en el toque', () => {
-  confirmarTranscript(1, {
+test('escribirTranscriptCompleto escribe el puntero y el resumen en el toque', () => {
+  escribirTranscriptCompleto(1, {
     proveedor: 'granola',
     transcriptId: 'not_abc123',
     titulo: 'Cabletelco - Llamada',
