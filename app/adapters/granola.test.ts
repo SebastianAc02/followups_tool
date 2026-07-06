@@ -61,6 +61,19 @@ test('coincide con acentos distintos (normaliza texto antes de comparar)', async
   assert.strictEqual(candidatas.length, 1);
 });
 
+test('caso real: nombre_normalizado con sufijo legal (s a s) matchea titulo sin sufijo', async (t) => {
+  const notes = [{ id: 'n-5', title: 'Phone call with Jenny Urrrea - digital coast', created_at: '2026-07-04T10:00:00.000Z' }];
+  const detalles = {
+    'n-5': { id: 'n-5', title: 'Phone call with Jenny Urrrea - digital coast', created_at: '2026-07-04T10:00:00.000Z', summary_text: 'resumen', web_url: null },
+  };
+  t.mock.method(globalThis, 'fetch', fetchFalso(notes, detalles));
+
+  const adapter = crearGranolaAdapter('user-sebastian');
+  const candidatas = await adapter.buscarCandidatas(['digital coast s a s'], '2026-07-04T00:00:00.000Z', '2026-07-04T23:59:59.000Z');
+
+  assert.strictEqual(candidatas.length, 1);
+});
+
 test('un termino de telefono tambien sirve si aparece en el resumen', async (t) => {
   const notes = [{ id: 'n-4', title: 'Phone call with Jenny - digital coast', created_at: '2026-07-04T10:00:00.000Z' }];
   const detalles = {

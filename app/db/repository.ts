@@ -358,6 +358,36 @@ export function registrarHeartbeatConector(proveedor: string, resultado: string,
   }
 }
 
+export type EstadoConector = {
+  tieneCredencial: boolean;
+  estado: string;
+  ultimaCorrida: string | null;
+  ultimoResultado: string | null;
+};
+
+// V3.8: lectura SOLO de estado, para la pantalla de conectores. Nunca descifra ni
+// devuelve la credencial -- ni siquiera enmascarada. "Hay credencial: si/no" es todo
+// lo que el cliente necesita ver.
+export function estadoConector(proveedor: string, idUsuario?: string): EstadoConector {
+  const fila = db
+    .select({
+      credencialCiphertext: conector.credencialCiphertext,
+      estado: conector.estado,
+      ultimaCorrida: conector.ultimaCorrida,
+      ultimoResultado: conector.ultimoResultado,
+    })
+    .from(conector)
+    .where(filtroConector(proveedor, idUsuario))
+    .get();
+
+  return {
+    tieneCredencial: Boolean(fila?.credencialCiphertext),
+    estado: fila?.estado ?? 'sin_credencial',
+    ultimaCorrida: fila?.ultimaCorrida ?? null,
+    ultimoResultado: fila?.ultimoResultado ?? null,
+  };
+}
+
 export function leerCredencialConector(proveedor: string, idUsuario?: string): string | null {
   const fila = db
     .select({ credencialCiphertext: conector.credencialCiphertext })

@@ -592,13 +592,32 @@ Sin slot de Tu código: es UI sobre datos que ya existen.
 
 **Pasos:**
 
-- [ ] **Paso 1:** estado por conector: vivo/caído, última corrida, último resultado, aviso
-      de token vencido (el error del adaptador queda en `ultimo_resultado`).
-- [ ] **Paso 2:** alta de credencial: se pega una vez, viaja al server, se guarda cifrada,
-      JAMAS vuelve al cliente (ni siquiera enmascarada; solo "hay credencial: sí/no").
-- [ ] **Paso 3:** criterio de cierre: token inválido se ve en pantalla sin mirar logs
-      (probar rompiendo la credencial a propósito).
-- [ ] **Paso 4: commit.** `git commit -m "V3.8: pantalla de conectores con estado y alta cifrada"`
+- [x] **Paso 1: `estadoConector` en el Repository** — nunca descifra, solo
+      `tieneCredencial/estado/ultimaCorrida/ultimoResultado`. Semáforo en la UI: gris (sin
+      configurar), ámbar (configurado, sin corridas), verde (`ok`), rojo (`ultimoResultado`
+      empieza con `error`).
+- [x] **Paso 2:** `app/conectores/page.tsx` + `actions.ts`. Granola: cualquier usuario ve/edita
+      SU credencial (`idUsuario` de la sesión). Notion: todos ven estado + link al CRM real,
+      SOLO admin ve el formulario de edición (gate doble: UI lo oculta, la action también
+      revisa `sesion.admin` antes de escribir).
+- [x] **Verificado EN VIVO** con sesión real de Sebastián (no simulada): login real, guardé
+      la credencial personal de Granola desde el formulario real, confirmé en la DB real que
+      quedó cifrada (`credencial_ciphertext` no es texto plano) y con el `id_usuario` correcto
+      de Better Auth. Encontré y arreglé 3 bugs reales en el camino, ninguno visible solo con
+      tests:
+      1. `.env.local` nunca tuvo `FOLLOWUPS_CRYPTO_KEY` — el fail-fast de V3.2 funcionó
+         exactamente como se diseñó (bloqueó el guardado con el mensaje correcto), pero
+         reveló que el entorno real nunca se terminó de configurar. Agregada.
+      2. Probé el flujo completo "Buscar grabación" con un toque real (temporal, borrado
+         después de probar): la API de Granola respondió 400 porque `page_size` real es
+         máximo 30, no 100 como asumí en V3.3 sin verificarlo contra ese parámetro puntual.
+      3. El nombre de empresa real (`nombre_normalizado`) trae el sufijo legal ("digital
+         coast s a s"), pero Granola solo dice "digital coast" — sin quitar el sufijo, CERO
+         empresas con razón social matchearían nunca. Agregado `quitarSufijoEmpresa`.
+      La UI del semáforo y el guardado cifrado quedaron confirmados en pantalla real; el
+      ciclo completo botón→acción→Granola real quedó probado por el error 400 real que
+      diagnostiqué y corregí (no una simulación).
+- [x] **Paso 4: commit.**
 
 ### Tarea V3.9 · Toque independiente (fuera de la cola del día)
 

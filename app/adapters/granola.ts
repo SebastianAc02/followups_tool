@@ -28,16 +28,37 @@ function soloDigitos(valor: string): string {
   return valor.replace(/\D/g, '');
 }
 
-// Cada termino se compara de dos formas: texto normal (empresa/alias, ej. "Redes del
-// Norte") y solo-digitos (telefono, ej. "3183154417" contra "+57 318 315 4417" en el
-// resumen -- las dos son el mismo numero pero no coinciden como substring de texto).
+// Verificado en vivo (2026-07-06): nombre_normalizado guarda el sufijo legal
+// ("digital coast s a s"), pero Granola solo dice "digital coast" en el titulo --
+// sin esto, CERO empresas con razon social matchearian nunca. Se quita el sufijo
+// SOLO al final de la cadena, para no comerse sufijos que sean parte real del nombre.
+const SUFIJOS_EMPRESA = ['s a s', 'sas', 's a', 'sa', 'ltda', 'inc', 'llc', 'corp'];
+
+function quitarSufijoEmpresa(normalizado: string): string {
+  for (const sufijo of SUFIJOS_EMPRESA) {
+    const patron = new RegExp(`\\s+${sufijo}\\.?$`);
+    if (patron.test(normalizado)) return normalizado.replace(patron, '').trim();
+  }
+  return normalizado;
+}
+
+// Cada termino se compara de tres formas: texto normal (empresa/alias, ej. "Redes
+// del Norte"), texto sin sufijo legal ("digital coast s a s" -> "digital coast"), y
+// solo-digitos (telefono, ej. "3183154417" contra "+57 318 315 4417" en el resumen --
+// las dos son el mismo numero pero no coinciden como substring de texto).
 function coincideAlgunTermino(texto: string, terminos: string[]): boolean {
   const textoNormalizado = normalizarTexto(texto);
   const digitosTexto = soloDigitos(texto);
   return terminos.some((t) => {
     const termino = t.trim();
     if (!termino) return false;
-    if (textoNormalizado.includes(normalizarTexto(termino))) return true;
+
+    const terminoNormalizado = normalizarTexto(termino);
+    if (textoNormalizado.includes(terminoNormalizado)) return true;
+
+    const sinSufijo = quitarSufijoEmpresa(terminoNormalizado);
+    if (sinSufijo !== terminoNormalizado && textoNormalizado.includes(sinSufijo)) return true;
+
     const digitosTermino = soloDigitos(termino);
     return digitosTermino.length >= 7 && digitosTexto.includes(digitosTermino);
   });
@@ -69,7 +90,9 @@ async function listarNotasEnVentana(apiKey: string, desde: string, hasta: string
   let cursor: string | null = null;
 
   for (let pagina = 0; pagina < MAX_PAGINAS; pagina++) {
-    const query = new URLSearchParams({ created_after: desde, page_size: '100' });
+    // page_size maximo real verificado en vivo: 30 (la doc no lo aclara, la API
+    // rechaza con 400 VALIDATION_ERROR por encima de eso).
+    const query = new URLSearchParams({ created_after: desde, page_size: '30' });
     if (cursor) query.set('cursor', cursor);
 
     const lista: ListaNotas = await llamarGranola<ListaNotas>(`/v1/notes?${query}`, apiKey);
