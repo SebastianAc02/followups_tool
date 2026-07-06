@@ -222,9 +222,12 @@ SÍ refleja lo construido (se siguió tal cual). Rama sin mergear, para revisió
 
 ## Fase 5 · F3.5 + F4 envío por Apollo y tracking (leer experimento-apollo.md ANTES)
 
-**Backend (V5.1, V5.2, V5.4, V5.5, V5.6) completo, 2026-07-06.** A pedido explícito
-de Sebastián: solo backend, sin UI (el front de cadencias se está rehaciendo en
-paralelo, ver bitácora). V5.3 (escritura real de Apollo) en pausa a propósito hasta
+**Backend (V5.1, V5.2, V5.4, V5.5, V5.6) + V5.7 completos, 2026-07-06.** A pedido
+explícito de Sebastián: solo backend al inicio (el front de cadencias se está
+rehaciendo en paralelo, ver bitácora); V5.7 sí tocó UI porque es la única pieza que
+unifica cadencias con la cola existente, y se hizo con cuidado de no chocar con la
+sesión paralela (nueva sección en /cola, sin tocar globals.css). V5.3 (escritura real
+de Apollo) en pausa a propósito hasta
 que confirme tocar la cuenta real. V5.7 es la acción inmediata siguiente.
 
 - [x] **V5.1 · Migración: grupo 3 del Anexo.**
@@ -270,7 +273,7 @@ que confirme tocar la cuenta real. V5.7 es la acción inmediata siguiente.
   Lista cuando: prueba de manual sin revisar 3 días no dispara nada; al aprobar, el
   siguiente paso se calcula desde la fecha real.
 
-- [ ] **V5.7 · Cola del día unificada.** EN CURSO (siguiente accion inmediata).
+- [x] **V5.7 · Cola del día unificada.**
   Los toques automatizados de hoy (paso_inscripcion) y los manuales conviven en la misma
   cola, con los atrasados visibles.
   Lista cuando: la demo de la fase se ve en una sola pantalla.
