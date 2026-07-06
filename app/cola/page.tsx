@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { colaDelDia, contadoresHoy } from "../db/repository";
-import { repartirAction, registrarTapAction } from "../actions";
+import { colaDelDia, contadoresHoy, agendaHoyCadencias } from "../db/repository";
+import { repartirAction, registrarTapAction, aprobarPasoManualAction } from "../actions";
 import { RESULTADO_LABELS, CANALES, RESULTADOS } from "../db/validation";
 import { requireSession } from "../lib/session";
 import TopNav from "../TopNav";
@@ -41,10 +41,15 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const cola = colaDelDia(hoy, owner);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
   const contadores = contadoresHoy(hoy, owner);
+  // V5.7: cadencias (automatico Apollo + manual Tier 1) no son por owner todavia
+  // (campana.owner es la campana masiva, no un individuo -- ver memoria del proyecto);
+  // se muestran a cualquier sesion, la cola unificada es informativa para todos.
+  const cadenciasHoy = agendaHoyCadencias(hoy);
 
   return (
     <div className="wrap">
       <TopNav email={usuario.email} />
+      <Link href="/" className="back">← Inicio</Link>
       <div className="head">
         <div>
           <div className="h-title">Toques del día</div>
@@ -87,6 +92,47 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
           <span className="rep-unit">por día</span>
           <button className="rep-btn">Repartir</button>
         </form>
+      )}
+
+      {cadenciasHoy.length > 0 && (
+        <div className="cadencias-hoy">
+          <div className="h-title" style={{ fontSize: 15, marginBottom: 10 }}>Cadencias de hoy</div>
+          {cadenciasHoy.map((t) => {
+            const atrasado = (t.fechaProgramada ?? "").slice(0, 10) < hoy;
+            return (
+              <div className="row-wrap" key={t.idPasoInscripcion}>
+                <div className="row">
+                  <div>
+                    <div className="l1">
+                      <span className={`dot ${atrasado ? "overdue" : "today"}`} aria-hidden="true" />
+                      <span className="emp">{t.empresaNombre}</span>
+                      <span className={`pill ${t.esManual ? "warm" : "cold"}`}>
+                        {t.esManual ? "manual · Tier 1" : "automatico"}
+                      </span>
+                      {t.nombre && <span className="contact">{t.nombre}</span>}
+                    </div>
+                    <div className="l2">
+                      <span>canal <b>{t.canal}</b></span>
+                      <span>contacto <b>{t.email ?? "—"}</b></span>
+                      {t.asunto && <span>asunto <b>{t.asunto}</b></span>}
+                    </div>
+                  </div>
+                  <div className="right">
+                    <div className={`when ${atrasado ? "overdue" : "today"}`}>
+                      {atrasado ? "atrasado" : "hoy"}
+                    </div>
+                  </div>
+                </div>
+                {t.esManual === 1 && (
+                  <form className="tap-row" action={aprobarPasoManualAction}>
+                    <input type="hidden" name="idPasoInscripcion" value={t.idPasoInscripcion} />
+                    <button type="submit" className="tap-btn">Aprobar (ya lo hice)</button>
+                  </form>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {cola.length === 0 ? (

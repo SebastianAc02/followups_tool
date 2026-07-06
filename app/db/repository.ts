@@ -1261,6 +1261,43 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
     .run();
 }
 
+// V5.7: cola del dia unificada. Un solo query trae AMBOS tipos de toque de cadencia
+// (automatico y manual, distinguidos por esManual) para hoy o atrasados; el llamador
+// (UI) decide que hacer con cada uno -- el automatico es informativo (Apollo lo
+// manda solo), el manual pide accion humana (aprobarPasoManual). date(...) en vez de
+// comparar el string crudo: fechaProgramada es ISO datetime completo, comparar texto
+// contra una fecha corta 'YYYY-MM-DD' fallaria para las de HOY con hora (mismo bug
+// que ya se evito en el puente de V4.8).
+export function agendaHoyCadencias(hoy: string) {
+  return db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+      canal: pasoInscripcion.canal,
+      esManual: pasoCadencia.esManual,
+      email: contacto.email,
+      nombre: contacto.nombre,
+      asunto: versionPaso.asunto,
+      idEmpresa: empresa.idEmpresa,
+      empresaNombre: empresa.nombreOficial,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .where(
+      and(
+        inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
+        sql`date(${pasoInscripcion.fechaProgramada}) <= date(${hoy})`,
+      ),
+    )
+    .orderBy(pasoInscripcion.fechaProgramada)
+    .all();
+}
+
 // V5.5: poll de tracking + reply detection.
 export function campanasConSecuencia(): CampanaConSecuencia[] {
   return db

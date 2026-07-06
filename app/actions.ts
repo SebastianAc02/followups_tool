@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { repartirFollowups, registrarToque } from "./db/repository";
+import { repartirFollowups, registrarToque, aprobarPasoManual } from "./db/repository";
 import { plusDias } from "./lib/date-utils";
 import { requireSession } from "./lib/session";
 
@@ -35,4 +35,17 @@ export async function registrarTapAction(formData: FormData) {
   registrarToque({ idEmpresa, canal, resultado: "no_contesto", proximoFollowUp, objecion });
 
   revalidatePath("/");
+}
+
+// V5.7: aprobar un paso manual (Tier 1) desde la cola unificada. fechaEnviada es AHORA
+// (la fecha REAL, no la programada) -- es la que el motor de fechas usa para re-anclar
+// el siguiente paso (B6, V5.6).
+export async function aprobarPasoManualAction(formData: FormData) {
+  await requireSession();
+  const idPasoInscripcion = Number(formData.get("idPasoInscripcion"));
+  if (!idPasoInscripcion) return;
+
+  aprobarPasoManual(idPasoInscripcion, new Date().toISOString());
+
+  revalidatePath("/cola");
 }
