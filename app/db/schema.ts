@@ -143,6 +143,9 @@ export const pasoCadencia = sqliteTable('paso_cadencia', {
   diaOffset: integer('dia_offset').notNull(),
   canal: text('canal').notNull(),
   objetivo: text('objetivo'),
+  // esManual (V5.6): FLAG del paso, no una rama de codigo. Un paso manual nunca lo
+  // dispara el push automatico (V5.4); espera revision humana (aprobarPasoManual).
+  esManual: integer('es_manual').notNull().default(0),
   createdAt: text('created_at'),
 });
 
@@ -264,5 +267,22 @@ export const eventoTracking = sqliteTable('evento_tracking', {
   proveedorEventoId: text('proveedor_evento_id').notNull(),
   detalle: text('detalle'),
   fechaEvento: text('fecha_evento'),
+  createdAt: text('created_at'),
+});
+
+export const organizacion = sqliteTable('organizacion', {
+  idOrganizacion: integer('id_organizacion').primaryKey({ autoIncrement: true }),
+  nombre: text('nombre').notNull(),
+  createdAt: text('created_at'),
+});
+
+export const organizacionMiembro = sqliteTable('organizacion_miembro', {
+  idMiembro: integer('id_miembro').primaryKey({ autoIncrement: true }),
+  idOrganizacion: integer('id_organizacion').notNull(),
+  // Valor EXACTO de empresa.owner en isps.db (incluye mayusculas/minusculas reales, ej.
+  // "Camilo fonseca"). No es el nombre bonito: es la llave con la que se filtra la cola.
+  ownerCanonico: text('owner_canonico').notNull(),
+  nombreDisplay: text('nombre_display').notNull(),
+  idUser: text('id_user'),
   createdAt: text('created_at'),
 });

@@ -140,6 +140,7 @@ export function crearDbPrueba() {
       dia_offset INTEGER NOT NULL,
       canal TEXT NOT NULL,
       objetivo TEXT,
+      es_manual INTEGER NOT NULL DEFAULT 0,
       created_at TEXT
     );
 
@@ -250,6 +251,24 @@ export function crearDbPrueba() {
 
     CREATE INDEX ix_evento_tracking_fecha_evento
       ON evento_tracking(fecha_evento);
+
+    CREATE TABLE organizacion (
+      id_organizacion INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL,
+      created_at TEXT
+    );
+
+    CREATE TABLE organizacion_miembro (
+      id_miembro INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_organizacion INTEGER NOT NULL,
+      owner_canonico TEXT NOT NULL,
+      nombre_display TEXT NOT NULL,
+      id_user TEXT,
+      created_at TEXT
+    );
+
+    CREATE UNIQUE INDEX ux_organizacion_miembro_id_user
+      ON organizacion_miembro(id_user) WHERE id_user IS NOT NULL;
   `);
 
   sqlite.close();
