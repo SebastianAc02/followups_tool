@@ -653,18 +653,28 @@ otra relación) — no debe alterar los contadores ni la cadencia de leads en se
 
 ### Tarea V3.10 · Cierre de fase 3
 
-- [ ] **Paso 1:** `npm test` completo verde y `npx tsc --noEmit` limpio.
-- [ ] **Paso 2: demo en vivo:** registrar una llamada como contestada dispara la búsqueda en
-      Granola por teléfono, aparece la grabación real y se confirma; una llamada marcada
-      como no contestada nunca ofrece buscar en Granola.
-- [ ] **Paso 3:** `/code-review` (CodeRabbit); resolver o descartar con razón cada hallazgo.
-- [ ] **Paso 4:** bitácora en `planeacion-ejecucion.md` + marcar V3.x en `tasks-v2.md` +
-      actualizar `CONTINUAR-IMPLEMENTACION.md` (próxima acción: Fase 4, V4.1).
-- [ ] **Paso 5: checkpoint final de aprendizaje:** Sebastián explica el viaje completo de
-      una llamada contestada: registro del toque -> búsqueda por teléfono -> candidatas ->
-      confirmación -> outbox -> Notion, y señala en qué punto exacto vive cada invariante
-      (un toque por sesión, nunca auto-escribir sin confirmar, Notion una vía, credencial
-      nunca en claro).
+- [x] **Paso 1:** 53/53 tests verdes, `npx tsc --noEmit` limpio.
+- [x] **Paso 2: demo en vivo, parcial.** Verificado con sesión real de Sebastián: guardado
+      cifrado de credencial (Granola personal, Notion global) confirmado contra la DB real;
+      ficha `/llamada/[id]` funciona para cualquier empresa (V3.9); el ciclo
+      botón→acción→Granola real quedó probado por el error 400 real que salió y se corrigió
+      (page_size). Lo que NO se logró: un clic limpio en el navegador mostrando las
+      candidatas en pantalla (fricción de tooling de clic remoto, no bug de la app
+      identificado — ver nota en `CONTINUAR-IMPLEMENTACION.md`). Un toque `no_contesto`
+      nunca ofrece el botón de buscar: confirmado por código (`RESULTADOS_CONTESTO` en
+      `validation.ts` lo excluye) y por test, no por clic en vivo.
+- [x] **Paso 3: `/code-review` corrido.** 7 hallazgos (0 críticos), 6 corregidos (fusión de
+      cadenas de 3+ sesiones rota, timeout de Notion, truncado silencioso de rich_text, error
+      oculto en `BuscarGrabacion`, concurrencia sin límite contra Granola, paginación que
+      podía saltarse la ventana buscada), 1 aprovechado para limpiar un patrón de estilo
+      (em dash) en los 13 archivos nuevos de la sesión, no solo el señalado. 0 descartados.
+- [x] **Paso 4:** bitácora en `planeacion-ejecucion.md`, `tasks-v2.md` marcado (con nota de
+      que su detalle quedó desactualizado, apunta acá), `CONTINUAR-IMPLEMENTACION.md`
+      actualizado (próxima acción: Fase 4).
+- [ ] **Paso 5: checkpoint final de aprendizaje — PENDIENTE.** No se hizo en esta sesión:
+      Sebastián pidió explícitamente saltarse los checkpoints por un constraint de tiempo
+      fuerte. Queda para retomar cuando haya espacio, o se da por asumido si no se vuelve a
+      pedir.
 
 ---
 

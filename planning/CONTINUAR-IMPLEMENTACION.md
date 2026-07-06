@@ -1,9 +1,46 @@
 # Continuar la implementación · punto de entrada para la próxima sesión
 
 Empieza AQUÍ. Este doc dice en qué estado quedó todo y qué archivos leer, en orden, para
-retomar sin perder contexto. Última sesión: 2026-07-05.
+retomar sin perder contexto. Última sesión: 2026-07-06.
 
-## Lo último (2026-07-04, sesión de la tarde): Turso para el jefe + Fase 3 en pausa
+## Lo último (2026-07-06): FASE 3 CERRADA Y MERGEADA A MAIN (V3.1 a V3.10)
+
+Sesión con constraint de tiempo fuerte de Sebastián: pidió avanzar sin pausas para que
+escribiera código (solo V3.6 quedó con su parte real, el resto lo tomé yo con las
+decisiones ya negociadas en un batch al principio). Toda la Fase 3 quedó cerrada en una
+sola sesión, con verificación en vivo real (no solo tests) porque a mitad de camino
+Sebastián compartió credenciales reales (Granola y su login) para destrabar la
+verificación. Detalle tarea por tarea en `plan-fase3.md` (cada paso marcado); acá solo lo
+que un lector nuevo necesita saber para seguir:
+
+- **El matching de Granola se rediseñó a mitad de camino, verificado contra datos
+  reales.** El plan original decía "teléfono manda siempre"; se probó contra el spec real
+  de Granola (`docs.granola.ai/api-reference/openapi.json`) y contra notas reales de dos
+  cuentas, y el teléfono NO es un campo estructurado en ningún endpoint (aparece a veces
+  como texto libre en el resumen, no siempre). El diseño final: nombre de empresa/alias
+  como término principal (con el sufijo legal quitado, ej. "digital coast s a s" ->
+  "digital coast", porque Granola solo dice el nombre corto), teléfono como término extra
+  cuando está.
+- **3 bugs reales encontrados en vivo que ningún test hubiera atrapado**, más 7 hallazgos
+  de `/code-review` (6 corregidos, ver commit V3.10): `FOLLOWUPS_CRYPTO_KEY` nunca estaba en
+  `.env.local`, `page_size` real de Granola es 30 no 100, la paginación podía saltarse la
+  ventana buscada si el equipo generó muchas notas nuevas después (faltaba `created_before`).
+- **Credenciales expuestas en el chat de esta sesión, pendiente de Sebastián:** dos API keys
+  de Granola (una de Thomas, una personal de Sebastián) y su password de la app quedaron
+  escritas en el chat. Avisado dos veces en la sesión; falta que las rote.
+- **Pendiente real para que Fase 3 funcione en producción de verdad (no bloquea Fase 4):**
+  token de Notion + un script de enlace `empresa.notion_page_id` que nunca se construyó
+  (hay 4 nombres de empresa duplicados reales, necesitan criterio humano para desambiguar,
+  no se puede automatizar a ciegas). Sin esto el outbox no tiene a dónde escribir.
+- **Verificación por clic remoto en el navegador tuvo fricción real** (varios intentos donde
+  el clic no disparaba el action, sin causa clara identificada, no parece ser bug de la
+  app). El ciclo completo botón→acción→Granola SÍ quedó probado de punta a punta, pero por
+  el error 400 real que salió y se corrigió, no por un clic limpio con candidatas
+  visibles en pantalla. Si se retoma esa verificación puntual, probar con más cuidado el
+  timing (esperar hidratación completa antes de clic) o simplemente confiar en que ya
+  quedó probado por otra vía.
+
+## Lo anterior (2026-07-04, sesión de la tarde): Turso para el jefe + Fase 3 en pausa
 
 A media tarea de diseñar el matcher de Fase 3 (ver más abajo), Sebastián pidió subir de
 prioridad el deploy de la base a Turso para darle acceso de solo lectura a su jefe por MCP.
@@ -103,44 +140,45 @@ V3.7 -> V3.8 -> V3.9 (toque independiente) -> V3.10 (cierre).
   canal real del toque, las 4 salidas cerradas validadas con Zod dentro del Repository, KDM a
   `contacto`, tap de WhatsApp/correo, contadores del día. 8/8 tests y tsc limpios en main.
   Repo en github.com/SebastianAc02/followups_tool (main al día).
-- **Fase 2 (Auth, B3) COMPLETA Y MERGEADA A MAIN** (commit `05f9d39`; este doc decía
-  "SIN MERGEAR" pero eso ya estaba viejo — corregido 2026-07-05 al ejecutar la Tarea 0a de
-  Fase 3: no había rama `fase2-auth` que mergear, main ya la tenía). Better Auth email+password,
-  tablas generadas por su CLI en la misma isps.db, gate de sesión en toda página/action,
-  owner sale de la sesión (ya no hardcodeado ni del form), flag admin. Refinamiento sobre B3
-  (documentado como B1.c en plan-claude-v2.md): `empresa.owner` guarda nombres, no emails, y
-  la mayoría de empresas (89%, verificado) no tiene owner individual porque son leads en
-  frío; la atribución de una campaña masiva (Fase 4) será `campana.owner`, un concepto
-  aparte. Solo Sebastián tiene cuenta real (admin=1); Felipe se agrega con
-  `scripts/seed_auth_users.ts` cuando dé su email y password. 10/10 tests, tsc limpio,
-  CodeRabbit corrido y con hallazgos resueltos o descartados con razón.
+- **Fase 2 (Auth, B3) COMPLETA Y MERGEADA A MAIN** (commit `05f9d39`). Better Auth
+  email+password, tablas generadas por su CLI en la misma isps.db, gate de sesión en toda
+  página/action, owner sale de la sesión (ya no hardcodeado ni del form), flag admin.
+  Refinamiento sobre B3 (documentado como B1.c en plan-claude-v2.md): `empresa.owner` guarda
+  nombres, no emails, y la mayoría de empresas (89%, verificado) no tiene owner individual
+  porque son leads en frío; la atribución de una campaña masiva (Fase 4) será
+  `campana.owner`, un concepto aparte. Solo Sebastián tiene cuenta real (admin=1); Felipe se
+  agrega con `scripts/seed_auth_users.ts` cuando dé su email y password. 10/10 tests, tsc
+  limpio, CodeRabbit corrido y con hallazgos resueltos o descartados con razón.
+- **Fase 3 (F1 conectores + ingest Granola + outbox Notion) COMPLETA Y MERGEADA A MAIN
+  (2026-07-06), V3.1 a V3.10.** Ver "Lo último" arriba para el resumen y `plan-fase3.md`
+  para el detalle tarea por tarea. 53/53 tests, tsc limpio, `/code-review` corrido (7
+  hallazgos, 6 corregidos). `UsuarioSesion` ahora incluye `id` (antes solo email/owner/admin).
 
 ## Próxima acción
 
-**Actualizada 2026-07-05 — diseño del matcher CERRADO, `plan-fase3.md` reescrito, Tarea 0a
-CERRADA.** Todo lo pendiente de antes (pregunta del "vacío", reescribir V3.4/V3.6, mergear
-`fase2-auth`) ya se hizo — ver "Lo último" y "Fase 3" arriba para el detalle completo.
+**Arrancar Fase 4 (F3 sin envío): tablas grupo 1 y 2 del Anexo de `funcionalidades-v2.md`
+(cadencia/paso/version_paso/segmento/campana/inscripcion con índice único parcial por
+destinatario), import CSV/MD, segmentos guardados, A/B, constructor de calendario con
+corrimiento. Motor probado EN SECO (sin envío real, eso es Fase 5).** Ver `tasks-v2.md` para
+la lista de tareas V4.x (verificar contra `plan-claude-v2.md` si sigue vigente el desglose,
+dado que Fase 3 se rediseñó a medio camino y el mismo cuidado aplica).
 
-**Lo único pendiente para arrancar Fase 3 de verdad:** Tarea 0b, el tour guiado (solo
-lectura, 30-45 min, pedido explícito de Sebastián) por `app/db/schema.ts`,
-`app/db/repository.ts`, el flujo completo de un toque, y las tablas de Better Auth — antes
-de escribir una línea de código de Fase 3. Se dejó para la siguiente sesión a pedido de
-Sebastián (2026-07-05, fin de sesión).
-
-Después del tour, orden de ejecución por `plan-fase3.md`: V3.1 (migración conector+outbox)
--> V3.2 (cifrado AES-256-GCM) -> V3.3 (puerto TranscriptAdapter + GranolaAdapter) -> V3.4
-(matcher de candidatas por teléfono + confirmación) -> V3.5 (worker, solo outbox) -> V3.6
-(confirmación repetible) -> V3.7 (outbox a Notion) -> V3.8 (pantalla de conectores) -> V3.9
-(toque independiente, feature nueva dejada para el final) -> V3.10 (cierre de fase).
-
-**Nota de proceso:** en esta sesión salió feedback explícito de Sebastián sobre CÓMO
-trabajar, no solo qué construir — ya está en CLAUDE.md ("Modo learning activo") y en la
-memoria de la IA: mantener el formato de Insights/Tu código/checkpoints incluso cuando pide
-ir rápido ("rápido" es apretar el loop de preguntas, no botar el formato).
+**Antes de tocar código de Fase 4, dos pendientes sueltos (no bloquean, pero hay que
+resolverlos pronto):**
+1. Sebastián tiene que rotar las dos API keys de Granola y su password que quedaron
+   expuestas en el chat de la sesión de Fase 3.
+2. Decidir el token de Notion + el script de enlace `empresa.notion_page_id` (4 nombres
+   duplicados reales necesitan criterio humano) cuando haya espacio — es lo que falta para
+   que el outbox de Fase 3 realmente escriba a Notion en producción.
 
 Aparte, sin bloquear lo anterior: decidir el camino del MCP para el jefe (servidor propio
 vs `mcp-turso-cloud`) cuando haya espacio para eso — no es parte de las 8 fases del roadmap
 original, es infraestructura transversal que se coló por prioridad de negocio.
+
+**Nota de proceso:** la sesión de Fase 3 tuvo un constraint de tiempo fuerte; Sebastián pidió
+explícitamente no seguir escribiendo el código él mismo (excepción puntual al modo learning
+activo de CLAUDE.md, no un cambio permanente de la regla). Retomar el modo learning normal
+(Insights + Tu código + checkpoints) en Fase 4 salvo que se repita la misma señal explícita.
 
 Detalle completo de cómo se ejecutó la Fase 2 (decisiones, fixes de review, verificación en
 vivo con el navegador) en la bitácora de `planeacion-ejecucion.md`.

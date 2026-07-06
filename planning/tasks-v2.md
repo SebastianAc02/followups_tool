@@ -95,6 +95,16 @@ Dato verificado contra isps.db (2026-07-03): `contacto` YA tiene `es_key_decisio
 
 ## Fase 3 · F1 conectores + ingest Granola + outbox Notion
 
+- [x] **CERRADA (2026-07-06), MERGEADA A MAIN.** Esta lista quedó desactualizada tras el
+  rediseño del matcher (2026-07-04): el matching de fondo por `empresa_alias` con cola de
+  revisión (V3.4 aquí abajo) se descartó, quedó on-demand disparado al confirmar un toque
+  contestado, por nombre de empresa/alias + teléfono como término extra (el teléfono no
+  sobrevivió como clave principal contra datos reales de Granola). El detalle real ejecutado,
+  tarea por tarea (V3.1 a V3.10, con V3.1b agregada a medio camino), vive en
+  `plan-fase3.md`, ya con cada paso marcado. Los checkboxes de abajo (V3.1-V3.9) NO
+  reflejan lo que realmente se construyó, se dejan sin tocar como registro histórico de la
+  intención original.
+
 - [ ] **V3.1 · Migración: tablas conector y outbox.**
   Script dry-run + apply: `conector` (proveedor, ciphertext de credencial, estado,
   ultima_corrida, ultimo_resultado) y `outbox` (entidad, id_registro, payload, estado,
