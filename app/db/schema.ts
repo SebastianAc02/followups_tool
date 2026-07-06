@@ -118,3 +118,95 @@ export const outbox = sqliteTable('outbox', {
   proximoIntento: text('proximo_intento'),
   createdAt: text('created_at'),
 });
+
+// ---------------------------------------------------------------------------
+// Fase 4 (V4.1): modelo de cadencias. Grupos 1 y 2 del Anexo. Tablas nuevas que
+// cuelgan de las maestras (empresa, contacto), sin tocarlas. "fk" logica, sin
+// REFERENCES fisicas (mismo estilo que empresa_alias/contacto en esta base).
+
+// Grupo 1 · la cadencia como template.
+export const cadencia = sqliteTable('cadencia', {
+  idCadencia: integer('id_cadencia').primaryKey({ autoIncrement: true }),
+  nombre: text('nombre').notNull(),
+  descripcion: text('descripcion'),
+  activa: integer('activa').notNull().default(1),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
+export const pasoCadencia = sqliteTable('paso_cadencia', {
+  idPaso: integer('id_paso').primaryKey({ autoIncrement: true }),
+  idCadencia: integer('id_cadencia').notNull(),
+  orden: integer('orden').notNull(),
+  // dia_offset: dia RELATIVO del playbook (0,1,4,7...), no fecha absoluta. El motor
+  // de fechas (V4.6) lo convierte a fecha real segun dias bloqueados y corrimiento.
+  diaOffset: integer('dia_offset').notNull(),
+  canal: text('canal').notNull(),
+  objetivo: text('objetivo'),
+  createdAt: text('created_at'),
+});
+
+// version_paso: el A/B cuelga del paso, no es template suelto. Iterar copy = nueva
+// version (peso reparte el trafico en el motor en seco), nunca editar la enviada.
+export const versionPaso = sqliteTable('version_paso', {
+  idVersion: integer('id_version').primaryKey({ autoIncrement: true }),
+  idPaso: integer('id_paso').notNull(),
+  nombre: text('nombre'),
+  asunto: text('asunto'),
+  cuerpo: text('cuerpo'),
+  esDefault: integer('es_default').notNull().default(0),
+  activa: integer('activa').notNull().default(1),
+  peso: integer('peso').notNull().default(1),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
+// Grupo 2 · campana e inscripcion.
+export const segmento = sqliteTable('segmento', {
+  idSegmento: integer('id_segmento').primaryKey({ autoIncrement: true }),
+  nombre: text('nombre').notNull(),
+  // definicion: el filtro compilado a JSON (tier/estado/on-hold/categoria). El
+  // lenguaje natural (descripcion_natural) llega en Fase 6, aqui solo se guarda.
+  definicion: text('definicion').notNull(),
+  descripcionNatural: text('descripcion_natural'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
+export const campana = sqliteTable('campana', {
+  idCampana: integer('id_campana').primaryKey({ autoIncrement: true }),
+  nombre: text('nombre').notNull(),
+  idCadencia: integer('id_cadencia').notNull(),
+  idSegmento: integer('id_segmento').notNull(),
+  estado: text('estado').notNull().default('borrador'),
+  owner: text('owner'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
+// inscripcion (nivel EMPRESA): la regla "una activa por empresa" la garantiza el
+// indice unico parcial ux_inscripcion_activa (WHERE estado='activa'), creado en la
+// migracion. Una inscripcion 'bloqueada' (sin email, cola de revision) NO cuenta
+// contra ese limite: el WHERE la deja fuera del indice.
+export const inscripcion = sqliteTable('inscripcion', {
+  idInscripcion: integer('id_inscripcion').primaryKey({ autoIncrement: true }),
+  idCampana: integer('id_campana').notNull(),
+  idEmpresa: text('id_empresa').notNull(),
+  estado: text('estado').notNull().default('activa'),
+  pasoActual: integer('paso_actual'),
+  fechaInscripcion: text('fecha_inscripcion'),
+  fechaFin: text('fecha_fin'),
+  motivoFin: text('motivo_fin'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
+// destinatario (nivel CONTACTO, 1+ por inscripcion). Una respuesta de cualquier
+// destinatario pausa la inscripcion de la empresa entera (Fase 5).
+export const destinatario = sqliteTable('destinatario', {
+  idDestinatario: integer('id_destinatario').primaryKey({ autoIncrement: true }),
+  idInscripcion: integer('id_inscripcion').notNull(),
+  idContacto: integer('id_contacto').notNull(),
+  estado: text('estado').notNull().default('activo'),
+  createdAt: text('created_at'),
+});

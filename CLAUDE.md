@@ -52,3 +52,13 @@ Frío puro, cadencia automática, sugerir números alternos, multipersona en la 
 - No agregar dependencias nuevas sin justificar. No tocar archivos no relacionados.
 - Una feature no está lista sin sus pruebas. La IA tiene su propio eval (`planning/evals.md`).
 - Voz de textos para humanos: sin emojis, sin em dashes, español directo. Owner = Sebastián siempre.
+- Modo learning activo (plugins `learning-output-style` + `explanatory-output-style`, criterio de
+  John Oct, johnoct.com/blog/2025/08/22/claude-code-output-styles-learning-mode-insights): al tocar
+  core/dominio o decidir entre alternativas de arquitectura válidas, la IA explica el porqué
+  (trade-offs, no solo el qué) antes de escribir, con bloques `★ Insight`, y deja un bloque de
+  5-10 líneas para que Sebastián lo escriba (la decisión de diseño, no el boilerplate alrededor).
+  La fricción es a propósito: ir más lento pensando activamente enseña más que aceptar código ya
+  generado, así que la IA no se salta el hueco ni lo rellena por su cuenta para ir más rápido.
+  Cada tarea cierra con un checkpoint: Sebastián explica de vuelta el concepto antes de seguir a
+  la próxima. No aplica a migraciones, UI o tareas mecánicas sin decisión real (ahí sí puede ir
+  directo). Los insights viven en la conversación, nunca como comentario en el código.

@@ -123,6 +123,82 @@ export function crearDbPrueba() {
       proximo_intento TEXT,
       created_at TEXT
     );
+
+    CREATE TABLE cadencia (
+      id_cadencia INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL,
+      descripcion TEXT,
+      activa INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE paso_cadencia (
+      id_paso INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_cadencia INTEGER NOT NULL,
+      orden INTEGER NOT NULL,
+      dia_offset INTEGER NOT NULL,
+      canal TEXT NOT NULL,
+      objetivo TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE version_paso (
+      id_version INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_paso INTEGER NOT NULL,
+      nombre TEXT,
+      asunto TEXT,
+      cuerpo TEXT,
+      es_default INTEGER NOT NULL DEFAULT 0,
+      activa INTEGER NOT NULL DEFAULT 1,
+      peso INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE segmento (
+      id_segmento INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL,
+      definicion TEXT NOT NULL,
+      descripcion_natural TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE campana (
+      id_campana INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL,
+      id_cadencia INTEGER NOT NULL,
+      id_segmento INTEGER NOT NULL,
+      estado TEXT NOT NULL DEFAULT 'borrador',
+      owner TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE inscripcion (
+      id_inscripcion INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_campana INTEGER NOT NULL,
+      id_empresa TEXT NOT NULL,
+      estado TEXT NOT NULL DEFAULT 'activa',
+      paso_actual INTEGER,
+      fecha_inscripcion TEXT,
+      fecha_fin TEXT,
+      motivo_fin TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE UNIQUE INDEX ux_inscripcion_activa
+      ON inscripcion(id_empresa) WHERE estado = 'activa';
+
+    CREATE TABLE destinatario (
+      id_destinatario INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_inscripcion INTEGER NOT NULL,
+      id_contacto INTEGER NOT NULL,
+      estado TEXT NOT NULL DEFAULT 'activo',
+      created_at TEXT
+    );
   `);
 
   sqlite.close();
