@@ -908,6 +908,7 @@ export function crearCampana(input: CampanaInput): number {
       idCadencia: val.idCadencia,
       idSegmento: val.idSegmento,
       estado: 'borrador',
+      modo: val.modo,
       owner: val.owner ?? null,
       createdAt: ahora,
       updatedAt: ahora,
@@ -1003,9 +1004,34 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
         res.bloqueadas += 1;
       }
     }
+
+    // Parte 4 campanas: la campana pasaba a 'borrador' para siempre (nunca se
+    // marcaba corriendo). Cualquier corrida de inscribirCampana la deja 'activa'.
+    tx.update(campana).set({ estado: 'activa', updatedAt: ahora }).where(eq(campana.idCampana, idCampana)).run();
   });
 
   return res;
+}
+
+// Parte 4 campanas: hub de /campanas. Resuelve nombre de cadencia/segmento (no ids
+// crudos) y el conteo de inscripciones activas, para que la UI no arme el join.
+export function listarCampanas() {
+  return db
+    .select({
+      id: campana.idCampana,
+      nombre: campana.nombre,
+      estado: campana.estado,
+      modo: campana.modo,
+      cadencia: cadencia.nombre,
+      segmento: segmento.nombre,
+      inscritas: sql<number>`(SELECT count(*) FROM inscripcion WHERE inscripcion.id_campana = campana.id_campana AND inscripcion.estado = 'activa')`,
+      bloqueadas: sql<number>`(SELECT count(*) FROM inscripcion WHERE inscripcion.id_campana = campana.id_campana AND inscripcion.estado = 'bloqueada')`,
+    })
+    .from(campana)
+    .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
+    .innerJoin(segmento, eq(segmento.idSegmento, campana.idSegmento))
+    .orderBy(desc(campana.idCampana))
+    .all();
 }
 
 // V4.5: cola de revision: las inscripciones bloqueadas (sin email) esperando resolucion

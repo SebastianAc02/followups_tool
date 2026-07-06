@@ -202,6 +202,11 @@ export const campana = sqliteTable('campana', {
   idCadencia: integer('id_cadencia').notNull(),
   idSegmento: integer('id_segmento').notNull(),
   estado: text('estado').notNull().default('borrador'),
+  // Parte 4 campanas: 'prioritaria' = toque uno a uno, revisar/personalizar cada
+  // envio antes de mandarlo. 'batch' = el copy default sale tal cual a todo el
+  // grupo del dia (tiers bajos, sin personalizacion); igual se puede editar antes
+  // de confirmar, pero por defecto no pide revisar lead por lead.
+  modo: text('modo').notNull().default('prioritaria'),
   owner: text('owner'),
   proveedorCampanaId: text('proveedor_campana_id'),
   createdAt: text('created_at'),

@@ -182,6 +182,7 @@ export function crearDbPrueba() {
       id_cadencia INTEGER NOT NULL,
       id_segmento INTEGER NOT NULL,
       estado TEXT NOT NULL DEFAULT 'borrador',
+      modo TEXT NOT NULL DEFAULT 'prioritaria',
       owner TEXT,
       proveedor_campana_id TEXT,
       created_at TEXT,

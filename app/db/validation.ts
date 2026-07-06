@@ -138,14 +138,24 @@ export type VersionPasoInput = z.infer<typeof versionPasoInputSchema>;
 
 // V4.5: una campana es una cadencia aplicada a un segmento. estado nace 'borrador';
 // inscribir la pasa a correr.
+export const MODOS_CAMPANA = ['prioritaria', 'batch'] as const;
+export type ModoCampana = (typeof MODOS_CAMPANA)[number];
+
 export const campanaInputSchema = z.object({
   nombre: z.string().min(1),
   idCadencia: z.number().int().positive(),
   idSegmento: z.number().int().positive(),
   owner: z.string().min(1).optional(),
+  // Parte 4 campanas: prioritaria = revisar/personalizar toque a toque; batch = el
+  // copy default sale tal cual al grupo del dia. Default prioritaria: mas segura,
+  // batch es un opt-in explicito (para tiers bajos donde no vale la pena personalizar).
+  modo: z.enum(MODOS_CAMPANA).optional().default('prioritaria'),
 });
 
-export type CampanaInput = z.infer<typeof campanaInputSchema>;
+// z.input (no z.infer/z.output): modo tiene default(), asi que en la salida ya
+// parseada queda obligatorio, pero el caller (antes de parsear) no esta obligado
+// a mandarlo. Mismo problema que tendria owner si tuviera default.
+export type CampanaInput = z.input<typeof campanaInputSchema>;
 
 export const registrarToqueSchema = z
   .object({

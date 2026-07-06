@@ -19,6 +19,7 @@ const {
   destinatariosDeInscripcion,
   resolverInscripcionBloqueada,
   excluirDeSegmento,
+  listarCampanas,
 } = await import('./repository.ts');
 
 // Seed: 4 empresas isp on_hold con distintos perfiles de contactos.
@@ -158,6 +159,31 @@ test('empresa excluida en la revision de leads no se inscribe en una campana nue
   const hKdm = historialInscripciones('e-kdm');
   assert.ok(hKdm.some((i) => i.idCampana === idCampanaC && i.estado === 'activa'));
   assert.ok(res.reemplazos >= 1);
+});
+
+// Parte 4 campanas: campana.estado pasa de 'borrador' a 'activa' al inscribir (antes
+// se quedaba en 'borrador' para siempre, un vacio real del estado de la campana).
+test('crearCampana nace borrador; inscribirCampana la pasa a activa', () => {
+  const idCampanaD = crearCampana({ nombre: 'Camp D', idCadencia, idSegmento });
+  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'borrador');
+  inscribirCampana(idCampanaD);
+  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'activa');
+});
+
+// Parte 4 campanas: hub de campanas (pantalla /campanas). Trae nombre de cadencia y
+// segmento resueltos (no solo los ids) para no armar el join en la UI.
+test('listarCampanas trae nombre de cadencia y segmento, mas conteo de inscritas', () => {
+  // Camp D es la ultima creada en este archivo: nada mas la supera todavia, asi que
+  // "inscritas" (activas AHORA MISMO en esta campana) es un conteo estable de verdad.
+  // Camp A ya fue reemplazada por campanas posteriores sobre el mismo segmento: sus
+  // inscripciones pasaron a 'finalizada', y por eso inscritas=0 es lo correcto ahi.
+  const filas = listarCampanas();
+  const cD = filas.find((f) => f.nombre === 'Camp D');
+  assert.ok(cD);
+  assert.equal(cD!.cadencia, 'C');
+  assert.equal(cD!.segmento, 'on-hold');
+  assert.equal(cD!.estado, 'activa');
+  assert.ok(cD!.inscritas >= 1);
 });
 
 test.after(() => {
