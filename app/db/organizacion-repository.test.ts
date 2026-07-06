@@ -7,6 +7,7 @@ import {
   miembroLibrePorId,
   reclamarMiembro,
   setOwnerDeUsuario,
+  reclamarMiembroYSetOwner,
   dbDePrueba,
 } from './organizacion-repository.ts';
 
@@ -59,5 +60,32 @@ test('setOwnerDeUsuario escribe el owner canonico directo en la tabla user', () 
   const raw = new Database(dbPath);
   const fila = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('user-nuevo') as any;
   assert.equal(fila.owner, 'Thomas Schumacher');
+  raw.close();
+});
+
+test('reclamarMiembroYSetOwner reclama y setea el owner juntos, atomico', () => {
+  const db = dbDePrueba(dbPath);
+  const ok = reclamarMiembroYSetOwner(1, 'user-nuevo', 'Thomas Schumacher', db);
+  assert.equal(ok, true);
+
+  const raw = new Database(dbPath);
+  const miembro = raw.prepare(`SELECT id_user FROM organizacion_miembro WHERE id_miembro = 1`).get() as any;
+  assert.equal(miembro.id_user, 'user-nuevo');
+  const usuario = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('user-nuevo') as any;
+  assert.equal(usuario.owner, 'Thomas Schumacher');
+  raw.close();
+});
+
+test('reclamarMiembroYSetOwner no toca la tabla user si el miembro ya estaba reclamado', () => {
+  const db = dbDePrueba(dbPath);
+  const primero = reclamarMiembroYSetOwner(1, 'user-nuevo', 'Thomas Schumacher', db);
+  assert.equal(primero, true);
+
+  const segundo = reclamarMiembroYSetOwner(1, 'otro-user', 'Thomas Schumacher', db);
+  assert.equal(segundo, false, 'un miembro ya reclamado no se puede reclamar otra vez');
+
+  const raw = new Database(dbPath);
+  const otro = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('otro-user') as any;
+  assert.equal(otro, undefined, 'el reclamo fallido no debe tocar la tabla user para el segundo usuario');
   raw.close();
 });

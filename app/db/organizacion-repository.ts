@@ -44,6 +44,29 @@ export function setOwnerDeUsuario(idUsuario: string, owner: string, db: DbInstan
   db.update(user).set({ owner }).where(eq(user.id, idUsuario)).run();
 }
 
+// Combina el reclamo del miembro y el seteo de owner en una sola transaccion: si algo
+// truena entre las dos escrituras, ninguna queda a medias (sin esto, un miembro podia
+// quedar reclamado con el owner del usuario todavia sin setear). Devuelve false si el
+// reclamo no tuvo efecto (alguien mas gano la carrera); en ese caso no toca la tabla user.
+export function reclamarMiembroYSetOwner(
+  idMiembro: number,
+  idUsuario: string,
+  owner: string,
+  db: DbInstancia = dbSingleton,
+): boolean {
+  return db.transaction((tx) => {
+    const res = tx
+      .update(organizacionMiembro)
+      .set({ idUser: idUsuario })
+      .where(and(eq(organizacionMiembro.idMiembro, idMiembro), isNull(organizacionMiembro.idUser)))
+      .run();
+    if (res.changes !== 1) return false;
+
+    tx.update(user).set({ owner }).where(eq(user.id, idUsuario)).run();
+    return true;
+  });
+}
+
 // Helper solo para tests: crea una instancia Drizzle apuntando a un archivo de prueba, con
 // el MISMO shape de schema que el singleton real (schema + authSchema) para que el tipo
 // DbInstancia calce sin castear.

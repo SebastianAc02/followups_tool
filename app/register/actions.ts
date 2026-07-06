@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { auth } from '../lib/auth';
-import { miembroLibrePorId, reclamarMiembro, setOwnerDeUsuario } from '../db/organizacion-repository';
+import { miembroLibrePorId, reclamarMiembroYSetOwner } from '../db/organizacion-repository';
 
 const registroSchema = z.object({
   idMiembro: z.coerce.number().int().positive(),
@@ -28,11 +28,12 @@ export async function registrarUsuarioAction(input: unknown): Promise<RegistroRe
   try {
     const res = await auth.api.signUpEmail({ body: { email, password, name: miembro.nombreDisplay } });
     userId = res.user.id;
-  } catch {
+  } catch (e) {
+    console.error('registrarUsuarioAction: fallo signUpEmail', e);
     return { ok: false, error: 'No se pudo crear la cuenta (correo ya registrado o clave muy corta).' };
   }
 
-  const reclamado = reclamarMiembro(idMiembro, userId);
+  const reclamado = reclamarMiembroYSetOwner(idMiembro, userId, miembro.ownerCanonico);
   if (!reclamado) {
     // Alguien mas gano la carrera por este nombre justo despues del check de arriba. La
     // cuenta ya existe sin owner: session-user.ts cae al name (cola vacia, no crash).
@@ -42,6 +43,5 @@ export async function registrarUsuarioAction(input: unknown): Promise<RegistroRe
     };
   }
 
-  setOwnerDeUsuario(userId, miembro.ownerCanonico);
   return { ok: true };
 }
