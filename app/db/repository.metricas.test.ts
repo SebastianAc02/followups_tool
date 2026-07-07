@@ -9,7 +9,7 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { metricasHub } = await import('./repository.ts');
+const { metricasHub, listarInscritasHub } = await import('./repository.ts');
 
 function isoHaceDias(dias: number): string {
   const d = new Date();
@@ -78,6 +78,19 @@ test('metricasHub cuenta toques de la semana y tasa de respuesta por cohorte env
   assert.equal(m.tasaRespuesta, 1 / 3);
   assert.equal(m.empresasEnSecuencia, 3);
   assert.equal(m.bloqueadasEsperandoRegla, 1);
+});
+
+test('listarInscritasHub trae activas y bloqueadas de cualquier campana, no inventa un estado nuevo', () => {
+  const filas = listarInscritasHub();
+  assert.equal(filas.length, 4);
+
+  const estados = new Set(filas.map((f) => f.estado));
+  assert.deepEqual(estados, new Set(['activa', 'bloqueada']));
+
+  const bloqueada = filas.find((f) => f.empresa === 'ISP Cuatro');
+  assert.ok(bloqueada);
+  assert.equal(bloqueada!.estado, 'bloqueada');
+  assert.equal(bloqueada!.campana, 'Campana 1');
 });
 
 test.after(() => {

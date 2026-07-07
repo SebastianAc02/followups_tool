@@ -1276,6 +1276,34 @@ export function metricasHub() {
   return { toquesSemana, tasaRespuesta, empresasEnSecuencia, bloqueadasEsperandoRegla };
 }
 
+// Task 1.6: tabla de empresas inscritas del hub (activas + bloqueadas, cualquier
+// campana). Reusa el mismo inscripcion.estado que inscripcionesBloqueadas() y
+// listarCampanas() -- no inventa un estado "limite diario": la unica distincion real
+// que guarda el dominio hoy es activa/bloqueada (bloqueada = cola de revision manual,
+// ver comentario de inscripcionesBloqueadas).
+export function listarInscritasHub() {
+  return db
+    .select({
+      id: inscripcion.idInscripcion,
+      empresa: empresa.nombreOficial,
+      campana: campana.nombre,
+      estado: inscripcion.estado,
+      canalPrincipal: sql<string | null>`(SELECT paso_cadencia.canal FROM paso_cadencia WHERE paso_cadencia.id_cadencia = campana.id_cadencia ORDER BY paso_cadencia.orden ASC LIMIT 1)`,
+      ultimoToque: sql<string | null>`(
+        SELECT max(paso_inscripcion.fecha_enviada)
+        FROM paso_inscripcion
+        INNER JOIN destinatario ON destinatario.id_destinatario = paso_inscripcion.id_destinatario
+        WHERE destinatario.id_inscripcion = inscripcion.id_inscripcion
+      )`,
+    })
+    .from(inscripcion)
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(inArray(inscripcion.estado, ['activa', 'bloqueada']))
+    .orderBy(desc(inscripcion.idInscripcion))
+    .all();
+}
+
 // V4.5: cola de revision: las inscripciones bloqueadas (sin email) esperando resolucion
 // manual, con el nombre de la empresa.
 export function inscripcionesBloqueadas() {
