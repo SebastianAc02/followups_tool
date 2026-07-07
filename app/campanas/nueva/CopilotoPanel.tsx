@@ -4,7 +4,13 @@ import { useState } from 'react';
 import type { DefinicionSegmento } from '../../db/validation';
 import { copilotoAction } from '../actions';
 
-type Mensaje = { frase: string; explicacion?: string; noMapeado?: string[]; error?: string };
+type Mensaje = {
+  frase: string;
+  explicacion?: string;
+  noMapeado?: string[];
+  error?: string;
+  relleno?: { eje: string; motivo: string };
+};
 
 type Props = {
   estadoActual: DefinicionSegmento;
@@ -23,7 +29,10 @@ export function CopilotoPanel({ estadoActual, total, onResultado }: Props) {
     setPendiente(true);
     const r = await copilotoAction(dicho, estadoActual, total);
     if (r.ok) {
-      setMensajes((prev) => [...prev, { frase: dicho, explicacion: r.explicacion, noMapeado: r.noMapeado }]);
+      setMensajes((prev) => [
+        ...prev,
+        { frase: dicho, explicacion: r.explicacion, noMapeado: r.noMapeado, relleno: r.relleno },
+      ]);
       onResultado({ estado: r.estado, relleno: r.relleno, frase: dicho });
       setFrase('');
     } else {
@@ -58,8 +67,27 @@ export function CopilotoPanel({ estadoActual, total, onResultado }: Props) {
             ) : (
               <>
                 {m.explicacion && <div className="max-w-[92%] text-[13px] leading-[1.5] text-ink-soft">{m.explicacion}</div>}
+                {m.relleno && (
+                  <div className="max-w-[92%] rounded-[13px] border border-line bg-surface p-[14px]">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-today" aria-hidden="true" />
+                      <span className="text-[12px] font-semibold text-ink">Relajé un filtro para llegar a la meta</span>
+                    </div>
+                    <p className="text-[12px] leading-[1.5] text-muted">
+                      El eje <span className="text-ink-soft">{m.relleno.eje}</span> dominaba el segmento: {m.relleno.motivo}
+                    </p>
+                  </div>
+                )}
                 {m.noMapeado && m.noMapeado.length > 0 && (
-                  <div className="max-w-[92%] text-[13px] leading-[1.5] text-today">no entendí: {m.noMapeado.join(', ')}</div>
+                  <div className="max-w-[92%] rounded-[13px] border border-line bg-surface p-[14px]">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-overdue" aria-hidden="true" />
+                      <span className="text-[12px] font-semibold text-ink">Parte de lo que dijiste no lo mapeé</span>
+                    </div>
+                    <p className="text-[12px] leading-[1.5] text-muted">
+                      No entendí: {m.noMapeado.join(', ')}. Ajusta esa parte a mano en los filtros de la izquierda.
+                    </p>
+                  </div>
                 )}
               </>
             )}

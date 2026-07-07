@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { cx } from '../../ui/cx';
+import { cn } from '../../ui/cn';
 import type { CampoSegmentoNumerico, DefinicionSegmento } from '../../db/validation';
 
 type Condicion = DefinicionSegmento['condiciones'][number];
@@ -80,11 +80,15 @@ export function FiltroWall({ value, onChange, opciones }: Props) {
 
       <div className="flex flex-col gap-[9px]">
         {condiciones.map((c, i) => (
-          <div key={i} className="rounded-[9px] border border-accent/30 bg-accent/10 px-[11px] py-[9px]">
+          <div
+            key={i}
+            className="rounded-[9px] border border-accent/30 bg-accent/10 px-[11px] py-[9px] transition-all duration-150 hover:-translate-y-px hover:border-accent/50 hover:bg-accent/[.18]"
+          >
             <button
               type="button"
               className="flex w-full items-center gap-2 text-left"
               onClick={() => setEditando(editando === i ? null : i)}
+              aria-label={`Filtro ${LABELS[c.campo]}: ${valorTexto(c)}`}
             >
               <span className="text-[11px] text-muted">{LABELS[c.campo]}</span>
               <span className="ml-auto truncate text-[12px] font-semibold text-ink">{valorTexto(c)}</span>
@@ -146,7 +150,7 @@ export function FiltroWall({ value, onChange, opciones }: Props) {
               key={c}
               type="button"
               onClick={() => agregarTexto(c)}
-              className={cx(
+              className={cn(
                 'rounded-lg border border-dashed border-line-strong px-[11px] py-2 text-center text-[12px] text-ink-soft',
                 'hover:border-accent/40 hover:text-ink',
               )}
@@ -159,7 +163,7 @@ export function FiltroWall({ value, onChange, opciones }: Props) {
               key={c}
               type="button"
               onClick={() => agregarRango(c)}
-              className={cx(
+              className={cn(
                 'rounded-lg border border-dashed border-line-strong px-[11px] py-2 text-center text-[12px] text-ink-soft',
                 'hover:border-accent/40 hover:text-ink',
               )}
