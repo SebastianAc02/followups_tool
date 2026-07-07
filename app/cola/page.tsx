@@ -5,12 +5,8 @@ import { RESULTADO_LABELS, CANALES, RESULTADOS } from "../db/validation";
 import { requireSession } from "../lib/session";
 import TopNav from "../TopNav";
 import CadenciasHoy from "./CadenciasHoy";
-
-const OWNERS = [
-  { key: "Sebastian Acosta Molina", label: "Sebastián" },
-  { key: "Felipe Castro", label: "Felipe" },
-  { key: "Thomas Schumacher", label: "Thomas" },
-];
+import { DashboardHeader } from "./DashboardHeader";
+import { contarCerradas } from "./stats";
 
 const ACCION: Record<string, string> = { llamada: "Llamar", whatsapp: "WhatsApp", correo: "Correo" };
 const CANAL_LABEL: Record<string, string> = { llamada: "llamadas", whatsapp: "whatsapp", correo: "correos" };
@@ -54,24 +50,19 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   }));
 
   return (
-    <div className="wrap">
+    <div className="mx-auto max-w-[860px] px-6 pt-10 pb-[110px]">
       <TopNav email={usuario.email} />
-      <Link href="/" className="back">← Inicio</Link>
-      <div className="head">
-        <div>
-          <div className="h-title">Toques del día</div>
-          <div className="switch">
-            {OWNERS.map((o) => (
-              <Link key={o.key} href={`/cola?owner=${encodeURIComponent(o.key)}`} className={o.key === owner ? "on" : ""}>
-                {o.label}
-              </Link>
-            ))}
-          </div>
-        </div>
-        <div className="h-meta">
-          <span className="mono">{cola.length}</span> hoy · <span className="mono">{vencidos}</span> vencidos
-        </div>
-      </div>
+      <Link href="/" className="mb-5 inline-block text-[13px] text-muted transition-colors hover:text-ink">
+        ← Inicio
+      </Link>
+      <DashboardHeader
+        nombre={usuario.owner.split(" ")[0]}
+        hoy={hoy}
+        owner={owner}
+        pendientes={cola.length}
+        vencidas={vencidos}
+        cerradas={contarCerradas(contadores)}
+      />
 
       {contadores.total > 0 && (
         <div className="counters">
