@@ -7,7 +7,8 @@ export default function SignOutButton({ email }: { email: string }) {
   const router = useRouter();
   return (
     <button
-      className="signout"
+      type="button"
+      className="cursor-pointer border-none bg-transparent font-[inherit] text-[13px] text-ink opacity-50 hover:opacity-100"
       title={email}
       onClick={async () => {
         await authClient.signOut();
