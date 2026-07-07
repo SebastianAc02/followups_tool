@@ -66,9 +66,12 @@ export function ConectorRow({
         )}
 
         {/* Controles de admin: cambiar modo + quitar. Ghost/quiet a proposito: son
-            secundarios frente al boton primario de conectar/reemplazar de arriba. */}
+            secundarios frente al boton primario de conectar/reemplazar de arriba. Labels
+            explicitos ("Aplicar modo" / "Quitar conector") para que no se confundan con el
+            boton de guardar credencial de justo encima. */}
         {esAdmin && (
-          <div className="mt-4 flex max-w-sm flex-wrap items-center gap-1 rounded-lg border border-line bg-surface px-2 py-1.5">
+          <div className="mt-4 flex max-w-sm flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1.5">
+            <span className="pl-1 text-xs text-faint">Modo</span>
             <form action={cambiarModoAction} className="flex items-center gap-1.5">
               <input type="hidden" name="proveedor" value={cat.id} />
               <select
@@ -80,14 +83,14 @@ export function ConectorRow({
                 <option value="admin">Equipo</option>
               </select>
               <Button type="submit" variant="quiet">
-                Guardar
+                Aplicar modo
               </Button>
             </form>
             <span className="h-4 w-px bg-line" aria-hidden="true" />
             <form action={quitarConectorAction}>
               <input type="hidden" name="proveedor" value={cat.id} />
               <Button type="submit" variant="quiet" className="text-overdue/80 hover:text-overdue">
-                Quitar
+                Quitar conector
               </Button>
             </form>
           </div>
