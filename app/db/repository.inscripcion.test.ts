@@ -186,6 +186,16 @@ test('listarCampanas trae nombre de cadencia y segmento, mas conteo de inscritas
   assert.ok(cD!.inscritas >= 1);
 });
 
+// Parte 5 campanas: reglaFaltante e intakeDiario se persisten y se leen de vuelta.
+test('crearCampana persiste reglaFaltante e intakeDiario', () => {
+  const idCampanaE = crearCampana({ nombre: 'Camp E', idCadencia, idSegmento, reglaFaltante: 'saltar', intakeDiario: 50 });
+  const raw = new Database(dbPath);
+  const fila = raw.prepare('SELECT regla_faltante, intake_diario FROM campana WHERE id_campana = ?').get(idCampanaE) as any;
+  raw.close();
+  assert.equal(fila.regla_faltante, 'saltar');
+  assert.equal(fila.intake_diario, 50);
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

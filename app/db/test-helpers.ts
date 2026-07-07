@@ -183,6 +183,8 @@ export function crearDbPrueba() {
       id_segmento INTEGER NOT NULL,
       estado TEXT NOT NULL DEFAULT 'borrador',
       modo TEXT NOT NULL DEFAULT 'prioritaria',
+      regla_faltante TEXT NOT NULL DEFAULT 'cola',
+      intake_diario INTEGER,
       owner TEXT,
       proveedor_campana_id TEXT,
       created_at TEXT,

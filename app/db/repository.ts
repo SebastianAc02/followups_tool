@@ -980,6 +980,8 @@ export function crearCampana(input: CampanaInput): number {
       idSegmento: val.idSegmento,
       estado: 'borrador',
       modo: val.modo,
+      reglaFaltante: val.reglaFaltante,
+      intakeDiario: val.intakeDiario ?? null,
       owner: val.owner ?? null,
       createdAt: ahora,
       updatedAt: ahora,

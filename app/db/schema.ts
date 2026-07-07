@@ -207,6 +207,12 @@ export const campana = sqliteTable('campana', {
   // grupo del dia (tiers bajos, sin personalizacion); igual se puede editar antes
   // de confirmar, pero por defecto no pide revisar lead por lead.
   modo: text('modo').notNull().default('prioritaria'),
+  // Parte 5 campanas: que hacer con un paso cuyo canal la empresa no tiene
+  // (reemplazar/saltar/cola). Ver REGLAS_FALTANTE en validation.ts.
+  reglaFaltante: text('regla_faltante').notNull().default('cola'),
+  // intake_diario: cuantas cuentas nuevas arrancan la cadencia por dia (goteo). null =
+  // todas el dia 1. Lo usa el preview dia a dia (Fase E) y el arranque real.
+  intakeDiario: integer('intake_diario'),
   owner: text('owner'),
   proveedorCampanaId: text('proveedor_campana_id'),
   createdAt: text('created_at'),

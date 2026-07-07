@@ -155,6 +155,12 @@ export type VersionPasoInput = z.infer<typeof versionPasoInputSchema>;
 export const MODOS_CAMPANA = ['prioritaria', 'batch'] as const;
 export type ModoCampana = (typeof MODOS_CAMPANA)[number];
 
+// Parte 5 campanas: que hacer cuando un paso pide un canal que la empresa no
+// tiene. Default 'cola': la empresa espera en vez de que se le mande cualquier
+// cosa o se le salte un paso sin que nadie lo decida a proposito.
+export const REGLAS_FALTANTE = ['reemplazar', 'saltar', 'cola'] as const;
+export type ReglaFaltanteInput = (typeof REGLAS_FALTANTE)[number];
+
 export const campanaInputSchema = z.object({
   nombre: z.string().min(1),
   idCadencia: z.number().int().positive(),
@@ -164,6 +170,10 @@ export const campanaInputSchema = z.object({
   // copy default sale tal cual al grupo del dia. Default prioritaria: mas segura,
   // batch es un opt-in explicito (para tiers bajos donde no vale la pena personalizar).
   modo: z.enum(MODOS_CAMPANA).optional().default('prioritaria'),
+  reglaFaltante: z.enum(REGLAS_FALTANTE).optional().default('cola'),
+  // intake_diario: cuantas cuentas nuevas arrancan la cadencia por dia (goteo).
+  // undefined = todas el dia 1.
+  intakeDiario: z.number().int().positive().optional(),
 });
 
 // z.input (no z.infer/z.output): modo tiene default(), asi que en la salida ya
