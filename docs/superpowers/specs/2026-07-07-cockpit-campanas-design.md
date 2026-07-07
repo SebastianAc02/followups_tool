@@ -203,8 +203,9 @@ Casi todo existe (schema Fase 4 completo). Cambios nuevos, mínimos:
   El core NO importa Claude.
 - **Repository:** nuevas queries de solo lectura para el wall/tabla (empresas + readiness +
   conteos por canal) y para poblar el preview. Nada de SQL fuera del Repository.
-- **UI:** Next 16 App Router + Server Actions (patrón ya usado en campanas/nueva). CSS plano
-  con variables (sin Tailwind). Componentes de cliente para el wall reactivo y el preview
+- **UI:** Next 16 App Router + Server Actions (patrón ya usado en campanas/nueva). Tailwind v4
+  (`@theme` en `app/globals.css`) + librería `app/ui/*` + `cx()` — actualizado post-spec, ver
+  D5 del plan de implementación. Componentes de cliente para el wall reactivo y el preview
   animado.
 
 ## 9. Riesgos y decisiones abiertas

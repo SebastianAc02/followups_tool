@@ -6,7 +6,7 @@
 
 **Architecture:** Se respeta la constitución: el core (dominio) es puro y no importa DB/Claude/Apollo; el Copiloto entra por `IAPort` (un adaptador más); el acceso a datos es solo por el Repository. Casi todo el schema y el motor (`proximoPasoDebido`, `calcularCalendario`, `elegirVersionPorPeso`) ya existen; esta feature agrega la segmentación extendida, el readiness de canal, la simulación del preview, y toda la UI. La ejecución real (envío a Apollo, tracking) queda FUERA: el preview simula, no manda.
 
-**Tech Stack:** Next 16 (App Router + Server Actions), React 19, Drizzle + better-sqlite3 (SQLite `isps.db` un nivel arriba), Zod v4, tests con `node:test` (`npm test`), CSS plano con variables en `app/globals.css` (NO Tailwind), animación con CSS + Web Animations API (sin librería nueva, ver Decisión D1).
+**Tech Stack:** Next 16 (App Router + Server Actions), React 19, Drizzle + better-sqlite3 (SQLite `isps.db` un nivel arriba), Zod v4, tests con `node:test` (`npm test`), **Tailwind v4** (`@theme` en `app/globals.css`, tokens `--color-*`) + librería de componentes `app/ui/{Dot,Pill,Chip,Seg,Button,SectionLabel,Field}.tsx` + helper `cx()` (ver Decisión D5 — reemplaza la decisión original de CSS plano), animación con CSS + Web Animations API (sin librería nueva, ver Decisión D1).
 
 **Spec:** `docs/superpowers/specs/2026-07-07-cockpit-campanas-design.md`
 **Mockup fuente de verdad de la UI:** `docs/superpowers/specs/2026-07-07-cockpit-campanas-mockup-completo.html`
@@ -19,6 +19,7 @@
 - **D2 · Core con TDD y código completo; UI con build + verificación en navegador.** Fases A, B y el core de E (simulación) van TDD estrictas (`node:test`), porque son deterministas. Fases C, D, E-UI y F son de UI: se construyen contra el mockup y se verifican en el navegador (contenido, estados, interacción), no con snapshots frágiles. Cada task de UI dice qué verificar.
 - **D3 · Canales del dominio = `['llamada','whatsapp','correo']`** (los de `CANALES` en `app/db/validation.ts`). LinkedIn/SMS no existen como canal. WhatsApp y llamada se derivan ambos de `contacto.telefono` (no distinguimos celular de fijo); correo de `contacto.email`. Esta limitación se documenta en el código de `canalesDisponibles`.
 - **D4 · Decomposición en 6 fases, cada una entrega software funcional.** Fases A y B están detalladas task-by-task con código aquí. Fases C-F traen mapa de archivos, firmas exactas de server actions/queries, dependencias y estrategia de verificación; cada una se expande a su propio plan (writing-plans) cuando se llegue, para que el código de UI no se escriba en frío contra un mockup que puede afinar.
+- **D5 · Tailwind v4, no CSS plano (revisa la decisión original de este documento).** Mientras Fases A y B se construían, `feat/cockpit-campanas` migró a Tailwind v4 en paralelo (`planning/plan-migracion-tailwind.md`, Tareas 0-3: `@theme` en `app/globals.css` con tokens `--color-*`, `postcss.config.mjs`, librería `app/ui/*` + `cx()`). Fases C-F usan ESE Tailwind, no clases CSS planas nuevas. Los tokens de la Sección 6 del design spec (`--accent`, `--accent-soft`, `--accent-glow`, `--warn`) se agregan al bloque `@theme` como `--color-accent`, `--color-accent-soft`, `--color-accent-glow`, `--color-warn` (mismo esquema que los tokens existentes), no a un `:root` nuevo. Newsreader ya está cableado como `--font-serif`/`font-serif` (usalo tal cual para los títulos 1C); no hace falta cargar una fuente nueva para "grotesca UI" — se reusa `--font-sans` (Geist, ya usado en Dashboard) para no fragmentar la tipografía del resto de la app ya migrada. IBM Plex Mono ya está cableado como `--ff-mono-tag` pero sin `@utility`; si Fase C lo necesita para columnas de datos, se agrega `@utility mono-tag { font-family: var(--font-mono-tag); ... }` en el mismo bloque Tailwind de `globals.css`, junto a `@utility mono`/`@utility serif`. Cola/Llamada/Cadencias/Panel (fuera de esta feature) siguen en CSS legado hasta su propio rediseño — no tocarlos desde Fases C-F.
 
 ---
 
@@ -863,21 +864,23 @@ Entrega: la vista 2 del wizard funcional: wall de filtros a la izquierda, tabla 
 
 > **Expandir a su propio plan (writing-plans) al llegar aquí.** Abajo, el mapa y los contratos ya cerrados para que ese plan se escriba directo.
 
-**Primero: tokens de diseño.** Modify `app/globals.css` — agregar sobre los `:root` existentes:
+**Primero: tokens de diseño (D5 — Tailwind, no `:root` nuevo).** Modify `app/globals.css` — agregar DENTRO del bloque `@theme` ya existente (junto a `--color-done`, etc.), no en un `:root` nuevo:
 ```css
-  --accent: #8b7cff;         /* violeta 2A: accion/seleccion/foco */
-  --accent-soft: #c4b5fd;
-  --accent-glow: rgba(139,124,255,.35);
-  --warn: #e07a3f;           /* naranja: alerta/energia */
-  /* --done ya existe (#57c98a) para el estado listo */
+  --color-accent: #8b7cff;         /* violeta 2A: accion/seleccion/foco */
+  --color-accent-soft: #c4b5fd;
+  --color-accent-glow: rgba(139,124,255,.35);
+  --color-warn: #e07a3f;           /* naranja: alerta/energia */
+  /* --color-done ya existe (#57c98a) para el estado listo */
 ```
-Fuentes: cargar IBM Plex Mono (datos), IBM Plex Sans (UI) y Newsreader (títulos de tarjeta 1C) por `next/font` en el layout. Verify: `preview_inspect` sobre un chip de filtro confirma `color: rgb(139,124,255)`.
+Esto genera automáticamente las utilidades `bg-accent`/`text-accent`/`border-accent`, etc. (convención Tailwind v4: `--color-*` en `@theme` -> utilidades `*-<nombre>`).
 
-**Componentes (client) y su responsabilidad única:**
-- `FiltroWall.tsx` — chips de filtro por campo (usuarios rango, región, categoría, estado, rol, personas) + control de orden y límite ("las N más grandes"). Estado = una `DefinicionSegmento`. Emite cambios hacia arriba. "Añadir filtro manual" agrega condiciones.
+Fuentes: Newsreader ya está cableado como `--font-serif`/`font-serif` (úsalo tal cual para los títulos de tarjeta 1C). Para el resto de la UI se reusa `--font-sans` (Geist, ya usado en Dashboard) — no cargar una fuente "grotesca" nueva, fragmentaría la tipografía del resto de la app ya migrada a Tailwind. Si hace falta IBM Plex Mono para columnas de datos (`usuarios`, montos), agregar `@utility mono-tag { font-family: var(--font-mono-tag); font-variant-numeric: tabular-nums; }` junto a `@utility mono`/`@utility serif` (la CSS var `--font-mono-tag` ya existe en `@theme`, solo falta la utility). Verify: `preview_inspect` sobre un chip de filtro con `className="bg-accent"` confirma `background-color: rgb(139,124,255)`.
+
+**Componentes (client) y su responsabilidad única.** Reusar `app/ui/*` (`Chip`, `SectionLabel`, `Pill`, `Button`, `Seg`) + `cx()` donde el patrón encaje; extenderlos o crear componentes nuevos en `app/campanas/nueva/` cuando el diseño 2A pida algo que la librería no cubre (ej. `ReadinessBadge` es nuevo, no está en `app/ui/*` porque su semántica — lista/parcial/sin_canal — es propia de campañas):
+- `FiltroWall.tsx` — chips de filtro por campo (usuarios rango, región, categoría, estado, rol, personas) + control de orden y límite ("las N más grandes"). Usa `Chip` de `app/ui/` para cada valor seleccionable. Estado = una `DefinicionSegmento`. Emite cambios hacia arriba. "Añadir filtro manual" agrega condiciones.
 - `CopilotoPanel.tsx` — **conversacional (multi-turno), estado BETA visible.** Hilo de instrucciones; cada una llama al server action `copiloto` con el ESTADO ACTUAL -> aplica `estadoNuevo` al `FiltroWall`, muestra `explicacion` ("bajé el umbral a 150k para completar 10") y `noMapeado` como aviso honesto. Soporta cantidad objetivo, ranking y "complétame a N parecidas".
 - `TablaCuentas.tsx` — filas de `empresasConReadiness`, columnas Cuenta/Ciudad/Usuarios/Estado/Readiness, checkbox incluir/excluir (persistir con `excluirDeSegmento`/`incluirDeSegmento` existentes). Header con conteos de `conteosReadiness`. Las filas que entran por relleno (`marcarRelajadas`, B4) llevan un badge "relajada".
-- `ReadinessBadge.tsx` — pinta lista (verde `--done`) / parcial (naranja `--warn`) / sin canal (gris), con tooltip de qué falta.
+- `ReadinessBadge.tsx` — componente nuevo en `app/campanas/nueva/`: pinta lista (verde `bg-done`/`text-done`) / parcial (naranja `bg-warn`/`text-warn`) / sin canal (gris `bg-surface-2`/`text-muted`), con tooltip de qué falta. Sigue el mismo estilo de props que `Pill` (`tone`/variante fija, `cx()` para condicional).
 
 **Server actions (Fase C):** en `app/campanas/nueva/actions.ts` (o donde vivan las de la ruta):
 - `copiloto(instruccion): Promise<Resultado>` — `'use server'` que arma `CAMPOS_COPILOTO` con `repo.valoresDistintosCampo` y delega en `pedirAlCopiloto` (B2) con el `ClaudeAdapter` real. Recibe el estado actual, devuelve el nuevo + explicación + relleno.
