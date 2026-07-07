@@ -29,6 +29,16 @@
   --color-canal-whatsapp: #84c99e;
   --color-acento: #6f9fd0;
 
+  /* Fila "actual" en AgendaHoy: mismo criterio que la fila --now del mockup
+     (Cockpit (1).html) -- se marca con borde azulado, no con fondo mas claro. */
+  --color-surface-hi: #101317;
+  --color-border-accent: #223047;
+  --color-acento-soft: #cfe0f2;
+
+  /* Chip de filtro activo (AgendaHoy): tono propio, distinto del surface-hi de la fila. */
+  --color-chip-active-bg: #1c2530;
+  --color-chip-active-border: #2d4066;
+
   --font-sans: var(--ff-sans), system-ui, sans-serif;
   --font-mono: var(--ff-mono), ui-monospace, monospace;
   --font-serif: var(--ff-serif), Georgia, serif;

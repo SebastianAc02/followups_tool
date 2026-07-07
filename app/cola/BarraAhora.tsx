@@ -35,7 +35,7 @@ export function BarraAhora({
 
   return (
     <div className="animate-fade-up mb-8 rounded-2xl border border-line bg-surface px-7 py-6">
-      <div className="mb-3 text-[11px] font-medium uppercase tracking-[0.09em] text-acento">Ahora</div>
+      <div className="mb-3 text-[11px] font-bold uppercase tracking-[0.2em] text-acento">Ahora</div>
       <div className="flex flex-wrap items-end justify-between gap-6 max-sm:items-start">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
@@ -47,17 +47,11 @@ export function BarraAhora({
           </div>
           <CanalTag canal={canalReal} className="mt-3" />
         </div>
-        <div className="flex flex-col items-end gap-2 max-sm:w-full max-sm:items-stretch">
-          <Link
-            href={`/llamada/${id}`}
-            className={cn(button({ variant: "pill" }), "inline-block max-sm:text-center")}
-          >
+        <div className="flex w-[184px] flex-col gap-[9px] max-sm:w-full">
+          <Link href={`/llamada/${id}`} className={cn(button({ variant: "solid" }), "block text-center")}>
             {CTA_POR_CANAL[canalReal]}
           </Link>
-          <Link
-            href={`/llamada/${id}`}
-            className="text-[13px] text-muted transition-colors hover:text-ink max-sm:text-center"
-          >
+          <Link href={`/llamada/${id}`} className={cn(button({ variant: "ghost" }), "block text-center")}>
             Abrir ficha
           </Link>
         </div>

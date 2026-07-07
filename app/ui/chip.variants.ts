@@ -1,11 +1,24 @@
 import { cva } from "class-variance-authority";
 
-export const chip = cva("cursor-pointer rounded-full border px-[15px] py-2 text-[12px] transition-colors duration-150", {
+// tone "invert" = selector tipo switch (owner en DashboardHeader), pill blanco/negro.
+// tone "accent" = chip de filtro (AgendaHoy), rectangulo con esquinas suaves y azul
+// tenue en estado activo -- calca .chip/.chip.is-active de Cockpit (1).html.
+export const chip = cva("inline-flex cursor-pointer items-center gap-2 border transition-colors duration-150", {
   variants: {
+    tone: {
+      invert: "rounded-full px-[15px] py-2 text-[12px]",
+      accent: "rounded-lg px-[13px] py-[7px] text-[12.5px] font-semibold",
+    },
     on: {
-      true: "border-white bg-white text-[#0a0a0b]",
-      false: "border-line-strong bg-surface text-ink-soft",
+      true: "",
+      false: "",
     },
   },
-  defaultVariants: { on: false },
+  compoundVariants: [
+    { tone: "invert", on: true, class: "border-white bg-white text-[#0a0a0b]" },
+    { tone: "invert", on: false, class: "border-line-strong bg-surface text-ink-soft" },
+    { tone: "accent", on: true, class: "border-chip-active-border bg-chip-active-bg text-acento-soft" },
+    { tone: "accent", on: false, class: "border-line bg-surface text-ink-soft hover:border-line-strong" },
+  ],
+  defaultVariants: { on: false, tone: "invert" },
 });

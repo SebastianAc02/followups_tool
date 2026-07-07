@@ -56,7 +56,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   });
 
   return (
-    <div className="mx-auto max-w-[860px] px-6 pt-10 pb-[110px]">
+    <div className="mx-auto max-w-[1160px] px-11 pt-[38px] pb-[60px]">
       <TopNav email={usuario.email} />
       <Link href="/" className="mb-5 inline-block text-[13px] text-muted transition-colors hover:text-ink">
         ← Inicio
