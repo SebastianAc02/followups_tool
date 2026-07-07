@@ -2,6 +2,15 @@
 
 > **Para agentes ejecutores:** SUB-SKILL REQUERIDA: usar `superpowers:subagent-driven-development` (recomendado) o `superpowers:executing-plans` para ejecutar este plan tarea por tarea. Los pasos usan checkbox (`- [ ]`) para tracking.
 
+> **ESTADO (actualizado 2026-07-07): Tareas 0-3 HECHAS y mergeadas a `feat/cockpit-campanas`/origin.**
+> Tailwind v4 está instalado, cableado y en uso en Dashboard (`/`) + `TopNav` +
+> `SignOutButton`. **Tareas 4-11 (Cola, Llamada, Cadencias, Panel, Conectores,
+> Toque independiente, Campañas-grupo, Login/Register) NO se van a ejecutar tal
+> como están escritas.** Ver el pivote documentado justo antes de la Tarea 4:
+> esas pantallas no se portan 1:1, se rediseñan de verdad y se construyen
+> directo en Tailwind cuando el diseño llegue. El contenido de esas tareas
+> (mapeos, Apéndices A/B) queda como REFERENCIA, no como pasos a ejecutar.
+
 **Goal:** Reemplazar todo el CSS global plano (`app/globals.css`) por Tailwind v4 (CSS-first) + una librería pequeña de componentes React reutilizables, sin romper ninguna pantalla durante la transición.
 
 **Architecture:** Tailwind v4 se instala AL LADO del CSS legacy (coexistencia). Los tokens semánticos de `:root` se duplican en `@theme` para volverse utilidades (`bg-surface`, `text-ink`, `font-serif`). Se migra pantalla por pantalla usando componentes de `app/ui/*` + utilidades directas. El `globals.css` legacy se borra completo solo en la última tarea, cuando ya nadie lo usa. Ninguna pantalla a medio migrar se rompe porque el CSS viejo sigue vivo hasta el final.
@@ -49,7 +58,7 @@
 - Modify: `app/layout.tsx` (renombrar font vars a `--ff-*`)
 - Delete: `app/page.module.css`
 
-- [ ] **Step 1: Instalar Tailwind v4 y el plugin de PostCSS**
+- [x] **Step 1: Instalar Tailwind v4 y el plugin de PostCSS**
 
 Run:
 ```bash
@@ -57,7 +66,7 @@ npm install -D tailwindcss @tailwindcss/postcss
 ```
 Expected: `package.json` gana `tailwindcss` y `@tailwindcss/postcss` en devDependencies. Sin errores.
 
-- [ ] **Step 2: Crear `postcss.config.mjs`**
+- [x] **Step 2: Crear `postcss.config.mjs`**
 
 Create `postcss.config.mjs`:
 ```js
@@ -70,7 +79,7 @@ const config = {
 export default config;
 ```
 
-- [ ] **Step 3: Borrar el CSS muerto**
+- [x] **Step 3: Borrar el CSS muerto**
 
 Run:
 ```bash
@@ -78,7 +87,7 @@ git rm app/page.module.css
 ```
 Expected: archivo eliminado. (Confirmado sin importadores: `grep -rn "page.module" app` no devuelve nada.)
 
-- [ ] **Step 4: Renombrar las font vars en `app/layout.tsx`**
+- [x] **Step 4: Renombrar las font vars en `app/layout.tsx`**
 
 Las theme keys de Tailwind (`--font-serif`, `--font-display`, `--font-mono-tag`) colisionan con las vars que emite `next/font`. Se renombran las de origen a `--ff-*`.
 
@@ -92,7 +101,7 @@ const monoTag = IBM_Plex_Mono({ variable: "--ff-mono-tag", subsets: ["latin"], w
 ```
 El `<html className={...}>` de la línea 22 no cambia (usa `.variable` de cada objeto, que ahora apunta a los nuevos nombres).
 
-- [ ] **Step 5: Actualizar las referencias de fuente en el legacy de `globals.css`**
+- [x] **Step 5: Actualizar las referencias de fuente en el legacy de `globals.css`**
 
 El CSS legacy referencia los nombres viejos. Sincronizarlos con los `--ff-*`:
 ```bash
@@ -106,7 +115,7 @@ cd app && sed -i '' \
 ```
 Expected: `grep -c 'var(--font-geist\|var(--font-serif)\|var(--font-display)\|var(--font-mono-tag)' app/globals.css` devuelve 0.
 
-- [ ] **Step 6: Anteponer Tailwind, `@theme` y base a `globals.css`**
+- [x] **Step 6: Anteponer Tailwind, `@theme` y base a `globals.css`**
 
 Insertar este bloque AL INICIO de `app/globals.css`, ANTES del `:root` existente (que se conserva intacto por ahora, para que el legacy siga funcionando):
 ```css
@@ -151,7 +160,7 @@ Notas:
 - Los valores de color se **duplican** (viven en `:root` legacy y en `@theme`). El `:root` legacy se borra en la Tarea final. Esto es intencional para la coexistencia.
 - `@utility mono` / `serif` hace que los cientos de `className="mono"`/`"serif"` existentes **sigan funcionando sin tocarlos** y sean válidos en Tailwind. Las reglas legacy `.mono`/`.serif` (globals.css línea 37-38) quedan duplicadas y se borran al final.
 
-- [ ] **Step 7: Verificar coexistencia**
+- [x] **Step 7: Verificar coexistencia**
 
 ```bash
 npm run build
@@ -164,7 +173,7 @@ Luego arrancar el server con el MCP de preview (`preview_start`), abrir `/` y `/
 - `preview_inspect` sobre el `body`: confirmar `font-family` resuelve a Geist (var renombrada funciona).
 - Verificar que Tailwind ya responde: inspeccionar cualquier elemento tras agregar temporalmente `class="bg-surface"` a un nodo por `preview_eval`, o simplemente confiar en el build. (Se ejercita de verdad en la Tarea 2.)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 ```bash
 git add -A
 git commit -m "chore(tailwind): instalar Tailwind v4 en coexistencia con CSS legacy"
@@ -177,7 +186,7 @@ git commit -m "chore(tailwind): instalar Tailwind v4 en coexistencia con CSS leg
 **Files:**
 - Create: `app/ui/cx.ts`
 
-- [ ] **Step 1: Crear el helper**
+- [x] **Step 1: Crear el helper**
 
 Create `app/ui/cx.ts`:
 ```ts
@@ -187,13 +196,13 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 }
 ```
 
-- [ ] **Step 2: Verificar typecheck**
+- [x] **Step 2: Verificar typecheck**
 ```bash
 npx tsc --noEmit
 ```
 Expected: sin errores.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 ```bash
 git add app/ui/cx.ts
 git commit -m "feat(ui): helper cx para clases condicionales"
@@ -208,7 +217,7 @@ Construye los componentes que absorben los patrones repetidos del CSS legacy. So
 **Files:**
 - Create: `app/ui/Dot.tsx`, `app/ui/Pill.tsx`, `app/ui/Chip.tsx`, `app/ui/Seg.tsx`, `app/ui/Button.tsx`, `app/ui/SectionLabel.tsx`, `app/ui/Field.tsx`
 
-- [ ] **Step 1: `Dot` (severidad de fila)**
+- [x] **Step 1: `Dot` (severidad de fila)**
 
 Legacy: `.dot` (6px, redondo) + `.dot.overdue`/`.dot.today`.
 
@@ -226,7 +235,7 @@ export function Dot({ sev }: { sev: keyof typeof SEV }) {
 }
 ```
 
-- [ ] **Step 2: `Pill` (estado hot/warm/cold)**
+- [x] **Step 2: `Pill` (estado hot/warm/cold)**
 
 Legacy: `.pill` + `.pill.hot`/`.warm`/`.cold`.
 
@@ -250,7 +259,7 @@ export function Pill({ tone, children }: { tone: keyof typeof TONE; children: Re
 }
 ```
 
-- [ ] **Step 3: `Chip` (toggle on/off)**
+- [x] **Step 3: `Chip` (toggle on/off)**
 
 Legacy: `.chip` + `.chip.on`.
 
@@ -278,7 +287,7 @@ export function Chip({ on, children, className, ...props }: ChipProps) {
 }
 ```
 
-- [ ] **Step 4: `Seg` + `SegButton` (segmented control)**
+- [x] **Step 4: `Seg` + `SegButton` (segmented control)**
 
 Legacy: `.seg` (contenedor) + `.seg-btn` + `.seg-btn.on`.
 
@@ -314,7 +323,7 @@ export function SegButton({ on, children, className, ...props }: SegButtonProps)
 }
 ```
 
-- [ ] **Step 5: `Button` (primario blanco: variantes block/pill)**
+- [x] **Step 5: `Button` (primario blanco: variantes block/pill)**
 
 Legacy: `.save` (block), `.cta-primary`/`.rep-btn` (pill).
 
@@ -346,7 +355,7 @@ export function Button({ variant = "pill", className, ...props }: ButtonProps) {
 ```
 (`type="button"` evita que, dentro de un `<form>`, el botón herede `type="submit"` por default — mismo patrón que ya usan `Chip` y `SegButton`.)
 
-- [ ] **Step 6: `SectionLabel`**
+- [x] **Step 6: `SectionLabel`**
 
 Legacy: `.section-label`/`.panel-section-label`/`.cad-config-label` (uppercase, tracking, faint).
 
@@ -364,7 +373,7 @@ export function SectionLabel({ children, className }: { children: ReactNode; cla
 }
 ```
 
-- [ ] **Step 7: `Field` (ficha de llamada: has/miss)**
+- [x] **Step 7: `Field` (ficha de llamada: has/miss)**
 
 Legacy: `.field` + `.field.has .f-value` / `.field.miss .f-value` + `.f-label`.
 
@@ -388,13 +397,13 @@ export function Field({ label, value, missing }: { label: string; value: ReactNo
 ```
 (Usa `cx()` aunque hoy no haya condicionales, por consistencia con el resto de la librería.)
 
-- [ ] **Step 8: Verificar typecheck + build**
+- [x] **Step 8: Verificar typecheck + build**
 ```bash
 npx tsc --noEmit && npm run build
 ```
 Expected: sin errores.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 ```bash
 git add app/ui/
 git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip, Seg, Button, SectionLabel, Field)"
@@ -419,15 +428,48 @@ git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip
 **Files:**
 - Modify: `app/page.tsx` (32 classNames), `app/TopNav.tsx` (2), `app/SignOutButton.tsx` (1)
 
-- [ ] **Step 1: Migrar `TopNav.tsx`** — `.topnav`, `.topnav-brand`. Ver Apéndice A.
-- [ ] **Step 2: Migrar `SignOutButton.tsx`** — `.signout` (botón texto, opacity .5→1 hover). Ver Apéndice A.
-- [ ] **Step 3: Migrar `page.tsx`** — `.wrap`, `.dash-masthead`, `.dash-brief` (+ `.dash-brief-num` dinámico overdue/done → Apéndice B), `.cta-primary` (usar `<Button variant="pill">` como link o `Link` con las utilidades pill), `.dash-cols`/`.dash-col-quiet`, `.dash-campanas` (tarjeta), `.nav-cad-*` (timeline de dots con `data-canal` → convertir a color por prop/cx), `.dash-utility`, `.section-label` → `<SectionLabel>`. Ver Apéndice A y B.
-- [ ] **Step 4: Verificar** ruta `/` en preview (snapshot + console + screenshot).
-- [ ] **Step 5: Commit** `feat(tailwind): migrar dashboard y navegación`
+- [x] **Step 1: Migrar `TopNav.tsx`** — `.topnav`, `.topnav-brand`. Ver Apéndice A.
+- [x] **Step 2: Migrar `SignOutButton.tsx`** — `.signout` (botón texto, opacity .5→1 hover). Ver Apéndice A.
+- [x] **Step 3: Migrar `page.tsx`** — `.wrap`, `.dash-masthead`, `.dash-brief` (+ `.dash-brief-num` dinámico overdue/done → Apéndice B), `.cta-primary` (usar `<Button variant="pill">` como link o `Link` con las utilidades pill), `.dash-cols`/`.dash-col-quiet`, `.dash-campanas` (tarjeta), `.nav-cad-*` (timeline de dots con `data-canal` → convertir a color por prop/cx), `.dash-utility`, `.section-label` → `<SectionLabel>`. Ver Apéndice A y B.
+- [x] **Step 4: Verificar** ruta `/` en preview (snapshot + console + screenshot).
+- [x] **Step 5: Commit** `feat(tailwind): migrar dashboard y navegación`
 
 ---
 
-### Tarea 4: Cola `/cola`
+## Pivote (2026-07-07): Tareas 4-11 pausadas — rediseño real, no port mecánico
+
+**Qué cambió:** después de migrar Dashboard + nav (Tarea 3), Sebastián decidió
+que portar 1:1 el CSS feo actual de Cola, Llamada, Cadencias, Panel admin,
+Conectores, Toque independiente, Campañas (grupo) y Login/Register era trabajo
+perdido — esas pantallas se van a rediseñar de verdad pronto (el diseño ya
+existe o está por llegar, pantalla por pantalla).
+
+**Qué NO hacer:** no ejecutar las Tareas 4-11 tal como están escritas abajo
+(son una traducción clase-por-clase del CSS legacy actual a utilidades
+Tailwind equivalentes, sin cambiar el look). Ese trabajo se descartó.
+
+**Qué hacer en su lugar, pantalla por pantalla, cuando Sebastián traiga el
+diseño real de una de ellas:**
+1. Confirmar cuál pantalla y pedir/leer el diseño (mockup, spec, o descripción).
+2. Construir la UI **directo en Tailwind v4**, reusando `app/ui/{Dot,Pill,Chip,Seg,Button,SectionLabel,Field}.tsx` y `cx()` donde el patrón encaje; extender esa librería con componentes nuevos si el diseño lo pide, siguiendo el mismo estilo (props tipo `sev`/`tone`/`on`/`missing`/`variant`, `type="button"` en botones).
+3. Verificar en navegador con el MCP de preview (`preview_start`, `preview_snapshot`, `preview_console_logs`, `preview_screenshot`) — sin errores de consola, la pantalla se ve como el diseño nuevo.
+4. El bloque de CSS legacy de ESA pantalla en `app/globals.css` queda muerto una vez nada lo importa — no se borra ahora (no tocar el CSS legacy de las demás pantallas que siguen pendientes), se puede limpiar cuando se confirme que ya no tiene consumidores (mismo guard de la Tarea 12).
+5. Commit por pantalla, mismo patrón `feat(tailwind): rediseñar <pantalla>` (o `feat(<pantalla>): rediseño <lo que sea>` si el cambio es más que solo CSS).
+
+**Las Tareas 4-11 de abajo y los Apéndices A/B quedan como REFERENCIA** — útiles
+para saber cuántos classNames tiene cada archivo y qué reglas legacy traduce
+cada clase, pero NO son la fuente de verdad del look nuevo (eso lo define el
+diseño real que traiga Sebastián). Cada tarea de abajo lleva la etiqueta
+**⏸ PAUSADA** en su título.
+
+La **Tarea 12 (teardown del CSS legacy)** queda bloqueada hasta que las 8
+pantallas de abajo tengan su rediseño real hecho — su propio guard (Step 1)
+ya revienta si alguna clase legacy sigue en uso, así que no hay riesgo de
+borrar CSS que alguien todavía necesita.
+
+---
+
+### Tarea 4 ⏸ PAUSADA (ver pivote arriba): Cola `/cola`
 
 **Files:**
 - Modify: `app/cola/page.tsx` (36), `app/cola/CadenciasHoy.tsx` (35)
@@ -439,7 +481,7 @@ git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip
 
 ---
 
-### Tarea 5: Pantalla de llamada `/llamada/[id]`
+### Tarea 5 ⏸ PAUSADA (ver pivote arriba): Pantalla de llamada `/llamada/[id]`
 
 **Files:**
 - Modify: `app/llamada/[id]/page.tsx` (19), `app/llamada/[id]/CaptureForm.tsx` (19), `app/llamada/[id]/BuscarGrabacion.tsx` (16)
@@ -452,7 +494,7 @@ git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip
 
 ---
 
-### Tarea 6: Cadencias `/cadencias`
+### Tarea 6 ⏸ PAUSADA (ver pivote arriba): Cadencias `/cadencias`
 
 **Files:**
 - Modify: `app/cadencias/page.tsx`, `app/cadencias/ConstructorCadencia.tsx` (26)
@@ -463,7 +505,7 @@ git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip
 
 ---
 
-### Tarea 7: Panel admin `/panel`
+### Tarea 7 ⏸ PAUSADA (ver pivote arriba): Panel admin `/panel`
 
 **Files:**
 - Modify: `app/panel/page.tsx` (54 classNames — el más grande)
@@ -474,7 +516,7 @@ git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip
 
 ---
 
-### Tarea 8: Conectores `/conectores`
+### Tarea 8 ⏸ PAUSADA (ver pivote arriba): Conectores `/conectores`
 
 **Files:**
 - Modify: `app/conectores/page.tsx` (15)
@@ -485,7 +527,7 @@ git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip
 
 ---
 
-### Tarea 9: Toque independiente `/toque-independiente`
+### Tarea 9 ⏸ PAUSADA (ver pivote arriba): Toque independiente `/toque-independiente`
 
 **Files:**
 - Modify: `app/toque-independiente/page.tsx` (12)
@@ -496,7 +538,7 @@ git commit -m "feat(ui): librería base de componentes Tailwind (Dot, Pill, Chip
 
 ---
 
-### Tarea 10: Campañas (grupo) `/campanas`
+### Tarea 10 ⏸ PAUSADA (ver pivote arriba): Campañas (grupo) `/campanas`
 
 Estas pantallas se construyeron con `style={{}}` inline crudo (px sueltos, flex), casi sin clases globales. Convertir los inline estáticos a utilidades; dejar inline solo lo dinámico.
 
@@ -512,7 +554,7 @@ Estas pantallas se construyeron con `style={{}}` inline crudo (px sueltos, flex)
 
 ---
 
-### Tarea 11: Auth `/login` + `/register` (auth-cockpit)
+### Tarea 11 ⏸ PAUSADA (ver pivote arriba): Auth `/login` + `/register` (auth-cockpit)
 
 El bloque `auth-cockpit` (globals.css:429-568) usa una paleta verde propia hardcodeada. Como es un look aislado y de una sola pantalla, se migra con **valores arbitrarios** (`bg-[#3ddc8b]`, `text-[#e7ecef]`, etc.) — no vale la pena meter esos hex al `@theme`. La animación `@keyframes ac-breathe` (focus-within) se puede: (a) conservar como un único `@utility ac-breathe` en el bloque Tailwind de `globals.css`, o (b) omitir (el usuario dijo que no importa perder detalle). Recomendado: (a) conservarla como `@utility` para no perder el "respiro" del input.
 
@@ -528,7 +570,7 @@ El bloque `auth-cockpit` (globals.css:429-568) usa una paleta verde propia hardc
 
 ---
 
-## Tarea 12: Teardown del CSS legacy
+## Tarea 12 🚫 BLOQUEADA (hasta cerrar Tareas 4-11): Teardown del CSS legacy
 
 Con las 24 pantallas migradas, `globals.css` ya no debería tener consumidores de las clases legacy. Se borra todo el cuerpo legacy, dejando solo el bloque Tailwind.
 
