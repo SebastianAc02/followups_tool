@@ -93,6 +93,7 @@ export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
 // rol es string (usa en/no_en) y NO va aqui; personas (cantidad de contactos de la
 // empresa, via COUNT) si.
 export const CAMPOS_SEGMENTO_NUMERICOS = ['prioridad', 'es_cliente', 'usuarios', 'personas'] as const;
+export type CampoSegmentoNumerico = (typeof CAMPOS_SEGMENTO_NUMERICOS)[number];
 
 const condicionEnSchema = z.object({
   campo: z.enum(CAMPOS_SEGMENTO),
@@ -133,6 +134,10 @@ export const definicionSegmentoSchema = z.object({
   condiciones: z
     .array(z.union([condicionEnSchema, condicionNullSchema, condicionEntreSchema, condicionComparaSchema]))
     .min(1, 'un segmento necesita al menos una condicion'),
+  // Ranking + tope: "las 50 mas grandes" = orden por usuarios desc, limite 50. Ambos
+  // opcionales; sin ellos el segmento es el conjunto completo que cumple condiciones.
+  orden: z.object({ campo: z.enum(CAMPOS_SEGMENTO_NUMERICOS), dir: z.enum(['asc', 'desc']) }).optional(),
+  limite: z.number().int().positive().optional(),
 });
 
 export type DefinicionSegmento = z.infer<typeof definicionSegmentoSchema>;

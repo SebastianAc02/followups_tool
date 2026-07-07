@@ -11,6 +11,7 @@ import {
   between,
   exists,
   notExists,
+  asc,
   desc,
   sql,
   type SQL,
@@ -56,6 +57,7 @@ import {
   definicionSegmentoSchema,
   type DefinicionSegmento,
   type CampoSegmento,
+  type CampoSegmentoNumerico,
   versionPasoInputSchema,
   type VersionPasoInput,
   campanaInputSchema,
@@ -788,10 +790,20 @@ function compilarSegmento(def: DefinicionSegmento): SQL | undefined {
 
 // V4.3: corre un filtro (aun sin guardar) y devuelve las empresas que caen. Valida la
 // definicion primero: un filtro corrupto no consulta nada. LEFT JOIN a empresa_usuarios
+// Parte 5 campanas: columna (o subconsulta escalar, para personas) usada por el
+// ranking "las N mas grandes". Mismo motivo que condicionPersonas: personas no tiene
+// columna propia.
+function columnaOrden(campo: CampoSegmentoNumerico): SQLiteColumn | SQL<number> {
+  if (campo === 'personas') {
+    return sql<number>`(SELECT COUNT(*) FROM ${contacto} WHERE ${contacto.idEmpresa} = ${empresa.idEmpresa})`;
+  }
+  return COLUMNA_SEGMENTO[campo].col;
+}
+
 // es gratis (join sobre PK) y necesario para el campo 'usuarios' del segmento.
 export function empresasDeSegmento(def: DefinicionSegmento) {
   const val = definicionSegmentoSchema.parse(def);
-  return db
+  let q = db
     .select({
       id: empresa.idEmpresa,
       nombre: empresa.nombreOficial,
@@ -802,8 +814,20 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
     .where(compilarSegmento(val))
-    .orderBy(empresa.nombreOficial)
-    .all();
+    .$dynamic();
+
+  if (val.orden) {
+    const col = columnaOrden(val.orden.campo);
+    // SQLite no tiene NULLS LAST nativo: ordenar primero por "es null" (0/1) empuja
+    // los nulos al final sin importar asc/desc, y despues ordena por el valor real.
+    const direccion = val.orden.dir === 'desc' ? desc(col) : asc(col);
+    q = q.orderBy(sql`${col} is null`, direccion);
+  } else {
+    q = q.orderBy(empresa.nombreOficial);
+  }
+  if (val.limite) q = q.limit(val.limite);
+
+  return q.all();
 }
 
 export function contarSegmento(def: DefinicionSegmento): number {

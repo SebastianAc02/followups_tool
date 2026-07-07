@@ -43,3 +43,20 @@ test('campanaInputSchema acepta intakeDiario positivo y lo deja undefined si no 
   const conIntake = campanaInputSchema.parse({ nombre: 'X', idCadencia: 1, idSegmento: 1, intakeDiario: 50 });
   assert.equal(conIntake.intakeDiario, 50);
 });
+
+test('definicionSegmento acepta orden y limite opcionales', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }],
+    orden: { campo: 'usuarios', dir: 'desc' },
+    limite: 50,
+  });
+  assert.equal(r.success, true);
+});
+
+test('rechaza orden sobre campo no numerico', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }],
+    orden: { campo: 'ciudad', dir: 'desc' },
+  });
+  assert.equal(r.success, false);
+});
