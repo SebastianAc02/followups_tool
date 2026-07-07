@@ -533,15 +533,98 @@ git add app/db/repository.ts app/db/repository.segmento.test.ts
 git commit -m "feat(repo): empresasConReadiness y conteosReadiness (core puro + query de lectura)"
 ```
 
-**Fin Fase A.** El backend ya segmenta por región/rol/personas, con `>`/`<`, y calcula readiness + conteos. Corre `npm test`: todo verde.
+### Task A7: Orden + límite en el segmento ("las 50 más grandes")
+
+**Files:**
+- Modify: `app/db/validation.ts` (`definicionSegmentoSchema` gana `orden` + `limite`)
+- Modify: `app/db/repository.ts` (`empresasDeSegmento` honra orden + límite)
+- Test: `app/db/validation.test.ts`, `app/db/repository.segmento.test.ts`
+
+- [ ] **Step 1: Test de dominio que falla**
+
+```ts
+test('definicionSegmento acepta orden y limite opcionales', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }],
+    orden: { campo: 'usuarios', dir: 'desc' },
+    limite: 50,
+  });
+  assert.equal(r.success, true);
+});
+test('rechaza orden sobre campo no numerico', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }],
+    orden: { campo: 'ciudad', dir: 'desc' },
+  });
+  assert.equal(r.success, false);
+});
+```
+
+- [ ] **Step 2: Ver que falla**
+
+Run: `npm test 2>&1 | grep -A3 'orden y limite'`
+Expected: FAIL.
+
+- [ ] **Step 3: Extender el schema**
+
+En `app/db/validation.ts`, dentro de `definicionSegmentoSchema`:
+
+```ts
+export const definicionSegmentoSchema = z.object({
+  condiciones: z
+    .array(z.union([condicionEnSchema, condicionNullSchema, condicionEntreSchema, condicionComparaSchema]))
+    .min(1, 'un segmento necesita al menos una condicion'),
+  // Ranking + tope: "las 50 mas grandes" = orden por usuarios desc, limite 50. Ambos
+  // opcionales; sin ellos el segmento es el conjunto completo que cumple condiciones.
+  orden: z.object({ campo: z.enum(CAMPOS_SEGMENTO_NUMERICOS), dir: z.enum(['asc', 'desc']) }).optional(),
+  limite: z.number().int().positive().optional(),
+});
+```
+
+- [ ] **Step 4: Test de repository que falla** (nulos al final, límite aplicado)
+
+```ts
+test('empresasDeSegmento ordena por usuarios desc, nulos al final, respeta limite', () => {
+  const repo = crearRepoDeArchivoTemporal();
+  repo._seedEmpresa({ idEmpresa: 'grande' }); repo._seedUsuarios('grande', 300000);
+  repo._seedEmpresa({ idEmpresa: 'media' });  repo._seedUsuarios('media', 100000);
+  repo._seedEmpresa({ idEmpresa: 'nula' });   // sin usuarios
+  const def = { condiciones: [{ campo: 'es_cliente', op: 'entre' as const, desde: 0, hasta: 1 }], orden: { campo: 'usuarios' as const, dir: 'desc' as const }, limite: 2 };
+  const r = repo.empresasDeSegmento(def);
+  assert.deepEqual(r.map((e) => e.id), ['grande', 'media']); // nula queda fuera por el limite, y nunca antes que las que tienen dato
+});
+```
+
+- [ ] **Step 5: Ver que falla, implementar orden/límite en el Repository**
+
+Añadir al final de la construcción de la query en `empresasDeSegmento`: si `def.orden`, `ORDER BY <columna> <dir> NULLS LAST` (en SQLite: `ORDER BY <col> IS NULL, <col> <dir>`); si `def.limite`, `LIMIT <n>`. Mantener todo dentro del Repository.
+
+- [ ] **Step 6: Ver que pasa**
+
+Run: `npm test 2>&1 | grep -A3 'ordena por usuarios'`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add app/db/validation.ts app/db/validation.test.ts app/db/repository.ts app/db/repository.segmento.test.ts
+git commit -m "feat(segmento): orden (ranking) + limite, nulos al final"
+```
+
+**Fin Fase A.** El backend ya segmenta por región/rol/personas, con `>`/`<`, con ranking y tope, y calcula readiness + conteos. Corre `npm test`: todo verde.
 
 ---
 
-## FASE B — El Copiloto (segmentación en lenguaje natural)
+## FASE B — El Copiloto conversacional (la pieza más importante)
 
-Entrega: `frase -> DefinicionSegmento` vía `IAPort`, con honestidad sobre lo que no puede mapear. El core define el contrato; ClaudeAdapter lo implementa; un fake lo testea. El filtro compilado siempre pasa por `definicionSegmentoSchema`, así que una alucinación de la IA se rechaza antes de tocar la DB.
+Entrega: un Copiloto multi-turno que edita el ESTADO del segmento (condiciones + orden +
+límite), con cantidad objetivo, ranking, relleno a la meta por el eje de la intención, y
+honestidad sobre lo que no mapea. El core define el contrato; ClaudeAdapter lo implementa; un
+fake lo testea. El estado propuesto SIEMPRE pasa por `definicionSegmentoSchema`, así que una
+alucinación se rechaza antes de tocar la DB. La IA solo PROPONE estado estructurado; el
+Repository ejecuta.
 
-### Task B1: Extender `IAPort` con `compilarSegmento`
+### Task B1: Extender `IAPort` con `copiloto` conversacional
 
 **Files:**
 - Modify: `app/core/ports/ia.ts`
@@ -559,18 +642,30 @@ import type { DefinicionSegmento } from '../../db/validation.ts';
 // Repository (valoresDistintosCampo) y se la pasa; la IA NO consulta la DB.
 export type CampoDisponible = { campo: string; ejemplosValor?: string[]; numerico?: boolean };
 
-// La IA devuelve el filtro compilado Y lo que NO supo mapear (honestidad: "de Cali"
-// se mapea; "las que mencionaron precio" no, y eso se le dice al usuario).
-export type ResultadoCopiloto = {
-  definicion: DefinicionSegmento;
+// Una instruccion del usuario en el contexto del segmento ACTUAL (multi-turno). El
+// Copiloto muta ese estado, no arranca de cero. `seleccion` le da cuantas cuentas cayeron
+// ya, para razonar el relleno ("faltan 10 para 50").
+export type InstruccionCopiloto = {
+  frase: string;
+  estadoActual: DefinicionSegmento; // condiciones + orden + limite de este momento
+  seleccion?: { total: number };    // cuantas trae el estado actual ahora mismo
+};
+
+// La IA devuelve el ESTADO NUEVO del segmento + que hizo (para mostrarlo) + lo que no
+// supo mapear. `relleno` aparece cuando la instruccion fue "completar a la meta": dice
+// por que eje relajo, para que la UI marque las cuentas que entran por ahi.
+export type AccionCopiloto = {
+  estadoNuevo: DefinicionSegmento;
+  explicacion: string; // "baje el umbral de usuarios de 200k a 150k para completar 10"
   noMapeado: string[];
+  relleno?: { eje: string; motivo: string };
 };
 
 export interface IAPort {
   extraerBorradores(resumenCacheado: string): Promise<BorradorToque>;
-  // Traduce lenguaje natural a filtro estructurado. Solo mapea a `campos`; lo que no
-  // cabe va en noMapeado. El llamador SIEMPRE re-valida definicion con Zod.
-  compilarSegmento(frase: string, campos: CampoDisponible[]): Promise<ResultadoCopiloto>;
+  // Toma la instruccion + estado actual y devuelve el estado nuevo. Solo mapea a `campos`;
+  // lo que no cabe va en noMapeado. El llamador SIEMPRE re-valida estadoNuevo con Zod.
+  copiloto(instruccion: InstruccionCopiloto, campos: CampoDisponible[]): Promise<AccionCopiloto>;
 }
 ```
 
@@ -581,11 +676,11 @@ git add app/core/ports/ia.ts
 git commit -m "feat(ia): contrato compilarSegmento en IAPort (frase -> DefinicionSegmento)"
 ```
 
-### Task B2: Fake `IAPort` + server action con re-validación
+### Task B2: Fake `IAPort` + función `pedirAlCopiloto` con re-validación
 
 **Files:**
 - Create: `app/adapters/ia-fake.ts`
-- Create: `app/campanas/nueva/copiloto.ts` (server action `traducirSegmento`)
+- Create: `app/campanas/nueva/copiloto.ts`
 - Test: `app/campanas/nueva/copiloto.test.ts`
 
 - [ ] **Step 1: Test que falla**
@@ -593,41 +688,45 @@ git commit -m "feat(ia): contrato compilarSegmento en IAPort (frase -> Definicio
 ```ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { traducirSegmento } from './copiloto.ts';
+import { pedirAlCopiloto } from './copiloto.ts';
 import { IAFake } from '../../adapters/ia-fake.ts';
 
-test('traducirSegmento devuelve el filtro validado cuando la IA responde bien', async () => {
+const estadoVacio = { condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }] } as const;
+
+test('pedirAlCopiloto devuelve el estado validado cuando la IA responde bien', async () => {
   const ia = new IAFake({
-    definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }, { campo: 'usuarios', op: 'mayor_que', valor: 200000 }] },
+    estadoNuevo: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }, { campo: 'usuarios', op: 'mayor_que', valor: 200000 }], orden: { campo: 'usuarios', dir: 'desc' }, limite: 50 },
+    explicacion: 'ISP, mas de 200k usuarios, las 50 mas grandes',
     noMapeado: [],
   });
-  const r = await traducirSegmento('ISPs de mas de 200000 usuarios', ia);
+  const r = await pedirAlCopiloto({ frase: 'tráeme las 50 ISP mas grandes de mas de 200k', estadoActual: estadoVacio }, ia);
   assert.equal(r.ok, true);
-  assert.equal(r.definicion.condiciones.length, 2);
+  assert.equal(r.estado.limite, 50);
+  assert.equal(r.explicacion.length > 0, true);
 });
 
-test('traducirSegmento rechaza un filtro invalido de la IA (campo inventado)', async () => {
-  const ia = new IAFake({ definicion: { condiciones: [{ campo: 'inventado', op: 'en', valores: ['x'] }] } as any, noMapeado: [] });
-  const r = await traducirSegmento('lo que sea', ia);
+test('pedirAlCopiloto rechaza un estado invalido de la IA (campo inventado)', async () => {
+  const ia = new IAFake({ estadoNuevo: { condiciones: [{ campo: 'inventado', op: 'en', valores: ['x'] }] } as any, explicacion: '', noMapeado: [] });
+  const r = await pedirAlCopiloto({ frase: 'lo que sea', estadoActual: estadoVacio }, ia);
   assert.equal(r.ok, false); // Zod lo tumba antes de tocar DB
 });
 ```
 
 - [ ] **Step 2: Ver que falla**
 
-Run: `npm test 2>&1 | grep -A3 traducirSegmento`
+Run: `npm test 2>&1 | grep -A3 pedirAlCopiloto`
 Expected: FAIL.
 
-- [ ] **Step 3: Implementar fake + action**
+- [ ] **Step 3: Implementar fake + función**
 
 `app/adapters/ia-fake.ts`:
 
 ```ts
-import type { IAPort, ResultadoCopiloto, CampoDisponible, BorradorToque } from '../core/ports/ia.ts';
+import type { IAPort, AccionCopiloto, InstruccionCopiloto, CampoDisponible, BorradorToque } from '../core/ports/ia.ts';
 
 export class IAFake implements IAPort {
-  constructor(private respuesta: ResultadoCopiloto) {}
-  async compilarSegmento(_frase: string, _campos: CampoDisponible[]): Promise<ResultadoCopiloto> {
+  constructor(private respuesta: AccionCopiloto) {}
+  async copiloto(_i: InstruccionCopiloto, _campos: CampoDisponible[]): Promise<AccionCopiloto> {
     return this.respuesta;
   }
   async extraerBorradores(): Promise<BorradorToque> {
@@ -636,41 +735,41 @@ export class IAFake implements IAPort {
 }
 ```
 
-`app/campanas/nueva/copiloto.ts` (la parte pura, sin `'use server'` para poder testear; el server action que la envuelve va en Fase C):
+`app/campanas/nueva/copiloto.ts` (parte pura, sin `'use server'` para poder testear; el server action que la envuelve va en Fase C):
 
 ```ts
-import type { IAPort } from '../../core/ports/ia.ts';
+import type { IAPort, InstruccionCopiloto } from '../../core/ports/ia.ts';
 import { definicionSegmentoSchema, type DefinicionSegmento } from '../../db/validation.ts';
 
 type Resultado =
-  | { ok: true; definicion: DefinicionSegmento; noMapeado: string[] }
+  | { ok: true; estado: DefinicionSegmento; explicacion: string; noMapeado: string[]; relleno?: { eje: string; motivo: string } }
   | { ok: false; error: string };
 
-// Re-valida SIEMPRE la salida de la IA con Zod: la IA nunca es la fuente de verdad
-// del filtro, el schema sí. Un campo/operador inventado no llega jamas al Repository.
-export async function traducirSegmento(frase: string, ia: IAPort, campos = CAMPOS_COPILOTO): Promise<Resultado> {
-  const bruto = await ia.compilarSegmento(frase, campos);
-  const parsed = definicionSegmentoSchema.safeParse(bruto.definicion);
-  if (!parsed.success) return { ok: false, error: 'El Copiloto propuso un filtro invalido. Ajustalo a mano.' };
-  return { ok: true, definicion: parsed.data, noMapeado: bruto.noMapeado };
+// Re-valida SIEMPRE el estado que propone la IA con Zod: la IA nunca es la fuente de
+// verdad del segmento, el schema sí. Un campo/operador/orden inventado no llega al Repository.
+export async function pedirAlCopiloto(instruccion: InstruccionCopiloto, ia: IAPort, campos = CAMPOS_COPILOTO): Promise<Resultado> {
+  const bruto = await ia.copiloto(instruccion, campos);
+  const parsed = definicionSegmentoSchema.safeParse(bruto.estadoNuevo);
+  if (!parsed.success) return { ok: false, error: 'El Copiloto propuso un segmento invalido. Ajustalo a mano.' };
+  return { ok: true, estado: parsed.data, explicacion: bruto.explicacion, noMapeado: bruto.noMapeado, relleno: bruto.relleno };
 }
 ```
 
-(`CAMPOS_COPILOTO`: lista `CampoDisponible[]` construida desde `CAMPOS_SEGMENTO`; en Fase C se enriquece con `valoresDistintosCampo` del Repository para las regiones/estados reales.)
+(`CAMPOS_COPILOTO`: lista `CampoDisponible[]` desde `CAMPOS_SEGMENTO`; en Fase C se enriquece con `valoresDistintosCampo` del Repository para las regiones/estados reales.)
 
 - [ ] **Step 4: Ver que pasa**
 
-Run: `npm test 2>&1 | grep -A3 traducirSegmento`
+Run: `npm test 2>&1 | grep -A3 pedirAlCopiloto`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add app/adapters/ia-fake.ts app/campanas/nueva/copiloto.ts app/campanas/nueva/copiloto.test.ts
-git commit -m "feat(copiloto): traducirSegmento con re-validacion Zod + IAFake para tests"
+git commit -m "feat(copiloto): pedirAlCopiloto conversacional con re-validacion Zod + IAFake"
 ```
 
-### Task B3: `ClaudeAdapter.compilarSegmento` (implementación real)
+### Task B3: `ClaudeAdapter.copiloto` (implementación real)
 
 **Files:**
 - Modify: `app/adapters/claude.ts`
@@ -678,18 +777,76 @@ git commit -m "feat(copiloto): traducirSegmento con re-validacion Zod + IAFake p
 
 - [ ] **Step 1: Implementar el método vía el gateway** (mismo patrón que `extraerBorradores`)
 
-El prompt le pasa: la frase, la lista cerrada de campos con sus valores conocidos (para mapear "Cali" -> ciudad, "Valle" -> departamento), y las reglas: responde SOLO JSON `{ definicion: {condiciones:[...]}, noMapeado: [...] }`, usa solo estos campos/operadores, y si algo de la frase no cae en ningún campo, ponlo en `noMapeado` en vez de inventar. Parsear la respuesta, y si el JSON viene sucio, devolver `{ definicion: { condiciones: [] }, noMapeado: [frase] }` para que la re-validación de B2 lo marque como "ajústalo a mano" (nunca revienta el flujo).
+El prompt le pasa: la instrucción (frase), el ESTADO ACTUAL del segmento (condiciones + orden + límite), cuántas cuentas trae ahora (`seleccion.total`), y la lista cerrada de campos con sus valores conocidos (para mapear "Cali" -> ciudad, "Valle" -> departamento). Reglas del prompt:
+- Devuelve SOLO JSON `{ estadoNuevo: {condiciones, orden?, limite?}, explicacion, noMapeado, relleno? }`.
+- Usa solo estos campos/operadores; si algo no cae en ningún campo, va a `noMapeado`, no lo inventes.
+- "las N más grandes" -> setea `orden: {campo:'usuarios', dir:'desc'}` y `limite: N`.
+- **Relleno a la meta:** si la instrucción es completar a `limite` y el estado actual trae menos, identifica el EJE de la intención (tamaño / región / vertical / etc., mira qué condición domina el segmento) y relaja SOLO ese eje (baja el umbral, suma departamentos vecinos, amplía la vertical), deja el resto igual, y explica el cambio en `explicacion` + `relleno {eje, motivo}`.
+- Multi-turno: parte del `estadoActual`, no de cero ("quítame Bogotá" quita ese valor de la condición de región existente).
 
-- [ ] **Step 2: Verificación manual** (no unit test): con el gateway corriendo, una frase real ("ISPs de más de 200.000 usuarios en el Valle") devuelve las condiciones esperadas. Documentar el resultado en el PR.
+Parsear la respuesta; si el JSON viene sucio, devolver `{ estadoNuevo: instruccion.estadoActual, explicacion: 'No entendí, ajústalo a mano', noMapeado: [instruccion.frase] }` (nunca revienta el flujo; la re-validación de B2 lo maneja).
+
+- [ ] **Step 2: Verificación manual** (no unit test): con el gateway corriendo, correr la secuencia real "tráeme las 50 ISP más grandes" -> luego "quítame las de Bogotá" -> luego "complétame a 50 parecidas" y confirmar que el estado evoluciona y el relleno relaja por tamaño. Documentar en el PR.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add app/adapters/claude.ts
-git commit -m "feat(copiloto): ClaudeAdapter.compilarSegmento via gateway"
+git commit -m "feat(copiloto): ClaudeAdapter.copiloto conversacional (ranking + relleno por eje) via gateway"
 ```
 
-**Fin Fase B.** El Copiloto traduce y es honesto; el filtro siempre se valida. `npm test` verde.
+### Task B4: Relleno a la meta — marcar las cuentas "relajadas"
+
+Cuando el Copiloto relaja para completar, la UI tiene que distinguir las que entraron por el filtro estricto de las que entraron por el relleno. El diff es determinista y vive en el core (no en la IA).
+
+**Files:**
+- Modify: `app/core/canales-empresa.ts` (o nuevo `app/core/relleno-segmento.ts`)
+- Test: `app/core/relleno-segmento.test.ts`
+
+- [ ] **Step 1: Test que falla**
+
+```ts
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { marcarRelajadas } from './relleno-segmento.ts';
+
+test('marca como relajadas las que estan en el relajado pero no en el estricto', () => {
+  const estrictas = ['A', 'B', 'C'];               // 3 del filtro duro
+  const relajadas = ['A', 'B', 'C', 'D', 'E'];     // 5 tras relajar
+  const r = marcarRelajadas(estrictas, relajadas);
+  assert.deepEqual(r, [
+    { id: 'A', relajada: false }, { id: 'B', relajada: false }, { id: 'C', relajada: false },
+    { id: 'D', relajada: true }, { id: 'E', relajada: true },
+  ]);
+});
+```
+
+- [ ] **Step 2: Ver que falla, implementar**
+
+```ts
+// Diff puro: las que aparecen en el conjunto relajado pero no en el estricto entraron
+// por el relleno. La UI las pinta distinto para que se revisen con mas ojo.
+export function marcarRelajadas(idsEstrictas: string[], idsRelajadas: string[]): { id: string; relajada: boolean }[] {
+  const duras = new Set(idsEstrictas);
+  return idsRelajadas.map((id) => ({ id, relajada: !duras.has(id) }));
+}
+```
+
+- [ ] **Step 3: Ver que pasa**
+
+Run: `npm test 2>&1 | grep -A3 relajadas`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add app/core/relleno-segmento.ts app/core/relleno-segmento.test.ts
+git commit -m "feat(copiloto): marcar cuentas 'relajadas' del relleno a la meta (diff puro)"
+```
+
+> En Fase C, el flujo de relleno es: correr el estado estricto (empresasDeSegmento) -> guardar sus ids -> aplicar el estadoNuevo del Copiloto (relajado, con limite) -> `marcarRelajadas(idsEstrictas, idsRelajadas)` -> la tabla pinta las relajadas con un badge y la revisión (P2) las trata aparte.
+
+**Fin Fase B.** El Copiloto es conversacional, rankea, completa a la meta relajando por el eje de la intención, es honesto, y el estado siempre se valida. `npm test` verde.
 
 ---
 
@@ -710,17 +867,17 @@ Entrega: la vista 2 del wizard funcional: wall de filtros a la izquierda, tabla 
 Fuentes: cargar IBM Plex Mono (datos), IBM Plex Sans (UI) y Newsreader (títulos de tarjeta 1C) por `next/font` en el layout. Verify: `preview_inspect` sobre un chip de filtro confirma `color: rgb(139,124,255)`.
 
 **Componentes (client) y su responsabilidad única:**
-- `FiltroWall.tsx` — chips de filtro por campo (usuarios rango, región, categoría, estado, rol, personas). Estado = una `DefinicionSegmento`. Emite cambios hacia arriba. "Añadir filtro manual" agrega condiciones.
-- `CopilotoPanel.tsx` — textarea + botón "Traducir" -> llama al server action `traducir` -> rellena `FiltroWall` con las condiciones y muestra `noMapeado` como aviso honesto ("no pude mapear: ..."). Estado BETA visible.
-- `TablaCuentas.tsx` — filas de `empresasConReadiness`, columnas Cuenta/Ciudad/Usuarios/Estado/Readiness, checkbox incluir/excluir (persistir con `excluirDeSegmento`/`incluirDeSegmento` existentes). Header con conteos de `conteosReadiness`.
+- `FiltroWall.tsx` — chips de filtro por campo (usuarios rango, región, categoría, estado, rol, personas) + control de orden y límite ("las N más grandes"). Estado = una `DefinicionSegmento`. Emite cambios hacia arriba. "Añadir filtro manual" agrega condiciones.
+- `CopilotoPanel.tsx` — **conversacional (multi-turno), estado BETA visible.** Hilo de instrucciones; cada una llama al server action `copiloto` con el ESTADO ACTUAL -> aplica `estadoNuevo` al `FiltroWall`, muestra `explicacion` ("bajé el umbral a 150k para completar 10") y `noMapeado` como aviso honesto. Soporta cantidad objetivo, ranking y "complétame a N parecidas".
+- `TablaCuentas.tsx` — filas de `empresasConReadiness`, columnas Cuenta/Ciudad/Usuarios/Estado/Readiness, checkbox incluir/excluir (persistir con `excluirDeSegmento`/`incluirDeSegmento` existentes). Header con conteos de `conteosReadiness`. Las filas que entran por relleno (`marcarRelajadas`, B4) llevan un badge "relajada".
 - `ReadinessBadge.tsx` — pinta lista (verde `--done`) / parcial (naranja `--warn`) / sin canal (gris), con tooltip de qué falta.
 
 **Server actions (Fase C):** en `app/campanas/nueva/actions.ts` (o donde vivan las de la ruta):
-- `traducir(frase: string): Promise<Resultado>` — `'use server'` que arma `CAMPOS_COPILOTO` con `repo.valoresDistintosCampo` y delega en `traducirSegmento` (B2) con el `ClaudeAdapter` real.
-- `previsualizar(def, canalesRequeridos, regla): { filas, conteos }` — delega en `empresasConReadiness`/`conteosReadiness`. `canalesRequeridos` se deriva de la cadencia elegida (o de todos los canales si aún no hay cadencia).
-- `guardar(nombre, def, frase)` — `guardarSegmento` (existe), guardando `descripcion_natural = frase`.
+- `copiloto(instruccion): Promise<Resultado>` — `'use server'` que arma `CAMPOS_COPILOTO` con `repo.valoresDistintosCampo` y delega en `pedirAlCopiloto` (B2) con el `ClaudeAdapter` real. Recibe el estado actual, devuelve el nuevo + explicación + relleno.
+- `previsualizar(def, canalesRequeridos, regla): { filas, conteos }` — delega en `empresasConReadiness`/`conteosReadiness`. Para relleno, corre estricto vs relajado y aplica `marcarRelajadas`. `canalesRequeridos` se deriva de la cadencia (o todos si aún no hay).
+- `guardar(nombre, def, frase)` — `guardarSegmento` (existe), guardando `descripcion_natural = frase`. `def` ya incluye orden/límite.
 
-**Verify (navegador):** escribir una frase, ver los chips llenarse; togglear un filtro y ver el conteo cambiar; excluir una fila y ver el conteo bajar; una empresa sin correo muestra badge parcial/sin-canal correcto. `preview_snapshot` + `preview_console_logs` sin errores.
+**Verify (navegador):** pedir "las 50 ISP más grandes de Valle" y ver chips + orden + límite llenarse; pedir "quítame Bogotá" y ver el estado mutar sin reiniciar; pedir "complétame a 50 parecidas" cuando hay 40 y ver 10 filas con badge "relajada" + la explicación del eje; togglear un filtro y ver el conteo cambiar; una empresa sin correo muestra badge parcial/sin-canal. `preview_console_logs` sin errores.
 
 ---
 
@@ -790,7 +947,7 @@ Cada fase de UI (C, D, E-UI, F) se expande a su propio `docs/superpowers/plans/`
 
 ## Self-review (cobertura del spec)
 
-- 3.1 segmentación wall+NL -> Fase A (campos/ops) + Fase B (Copiloto) + Fase C (UI). ✓
+- 3.1 segmentación wall + Copiloto conversacional -> Fase A (campos/ops + A7 orden/límite) + Fase B (B1-B3 Copiloto multi-turno con ranking + B4 relleno por eje) + Fase C (UI hilo + badge relajada). ✓
 - 3.2 reality check del dato -> informa A4/A6 (readiness) y los conteos "sin contacto". ✓
 - 3.3 readiness + regla de faltante -> A4 (core), A5 (columna), A6 (conteos), C/D (UI). ✓
 - 3.4 destinatarios por rol -> A2/A3 (filtro rol) + D (contactosPorRol + UI). ✓

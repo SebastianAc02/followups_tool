@@ -58,16 +58,37 @@ simular el preview, no para enviar de verdad.
 
 ## 3. Decisiones de producto (cerradas en brainstorming)
 
-### 3.1 Segmentación: wall + lenguaje natural, un solo filtro
-Dos formas de manejar el MISMO estado de filtro:
+### 3.1 Segmentación: wall + Copiloto conversacional (la pieza más importante)
+Dos formas de manejar el MISMO estado de segmento; el Copiloto es potente, no un traductor
+de un solo tiro.
 - **Wall de filtros a la izquierda** (Apollo): usuarios (rango), región (departamento/
   ciudad), categoría, estado del deal, rol del contacto, cantidad de personas en la cuenta.
-- **Caja de lenguaje natural arriba** (Clay): el usuario escribe "ISPs de más de 200.000
-  usuarios en el Valle del Cauca" y la IA lo **compila** al filtro estructurado; los chips
-  del wall se llenan y quedan visibles y editables a mano.
-- La IA solo traduce (frase -> `DefinicionSegmento`); NUNCA toca la DB. El Repository
-  ejecuta el filtro, determinístico y auditable. Si la frase pide algo que no tenemos como
-  dato, la IA lo dice honesto en vez de inventar un filtro que no aplica.
+- **Copiloto a la derecha** (Clay): el usuario le habla y el Copiloto llena/edita los chips
+  del wall. Capacidades obligatorias:
+  1. **Traducir explícito -> filtros.** "ISPs de más de 200.000 usuarios en el Valle del
+     Cauca" -> chips visibles y editables a mano.
+  2. **Cantidad objetivo + ranking.** "Tráeme las 50 ISP más grandes." El segmento gana un
+     ORDEN (por `usuarios` desc por defecto; configurable) y un LÍMITE (50). No es solo un
+     conjunto que cumple condiciones: son los mejores N según un ranking.
+  3. **Relleno a la meta por el eje de la intención.** Si el filtro estricto da 40 y el
+     objetivo es 50, "tráeme las otras 10 parecidas" -> el Copiloto identifica el EJE que
+     define la intención del segmento y relaja/extiende por ahí, manteniendo el resto:
+     - intención = tamaño -> las siguientes 10 más grandes.
+     - intención = región -> las más cercanas a esa región (departamentos vecinos).
+     - intención = vertical -> las que más operan en esa vertical.
+     Reporta qué relajó ("bajé el umbral de 200k a 150k, sumé 8, no encontré 10"). Las que
+     entran por relleno quedan MARCADAS "relajadas" para revisarlas distinto.
+  4. **Conversacional (multi-turno).** Cada instrucción muta el ESTADO ACTUAL del segmento
+     ("ahora quítame las de Bogotá", "las otras 10"), no arranca de cero. El estado del
+     segmento (condiciones + orden + límite + incluidas/excluidas) es la ÚNICA fuente de
+     verdad; el Copiloto la va editando turno a turno.
+- **Frontera dura:** la IA solo PROPONE un estado de segmento estructurado (condiciones,
+  orden, límite, eje de relajación); NUNCA toca la DB ni corre SQL. El Repository ejecuta,
+  determinístico y auditable. El estado propuesto SIEMPRE se re-valida con Zod, así una
+  alucinación (campo/operador inventado) se rechaza antes de tocar datos. Si algo de la
+  frase no cae en ningún campo, va a `noMapeado` y se le dice al usuario, no se inventa.
+- **Ranking con nulos:** empresas sin `usuarios` van al final del orden (no se cuelan como
+  "grandes"); si el filtro pide un rango de usuarios, quedan excluidas como hoy.
 
 ### 3.2 Reality check del dato (define el wall)
 - 1959 empresas (1873 ISPs), buena cobertura de usuarios (1730) y región.
@@ -161,8 +182,11 @@ Casi todo existe (schema Fase 4 completo). Cambios nuevos, mínimos:
 - `campana.regla_faltante` (text: `reemplazar`|`saltar`|`cola`; default `cola`). NUEVO.
 - Derivación de canales alcanzables: función PURA en core, no columna (se calcula de
   `contacto.email`/`telefono`). Si el cómputo pesa, se cachea después; no ahora.
-- `DefinicionSegmento`: extender `CAMPOS_SEGMENTO` con `departamento` y rol de contacto, y el
-  operador `mayor_que`/`menor_que` (hoy solo `entre`). Validado en `app/db/validation.ts`.
+- `DefinicionSegmento`: extender `CAMPOS_SEGMENTO` con `departamento` y rol de contacto, el
+  operador `mayor_que`/`menor_que` (hoy solo `entre`), y **`orden` { campo, dir } + `limite`**
+  (para "las 50 más grandes"). El relleno a la meta se modela como un SEGUNDO estado relajado
+  que el Repository corre y diffea contra el estricto para marcar las "relajadas". Validado en
+  `app/db/validation.ts`.
 - Sin tablas nuevas. `segmento`, `campana`, `inscripcion`, `destinatario`, `version_paso`,
   `paso_inscripcion`, `evento_tracking` ya están.
 
