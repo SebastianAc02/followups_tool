@@ -1,31 +1,17 @@
 import Link from "next/link";
 import { colaDelDia, contadoresHoy, agendaHoyCadencias, historialPasosDestinatario } from "../db/repository";
 import { repartirAction, registrarTapAction } from "../actions";
-import { RESULTADO_LABELS, CANALES, RESULTADOS } from "../db/validation";
+import { RESULTADO_LABELS, RESULTADOS } from "../db/validation";
 import { requireSession } from "../lib/session";
 import TopNav from "../TopNav";
 import CadenciasHoy from "./CadenciasHoy";
+import { DashboardHeader } from "./DashboardHeader";
+import { BarraAhora } from "./BarraAhora";
+import { AgendaHoy } from "./AgendaHoy";
+import { contarCerradas } from "./stats";
+import { canalNormalizado, type FilaAgenda } from "./agenda.ts";
 
-const OWNERS = [
-  { key: "Sebastian Acosta Molina", label: "Sebastián" },
-  { key: "Felipe Castro", label: "Felipe" },
-  { key: "Thomas Schumacher", label: "Thomas" },
-];
-
-const ACCION: Record<string, string> = { llamada: "Llamar", whatsapp: "WhatsApp", correo: "Correo" };
-const CANAL_LABEL: Record<string, string> = { llamada: "llamadas", whatsapp: "whatsapp", correo: "correos" };
-const CANALES_ORDEN = CANALES;
 const RESULTADOS_ORDEN = RESULTADOS;
-
-const ESTADO_PILL: Record<string, { l: string; c: string }> = {
-  reunion_agendada: { l: "reunión", c: "hot" },
-  oportunidad: { l: "oportunidad", c: "hot" },
-  cierre_documentacion: { l: "cierre", c: "hot" },
-  enviar_contrato: { l: "contrato", c: "hot" },
-  contacto_iniciado: { l: "contactado", c: "warm" },
-  lead: { l: "lead", c: "warm" },
-  on_hold: { l: "on hold", c: "cold" },
-};
 
 function diasVencido(fechaISO: string, hoyISO: string) {
   return Math.round((Date.parse(hoyISO) - Date.parse(fechaISO)) / 86400000);
@@ -53,101 +39,84 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
     historial: t.esManual === 1 ? historialPasosDestinatario(t.idDestinatario) : [],
   }));
 
+  const filas: FilaAgenda[] = cola.map((c, i) => {
+    const dias = diasVencido(c.fecha!, hoy);
+    return {
+      id: c.id,
+      empresa: c.empresa,
+      ciudad: c.ciudad,
+      contacto: c.contacto,
+      cargo: c.cargo,
+      canal: canalNormalizado(c.canal),
+      estado: c.estado,
+      sev: dias > 0 ? "overdue" : "today",
+      severidadTexto: dias > 0 ? `vencido ${dias}d` : "hoy",
+      actual: i === 0,
+    };
+  });
+
   return (
-    <div className="wrap">
+    <div className="mx-auto max-w-[860px] px-6 pt-10 pb-[110px]">
       <TopNav email={usuario.email} />
-      <Link href="/" className="back">← Inicio</Link>
-      <div className="head">
-        <div>
-          <div className="h-title">Toques del día</div>
-          <div className="switch">
-            {OWNERS.map((o) => (
-              <Link key={o.key} href={`/cola?owner=${encodeURIComponent(o.key)}`} className={o.key === owner ? "on" : ""}>
-                {o.label}
-              </Link>
-            ))}
-          </div>
-        </div>
-        <div className="h-meta">
-          <span className="mono">{cola.length}</span> hoy · <span className="mono">{vencidos}</span> vencidos
-        </div>
-      </div>
+      <Link href="/" className="mb-5 inline-block text-[13px] text-muted transition-colors hover:text-ink">
+        ← Inicio
+      </Link>
+      <DashboardHeader
+        nombre={usuario.owner.split(" ")[0]}
+        hoy={hoy}
+        owner={owner}
+        pendientes={cola.length}
+        vencidas={vencidos}
+        cerradas={contarCerradas(contadores)}
+      />
 
       {contadores.total > 0 && (
-        <div className="counters">
-          <div className="counters-row">
-            {CANALES_ORDEN.map((canal) => (
-              <span key={canal}>
-                <span className="mono">{contadores.porCanal[canal]}</span> {CANAL_LABEL[canal]}
-              </span>
-            ))}
-          </div>
-          <div className="counters-row">
-            {RESULTADOS_ORDEN.map((resultado) => (
-              <span key={resultado}>
-                <span className="mono">{contadores.porResultado[resultado]}</span> {RESULTADO_LABELS[resultado].toLowerCase()}
-              </span>
-            ))}
-          </div>
+        <div className="mb-6 flex flex-wrap gap-x-3 gap-y-1 text-[12.5px] text-muted">
+          {RESULTADOS_ORDEN.map((resultado) => (
+            <span key={resultado}>
+              <span className="mono text-ink-soft">{contadores.porResultado[resultado]}</span>{" "}
+              {RESULTADO_LABELS[resultado].toLowerCase()}
+            </span>
+          ))}
         </div>
       )}
 
-      {esPropia && (
-        <form action={repartirAction} className="repartir">
-          <span className="rep-label">¿Atrasado? Reparte tus follow-ups</span>
-          <input name="porDia" type="number" min={1} defaultValue={10} className="pordia mono" aria-label="follow-ups por día" />
-          <span className="rep-unit">por día</span>
-          <button className="rep-btn">Repartir</button>
-        </form>
+      {cola.length > 0 && (
+        <BarraAhora
+          id={cola[0].id}
+          empresa={cola[0].empresa}
+          ciudad={cola[0].ciudad}
+          contacto={cola[0].contacto}
+          cargo={cola[0].cargo}
+          canal={cola[0].canal}
+          estado={cola[0].estado}
+        />
       )}
 
       {cadenciasHoy.length > 0 && <CadenciasHoy items={cadenciasHoy} hoy={hoy} />}
 
-      {cola.length === 0 ? (
-        <div className="empty">Sin follow-ups para hoy. Buen trabajo.</div>
+      {filas.length === 0 ? (
+        <div className="py-8 text-[13px] text-muted">Sin follow-ups para hoy. Buen trabajo.</div>
       ) : (
-        cola.map((c) => {
-          const dias = diasVencido(c.fecha!, hoy);
-          const sev = dias > 0 ? "overdue" : "today";
-          const accion = ACCION[c.canal ?? "llamada"] ?? "Llamar";
-          return (
-            <div className="row-wrap" key={c.id}>
-              <Link className="row" href={`/llamada/${c.id}`}>
-                <div>
-                  <div className="l1">
-                    <span className={`dot ${sev}`} aria-hidden="true" />
-                    <span className="emp">{c.empresa}</span>
-                    {c.estado && ESTADO_PILL[c.estado] && (
-                      <span className={`pill ${ESTADO_PILL[c.estado].c}`}>{ESTADO_PILL[c.estado].l}</span>
-                    )}
-                    {c.contacto && (
-                      <span className="contact">
-                        {c.contacto}
-                        {c.cargo ? ` · ${c.cargo}` : ""}
-                      </span>
-                    )}
-                  </div>
-                  <div className="l2">
-                    <span>usuarios <b className="mono">{c.usuarios != null ? Math.round(c.usuarios) : "—"}</b></span>
-                    <span>CRM <b>{c.crm ?? "—"}</b></span>
-                    <span>pasarela <b>{c.pasarela ?? "—"}</b></span>
-                  </div>
-                  {c.proximoPaso && <div className="paso">{c.proximoPaso}</div>}
-                </div>
-                <div className="right">
-                  <div className={`when ${sev}`}>{dias > 0 ? `vencido ${dias}d` : "hoy"}</div>
-                  <div className="call-cta">{accion} →</div>
-                </div>
-              </Link>
-              <form className="tap-row" action={registrarTapAction}>
-                <input type="hidden" name="idEmpresa" value={c.id} />
-                <input name="objecion" placeholder="Objeción (opcional)" className="tap-objecion" />
-                <button type="submit" name="canal" value="whatsapp" className="tap-btn">WhatsApp</button>
-                <button type="submit" name="canal" value="correo" className="tap-btn">Correo</button>
-              </form>
-            </div>
-          );
-        })
+        <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
+      )}
+
+      {esPropia && (
+        <form action={repartirAction} className="mt-8 flex flex-wrap items-center gap-2 border-t border-line pt-5 text-[12.5px] text-muted">
+          <span>¿Atrasado? Reparte tus follow-ups</span>
+          <input
+            name="porDia"
+            type="number"
+            min={1}
+            defaultValue={10}
+            aria-label="follow-ups por día"
+            className="mono w-14 rounded-[7px] border border-line bg-hover px-2 py-1 text-center text-ink outline-none focus:border-line-strong"
+          />
+          <span>por día</span>
+          <button type="submit" className="text-ink-soft underline decoration-line-strong underline-offset-2 hover:text-ink">
+            Repartir
+          </button>
+        </form>
       )}
     </div>
   );

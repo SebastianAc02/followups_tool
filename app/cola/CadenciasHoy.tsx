@@ -2,6 +2,12 @@
 
 import { useState } from 'react';
 import { aprobarPasoManualAction, aprobarLoteManualAction } from '../actions';
+import { cn } from '../ui/cn';
+import { Pill } from '../ui/Pill';
+import { CanalTag } from '../ui/CanalTag';
+import { SeverityText } from '../ui/SeverityText';
+import { button } from '../ui/button.variants.ts';
+import { canalNormalizado } from './agenda.ts';
 
 export type ItemCadenciaHoy = {
   idPasoInscripcion: number;
@@ -30,7 +36,15 @@ const PRIORIDAD_CANAL: Record<string, number> = { llamada: 0, correo: 1, whatsap
 
 function conVariablesResaltadas(texto: string) {
   const partes = texto.split(/(\[[^[\]]+\])/g);
-  return partes.map((p, i) => (/^\[[^[\]]+\]$/.test(p) ? <mark key={i}>{p}</mark> : <span key={i}>{p}</span>));
+  return partes.map((p, i) =>
+    /^\[[^[\]]+\]$/.test(p) ? (
+      <mark key={i} className="rounded-[4px] bg-today-bg px-1 text-today">
+        {p}
+      </mark>
+    ) : (
+      <span key={i}>{p}</span>
+    ),
+  );
 }
 
 function diaLabel(item: Pick<ItemCadenciaHoy, 'orden' | 'diaOffset' | 'historial'>) {
@@ -38,56 +52,79 @@ function diaLabel(item: Pick<ItemCadenciaHoy, 'orden' | 'diaOffset' | 'historial
   return `Paso ${item.orden} (día ${item.diaOffset})${tocados ? ` · ya tocados: ${tocados}` : ' · primer toque'}`;
 }
 
+function CopyBox({
+  cuerpo,
+  onChange,
+  firmaApollo,
+  placeholder,
+  original,
+}: {
+  cuerpo: string;
+  onChange: (v: string) => void;
+  firmaApollo: boolean;
+  placeholder: string;
+  original: string;
+}) {
+  return (
+    <div className="my-2">
+      <div className="mb-1.5 text-[13px] leading-[1.5] text-ink-soft">
+        {conVariablesResaltadas(original)}
+        {firmaApollo ? ' · lleva firma' : ''}
+      </div>
+      <textarea
+        rows={4}
+        value={cuerpo}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-[10px] border border-line bg-hover px-3 py-2.5 text-[13.5px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
+      />
+    </div>
+  );
+}
+
 function FilaPrioritaria({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: boolean }) {
   const [cuerpo, setCuerpo] = useState(item.cuerpo ?? '');
   const tieneCopy = item.canal !== 'llamada' && item.cuerpo != null;
 
   return (
-    <div className="row-wrap">
-      <div className="row">
-        <div>
-          <div className="l1">
-            <span className={`dot ${atrasado ? 'overdue' : 'today'}`} aria-hidden="true" />
-            <span className="emp">{item.empresaNombre}</span>
-            <span className="pill warm">manual · Tier 1</span>
-            {item.nombre && <span className="contact">{item.nombre}</span>}
-          </div>
-          <div className="l2">
-            <span>
-              canal <b>{item.canal}</b>
-            </span>
-            <span>
-              contacto <b>{item.email ?? '—'}</b>
-            </span>
-            {item.asunto && (
-              <span>
-                asunto <b>{item.asunto}</b>
-              </span>
-            )}
-          </div>
-          <div className="conector-desc mono" style={{ marginTop: 4 }}>
-            {diaLabel(item)}
-          </div>
+    <div className="border-b border-line py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="truncate font-medium text-ink">{item.empresaNombre}</span>
+          <Pill tone="warm">manual · Tier 1</Pill>
+          <CanalTag canal={canalNormalizado(item.canal)} />
+          {item.nombre && <span className="text-[13px] text-muted">{item.nombre}</span>}
         </div>
-        <div className="right">
-          <div className={`when ${atrasado ? 'overdue' : 'today'}`}>{atrasado ? 'atrasado' : 'hoy'}</div>
-        </div>
+        <SeverityText variant={atrasado ? 'overdue' : 'today'} className="shrink-0">
+          {atrasado ? 'atrasado' : 'hoy'}
+        </SeverityText>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-muted">
+        <span>
+          contacto <b className="text-ink-soft">{item.email ?? '—'}</b>
+        </span>
+        {item.asunto && (
+          <span>
+            asunto <b className="text-ink-soft">{item.asunto}</b>
+          </span>
+        )}
+        <span className="mono text-faint">{diaLabel(item)}</span>
       </div>
 
       {tieneCopy && (
-        <div style={{ margin: '8px 0' }}>
-          <div className="conector-desc">
-            {conVariablesResaltadas(item.cuerpo!)}
-            {item.firmaApollo ? ' · lleva firma' : ''}
-          </div>
-          <textarea rows={4} value={cuerpo} onChange={(e) => setCuerpo(e.target.value)} placeholder="Personaliza antes de mandarlo..." />
-        </div>
+        <CopyBox
+          cuerpo={cuerpo}
+          onChange={setCuerpo}
+          firmaApollo={item.firmaApollo}
+          original={item.cuerpo!}
+          placeholder="Personaliza antes de mandarlo..."
+        />
       )}
 
-      <form className="tap-row" action={aprobarPasoManualAction}>
+      <form action={aprobarPasoManualAction} className="mt-2">
         <input type="hidden" name="idPasoInscripcion" value={item.idPasoInscripcion} />
         {tieneCopy && <input type="hidden" name="cuerpoFinal" value={cuerpo} />}
-        <button type="submit" className="tap-btn">
+        <button type="submit" className={cn(button({ variant: 'pill' }), "text-[12.5px]")}>
           Aprobar (ya lo hice)
         </button>
       </form>
@@ -101,40 +138,63 @@ function GrupoBatch({ items }: { items: ItemCadenciaHoy[] }) {
   const tieneCopy = base.canal !== 'llamada' && base.cuerpo != null;
 
   return (
-    <div className="row-wrap">
-      <div className="row">
-        <div>
-          <div className="l1">
-            <span className="emp">
-              {items.length} empresas · {base.canal}
-            </span>
-            <span className="pill warm">batch · {diaLabel(base)}</span>
-          </div>
-          <div className="l2">
-            <span>{items.map((i) => i.empresaNombre).join(', ')}</span>
-          </div>
-        </div>
+    <div className="border-b border-line py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-ink">
+          {items.length} empresas
+        </span>
+        <CanalTag canal={canalNormalizado(base.canal)} />
+        <Pill tone="warm">batch · {diaLabel(base)}</Pill>
       </div>
+      <div className="mt-1.5 text-[12.5px] text-muted">{items.map((i) => i.empresaNombre).join(', ')}</div>
 
       {tieneCopy && (
-        <div style={{ margin: '8px 0' }}>
-          <div className="conector-desc">
-            {conVariablesResaltadas(base.cuerpo!)}
-            {base.firmaApollo ? ' · lleva firma' : ''}
-          </div>
-          <textarea rows={4} value={cuerpo} onChange={(e) => setCuerpo(e.target.value)} placeholder="Editar para todo el grupo..." />
-        </div>
+        <CopyBox
+          cuerpo={cuerpo}
+          onChange={setCuerpo}
+          firmaApollo={base.firmaApollo}
+          original={base.cuerpo!}
+          placeholder="Editar para todo el grupo..."
+        />
       )}
 
-      <form className="tap-row" action={aprobarLoteManualAction}>
+      <form action={aprobarLoteManualAction} className="mt-2">
         {items.map((i) => (
           <input key={i.idPasoInscripcion} type="hidden" name="idPasoInscripcion" value={i.idPasoInscripcion} />
         ))}
         {tieneCopy && <input type="hidden" name="cuerpoFinal" value={cuerpo} />}
-        <button type="submit" className="tap-btn">
+        <button type="submit" className={cn(button({ variant: 'pill' }), "text-[12.5px]")}>
           Confirmar para las {items.length}
         </button>
       </form>
+    </div>
+  );
+}
+
+function FilaAutomatica({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: boolean }) {
+  return (
+    <div className="border-b border-line py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="truncate font-medium text-ink">{item.empresaNombre}</span>
+          <Pill tone="cold">automático</Pill>
+          <CanalTag canal={canalNormalizado(item.canal)} />
+          {item.nombre && <span className="text-[13px] text-muted">{item.nombre}</span>}
+        </div>
+        <SeverityText variant={atrasado ? 'overdue' : 'today'} className="shrink-0">
+          {atrasado ? 'atrasado' : 'hoy'}
+        </SeverityText>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-muted">
+        <span>
+          contacto <b className="text-ink-soft">{item.email ?? '—'}</b>
+        </span>
+        {item.asunto && (
+          <span>
+            asunto <b className="text-ink-soft">{item.asunto}</b>
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -161,10 +221,8 @@ export default function CadenciasHoy({ items, hoy }: { items: ItemCadenciaHoy[];
   }
 
   return (
-    <div className="cadencias-hoy">
-      <div className="h-title" style={{ fontSize: 15, marginBottom: 10 }}>
-        Cadencias de hoy
-      </div>
+    <div className="mb-8">
+      <div className="mb-2.5 font-serif text-[15px] font-medium text-ink">Cadencias de hoy</div>
 
       {prioritarios.map((t) => (
         <FilaPrioritaria key={t.idPasoInscripcion} item={t} atrasado={(t.fechaProgramada ?? '').slice(0, 10) < hoy} />
@@ -174,39 +232,9 @@ export default function CadenciasHoy({ items, hoy }: { items: ItemCadenciaHoy[];
         <GrupoBatch key={`${grupo[0].idCampana}-${grupo[0].orden}`} items={grupo} />
       ))}
 
-      {automaticos.map((t) => {
-        const atrasado = (t.fechaProgramada ?? '').slice(0, 10) < hoy;
-        return (
-          <div className="row-wrap" key={t.idPasoInscripcion}>
-            <div className="row">
-              <div>
-                <div className="l1">
-                  <span className={`dot ${atrasado ? 'overdue' : 'today'}`} aria-hidden="true" />
-                  <span className="emp">{t.empresaNombre}</span>
-                  <span className="pill cold">automático</span>
-                  {t.nombre && <span className="contact">{t.nombre}</span>}
-                </div>
-                <div className="l2">
-                  <span>
-                    canal <b>{t.canal}</b>
-                  </span>
-                  <span>
-                    contacto <b>{t.email ?? '—'}</b>
-                  </span>
-                  {t.asunto && (
-                    <span>
-                      asunto <b>{t.asunto}</b>
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="right">
-                <div className={`when ${atrasado ? 'overdue' : 'today'}`}>{atrasado ? 'atrasado' : 'hoy'}</div>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+      {automaticos.map((t) => (
+        <FilaAutomatica key={t.idPasoInscripcion} item={t} atrasado={(t.fechaProgramada ?? '').slice(0, 10) < hoy} />
+      ))}
     </div>
   );
 }

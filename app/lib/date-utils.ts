@@ -35,3 +35,24 @@ export function sumarDias(iso: string, dias: number): string {
 export function diaSemana(iso: string): number {
   return parseFechaISO(iso).getDay();
 }
+
+const DIAS_LARGO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const MESES_LARGO = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+// Fecha larga es-CO para el header del dashboard: "Martes 7 de julio". Sin año (la cola
+// es de HOY, el año es irrelevante en ese contexto).
+export function formatoFechaLargaEsCo(iso: string): string {
+  const d = parseFechaISO(iso);
+  return `${DIAS_LARGO[d.getDay()]} ${d.getDate()} de ${MESES_LARGO[d.getMonth()]}`;
+}
+
+// Saludo por franja horaria (hora local 0-23). Limites: madrugada y noche caen en
+// "Buenas noches" -- no hay franja de "buena madrugada" en el habla es-CO cotidiano.
+export function saludoPorHora(hora: number): string {
+  if (hora >= 5 && hora < 12) return 'Buenos días';
+  if (hora >= 12 && hora < 19) return 'Buenas tardes';
+  return 'Buenas noches';
+}

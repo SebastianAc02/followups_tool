@@ -24,6 +24,11 @@
   --color-accent-glow: rgba(139, 124, 255, 0.35);
   --color-warn: #e07a3f;
 
+  --color-canal-llamada: #8fb0e0;
+  --color-canal-correo: #d3a0a6;
+  --color-canal-whatsapp: #84c99e;
+  --color-acento: #6f9fd0;
+
   --font-sans: var(--ff-sans), system-ui, sans-serif;
   --font-mono: var(--ff-mono), ui-monospace, monospace;
   --font-serif: var(--ff-serif), Georgia, serif;
@@ -38,6 +43,20 @@
 }
 @utility serif {
   font-family: var(--font-serif);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@utility animate-fade-up {
+  animation: fade-up 0.35s ease-out;
 }
 
 :root {
