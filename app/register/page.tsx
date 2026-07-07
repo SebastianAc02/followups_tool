@@ -15,8 +15,7 @@ export default async function RegisterPage() {
   const miembros = miembrosLibres(ID_ORGANIZACION_ONEPAY);
 
   return (
-    <div className="wrap login-wrap">
-      <div className="h-title">Follow-ups OnePay</div>
+    <div className="auth-cockpit">
       <RegisterForm miembros={miembros} />
     </div>
   );

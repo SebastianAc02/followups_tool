@@ -8,8 +8,7 @@ export default async function LoginPage() {
   if (session) redirect('/');
 
   return (
-    <div className="wrap login-wrap">
-      <div className="h-title">Follow-ups OnePay</div>
+    <div className="auth-cockpit">
       <LoginForm />
     </div>
   );

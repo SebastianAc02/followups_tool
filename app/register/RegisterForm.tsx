@@ -9,20 +9,34 @@ type Miembro = { id: number; nombreDisplay: string };
 
 export default function RegisterForm({ miembros }: { miembros: Miembro[] }) {
   const router = useRouter();
+  const [paso, setPaso] = useState<1 | 2>(1);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmar, setConfirmar] = useState('');
+  const [idMiembro, setIdMiembro] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+
+  function irAPaso2(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    if (password.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    if (password !== confirmar) {
+      setError('Las contraseñas no coinciden.');
+      return;
+    }
+    setPaso(2);
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     setEnviando(true);
     try {
-      const form = new FormData(e.currentTarget);
-      const resultado = await registrarUsuarioAction({
-        idMiembro: form.get('idMiembro'),
-        email: form.get('email'),
-        password: form.get('password'),
-      });
+      const resultado = await registrarUsuarioAction({ idMiembro, email, password });
       if (!resultado.ok) {
         setError(resultado.error);
         return;
@@ -35,34 +49,123 @@ export default function RegisterForm({ miembros }: { miembros: Miembro[] }) {
     }
   }
 
+  const marca = (
+    <div className="ac-brand">
+      <div className="ac-brand-mark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="8" stroke="#0b0d10" strokeWidth="2" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="#0b0d10" strokeWidth="2" />
+          <circle cx="12" cy="12" r="2" fill="#0b0d10" />
+        </svg>
+      </div>
+      <span className="ac-brand-name">OnePay Cockpit</span>
+    </div>
+  );
+
   if (miembros.length === 0) {
     return (
-      <div className="login-form">
-        <div className="login-error">Ya no hay nombres libres para registrar. Habla con Sebastián.</div>
-        <Link href="/login" className="login-link">Ir a iniciar sesión</Link>
+      <div className="ac-card">
+        <div className="ac-inner">
+          {marca}
+          <h2 className="ac-h med">Sin cupos libres</h2>
+          <p className="ac-sub">Ya no hay nombres libres para registrar. Habla con Sebastián.</p>
+          <div className="ac-foot">
+            <Link href="/login">Ir a iniciar sesión</Link>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <form onSubmit={onSubmit} className="login-form">
-      <div className="register-org">Organización: Onepay</div>
+    <div className="ac-card">
+      <div className="ac-inner">
+        {marca}
 
-      <label className="register-label" htmlFor="idMiembro">Quién eres tú</label>
-      <select name="idMiembro" id="idMiembro" required defaultValue="">
-        <option value="" disabled>Elige tu nombre</option>
-        {miembros.map((m) => (
-          <option key={m.id} value={m.id}>{m.nombreDisplay}</option>
-        ))}
-      </select>
+        <div className="ac-progress">
+          <div className="ac-seg on" />
+          <div className={`ac-seg ${paso === 2 ? 'on' : ''}`} />
+          <span className="ac-step">{paso === 1 ? '01 / 02' : '02 / 02'}</span>
+        </div>
 
-      <input name="email" type="email" placeholder="Correo" required />
-      <input name="password" type="password" placeholder="Contraseña (mínimo 8 caracteres)" required minLength={8} />
-      {error && <div className="login-error">{error}</div>}
-      <button className="rep-btn login-btn" disabled={enviando}>
-        {enviando ? 'Creando cuenta...' : 'Crear cuenta'}
-      </button>
-      <Link href="/login" className="login-link">¿Ya tienes cuenta? Inicia sesión</Link>
-    </form>
+        {paso === 1 && (
+          <form onSubmit={irAPaso2}>
+            <h2 className="ac-h med">Crea tu cuenta</h2>
+            <p className="ac-sub">Primero tus credenciales. Luego elegimos organización y rol.</p>
+
+            <label className="ac-label" htmlFor="email">Correo</label>
+            <div className="ac-field">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="5" width="18" height="14" rx="2" stroke="#5b636e" strokeWidth="1.6" />
+                <path d="M4 7l8 6 8-6" stroke="#5b636e" strokeWidth="1.6" />
+              </svg>
+              <input id="email" type="email" placeholder="ana@onepay.co" required
+                value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+            </div>
+
+            <label className="ac-label" htmlFor="password">Contraseña</label>
+            <div className="ac-field">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <rect x="5" y="11" width="14" height="9" rx="2" stroke="#5b636e" strokeWidth="1.6" />
+                <path d="M8 11V8a4 4 0 018 0v3" stroke="#5b636e" strokeWidth="1.6" />
+              </svg>
+              <input id="password" type="password" placeholder="Mínimo 8 caracteres" required minLength={8}
+                value={password} onChange={(e) => setPassword(e.target.value)} />
+            </div>
+
+            <label className="ac-label" htmlFor="confirmar">Confirmar contraseña</label>
+            <div className="ac-field" style={{ marginBottom: 24 }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <rect x="5" y="11" width="14" height="9" rx="2" stroke="#5b636e" strokeWidth="1.6" />
+                <path d="M8 11V8a4 4 0 018 0v3" stroke="#5b636e" strokeWidth="1.6" />
+              </svg>
+              <input id="confirmar" type="password" placeholder="Repite la contraseña" required
+                value={confirmar} onChange={(e) => setConfirmar(e.target.value)} />
+            </div>
+
+            {error && <div className="ac-error">{error}</div>}
+
+            <button className="ac-btn">Continuar</button>
+            <div className="ac-foot">
+              <span className="muted">¿Ya tienes cuenta? </span>
+              <Link href="/login">Inicia sesión</Link>
+            </div>
+          </form>
+        )}
+
+        {paso === 2 && (
+          <form onSubmit={onSubmit}>
+            <h2 className="ac-h med">Configura tu cabina</h2>
+            <p className="ac-sub">Cuenta creada para <em>{email}</em>. Dinos quién eres en el equipo.</p>
+
+            <label className="ac-label">Organización</label>
+            <div className="ac-orgchip">
+              <div className="ac-orgchip-badge">O</div>
+              <span className="ac-orgchip-name">Onepay</span>
+            </div>
+
+            <label className="ac-label" htmlFor="idMiembro">Persona del equipo</label>
+            <div className="ac-field ac-select" style={{ marginBottom: 24 }}>
+              <select id="idMiembro" required value={idMiembro}
+                onChange={(e) => setIdMiembro(e.target.value)}>
+                <option value="" disabled>Elige tu nombre</option>
+                {miembros.map((m) => (
+                  <option key={m.id} value={m.id}>{m.nombreDisplay}</option>
+                ))}
+              </select>
+            </div>
+
+            {error && <div className="ac-error">{error}</div>}
+
+            <button className="ac-btn" disabled={enviando || idMiembro === ''}>
+              {enviando ? 'Creando cuenta...' : 'Entrar a la cabina'}
+            </button>
+            <button type="button" className="ac-back" onClick={() => { setError(null); setPaso(1); }}>
+              Volver a datos de cuenta
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
   );
 }
