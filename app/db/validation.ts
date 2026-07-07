@@ -115,9 +115,19 @@ const condicionEntreSchema = z
     path: ['desde'],
   });
 
+// Parte 5 campanas: comparadores abiertos sobre campos numericos. La UI muestra
+// "Usuarios > 200.000"; mayor_que/menor_que evitan tener que expresarlo como entre
+// con un limite infinito artificial. Estrictos (>/<), no inclusivos: para inclusivo
+// ya existe 'entre'.
+const condicionComparaSchema = z.object({
+  campo: z.enum(CAMPOS_SEGMENTO_NUMERICOS),
+  op: z.enum(['mayor_que', 'menor_que']),
+  valor: z.number(),
+});
+
 export const definicionSegmentoSchema = z.object({
   condiciones: z
-    .array(z.union([condicionEnSchema, condicionNullSchema, condicionEntreSchema]))
+    .array(z.union([condicionEnSchema, condicionNullSchema, condicionEntreSchema, condicionComparaSchema]))
     .min(1, 'un segmento necesita al menos una condicion'),
 });
 
