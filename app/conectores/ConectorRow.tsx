@@ -4,7 +4,8 @@ import { Button } from "../ui/Button";
 import type { EstadoConector } from "../db/repository";
 import type { ConectorCatalogo, ModoConector } from "./catalogo.ts";
 import { vistaEstado } from "./estado-ui.ts";
-import { guardarCredencialAction, cambiarModoAction, quitarConectorAction } from "./actions";
+import { cambiarModoAction, quitarConectorAction } from "./actions";
+import { CredencialForm } from "./CredencialForm";
 
 // Una fila de conector: columna izquierda de estado (punto + label + timestamp), columna
 // derecha con nombre + badge de modo + descripcion + formulario/estado/error. La autoridad
@@ -57,27 +58,18 @@ export function ConectorRow({
         )}
 
         {puedeEditar ? (
-          <form action={guardarCredencialAction} className="flex max-w-sm items-center gap-2">
-            <input type="hidden" name="proveedor" value={cat.id} />
-            <input
-              name="credencial"
-              type="password"
-              autoComplete="off"
-              placeholder={estado.tieneCredencial ? "Reemplazar credencial" : "Pega tu credencial"}
-              className="min-w-0 flex-1 rounded-lg border border-line bg-bg px-3 py-2.5 font-[family-name:var(--ff-mono)] text-sm text-ink outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            <Button type="submit">{estado.tieneCredencial ? "Reemplazar" : "Conectar"}</Button>
-          </form>
+          <CredencialForm proveedor={cat.id} tieneCredencial={estado.tieneCredencial} />
         ) : (
           <p className="max-w-sm rounded-lg border border-dashed border-line p-4 text-sm leading-relaxed text-muted">
             Solo un admin puede configurar esta conexión. Si algo no llega, avísale a tu admin.
           </p>
         )}
 
-        {/* Controles de admin: cambiar modo + quitar */}
+        {/* Controles de admin: cambiar modo + quitar. Ghost/quiet a proposito: son
+            secundarios frente al boton primario de conectar/reemplazar de arriba. */}
         {esAdmin && (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <form action={cambiarModoAction} className="flex items-center gap-2">
+          <div className="mt-4 flex max-w-sm flex-wrap items-center gap-1 rounded-lg border border-line bg-surface px-2 py-1.5">
+            <form action={cambiarModoAction} className="flex items-center gap-1.5">
               <input type="hidden" name="proveedor" value={cat.id} />
               <select
                 name="modo"
@@ -87,13 +79,14 @@ export function ConectorRow({
                 <option value="personal">Personal</option>
                 <option value="admin">Equipo</option>
               </select>
-              <Button type="submit" variant="pill">
-                Guardar modo
+              <Button type="submit" variant="quiet">
+                Guardar
               </Button>
             </form>
+            <span className="h-4 w-px bg-line" aria-hidden="true" />
             <form action={quitarConectorAction}>
               <input type="hidden" name="proveedor" value={cat.id} />
-              <Button type="submit" variant="pill" className="text-muted">
+              <Button type="submit" variant="quiet" className="text-overdue/80 hover:text-overdue">
                 Quitar
               </Button>
             </form>

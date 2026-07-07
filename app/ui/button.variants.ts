@@ -9,6 +9,9 @@ export const button = cva("cursor-pointer transition-colors disabled:opacity-55"
       pill: "rounded-full bg-white px-[18px] py-2 text-[13px] font-medium text-[#0a0a0b] hover:opacity-90",
       solid: "w-full rounded-[10px] bg-[#eef1f4] px-4 py-[13px] text-[14px] font-bold text-[#14181d] hover:bg-white",
       ghost: "w-full rounded-[10px] border border-[#33333a] bg-transparent px-4 py-[11px] text-[13px] font-semibold text-[#c9c9cd] hover:bg-hover",
+      // Inline, sin fondo: para controles secundarios agrupados (cambiar modo / quitar en
+      // ConectorRow) que no deben competir visualmente con la accion primaria de la fila.
+      quiet: "rounded-md px-2.5 py-1 text-xs font-medium text-muted hover:bg-surface-2 hover:text-ink",
     },
   },
   defaultVariants: { variant: "pill" },

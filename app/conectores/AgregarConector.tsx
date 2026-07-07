@@ -20,12 +20,12 @@ export function AgregarConector({ disponibles }: { disponibles: ConectorCatalogo
       </Button>
 
       {abierto && (
-        <div className="mt-4 flex flex-col gap-3 rounded-lg border border-line bg-surface p-4">
+        <div className="mt-4 flex flex-col gap-2.5 rounded-lg border border-line bg-surface p-3">
           {disponibles.map((cat) => (
             <form
               key={cat.id}
               action={agregarConectorAction}
-              className="flex flex-col gap-3 border-b border-line pb-3 last:border-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+              className="flex flex-col gap-3 rounded-md border border-line bg-bg p-3.5 sm:flex-row sm:items-center sm:justify-between"
             >
               <input type="hidden" name="proveedor" value={cat.id} />
               <div className="min-w-0">
@@ -36,7 +36,7 @@ export function AgregarConector({ disponibles }: { disponibles: ConectorCatalogo
                 <select
                   name="modo"
                   defaultValue={cat.modoSugerido}
-                  className="rounded-md border border-line bg-bg px-2 py-1 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="personal">Personal</option>
                   <option value="admin">Equipo</option>
