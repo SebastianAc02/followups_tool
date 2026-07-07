@@ -18,6 +18,12 @@
   --color-done: #57c98a;
   --color-ring: rgba(255, 255, 255, 0.12);
 
+  /* Cockpit de campañas (dirección 2A): acento violeta para acción/selección/foco. */
+  --color-accent: #8b7cff;
+  --color-accent-soft: #c4b5fd;
+  --color-accent-glow: rgba(139, 124, 255, 0.35);
+  --color-warn: #e07a3f;
+
   --font-sans: var(--ff-sans), system-ui, sans-serif;
   --font-mono: var(--ff-mono), ui-monospace, monospace;
   --font-serif: var(--ff-serif), Georgia, serif;
