@@ -348,9 +348,9 @@ Decisión de dominio: cómo se modela ritmo y tope. Propuesta a validar con Seba
 
 **Files:** Modify `app/db/schema.ts` (tabla `campana`, agrega `topeToquesDia` per-campaign), Modify `app/db/validation.ts` (`campanaInputSchema`), migración Drizzle, Modify `app/db/repository.ts` (agregar query de agregado global, ej. `toquesGlobalesHoy()` o similar, para consumo informativo en la Task 8.4 UI).
 
-- [ ] **Step 1:** Con la decisión de Sebastián, agregar las columnas a `campana` (reflejar en el schema Drizzle; recordar que isps.db no usa FKs, la lógica va en el Repository). Generar migración con drizzle-kit.
-- [ ] **Step 2:** Extender `campanaInputSchema` con los enums nuevos (`RITMOS_INGRESO` en `validation.ts`, junto a `MODOS_CAMPANA`/`REGLAS_FALTANTE`).
-- [ ] **Step 3: Commit** — `git commit -m "feat(schema): ritmo, tope y fecha de inicio en campana"`
+- [x] **Step 1:** Columnas agregadas a `campana` en el schema Drizzle (`ritmoIngreso` enum default `'diario'`, `topeToquesDia` int nullable, `fechaInicio` text ISO nullable). **DESVIACIÓN:** no hay `drizzle-kit generate` en este repo — el patrón real (heredado de toda migración anterior, ver `regla_faltante`/`intake_diario`) es un par de scripts Python `migrate_*_dryrun.py`/`migrate_*_apply.py` con `ALTER TABLE ADD COLUMN` idempotente (chequea `PRAGMA table_info` antes) y log en `sync_cambios`. Se siguió ese patrón: `scripts/migrate_campanas_p8_goteo_dryrun.py` + `_apply.py`, corridos contra `isps.db` real (3 columnas creadas, 4 filas logueadas). También se actualizó el `CREATE TABLE campana` de `app/db/test-helpers.ts` (fixture de tests, DDL hardcodeado); sin esto rompían 14 tests que usan esa base de prueba.
+- [x] **Step 2:** `RITMOS_INGRESO` (`diario`|`dia_si_dia_no`|`personalizado`) agregado a `validation.ts` junto a `MODOS_CAMPANA`/`REGLAS_FALTANTE`, mismo patrón. `campanaInputSchema` extendido con `ritmoIngreso` (default `'diario'`), `topeToquesDia` y `fechaInicio` (opcionales). Se agregó `toquesGlobalesHoy()` en `repository.ts` (agregado informativo de `topeToquesDia ?? intakeDiario` sobre campañas `estado = 'activa'`, solo lectura, sin enforcement) para que la Task 8.4 de UI lo consuma.
+- [x] **Step 3: Commit** — `git commit -m "feat(schema): ritmo, tope y fecha de inicio en campana"` → `3e6a1ff`
 
 ### Task 8.2: Core `calcularGoteo(total, intakeDiario, ritmo, inicio)` `[CHECKPOINT]`
 
@@ -360,11 +360,9 @@ Decisión de dominio: la lógica de "20 por día, día sí día no → estos ent
 
 **Files:** Create `app/core/goteo.ts`, Test `app/core/goteo.test.ts`
 
-- [ ] **Step 1: Test que falla:** dado total=4, intakeDiario=20, ritmo=`dia_si_dia_no`, inicio=hoy → los 4 entran hoy (D1), y en un segmento de 100 el cálculo devuelve 9 días hábiles. Casos: ritmo diario vs día sí día no, respetar días hábiles.
-- [ ] **Step 2: Correr y ver fallar** — `TESTONE app/core/goteo.test.ts`.
-- [ ] **Step 3: Implementar** `calcularGoteo(...)` puro: devuelve `{ porDia: {fecha, cuantos}[], diasHabiles }`. Reusar el manejo de días bloqueados de `motor-cadencia.ts` si aplica (DRY).
-- [ ] **Step 4: Correr y ver pasar.**
-- [ ] **Step 5: Commit** — `git commit -m "feat(core): calcularGoteo distribuye el ingreso a la cadencia"`
+- [x] **HECHO** (`0e94a6d`). `app/core/goteo.ts` + test, TDD confirmado. Tipo devuelto: `{ porDia: {fecha, cuantos}[], diasHabiles }`. 7/7 tests nuevos verdes.
+
+**DESVIACIÓN:** `personalizado` sin más spec en plan/schema — tratado como alias exacto de `diario` (mismo output), documentado en comentario del código. Días hábiles = lunes a viernes fijo, lógica local a `goteo.ts` (no se reusó `ajustarPorBloqueados` de `motor-cadencia.ts` porque no está exportada y su concepto —días bloqueados configurables para REPROGRAMAR toques— es distinto del de goteo —fin de semana fijo para INGRESO—; sí se reusaron los primitivos de fecha de `app/lib/date-utils.ts`). `diasHabiles` cuenta todos los días hábiles transcurridos, incluidos los "no" de `dia_si_dia_no` (no consumen cupo pero sí cuentan como día transcurrido).
 
 ### Task 8.3: Enrollment escalonado `[CHECKPOINT]`
 
