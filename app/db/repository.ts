@@ -43,7 +43,7 @@ import {
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
 import type { CadenciaParseada } from '../core/cadencia-parser';
-import { previsualizarInscripcion, type PasoRequerido } from '../core/preview-inscripcion';
+import { previsualizarInscripcion, type PasoRequerido, type PasoAjustado, type EstadoPreviewInscripcion } from '../core/preview-inscripcion';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
@@ -1293,6 +1293,9 @@ export function crearCampana(input: CampanaInput): number {
       modo: val.modo,
       reglaFaltante: val.reglaFaltante,
       intakeDiario: val.intakeDiario ?? null,
+      ritmoIngreso: val.ritmoIngreso,
+      topeToquesDia: val.topeToquesDia ?? null,
+      fechaInicio: val.fechaInicio ?? null,
       owner: val.owner ?? null,
       createdAt: ahora,
       updatedAt: ahora,
@@ -1422,6 +1425,126 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
   });
 
   return res;
+}
+
+// Fase 6 (V4 Destinatarios): cabecera de la campana para la factura del preview
+// (nombre, cadencia, segmento, regla activa). Es lo que necesita la UI antes de
+// pedir el detalle por empresa -- separado de PreviewInscripcionCampana para no
+// recorrer todas las empresas solo para pintar el header.
+export type CampanaParaPreview = {
+  idCampana: number;
+  nombre: string;
+  cadencia: string;
+  segmento: string;
+  reglaFaltante: ReglaFaltante;
+};
+
+export function campanaParaPreview(idCampana: number): CampanaParaPreview | null {
+  const fila = db
+    .select({ idCampana: campana.idCampana, nombre: campana.nombre, cadencia: cadencia.nombre, segmento: segmento.nombre, reglaFaltante: campana.reglaFaltante })
+    .from(campana)
+    .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
+    .innerJoin(segmento, eq(segmento.idSegmento, campana.idSegmento))
+    .where(eq(campana.idCampana, idCampana))
+    .get();
+  if (!fila) return null;
+  return { ...fila, reglaFaltante: fila.reglaFaltante as ReglaFaltante };
+}
+
+// Fase 6 (V4 Destinatarios): una fila de la tabla de destinatarios, con los datos
+// de contacto/empresa ya resueltos (la UI no arma el join). El calculo de estado y
+// cadencia ajustada viene tal cual de previsualizarInscripcion (core, puro).
+export type FilaPreviewInscripcion = {
+  idEmpresa: string;
+  nombreEmpresa: string;
+  idContacto: number | null;
+  nombreContacto: string | null;
+  cargo: string | null;
+  estado: EstadoPreviewInscripcion;
+  pasosAjustados: PasoAjustado[];
+  toquesTotales: number;
+};
+
+// Fase 6 (V4 Destinatarios): el detalle completo del preview, mismo set de empresas
+// que inscribirCampana usaria (segmento menos exclusiones de Parte 2) pero SIN
+// escribir nada. inscribirCampana vuelve a llamar previsualizarInscripcion antes de
+// persistir (checkpoint 6.1) -- esta funcion es solo para mostrar en pantalla.
+export function previsualizarInscripcionCampana(idCampana: number): FilaPreviewInscripcion[] | null {
+  const camp = db
+    .select({ idSegmento: campana.idSegmento, idCadencia: campana.idCadencia, reglaFaltante: campana.reglaFaltante })
+    .from(campana)
+    .where(eq(campana.idCampana, idCampana))
+    .get();
+  if (!camp) return null;
+
+  const paraRevision = empresasParaRevision(camp.idSegmento);
+  if (!paraRevision) return null;
+  const empresas = paraRevision.filter((e) => !e.excluida);
+  if (empresas.length === 0) return [];
+
+  const pasosCrudos = db
+    .select({ orden: pasoCadencia.orden, canal: pasoCadencia.canal })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, camp.idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+  const pasos: PasoRequerido[] = pasosCrudos.map((p) => ({ orden: p.orden, canal: p.canal as Canal }));
+
+  const contactosPorEmpresa = new Map<
+    string,
+    { idContacto: number; esKeyDecisionMaker: boolean; esPrincipal: boolean; email: string | null; telefono: string | null; nombre: string | null; cargo: string | null }[]
+  >();
+  const filas = db
+    .select({
+      idEmpresa: contacto.idEmpresa,
+      idContacto: contacto.idContacto,
+      esKeyDecisionMaker: contacto.esKeyDecisionMaker,
+      esPrincipal: contacto.esPrincipal,
+      email: contacto.email,
+      telefono: contacto.telefono,
+      nombre: contacto.nombre,
+      apellido: contacto.apellido,
+      cargo: contacto.cargo,
+    })
+    .from(contacto)
+    .where(inArray(contacto.idEmpresa, empresas.map((e) => e.id)))
+    .orderBy(contacto.idContacto)
+    .all();
+  for (const f of filas) {
+    const lista = contactosPorEmpresa.get(f.idEmpresa) ?? [];
+    lista.push({
+      idContacto: f.idContacto,
+      esKeyDecisionMaker: f.esKeyDecisionMaker === 1,
+      esPrincipal: f.esPrincipal === 1,
+      email: f.email,
+      telefono: f.telefono,
+      nombre: [f.nombre, f.apellido].filter(Boolean).join(' ') || null,
+      cargo: f.cargo,
+    });
+    contactosPorEmpresa.set(f.idEmpresa, lista);
+  }
+
+  const preview = previsualizarInscripcion({
+    empresas: empresas.map((e) => ({ idEmpresa: e.id, contactos: contactosPorEmpresa.get(e.id) ?? [] })),
+    pasos,
+    regla: camp.reglaFaltante as ReglaFaltante,
+  });
+
+  const empresaPorId = new Map(empresas.map((e) => [e.id, e]));
+  return preview.map((p) => {
+    const contactos = contactosPorEmpresa.get(p.idEmpresa) ?? [];
+    const dest = p.idContactoDestinatario != null ? contactos.find((c) => c.idContacto === p.idContactoDestinatario) : undefined;
+    return {
+      idEmpresa: p.idEmpresa,
+      nombreEmpresa: empresaPorId.get(p.idEmpresa)?.nombre ?? p.idEmpresa,
+      idContacto: p.idContactoDestinatario,
+      nombreContacto: dest?.nombre ?? null,
+      cargo: dest?.cargo ?? null,
+      estado: p.estado,
+      pasosAjustados: p.pasosAjustados,
+      toquesTotales: p.toquesTotales,
+    };
+  });
 }
 
 // Parte 4 campanas: hub de /campanas. Resuelve nombre de cadencia/segmento (no ids

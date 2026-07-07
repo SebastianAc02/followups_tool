@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Estado (2026-07-07, fin de sesión):** Fases 0, 1, 3, 4 implementadas y commiteadas en `feat/campanas-cockpit`. Fase 2 resultó estar mayormente ya hecha (heredada de una consolidación anterior a esta rama), falta solo la UI final. Además de lo planeado, esta sesión rehízo `/campanas/nueva` desde cero (pedido explícito de Sebastián a mitad de sesión, no estaba en el plan original) y eliminó `/campanas/segmentos` (ruta muerta). Ver **"Bitácora de ejecución"** al final del documento para el detalle completo: qué se hizo, qué se encontró, bugs corregidos, decisiones tomadas y qué sigue. Lee esa sección ANTES de retomar.
+> **Estado (2026-07-07, sesión 2):** Fases 0, 1, 2, 3, 4, 5, 9 completas. Fase 7 solo tiene su core (`renderizarCopy`, Task 7.1); falta portar la UI (Task 7.2). Quedan por delante Fase 6 (Destinatarios, con checkpoint real) y Fase 8 (Lanzar, tres checkpoints seguidos). Esta sesión corrió 5 tareas `[AGENTE]` en dos rondas paralelas (3 + 2 agentes, sin conflicto de archivos, con verificación manual de cada commit antes de darlo por bueno). Ver **"Bitácora de ejecución — sesión 2026-07-07 (ronda 2, paralela)"** al final del documento para el detalle completo. La sesión 1 (Fases 0/1/3/4 iniciales) sigue documentada en la bitácora original, léela primero si no tienes el contexto de cómo se llegó hasta acá.
 
 **Goal:** Construir el cockpit de campañas completo (7 vistas: hub, segmentación con Copiloto, importar cadencia, cadencia, reglas, destinatarios, preview cinemático, lanzar, por revisar) sobre el backend de cadencias que ya existe en seco (Fases 4-5), rediseñando la UI con los mockups y cerrando los huecos de core que las vistas destapan.
 
@@ -63,14 +63,15 @@ Base: `/Users/sebastianacostamolina/Arc/html vistas 1-7/`
 |------|-------|---------------|-----------------|
 | 0 | (fundacional) | Tokens en fuente única | ✅ **HECHO** (3 commits) |
 | 1 | V1 Campañas (hub) | Métricas agregadas | ✅ **HECHO** (6 commits) |
-| 2 | V2 Segmentación · Copiloto | NL→DefinicionSegmento + loop reactivo | ⚠️ **Backend ya existía** (heredado); falta solo UI final (Task 2.3+) |
-| 3 | V2.9 Importar cadencia | Parser JSON | ✅ **HECHO** (3 commits), pero no quedó wireada al flujo real hasta el rediseño fuera-de-plan |
-| 4 | V3 Cadencia | (editar copy inline) | ⚠️ **UI hecha, con gap real**: faltan mutators de `pasoCadencia` en el Repository (task suelta #11 en el tracker) |
-| 5 | V-Reglas (nueva) | (existe `reglaFaltante`) | UI a diseñar; se expande al iniciar |
-| 6 | V4 Destinatarios · Readiness | Preview no destructivo | Core detallado; UI se expande al iniciar |
-| 7 | V5 Preview cinemático | Render de variables | Core detallado; UI (port Vite) se expande |
-| 8 | V6 Lanzar | Goteo de ingreso + ritmo + tope + fecha inicio | Core detallado; UI se expande al iniciar |
-| 9 | V7 Por revisar | (existe `pasosManualesPendientes`) + render variables | Core existe; UI se expande al iniciar |
+| 2 | V2 Segmentación · Copiloto | NL→DefinicionSegmento + loop reactivo | ✅ **HECHO** — backend heredado + UI final (`f881125`) calcada de V2, acerca `TablaCuentas`/`FiltroWall`/`CopilotoPanel` al mockup |
+| 3 | V2.9 Importar cadencia | Parser JSON | ✅ **HECHO** (3 commits), wireada al flujo real en el rediseño fuera-de-plan |
+| 4 | V3 Cadencia | (editar copy inline) | ✅ **HECHO** — mutators de `pasoCadencia` cerrados (`f2665d7`, task suelta #11): día/canal/aprobación persisten, añadir toque/paso funciona |
+| 5 | V-Reglas (nueva) | (existe `reglaFaltante`) | ✅ **HECHO** (`fe71106`) — standalone en `/campanas/[id]/reglas`, no colgada aún de ningún wizard |
+| 6 | V4 Destinatarios · Readiness | Preview no destructivo | ⚠️ **Core hecho** (`previsualizarInscripcion`, `ea59e60`, checkpoint resuelto: siempre revalidar); falta la UI (Task 6.2) |
+| 7 | V5 Preview cinemático | Render de variables | ✅ **HECHO** (`f9f6025` core + `97c46d0` UI) — componente listo, sin enchufar a ruta real (espera Fases 6/8) |
+| 8 | V6 Lanzar | Goteo de ingreso + ritmo + tope + fecha inicio | **PENDIENTE** — 3 checkpoints de dominio seguidos, no delegado sin decisión de Sebastián |
+| 9 | V7 Por revisar | (existe `pasosManualesPendientes`) + render variables | ✅ **HECHO** (`58e4ef4`) — inbox permanente en `/por-revisar` + nav badge. La entrada desde la cola (Task 9.2) ya existía de antes en `CadenciasHoy.tsx`, no hubo que construirla |
+| 10 | Panel de control de campaña (nuevo, sin mockup) | Métricas por campaña + errores | **PENDIENTE** — pedido explícito de Sebastián a mitad de sesión, `[AGENTE]` puro (arquitectura ya decidida) |
 
 Cada fase produce software que corre y se testea por sí solo. Dependencias: la Fase 0 es prerequisito de toda UI. El "render de variables" de la Fase 7 lo reusa la Fase 9 (se construye una vez).
 
@@ -253,7 +254,9 @@ No están en `app/campanas/nueva/actions.ts` (ese archivo solo tiene las de crea
 
 Inventario (se expande al iniciar): fila de toque editable (día select + `Chip` de canal + toggle Revisar/Automático), timeline "por pasos" con las tarjetas de copy, editar copy inline (server action `actualizarVersionPaso`/`agregarVersionPaso` que ya existen). Añadir toque/paso. Sin huecos de core.
 
-**HECHO, con un gap real encontrado en la ejecución.** UI construida en `app/cadencias/[id]/{page,CadenciaCockpit,actions}.tsx` — **archivo nuevo, NO in-place** sobre `ConstructorCadencia.tsx` legacy (ese hace calendario con días bloqueados/corrimiento, un concepto distinto; `/cadencias/page.tsx` además ya redirige a `/campanas` y no había ruta viva para ver una cadencia por id, así que tocar el legacy hubiera roto ese redirect). `agregarVersionPaso`/`actualizarVersionPaso` sí cubren edición de copy, pero **no existe ningún mutator para `pasoCadencia` más allá de la inserción inicial en `crearCadencia`**: falta togglear `esManual`, cambiar `diaOffset`/`canal` de un paso existente, e insertar un paso nuevo en una cadencia ya creada. Los tres controles están en la UI como estado visual local con `title="Cambio visual — falta action del repository para guardarlo"`, SIN fingir persistencia — los botones "Añadir toque"/"Añadir paso" quedaron deshabilitados. Esto es la **task #11 del tracker** ("Repository: mutators de pasoCadencia"), pendiente. Commit → `bee4384`.
+**HECHO.** UI construida en `app/cadencias/[id]/{page,CadenciaCockpit,actions}.tsx` — **archivo nuevo, NO in-place** sobre `ConstructorCadencia.tsx` legacy (ese hace calendario con días bloqueados/corrimiento, un concepto distinto; `/cadencias/page.tsx` además ya redirige a `/campanas` y no había ruta viva para ver una cadencia por id, así que tocar el legacy hubiera roto ese redirect). Commit → `bee4384`.
+
+**Gap cerrado en sesión 2 (`f2665d7`, task #11 del tracker):** el repository ganó `actualizarPasoCadencia` (UPDATE parcial validado con Zod contra `CANALES`) y `agregarPasoCadencia` (INSERT transaccional con orden correlativo + `versionPaso` default, mismo patrón que `crearCadencia`). `CadenciaCockpit.tsx` ahora persiste de verdad: día/canal/toggle Automático↔Revisar usan actualización optimista con revert si la action falla, y "+ Añadir toque"/"+ Añadir paso" ya no están deshabilitados. No se pudo verificar visualmente porque `isps.db` local no tiene ninguna cadencia real cargada (base recién reseedeada) — validado por 306 tests + `tsc` + `build` limpios.
 
 ---
 
@@ -277,20 +280,26 @@ Inventario (se expande al iniciar): selector de las tres reglas con explicación
 
 Decisión de dominio: separar "decidir a quién y con qué ajustes" (puro, sin escribir) de "persistir" (la transacción actual). Extraer la parte pura para que preview y ejecución compartan lógica y no se dupliquen.
 
+**Decisión de Sebastián:** siempre revalidar. `inscribirCampana` NO recibe el resultado del preview como snapshot de verdad — vuelve a llamar `previsualizarInscripcion` justo antes de escribir, recalculando contra el estado actual de la DB. El preview que ve Sebastián en la UI puede quedar desactualizado (alguien resolvió un dato faltante entre medio); la persistencia nunca confía en eso, siempre recalcula en el momento de lanzar.
+
 **Files:**
 - Create: `app/core/preview-inscripcion.ts`
 - Test: `app/core/preview-inscripcion.test.ts`
 - Modify (refactor): `app/db/repository.ts` (`inscribirCampana` reusa la función pura)
 
-- [ ] **Step 1: Test que falla:** dado un segmento + cadencia + regla, `previsualizarInscripcion(...)` devuelve por empresa: destinatario elegido, cadencia ajustada (pasos con su canal final tras la regla), toques totales, estado (`lista`/`con_ajuste`/`bloqueada`), sin tocar la DB.
-- [ ] **Step 2: Correr y ver fallar** — `TESTONE app/core/preview-inscripcion.test.ts`.
-- [ ] **Step 3: Implementar** la función pura (reusa `elegirDestinatarioDefault`, `canalesDisponibles`, `readinessEmpresa`). Devuelve una estructura serializable.
-- [ ] **Step 4:** Refactor `inscribirCampana` para que su cálculo de "a quién/qué ajuste" llame a esta misma función, y solo la parte de escritura quede en el Repository. Correr `npm test` completo: nada se rompe.
-- [ ] **Step 5: Commit** — `git commit -m "feat(core): previsualizarInscripcion dry-run compartido con inscribirCampana"`
+- [x] **Step 1: Test que falla:** dado un segmento + cadencia + regla, `previsualizarInscripcion(...)` devuelve por empresa: destinatario elegido, cadencia ajustada (pasos con su canal final tras la regla), toques totales, estado (`lista`/`con_ajuste`/`bloqueada`), sin tocar la DB.
+- [x] **Step 2: Correr y ver fallar** — `TESTONE app/core/preview-inscripcion.test.ts`.
+- [x] **Step 3: Implementar** la función pura (reusa `elegirDestinatarioDefault`, `canalesDisponibles`, `readinessEmpresa`). Devuelve una estructura serializable.
+- [x] **Step 4:** Refactor `inscribirCampana` para que su cálculo de "a quién/qué ajuste" llame a esta misma función, y solo la parte de escritura quede en el Repository. Correr `npm test` completo: nada se rompe (328/328).
+- [x] **Step 5: Commit** — `git commit -m "feat(core): previsualizarInscripcion dry-run compartido con inscribirCampana"` → `ea59e60`
+
+**DESVIACIÓN:** `readinessEmpresa` marca un reemplazo exitoso como `estado: 'lista'` (no le falta nada, el paso se reasignó). Para el estado del preview, eso no es lo mismo que "sin ningún ajuste": si hubo reemplazo u omisión de paso, la empresa recibe una cadencia distinta a la original. `previsualizarInscripcion` calcula `con_ajuste` mirando `readiness.reemplazos.length > 0 || readiness.pasosSinCanal.length > 0`, no el `estado` crudo de `readinessEmpresa`. También se extendió `ContactoCandidato` (`app/core/inscripcion.ts`) con `telefono?: string | null` (opcional, no rompe el uso existente) porque el preview necesita ambos canales, no solo email.
 
 ### Task 6.2: Action + UI de la V4 (se expande al iniciar) `[AGENTE]`
 
 `previsualizarInscripcionAction(idCampana)` que llama la función pura. UI: tabla de destinatarios (contacto+empresa, cadencia con canales tachados/ajustados, toques, estado `Pill`), panel "Regla activa · Cambiar regla" (enlaza a Fase 5), resumen lateral (correos/llamadas/WhatsApp/total). Se detalla con el HTML delante.
+
+**HECHO.** `previsualizarInscripcionCampana(idCampana)` (Repository, nuevo) resuelve empresas del segmento (mismo filtro `!excluida` que `inscribirCampana`) + sus contactos y llama la función pura `previsualizarInscripcion`; `campanaParaPreview` trae la cabecera (nombre/cadencia/segmento/regla). `previsualizarInscripcionAction` (`app/campanas/[id]/destinatarios/actions.ts`) solo envuelve eso -- de solo lectura, no escribe nada. UI standalone en `/campanas/[id]/destinatarios` (mismo patrón que `/campanas/[id]/reglas`): tabla de destinatarios con chip por paso (fondo sólido si no hubo ajuste, borde punteado + canal original tachado si la regla lo reemplazó, tachado simple si se omitió), pill de estado por color de tono (`done`/`today`/`overdue`, no el primitivo `<Pill>` porque ese fija su propio fondo neutro y el mockup pinta el pill entero con el color), resumen lateral por canal + total, y nota de cuentas bloqueadas sin contacto. No se pudo verificar visualmente: puerto 3000 ocupado por el dev server de otra sesión y la regla del repo prohíbe liberarlo o matar procesos ajenos -- verificado por `tsc --noEmit` limpio, `npm run build` limpio, y 328/328 tests verdes (sin tests nuevos: la UI consume tipos ya cubiertos por `preview-inscripcion.test.ts`, y las dos funciones de repository nuevas son composición directa de queries + la función pura ya probada, sin lógica de dominio nueva que testear).
 
 ---
 
@@ -321,7 +330,7 @@ test("renderizarCopy reporta variable sin dato", () => {
 
 ### Task 7.2: Portar el preview cinemático (se expande al iniciar) `[AGENTE]`
 
-Traer los componentes de `Cinematic Sequence Preview html5/src/sections/SequencePreview.tsx` a `app/campanas/nueva/PreviewCinematico.tsx`, cambiando sus tokens/utilidades por los del proyecto (Tailwind v4 + semánticos), alimentándolo con `calcularCalendario` + `getCadencia` + `renderizarCopy` sobre un destinatario real. La animación es frontend puro.
+- [x] **HECHO** (`97c46d0`). `PreviewCinematico.tsx` porta el track arrastrable/reproducible, nodos día 0..N y los cuatro paneles (correo/llamada/whatsapp/resumen). Consume `renderizarCopy` sobre `pasos`/`datos` recibidos por props — **no está enchufado a ninguna ruta ni a `getCadencia`/`calcularCalendario` directamente**, porque Fases 6 y 8 (que definirían esos props reales) siguen con checkpoints pendientes; wirearlo antes hubiera significado inventar ese flujo. Queda listo para conectarlo cuando 6.1/8.x se resuelvan. Desviación: sin `@phosphor-icons/react` (no instalado en el repo), símbolos de texto en su lugar (mismo patrón que `CanalTag`). tsc/build/312 tests verdes; sin verificación visual (puerto ocupado por otra sesión).
 
 ---
 
@@ -335,7 +344,9 @@ Traer los componentes de `Cinematic Sequence Preview html5/src/sections/Sequence
 
 Decisión de dominio: cómo se modela ritmo y tope. Propuesta a validar con Sebastián: agregar a `campana` los campos `ritmoIngreso` (`diario`|`dia_si_dia_no`|`personalizado`), `topeToquesDia` (int, global o por campaña, según lo que Sebastián decida), `fechaInicio` (ISO date, null = hoy). `intakeDiario` ya existe.
 
-**Files:** Modify `app/db/schema.ts` (tabla `campana`), Modify `app/db/validation.ts` (`campanaInputSchema`), migración Drizzle.
+**Decisión de Sebastián:** las dos, con jerarquía clara. `topeToquesDia` es un campo de `campana` (control real, editable en el wizard de Lanzar V6) — eso es lo que Sebastián ajusta cuando arma una campaña puntual. Además, la V6 necesita un cálculo agregado de "toques totales que se van a generar hoy sumando TODAS las campañas activas" — informativo, en segundo plano, sin enforcement automático del sistema (no bloquea lanzar). Sirve para que Sebastián vea la carga total antes de comprometerse y decida bajarle el tope a esta campaña si la suma se ve alta. No es una columna nueva: es una query de agregación sobre `campana.topeToquesDia`/`intakeDiario` de las campañas con `estado = 'activa'`, para el momento de crear/editar la campaña.
+
+**Files:** Modify `app/db/schema.ts` (tabla `campana`, agrega `topeToquesDia` per-campaign), Modify `app/db/validation.ts` (`campanaInputSchema`), migración Drizzle, Modify `app/db/repository.ts` (agregar query de agregado global, ej. `toquesGlobalesHoy()` o similar, para consumo informativo en la Task 8.4 UI).
 
 - [ ] **Step 1:** Con la decisión de Sebastián, agregar las columnas a `campana` (reflejar en el schema Drizzle; recordar que isps.db no usa FKs, la lógica va en el Repository). Generar migración con drizzle-kit.
 - [ ] **Step 2:** Extender `campanaInputSchema` con los enums nuevos (`RITMOS_INGRESO` en `validation.ts`, junto a `MODOS_CAMPANA`/`REGLAS_FALTANTE`).
@@ -344,6 +355,8 @@ Decisión de dominio: cómo se modela ritmo y tope. Propuesta a validar con Seba
 ### Task 8.2: Core `calcularGoteo(total, intakeDiario, ritmo, inicio)` `[CHECKPOINT]`
 
 Decisión de dominio: la lógica de "20 por día, día sí día no → estos entran el D1, estos el D3..." y el cálculo "en 100 tardarías 9 días hábiles".
+
+**Decisión de Sebastián:** en `dia_si_dia_no`, el cupo completo (`intakeDiario`) entra en cada día activo, sin repartir a la mitad. Los días "no" no meten a nadie.
 
 **Files:** Create `app/core/goteo.ts`, Test `app/core/goteo.test.ts`
 
@@ -355,7 +368,9 @@ Decisión de dominio: la lógica de "20 por día, día sí día no → estos ent
 
 ### Task 8.3: Enrollment escalonado `[CHECKPOINT]`
 
-- [ ] **Step 1:** Extender `inscribirCampana` (o un `inscribirEscalonado`) para que use `calcularGoteo` y programe la `fechaInscripcion`/`fechaProgramada` de cada empresa según el goteo, en vez de meter a todos el día 1. Test que verifica que con goteo, la fecha programada del contacto N respeta el ritmo. Correr `npm test`.
+**Decisión de Sebastián:** el orden de entrada respeta el rank/orden en que el segmento trae las empresas (tal cual llega, sin reordenar por readiness) — la que quedó más arriba entra primero. Las empresas en estado `bloqueada` (según `previsualizarInscripcion`) se EXCLUYEN del reparto de goteo, no solo se posponen: necesitan resolverse (dato faltante, regla) antes de poder ocupar un cupo de ningún día. Solo `lista`/`con_ajuste` consumen turnos en `calcularGoteo`, en el orden del segmento.
+
+- [ ] **Step 1:** Extender `inscribirCampana` (o un `inscribirEscalonado`) para que use `calcularGoteo` y programe la `fechaInscripcion`/`fechaProgramada` de cada empresa según el goteo, en vez de meter a todos el día 1. Filtra `bloqueada` fuera del reparto (revalidando con `previsualizarInscripcion`, Task 6.1) y mantiene el orden de rank del segmento entre las que sí entran. Test que verifica que con goteo, la fecha programada del contacto N respeta el ritmo y que las bloqueadas no consumen cupo. Correr `npm test`.
 - [ ] **Step 2: Commit** — `git commit -m "feat(core): enrollment escalonado por goteo de ingreso"`
 
 ### Task 8.4: UI de la V6 (se expande al iniciar) `[AGENTE]`
@@ -387,6 +402,23 @@ Inventario contra `Lanzar Cockpit html6/index.html`: toggle "Lanzar hoy / Progra
 
 ---
 
+## Fase 10: Panel de control de campaña (nuevo, sin mockup — pedido explícito de Sebastián a mitad de sesión)
+
+**Objetivo:** al hacer clic en una campaña desde el hub (`/campanas`), aterrizar en `/campanas/[id]` — el panel de control real de esa campaña: ver/ajustar la config (ritmo/tope/fecha de Fase 8), ver salud (errores, si algo falló), ver si la gente está respondiendo, y navegar a Cadencia/Reglas/Destinatarios/Lanzar. Hoy `CampanaCard` no es un link — quedó como `<article>` no interactivo (ver bitácora Fase 1) porque no existía ruta de detalle.
+
+**Arquitectura decidida:** shell con sub-nav, no un tab monolítico. `/campanas/[id]` es el resumen (estado, métricas filtradas por esa campaña, errores recientes) con nav lateral a las sub-rutas que ya existen o se están construyendo (`/campanas/[id]/reglas` de Fase 5, `/campanas/[id]/destinatarios` de Fase 6.2) y a `/cadencias/[id]` (Fase 4) y Lanzar (Fase 8.4). Reusa piezas ya construidas, no las duplica. Genérico por ahora — Sebastián puede pedir diseño custom después de verlo corriendo.
+
+### Task 10.1: `CampanaCard` como link + shell + resumen `[AGENTE]`
+
+**Files:** Modify `app/campanas/CampanaCard.tsx` (envolver en `Link` a `/campanas/[id]`), Create `app/campanas/[id]/layout.tsx` (sub-nav: Resumen/Cadencia/Reglas/Destinatarios/Lanzar), Create `app/campanas/[id]/page.tsx` (Resumen).
+
+- [ ] **Step 1:** `CampanaCard` pasa de `<article>` a `<Link href={`/campanas/${id}`}>`.
+- [ ] **Step 2:** `app/campanas/[id]/layout.tsx` con sub-nav (reusar patrón de `AppShell`/`SidebarNav` si aplica, o una barra de tabs simple con los primitivos existentes).
+- [ ] **Step 3:** `app/campanas/[id]/page.tsx` (Resumen): estado de la campaña, métricas filtradas por `idCampana` (extender `metricasHub` o crear variante — investigar si acepta filtro), errores recientes (`sync_cambios` o el log de fallidos, filtrado por campaña si el schema lo permite).
+- [ ] **Step 4:** Verificar `tsc`/build/tests, commit — `git commit -m "feat(campanas): panel de control por campana con sub-nav"`.
+
+---
+
 ## Self-review (cobertura del spec)
 
 - V1 hub → Fase 1. V2 Copiloto → Fase 2. V2.9 importar → Fase 3. V3 cadencia → Fase 4. Reglas → Fase 5. V4 destinatarios → Fase 6. V5 preview → Fase 7. V6 lanzar → Fase 8. V7 por revisar → Fase 9. Tokens (requisito de Sebastián) → Fase 0. Cobertura completa.
@@ -397,8 +429,8 @@ Inventario contra `Lanzar Cockpit html6/index.html`: toggle "Lanzar hoy / Progra
 
 1. ✅ **RESUELTO** — Fórmula de métricas del hub (1.1): cohorte por `idPasoInscripcion` (enviado→respondio), no ratio de conteos en la ventana.
 2. ✅ **RESUELTO (sin necesidad de decidir)** — el Copiloto (2.0) ya existía completo y correcto; no hubo que elegir entre extender o reescribir.
-3. ⏳ **PENDIENTE** — Separar decidir de persistir en inscripción (6.1). No se llegó a Fase 6 esta sesión.
-4. ⏳ **PENDIENTE** — Modelo de goteo: ritmo, tope global vs. por campaña (8.1); lógica de distribución (8.2). No se llegó a Fase 8 esta sesión.
+3. ✅ **RESUELTO** — Separar decidir de persistir en inscripción (6.1): siempre revalidar, `inscribirCampana` recalcula contra la DB en el momento de escribir, nunca confía en el snapshot del preview.
+4. ✅ **RESUELTO** — Modelo de goteo (8.1): tope por campaña (control real, editable en el wizard) MÁS un agregado global de solo lectura (informativo, sin enforcement) para ver la carga total entre campañas activas. Distribución (8.2): en `dia_si_dia_no` el cupo completo entra en cada día activo, sin repartir a la mitad. Enrollment (8.3): orden de rank del segmento tal cual llega, bloqueadas excluidas del reparto (no consumen turno).
 5. ✅ **RESUELTO** — Fuentes en tokens (0.1): IBM Plex Sans como `--font-body`. Sebastián confirmó el principio general: "no importa la familia exacta, siempre y cuando quede abstraída" — la arquitectura de capas (primitivo→semántico) es la respuesta, no un valor específico.
 
 ## Handoff
@@ -447,16 +479,41 @@ Sebastián confirmó que esto no bloquea nada — el core es hexagonal, solo hab
 - **Apollo:** credencial activa en DB, pero el envío real está bloqueado a propósito: `APOLLO_MAILBOX_ID` no está seteado en `.env.local`, y `app/adapters/apollo.ts:174` tira error explícito ("decisión de negocio S2 pendiente") si se intenta usar. No es un bug, es un freno intencional de una sesión anterior.
 - **Notion:** sin conectar (`sin_credencial`). El sync DB→Notion no tiene a dónde escribir hasta conectar en `/conectores`.
 
-### Qué falta (siguiente sesión)
+### Qué falta (siguiente sesión) — actualizado fin de sesión 2
 
-En orden sugerido (Fase 5 y el gap de Fase 4 no tienen checkpoints, son los más rápidos de arrancar):
+Todo lo que no tenía checkpoint de dominio quedó cerrado esta sesión (ver bitácora ronda 2 abajo). Lo que queda:
 
-1. **Task #11 — mutators de `pasoCadencia`** en el Repository (toggle `esManual`, cambiar `diaOffset`/`canal`, insertar paso nuevo). Desbloquea que `app/cadencias/[id]/CadenciaCockpit.tsx` sea funcional de verdad — hoy sus controles están deshabilitados.
-2. **Fase 5 — Vista Reglas** (nueva, sin mockup). Sin checkpoints de core, backend ya existe (`campana.reglaFaltante`, `conteosReadiness`).
-3. **Fase 2.3+ — UI final del Copiloto/Segmentación** calcada de `HTML 2 Segmentacion/index.html`. Es lo único que falta de Fase 2; el backend está 100% listo.
-4. **Fase 6 — Destinatarios/Readiness.** Tiene un checkpoint real (6.1, separar decidir de persistir en inscripción) — parar y preguntar antes de construir.
-5. **Fase 7 — Preview cinemático.** Portar `html5/` (proyecto Vite separado), sin checkpoints.
-6. **Fase 8 — Lanzar.** Tres checkpoints de dominio seguidos (8.1 schema de goteo, 8.2 algoritmo, 8.3 enrollment escalonado) — la fase con más decisiones pendientes de Sebastián, ir despacio ahí.
-7. **Fase 9 — Por revisar.** Sin checkpoints, backend completo, reusa `renderizarCopy` de Fase 7.
+1. **Fase 6 — Destinatarios/Readiness.** Checkpoint real (6.1: separar "decidir a quién y con qué ajuste" — puro — de "persistir" — la transacción actual de `inscribirCampana`). Parar y preguntar a Sebastián antes de construir `previsualizarInscripcion`.
+2. **Fase 7, Task 7.2 — Portar el preview cinemático.** El core (`renderizarCopy`) ya está listo y probado (`f9f6025`); falta traer los componentes de `Cinematic Sequence Preview html5/src/sections/SequencePreview.tsx` (proyecto Vite separado) a `app/campanas/nueva/PreviewCinematico.tsx`. Sin checkpoint, es `[AGENTE]` puro — se puede delegar directo.
+3. **Fase 8 — Lanzar.** Tres checkpoints de dominio seguidos (8.1 schema de goteo/ritmo/tope, 8.2 algoritmo `calcularGoteo`, 8.3 enrollment escalonado) — la fase con más decisiones pendientes de Sebastián, ir despacio ahí, una a la vez.
+4. **Gap de backend encontrado en Fase 2.3+ (nuevo, no estaba en el plan original):** el mockup V2 tiene tarjetas de acción tipo "3 cuentas sin correo → [Reemplazar el paso por una llamada] [Saltar el paso] [Enviar a cola]" para resolver EXCEPCIONES por cuenta/lote — distinto de la regla global de Fase 5 (`campana.reglaFaltante`, que aplica igual a toda la campaña). No hay ninguna server action ni tabla para esto. Antes de construirlo hay que decidir: ¿la excepción aplica a nivel cuenta o a nivel paso de cadencia? ¿se persiste en `toque` o en una tabla nueva? Es candidato a `[CHECKPOINT]`, no delegar en frío.
 
 Antes de asumir que algo del plan original "no está hecho", verificar el código real primero (como pasó con Fase 2) — el plan se escribió antes de auditar todo lo que ya existía en el repo.
+
+---
+
+## Bitácora de ejecución — sesión 2026-07-07 (ronda 2, paralela)
+
+Continuación de la sesión 1 (ver bitácora arriba). Objetivo: cerrar todas las tareas `[AGENTE]` sin checkpoint de dominio que quedaban pendientes, optimizando tokens con agentes en paralelo (Haiku para lo mecánico, Sonnet para el resto) y verificación manual de cada commit antes de darlo por bueno (no confiar ciegamente en el reporte del agente).
+
+### Qué se hizo (dos rondas paralelas, 5 agentes total)
+
+**Ronda 1 (3 agentes en paralelo, archivos sin superposición):**
+1. **Task #11 — mutators de `pasoCadencia`** (Sonnet). `actualizarPasoCadencia` + `agregarPasoCadencia` en el repository (TDD, `app/db/repository.pasoCadencia.test.ts`), wireado a `CadenciaCockpit.tsx` con actualización optimista + revert en error. Commit `f2665d7`.
+2. **Task 7.1 — `renderizarCopy`** (Haiku, tarea mecánica). Función pura en `app/core/render-copy.ts`, reusa la regex de `extraerVariables` del parser para consistencia. TDD, 6 casos. Commit `f9f6025`.
+3. **Fase 5 — Vista Reglas** (Sonnet). Standalone en `/campanas/[id]/reglas`, a propósito no colgada de `/campanas/nueva` (otro agente trabajaba ahí en la ronda 2). Conteos de readiness recalculan en vivo al cambiar la regla, sin persistir hasta "Guardar". Commit `fe71106`.
+
+**Ronda 2 (2 agentes en paralelo, lanzada tras verificar la ronda 1):**
+4. **Fase 9, Task 9.1 — Inbox "Por revisar"** (Sonnet). Antes de delegar se auditó `app/cola/CadenciasHoy.tsx` y se encontró que la Task 9.2 del plan ("entrada desde la cola") **ya estaba hecha** de una sesión anterior — `FilaPrioritaria`/`GrupoBatch` ya editan y aprueban manuales inline. Se le pasó ese hallazgo al agente para que no la reconstruyera. Solo faltaba el inbox permanente (`pasosManualesPendientes()`, sin filtro de fecha, nunca usado en la UI hasta ahora) + el ítem de nav con badge. Commit `58e4ef4`.
+5. **Fase 2.3+ — UI final Copiloto/Segmentación** (Sonnet). Rediseño de `CopilotoPanel.tsx`/`FiltroWall.tsx`/`TablaCuentas.tsx`/`ReadinessBadge.tsx` calcando `HTML 2 Segmentacion/index.html`, sin tocar las server actions que ya funcionaban. Commit `f881125`.
+
+### Insights (hallazgos no obvios)
+
+- **La Task 9.2 de Fase 9 resultó ser trabajo fantasma.** El plan la listaba como pendiente, pero ya estaba resuelta desde antes en `CadenciasHoy.tsx` (mismo patrón que el hallazgo de Fase 2 en la sesión 1: pedir al agente que audite antes de construir evita reconstruir algo que ya existe). Confirma la lección ya escrita arriba: verificar código real antes de asumir que un ítem del plan está pendiente.
+- **El aislamiento por archivos entre agentes paralelos funcionó bien esta vez, con una excepción menor:** dos funciones nuevas de repository (`campanaConReglas`, `actualizarReglaFaltante`) que el agente de Fase 5 necesitaba quedaron mezcladas dentro del commit `f2665d7` (del agente de Task #11) porque ambos compartían el mismo working tree y ese agente commiteó primero. No hubo pérdida de código — se verificó con `git show` que las funciones sí están ahí — pero la separación de autoría entre commits no quedó perfecta. Mismo patrón ya documentado en la sesión 1 con `git stash`.
+- **Un agente de la ronda 2 mató por accidente el dev server de otra sesión activa** (puerto 3000) mientras intentaba liberar el puerto para hacer `preview_start`. Lo reinició de inmediato con `npm run dev` normal (sin `rm -rf`, sin pérdida de datos — el PID cambió, el proceso es nuevo). Verificado después: servidor respondiendo 200 en `/login`. Lección reforzada de la sesión 1: **ningún agente debería intentar liberar puertos compartidos por su cuenta** — si el dev server de otra sesión bloquea el propio, hay que reportarlo y verificar solo con `tsc`/`build`/tests, nunca matar procesos ajenos para destrabarse.
+- **Ninguno de los 5 agentes pudo verificar visualmente en preview.** Razón compartida: `isps.db` local no tiene campañas/cadencias/segmentos reales cargados (base recién reseedeada, solo `empresa`/`contacto`), y el working tree compartido con otro agente en curso hacía que el dev server mostrara estado roto ajeno, no el propio. Toda la verificación de esta ronda fue por tests (306/306 verdes) + `tsc --noEmit` + `npm run build`, nunca por pantalla. Antes de la próxima ronda de UI, vale la pena sembrar `isps.db` con al menos una campaña/cadencia/segmento de prueba para poder verificar de verdad.
+
+### Gap nuevo encontrado (no estaba en el plan original)
+
+El mockup V2 (`HTML 2 Segmentacion/index.html`) incluye tarjetas de acción del Copiloto para resolver excepciones de canal por cuenta o lote (ej. "3 cuentas sin correo → Reemplazar/Saltar/Cola"), distinto de la regla global de campaña que ya cubre la Fase 5 (`campana.reglaFaltante`, aplica igual a todos). No existe backend para esto. Queda anotado en "Qué falta" como candidato a `[CHECKPOINT]` — hay que decidir el nivel (cuenta vs. paso de cadencia) y dónde se persiste antes de construirlo.
