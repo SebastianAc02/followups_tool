@@ -64,7 +64,7 @@ export function AgendaHoy({
                 <input
                   name="objecion"
                   placeholder="Objeción (opcional)"
-                  className="min-w-0 flex-1 border-b border-line bg-transparent text-[12.5px] text-ink-soft outline-none placeholder:text-faint"
+                  className="min-w-0 flex-1 border-b border-line bg-transparent text-[12.5px] text-ink-soft outline-none placeholder:text-faint focus:border-line-strong"
                 />
                 <button type="submit" name="canal" value="whatsapp" className="text-[12px] text-muted hover:text-ink">
                   WhatsApp

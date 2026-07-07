@@ -110,7 +110,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
             min={1}
             defaultValue={10}
             aria-label="follow-ups por día"
-            className="mono w-14 rounded-[7px] border border-line bg-hover px-2 py-1 text-center text-ink outline-none"
+            className="mono w-14 rounded-[7px] border border-line bg-hover px-2 py-1 text-center text-ink outline-none focus:border-line-strong"
           />
           <span>por día</span>
           <button type="submit" className="text-ink-soft underline decoration-line-strong underline-offset-2 hover:text-ink">
