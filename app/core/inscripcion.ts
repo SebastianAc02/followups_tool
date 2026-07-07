@@ -6,6 +6,10 @@ export type ContactoCandidato = {
   esKeyDecisionMaker: boolean;
   esPrincipal: boolean;
   email: string | null;
+  // opcional: elegirDestinatarioDefault no lo usa (decide solo por email, B1.b), pero
+  // el preview de inscripcion (Fase 6) reusa este mismo tipo de contacto para calcular
+  // canalesDisponibles, que si necesita el telefono.
+  telefono?: string | null;
 };
 
 // B1.b: se le manda al que tiene email, en orden de preferencia:

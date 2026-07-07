@@ -43,7 +43,7 @@ import {
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
 import type { CadenciaParseada } from '../core/cadencia-parser';
-import { elegirDestinatarioDefault } from '../core/inscripcion';
+import { previsualizarInscripcion, type PasoRequerido } from '../core/preview-inscripcion';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
@@ -1315,7 +1315,11 @@ export type ResultadoInscripcion = {
 // Todo en UNA transaccion: cerrar la anterior y abrir la nueva ocurren juntos, asi el
 // indice unico parcial nunca ve dos activas de la misma empresa a la vez.
 export function inscribirCampana(idCampana: number): ResultadoInscripcion {
-  const camp = db.select({ idSegmento: campana.idSegmento }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  const camp = db
+    .select({ idSegmento: campana.idSegmento, idCadencia: campana.idCadencia, reglaFaltante: campana.reglaFaltante })
+    .from(campana)
+    .where(eq(campana.idCampana, idCampana))
+    .get();
   if (!camp) throw new Error(`campana ${idCampana} no existe`);
   // Parte 3 campanas: el set curado en la revision (Parte 2) es la fuente real de
   // a quien inscribir, no el segmento crudo. empresasParaRevision ya trae el flag
@@ -1323,6 +1327,14 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
   const paraRevision = empresasParaRevision(camp.idSegmento);
   if (!paraRevision) throw new Error(`segmento ${camp.idSegmento} de la campana no existe`);
   const empresas = paraRevision.filter((e) => !e.excluida);
+
+  const pasosCrudos = db
+    .select({ orden: pasoCadencia.orden, canal: pasoCadencia.canal })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, camp.idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+  const pasos: PasoRequerido[] = pasosCrudos.map((p) => ({ orden: p.orden, canal: p.canal as Canal }));
 
   const res: ResultadoInscripcion = { inscritas: 0, bloqueadas: 0, reemplazos: 0, saltadas: 0 };
   const ahora = new Date().toISOString();
@@ -1358,21 +1370,36 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
           esKeyDecisionMaker: contacto.esKeyDecisionMaker,
           esPrincipal: contacto.esPrincipal,
           email: contacto.email,
+          telefono: contacto.telefono,
         })
         .from(contacto)
         .where(eq(contacto.idEmpresa, emp.id))
         .orderBy(contacto.idContacto)
         .all();
 
-      const idContactoDest = elegirDestinatarioDefault(
-        contactos.map((c) => ({
-          idContacto: c.idContacto,
-          esKeyDecisionMaker: c.esKeyDecisionMaker === 1,
-          esPrincipal: c.esPrincipal === 1,
-          email: c.email,
-        })),
-      );
+      // Siempre revalidar (checkpoint 6.1): esta corrida vuelve a llamar la misma
+      // funcion pura que arma el preview de la V4 justo antes de escribir, contra los
+      // datos que ACABA de leer de la DB en esta transaccion. No recibe el resultado
+      // de ningun preview externo como snapshot de verdad — ese pudo quedar
+      // desactualizado desde que se mostro en pantalla.
+      const [preview] = previsualizarInscripcion({
+        empresas: [
+          {
+            idEmpresa: emp.id,
+            contactos: contactos.map((c) => ({
+              idContacto: c.idContacto,
+              esKeyDecisionMaker: c.esKeyDecisionMaker === 1,
+              esPrincipal: c.esPrincipal === 1,
+              email: c.email,
+              telefono: c.telefono,
+            })),
+          },
+        ],
+        pasos,
+        regla: camp.reglaFaltante as ReglaFaltante,
+      });
 
+      const idContactoDest = preview.idContactoDestinatario;
       const estado = idContactoDest != null ? 'activa' : 'bloqueada';
       const ins = tx
         .insert(inscripcion)
