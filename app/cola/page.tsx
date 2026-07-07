@@ -7,22 +7,13 @@ import TopNav from "../TopNav";
 import CadenciasHoy from "./CadenciasHoy";
 import { DashboardHeader } from "./DashboardHeader";
 import { BarraAhora } from "./BarraAhora";
+import { AgendaHoy } from "./AgendaHoy";
 import { contarCerradas } from "./stats";
+import { canalNormalizado, type FilaAgenda } from "./agenda.ts";
 
-const ACCION: Record<string, string> = { llamada: "Llamar", whatsapp: "WhatsApp", correo: "Correo" };
 const CANAL_LABEL: Record<string, string> = { llamada: "llamadas", whatsapp: "whatsapp", correo: "correos" };
 const CANALES_ORDEN = CANALES;
 const RESULTADOS_ORDEN = RESULTADOS;
-
-const ESTADO_PILL: Record<string, { l: string; c: string }> = {
-  reunion_agendada: { l: "reunión", c: "hot" },
-  oportunidad: { l: "oportunidad", c: "hot" },
-  cierre_documentacion: { l: "cierre", c: "hot" },
-  enviar_contrato: { l: "contrato", c: "hot" },
-  contacto_iniciado: { l: "contactado", c: "warm" },
-  lead: { l: "lead", c: "warm" },
-  on_hold: { l: "on hold", c: "cold" },
-};
 
 function diasVencido(fechaISO: string, hoyISO: string) {
   return Math.round((Date.parse(hoyISO) - Date.parse(fechaISO)) / 86400000);
@@ -49,6 +40,22 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
     ...t,
     historial: t.esManual === 1 ? historialPasosDestinatario(t.idDestinatario) : [],
   }));
+
+  const filas: FilaAgenda[] = cola.map((c, i) => {
+    const dias = diasVencido(c.fecha!, hoy);
+    return {
+      id: c.id,
+      empresa: c.empresa,
+      ciudad: c.ciudad,
+      contacto: c.contacto,
+      cargo: c.cargo,
+      canal: canalNormalizado(c.canal),
+      estado: c.estado,
+      sev: dias > 0 ? "overdue" : "today",
+      severidadTexto: dias > 0 ? `vencido ${dias}d` : "hoy",
+      actual: i === 0,
+    };
+  });
 
   return (
     <div className="mx-auto max-w-[860px] px-6 pt-10 pb-[110px]">
@@ -107,51 +114,10 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
 
       {cadenciasHoy.length > 0 && <CadenciasHoy items={cadenciasHoy} hoy={hoy} />}
 
-      {cola.length === 0 ? (
-        <div className="empty">Sin follow-ups para hoy. Buen trabajo.</div>
+      {filas.length === 0 ? (
+        <div className="py-8 text-[13px] text-muted">Sin follow-ups para hoy. Buen trabajo.</div>
       ) : (
-        cola.map((c) => {
-          const dias = diasVencido(c.fecha!, hoy);
-          const sev = dias > 0 ? "overdue" : "today";
-          const accion = ACCION[c.canal ?? "llamada"] ?? "Llamar";
-          return (
-            <div className="row-wrap" key={c.id}>
-              <Link className="row" href={`/llamada/${c.id}`}>
-                <div>
-                  <div className="l1">
-                    <span className={`dot ${sev}`} aria-hidden="true" />
-                    <span className="emp">{c.empresa}</span>
-                    {c.estado && ESTADO_PILL[c.estado] && (
-                      <span className={`pill ${ESTADO_PILL[c.estado].c}`}>{ESTADO_PILL[c.estado].l}</span>
-                    )}
-                    {c.contacto && (
-                      <span className="contact">
-                        {c.contacto}
-                        {c.cargo ? ` · ${c.cargo}` : ""}
-                      </span>
-                    )}
-                  </div>
-                  <div className="l2">
-                    <span>usuarios <b className="mono">{c.usuarios != null ? Math.round(c.usuarios) : "—"}</b></span>
-                    <span>CRM <b>{c.crm ?? "—"}</b></span>
-                    <span>pasarela <b>{c.pasarela ?? "—"}</b></span>
-                  </div>
-                  {c.proximoPaso && <div className="paso">{c.proximoPaso}</div>}
-                </div>
-                <div className="right">
-                  <div className={`when ${sev}`}>{dias > 0 ? `vencido ${dias}d` : "hoy"}</div>
-                  <div className="call-cta">{accion} →</div>
-                </div>
-              </Link>
-              <form className="tap-row" action={registrarTapAction}>
-                <input type="hidden" name="idEmpresa" value={c.id} />
-                <input name="objecion" placeholder="Objeción (opcional)" className="tap-objecion" />
-                <button type="submit" name="canal" value="whatsapp" className="tap-btn">WhatsApp</button>
-                <button type="submit" name="canal" value="correo" className="tap-btn">Correo</button>
-              </form>
-            </div>
-          );
-        })
+        <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
       )}
     </div>
   );

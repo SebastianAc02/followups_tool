@@ -5,16 +5,13 @@ import { pillParaEstado } from "../ui/pill.variants.ts";
 import { CanalTag } from "../ui/CanalTag";
 import { button } from "../ui/button.variants.ts";
 import type { Canal } from "../ui/canal-tag.variants.ts";
+import { canalNormalizado } from "./agenda.ts";
 
 const CTA_POR_CANAL: Record<Canal, string> = {
   llamada: "Llamar ahora",
   whatsapp: "Escribir por WhatsApp",
   correo: "Enviar correo",
 };
-
-function canalNormalizado(canal: string | null | undefined): Canal {
-  return canal === "whatsapp" || canal === "correo" ? canal : "llamada";
-}
 
 export function BarraAhora({
   id,
