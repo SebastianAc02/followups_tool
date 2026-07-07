@@ -11,6 +11,7 @@ type ButtonProps = { variant?: keyof typeof VARIANT } & ButtonHTMLAttributes<HTM
 export function Button({ variant = "pill", className, ...props }: ButtonProps) {
   return (
     <button
+      type="button"
       className={cx(
         "cursor-pointer bg-white text-[#0a0a0b] transition-opacity hover:opacity-90 disabled:opacity-55",
         VARIANT[variant],
