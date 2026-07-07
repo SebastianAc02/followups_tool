@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { IAPort, BorradorToque } from '../core/ports/ia';
+// Web search disponible cuando se necesite:
+// import { ejecutarBusqueda } from '../../dario/tools/web-search';
 
 // El adaptador apunta al gateway (dario) por DARIO_URL.
 // En local: http://localhost:3456  (dario proxy corriendo en el Mac)
@@ -112,97 +114,37 @@ export function crearClaudeAdapter(): IAPort {
 }
 
 // -------------------------------------------------------------------------
-// Sandbox de prueba (NO es parte de IAPort). Es un botoncito de la UI que le
-// habla al adaptador para probar a mano que Claude responde bien, con streaming
-// y acceso a internet, antes de construir la segmentacion de verdad. El core
-// nunca ve esto.
+// Sandbox de prueba (NO es parte de IAPort). Botoncito de la UI para
+// verificar que el gateway (dario) responde antes de usar el flujo real.
+// El core nunca ve esto.
 // -------------------------------------------------------------------------
 
 // Eventos que el sandbox va emitiendo mientras trabaja, para pintarlos en vivo.
 export type EventoPing =
-  | { tipo: 'inicio';   modelo: string }
-  | { tipo: 'texto';    texto: string }   // un pedazo de la respuesta, en streaming
-  | { tipo: 'busqueda'; query: string }   // el modelo pidio esta query
-  | { tipo: 'fin';      ms: number }
-  | { tipo: 'error';    error: string };
+  | { tipo: 'inicio'; modelo: string }
+  | { tipo: 'texto';  texto: string }  // fragmento de la respuesta en streaming
+  | { tipo: 'fin';    ms: number }
+  | { tipo: 'error';  error: string };
 
-// Como funciona WebSearch a traves de dario (verificado contra cc-template.ts):
-//
-// Dario traduce nombres de tools en ambas direcciones:
-//   outbound: web_search -> WebSearch (wire-shape de Claude Code)
-//   inbound:  WebSearch  -> web_search (de vuelta al cliente)
-//
-// PERO dario NO ejecuta la busqueda: devuelve tool_use con stop_reason='tool_use'
-// igual que cualquier tool de cliente. El cliente (nosotros) ejecuta la busqueda
-// y manda el resultado como tool_result. Asi funciona Claude Code tambien.
-//
-// Proveedor de busqueda: Brave Search API (tier gratuito: 2000 queries/mes).
-// Configurar BRAVE_SEARCH_KEY en .env. Sin key: devuelve string vacio y el
-// modelo responde con lo que sabe sin busqueda real.
-async function ejecutarBusqueda(query: string): Promise<string> {
-  const key = process.env.BRAVE_SEARCH_KEY;
-  if (!key) return '';
-  try {
-    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=5`;
-    const res = await fetch(url, { headers: { 'X-Subscription-Token': key, 'Accept': 'application/json' } });
-    if (!res.ok) return '';
-    const data = await res.json() as { web?: { results?: { title: string; url: string; description?: string }[] } };
-    const items = data?.web?.results ?? [];
-    return items.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.description ?? ''}`).join('\n\n');
-  } catch {
-    return '';
-  }
-}
-
-// Loop de tool_use: el modelo puede pedir varias busquedas encadenadas.
-// Tope de 5 turnos como cinturon de seguridad.
+// Llamada directa al gateway con streaming. Sin tools, sin loops, sin
+// dependencias externas. Solo verifica que dario esta vivo y responde.
+// Web search queda fuera de este sandbox por ahora — se retoma cuando
+// se construya el tool-executor (ver dario/PLAN.md, fase futura).
 export async function* pingClaudeStream(prompt: string): AsyncGenerator<EventoPing> {
   const inicio = Date.now();
   yield { tipo: 'inicio', modelo: MODELO_PING };
   try {
-    const client  = crearClient();
-    const tools   = [
-      { type: 'web_search_20250305', name: 'web_search', max_uses: 3 },
-    ] as unknown as Anthropic.Messages.ToolUnion[];
-    const messages: Anthropic.MessageParam[] = [{ role: 'user', content: prompt }];
+    const client = crearClient();
+    const stream = client.messages.stream({
+      model:     MODELO_PING,
+      max_tokens: 1024,
+      messages:  [{ role: 'user', content: prompt }],
+    });
 
-    for (let turno = 0; turno < 5; turno++) {
-      const respuesta = await client.messages.create({
-        model:      MODELO_PING,
-        max_tokens: 2048,
-        messages,
-        tools,
-      });
-
-      // Emitir texto de este turno.
-      for (const bloque of respuesta.content) {
-        if (bloque.type === 'text') {
-          yield { tipo: 'texto', texto: bloque.text };
-        }
+    for await (const ev of stream) {
+      if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
+        yield { tipo: 'texto', texto: ev.delta.text };
       }
-
-      // Si el modelo no pidio ninguna tool, termino.
-      if (respuesta.stop_reason !== 'tool_use') break;
-
-      // Ejecutar cada busqueda que pidio y acumular resultados.
-      messages.push({ role: 'assistant', content: respuesta.content });
-      const resultados: Anthropic.ToolResultBlockParam[] = [];
-
-      for (const bloque of respuesta.content) {
-        if (bloque.type !== 'tool_use') continue;
-        if (bloque.name === 'web_search') {
-          const input = bloque.input as { query?: string; search_term?: string };
-          const query = String(input?.query ?? input?.search_term ?? '').trim();
-          yield { tipo: 'busqueda', query };
-          const resultado = await ejecutarBusqueda(query);
-          resultados.push({ type: 'tool_result', tool_use_id: bloque.id, content: resultado || 'Sin resultados.' });
-        } else {
-          // Otra tool de dario que el modelo pida en este contexto: no aplica.
-          resultados.push({ type: 'tool_result', tool_use_id: bloque.id, content: 'Tool no disponible en este contexto.' });
-        }
-      }
-
-      messages.push({ role: 'user', content: resultados });
     }
 
     yield { tipo: 'fin', ms: Date.now() - inicio };
