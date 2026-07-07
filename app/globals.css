@@ -1,6 +1,18 @@
 @import "tailwindcss";
 
 @theme {
+  /* Capa 1: primitivos. Paleta y neutros crudos, se definen una sola vez.
+     Ver docs/design-tokens.md para el contrato completo. */
+  --violet-500: #8b7cff;
+  --violet-400: #a99cff;
+  --green: #57c98a;
+  --red: #f4796b;
+  --amber: #f2b738;
+  --orange: #e07a3f;
+  --blue: #8fb0e0;
+  --rose: #d3a0a6;
+
+  /* Capa 2: semánticos. Roles que consume la UI, apuntan a un primitivo. */
   --color-bg: #0a0a0b;
   --color-surface: #161619;
   --color-surface-2: #1f1f24;
@@ -11,21 +23,21 @@
   --color-faint: #5e5e66;
   --color-line: rgba(255, 255, 255, 0.08);
   --color-line-strong: rgba(255, 255, 255, 0.15);
-  --color-overdue: #f4796b;
+  --color-overdue: var(--red);
   --color-overdue-bg: rgba(244, 121, 107, 0.13);
-  --color-today: #f2b738;
+  --color-today: var(--amber);
   --color-today-bg: rgba(242, 183, 56, 0.13);
-  --color-done: #57c98a;
+  --color-done: var(--green);
   --color-ring: rgba(255, 255, 255, 0.12);
 
   /* Cockpit de campañas (dirección 2A): acento violeta para acción/selección/foco. */
-  --color-accent: #8b7cff;
-  --color-accent-soft: #a99cff;
+  --color-accent: var(--violet-500);
+  --color-accent-soft: var(--violet-400);
   --color-accent-glow: rgba(139, 124, 255, 0.35);
-  --color-warn: #e07a3f;
+  --color-warn: var(--orange);
 
-  --color-canal-llamada: #8fb0e0;
-  --color-canal-correo: #d3a0a6;
+  --color-canal-llamada: var(--blue);
+  --color-canal-correo: var(--rose);
   --color-canal-whatsapp: #84c99e;
   --color-acento: #6f9fd0;
 
@@ -66,9 +78,10 @@
   --font-serif: var(--ff-serif), Georgia, serif;
   --font-display: var(--ff-display), sans-serif;
   --font-mono-tag: var(--ff-mono-tag), monospace;
-  /* Vocabulario del mockup: font-heading (Archivo Black) + font-body (Space Mono). */
+  /* font-heading: SOLO home dashboard (Archivo Black). El cockpit de campañas y
+     /cola usan font-serif (Newsreader) para títulos -- ver docs/design-tokens.md. */
   --font-heading: var(--ff-display), system-ui, sans-serif;
-  --font-body: var(--ff-body), ui-monospace, monospace;
+  --font-body: var(--ff-body), system-ui, sans-serif;
 }
 
 @utility mono {
@@ -129,7 +142,7 @@
   body {
     color: var(--ink);
     background: var(--bg);
-    font-family: var(--ff-body), ui-monospace, monospace;
+    font-family: var(--ff-body), system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-size: 14px;
