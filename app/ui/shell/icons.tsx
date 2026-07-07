@@ -57,3 +57,12 @@ export function IconConectores({ className }: IconProps) {
     </svg>
   );
 }
+
+export function IconPorRevisar({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <path d="m9 12 2 2 4-4" />
+      <path d="M12 3a9 9 0 1 0 9 9" />
+    </svg>
+  );
+}

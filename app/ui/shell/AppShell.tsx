@@ -1,13 +1,13 @@
 // Shell reusable del cockpit (rediseño home). Server component: hace su propio fetch de los
 // datos del shell y renderiza sidebar + top bar + main. Cualquier ruta lo puede envolver.
 import type { ReactNode } from 'react';
-import { colaDelDia, listarCampanas, estadoConector, contarPorEstado } from '../../db/repository';
+import { colaDelDia, listarCampanas, estadoConector, contarPorEstado, pasosManualesPendientes } from '../../db/repository';
 import { ESTADOS_ACTIVOS } from '../../db/funnel';
 import { requireSession } from '../../lib/session';
 import { Sidebar, type ConectorEstado } from './Sidebar';
 import { TopBar } from './TopBar';
 import type { NavItem } from './SidebarNav';
-import { IconInicio, IconCampanas, IconToques, IconPipeline, IconConectores } from './icons';
+import { IconInicio, IconCampanas, IconToques, IconPipeline, IconConectores, IconPorRevisar } from './icons';
 
 const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -36,6 +36,9 @@ export async function AppShell({ children }: { children: ReactNode }) {
   const campanasActivas = listarCampanas().filter((c) => c.estado === 'activa').length;
   const porEstado = contarPorEstado();
   const cuentasFunnel = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
+  // Fase 9.1: inbox permanente de manuales pendientes, sin filtro de fecha (a
+  // diferencia de toquesHoy) -- ver pasosManualesPendientes() en el repository.
+  const porRevisar = pasosManualesPendientes().length;
 
   // Conectores: Granola y Notion tienen fila real; Claude es la API (siempre activa, key
   // server-side). Total conectados / esperados para el badge del nav.
@@ -47,6 +50,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     { href: '/', label: 'Inicio', icon: <IconInicio /> },
     { href: '/campanas', label: 'Campañas', icon: <IconCampanas />, badge: String(campanasActivas) },
     { href: '/cola', label: 'Toques', icon: <IconToques />, badge: String(toquesHoy), badgeTone: toquesHoy > 0 ? 'done' : 'neutral' },
+    { href: '/por-revisar', label: 'Por revisar', icon: <IconPorRevisar />, badge: String(porRevisar), badgeTone: porRevisar > 0 ? 'overdue' : 'neutral' },
     { href: '/panel', label: 'Pipeline', icon: <IconPipeline />, badge: String(cuentasFunnel) },
     { href: '/conectores', label: 'Conectores', icon: <IconConectores />, badge: `${conectadosReales + 1}/3`, badgeTone: conectadosReales < 2 ? 'overdue' : 'neutral' },
   ];
