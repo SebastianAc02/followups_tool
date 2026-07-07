@@ -6,6 +6,7 @@ import { requireSession } from "../lib/session";
 import TopNav from "../TopNav";
 import CadenciasHoy from "./CadenciasHoy";
 import { DashboardHeader } from "./DashboardHeader";
+import { BarraAhora } from "./BarraAhora";
 import { contarCerradas } from "./stats";
 
 const ACCION: Record<string, string> = { llamada: "Llamar", whatsapp: "WhatsApp", correo: "Correo" };
@@ -63,6 +64,18 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
         vencidas={vencidos}
         cerradas={contarCerradas(contadores)}
       />
+
+      {cola.length > 0 && (
+        <BarraAhora
+          id={cola[0].id}
+          empresa={cola[0].empresa}
+          ciudad={cola[0].ciudad}
+          contacto={cola[0].contacto}
+          cargo={cola[0].cargo}
+          canal={cola[0].canal}
+          estado={cola[0].estado}
+        />
+      )}
 
       {contadores.total > 0 && (
         <div className="counters">

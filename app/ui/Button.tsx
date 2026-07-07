@@ -1,23 +1,9 @@
 import type { ButtonHTMLAttributes } from "react";
-import { cx } from "./cx";
+import { cn } from "./cn";
+import { button } from "./button.variants.ts";
 
-const VARIANT = {
-  block: "w-full rounded-[13px] py-4 text-[15px] font-semibold",
-  pill: "rounded-full px-[18px] py-2 text-[13px] font-medium",
-} as const;
-
-type ButtonProps = { variant?: keyof typeof VARIANT } & ButtonHTMLAttributes<HTMLButtonElement>;
+type ButtonProps = { variant?: "block" | "pill" } & ButtonHTMLAttributes<HTMLButtonElement>;
 
 export function Button({ variant = "pill", className, ...props }: ButtonProps) {
-  return (
-    <button
-      type="button"
-      className={cx(
-        "cursor-pointer bg-white text-[#0a0a0b] transition-opacity hover:opacity-90 disabled:opacity-55",
-        VARIANT[variant],
-        className,
-      )}
-      {...props}
-    />
-  );
+  return <button type="button" className={cn(button({ variant }), className)} {...props} />;
 }
