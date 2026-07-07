@@ -82,13 +82,17 @@ export const CAMPOS_SEGMENTO = [
   'prioridad', // empresa.prioridad_comercial (el "tier", numerico)
   'es_cliente', // 0 / 1
   'ciudad',
+  'departamento', // empresa.departamento (la "region" del wall)
   'owner',
   'usuarios', // empresa_usuarios.usuarios_estimados (via LEFT JOIN)
+  'rol', // contacto.cargo_categoria: la empresa tiene >=1 contacto con ese rol (EXISTS)
 ] as const;
 export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
 
 // Parte 1 campanas: subset de campos donde un rango numerico tiene sentido.
-export const CAMPOS_SEGMENTO_NUMERICOS = ['prioridad', 'es_cliente', 'usuarios'] as const;
+// rol es string (usa en/no_en) y NO va aqui; personas (cantidad de contactos de la
+// empresa, via COUNT) si.
+export const CAMPOS_SEGMENTO_NUMERICOS = ['prioridad', 'es_cliente', 'usuarios', 'personas'] as const;
 
 const condicionEnSchema = z.object({
   campo: z.enum(CAMPOS_SEGMENTO),

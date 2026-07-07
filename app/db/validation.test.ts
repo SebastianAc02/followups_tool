@@ -15,3 +15,14 @@ test('rechaza mayor_que sobre campo no numerico', () => {
   });
   assert.equal(r.success, false);
 });
+
+test('acepta departamento y rol (string) y personas (numerico)', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [
+      { campo: 'departamento', op: 'en', valores: ['Valle del Cauca'] },
+      { campo: 'rol', op: 'en', valores: ['gerente', 'dueno'] },
+      { campo: 'personas', op: 'mayor_que', valor: 1 },
+    ],
+  });
+  assert.equal(r.success, true);
+});
