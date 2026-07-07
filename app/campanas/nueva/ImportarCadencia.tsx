@@ -5,6 +5,7 @@ import { previsualizarCadenciaAction, type PreviewCadencia } from './actions';
 import type { FormatoCadencia } from '../../core/cadencia-parser';
 import { CanalTag, type Canal } from '../../ui/CanalTag';
 import { cn } from '../../ui/cn';
+import { PLANTILLAS_CADENCIA } from './plantillas-cadencia';
 
 const CANALES_CONOCIDOS = new Set<Canal>(['llamada', 'correo', 'whatsapp']);
 
@@ -59,6 +60,17 @@ export function ImportarCadencia({ onResuelto, onLimpiar }: Props = {}) {
     if (resultado.ok) onResuelto?.({ formato, contenido, nombreCsv, preview: resultado });
   }
 
+  // Biblioteca de secuencias: mismo camino que pegar/subir un .md a mano, así el
+  // resto del flujo (preview, resolución, onResuelto) no se entera de dónde vino
+  // el contenido.
+  async function cargarPlantilla(contenido: string, nombreCsv: string) {
+    setCargando(true);
+    const resultado = await previsualizarCadenciaAction('md', contenido, nombreCsv);
+    setPreview(resultado);
+    setCargando(false);
+    if (resultado.ok) onResuelto?.({ formato: 'md', contenido, nombreCsv, preview: resultado });
+  }
+
   function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setArrastrando(false);
@@ -73,34 +85,58 @@ export function ImportarCadencia({ onResuelto, onLimpiar }: Props = {}) {
 
   if (!preview) {
     return (
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setArrastrando(true);
-        }}
-        onDragLeave={() => setArrastrando(false)}
-        onDrop={onDrop}
-        className={cn(
-          'flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-line px-6 py-16 text-center transition-colors',
-          arrastrando ? 'border-accent bg-accent-bg/40' : 'border-line',
-        )}
-      >
-        <p className="font-serif text-lg text-ink">Arrastra tu cadencia acá</p>
-        <p className="text-sm text-muted">CSV, Markdown o JSON — se previsualiza automático al soltar</p>
-        <label className="mt-2 cursor-pointer text-sm font-medium text-accent-soft hover:text-accent">
-          o elige un archivo
-          <input
-            type="file"
-            accept=".csv,.md,.markdown,.json"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void cargarArchivo(file);
-              e.target.value = '';
-            }}
-          />
-        </label>
-        {cargando && <p className="text-xs text-faint">Leyendo…</p>}
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3">
+          <p className="font-mono-tag text-xs uppercase tracking-widest text-muted">Biblioteca de secuencias</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {PLANTILLAS_CADENCIA.map((plantilla) => {
+              const pasos = plantilla.contenido.split(/\r?\n/).filter((l) => /^##\s+/.test(l)).length;
+              return (
+                <button
+                  key={plantilla.id}
+                  type="button"
+                  disabled={cargando}
+                  onClick={() => void cargarPlantilla(plantilla.contenido, plantilla.nombre)}
+                  className="flex flex-col gap-1.5 rounded-[13px] border border-line bg-card px-4 py-3.5 text-left transition-colors hover:border-accent/40 disabled:opacity-40"
+                >
+                  <p className="font-serif text-[15px] text-ink">{plantilla.nombre}</p>
+                  <p className="text-[13px] leading-relaxed text-ink-soft">{plantilla.descripcion}</p>
+                  <p className="mt-1 font-mono-tag text-xs text-faint">{pasos} pasos</p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setArrastrando(true);
+          }}
+          onDragLeave={() => setArrastrando(false)}
+          onDrop={onDrop}
+          className={cn(
+            'flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-line px-6 py-16 text-center transition-colors',
+            arrastrando ? 'border-accent bg-accent-bg/40' : 'border-line',
+          )}
+        >
+          <p className="font-serif text-lg text-ink">Arrastra tu cadencia acá</p>
+          <p className="text-sm text-muted">CSV, Markdown o JSON — se previsualiza automático al soltar</p>
+          <label className="mt-2 cursor-pointer text-sm font-medium text-accent-soft hover:text-accent">
+            o elige un archivo
+            <input
+              type="file"
+              accept=".csv,.md,.markdown,.json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void cargarArchivo(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          {cargando && <p className="text-xs text-faint">Leyendo…</p>}
+        </div>
       </div>
     );
   }
