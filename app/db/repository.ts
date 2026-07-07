@@ -44,6 +44,7 @@ import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
 import type { CadenciaParseada } from '../core/cadencia-parser';
 import { previsualizarInscripcion, type PasoRequerido, type PasoAjustado, type EstadoPreviewInscripcion } from '../core/preview-inscripcion';
+import { calcularGoteo, type RitmoIngreso } from '../core/goteo';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
@@ -1319,7 +1320,14 @@ export type ResultadoInscripcion = {
 // indice unico parcial nunca ve dos activas de la misma empresa a la vez.
 export function inscribirCampana(idCampana: number): ResultadoInscripcion {
   const camp = db
-    .select({ idSegmento: campana.idSegmento, idCadencia: campana.idCadencia, reglaFaltante: campana.reglaFaltante })
+    .select({
+      idSegmento: campana.idSegmento,
+      idCadencia: campana.idCadencia,
+      reglaFaltante: campana.reglaFaltante,
+      intakeDiario: campana.intakeDiario,
+      ritmoIngreso: campana.ritmoIngreso,
+      fechaInicio: campana.fechaInicio,
+    })
     .from(campana)
     .where(eq(campana.idCampana, idCampana))
     .get();
@@ -1341,6 +1349,73 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
 
   const res: ResultadoInscripcion = { inscritas: 0, bloqueadas: 0, reemplazos: 0, saltadas: 0 };
   const ahora = new Date().toISOString();
+
+  // Task 8.3 (enrollment escalonado): el goteo de ingreso reparte SOLO las empresas
+  // que de verdad van a quedar 'lista'/'con_ajuste' (elegibles). Las 'bloqueada' (sin
+  // destinatario o sin ningun canal viable tras la regla) quedan fuera del reparto:
+  // no consumen un cupo de ningun dia, para no robarle el turno a la siguiente
+  // elegible del orden del segmento. El orden de entrada es el del segmento tal cual
+  // llega (empresasParaRevision no reordena por readiness), sin importar cuantas
+  // bloqueadas haya en el medio.
+  //
+  // Se contactos-a-todas primero (una sola pasada, sin escribir) para poder contar
+  // cuantas empresas SI consumen turno antes de llamar calcularGoteo -- el total que
+  // necesita el goteo es el de elegibles, no el del segmento crudo.
+  const contactosPorEmpresaGoteo = new Map<
+    string,
+    { idContacto: number; esKeyDecisionMaker: boolean; esPrincipal: boolean; email: string | null; telefono: string | null }[]
+  >();
+  if (empresas.length > 0) {
+    const filasContacto = db
+      .select({
+        idEmpresa: contacto.idEmpresa,
+        idContacto: contacto.idContacto,
+        esKeyDecisionMaker: contacto.esKeyDecisionMaker,
+        esPrincipal: contacto.esPrincipal,
+        email: contacto.email,
+        telefono: contacto.telefono,
+      })
+      .from(contacto)
+      .where(inArray(contacto.idEmpresa, empresas.map((e) => e.id)))
+      .orderBy(contacto.idContacto)
+      .all();
+    for (const f of filasContacto) {
+      const lista = contactosPorEmpresaGoteo.get(f.idEmpresa) ?? [];
+      lista.push({
+        idContacto: f.idContacto,
+        esKeyDecisionMaker: f.esKeyDecisionMaker === 1,
+        esPrincipal: f.esPrincipal === 1,
+        email: f.email,
+        telefono: f.telefono,
+      });
+      contactosPorEmpresaGoteo.set(f.idEmpresa, lista);
+    }
+  }
+  const previewGoteo = previsualizarInscripcion({
+    empresas: empresas.map((e) => ({ idEmpresa: e.id, contactos: contactosPorEmpresaGoteo.get(e.id) ?? [] })),
+    pasos,
+    regla: camp.reglaFaltante as ReglaFaltante,
+  });
+  const estadoPorEmpresaGoteo = new Map(previewGoteo.map((p) => [p.idEmpresa, p.estado]));
+  const idsElegiblesEnOrden = empresas.map((e) => e.id).filter((id) => estadoPorEmpresaGoteo.get(id) !== 'bloqueada');
+
+  const intakeDiario = camp.intakeDiario ?? idsElegiblesEnOrden.length;
+  const goteo =
+    idsElegiblesEnOrden.length > 0 && intakeDiario > 0
+      ? calcularGoteo(idsElegiblesEnOrden.length, intakeDiario, camp.ritmoIngreso as RitmoIngreso, camp.fechaInicio ?? ahora.slice(0, 10))
+      : { porDia: [], diasHabiles: 0 };
+
+  // Aplana el goteo a "fecha por posicion": la K-esima elegible (0-based, en el orden
+  // del segmento) cae en el dia donde se acumula su turno. Si el goteo no produjo
+  // dias (total 0), el mapa queda vacio y todas caen al fallback (fecha de hoy).
+  const fechaPorPosicion: string[] = [];
+  for (const dia of goteo.porDia) {
+    for (let i = 0; i < dia.cuantos; i += 1) fechaPorPosicion.push(dia.fecha);
+  }
+  const fechaProgramadaPorEmpresa = new Map<string, string>();
+  idsElegiblesEnOrden.forEach((id, i) => {
+    fechaProgramadaPorEmpresa.set(id, fechaPorPosicion[i] ?? ahora.slice(0, 10));
+  });
 
   db.transaction((tx) => {
     for (const emp of empresas) {
@@ -1404,9 +1479,19 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
 
       const idContactoDest = preview.idContactoDestinatario;
       const estado = idContactoDest != null ? 'activa' : 'bloqueada';
+      // Task 8.3: la fecha de inscripcion de una empresa elegible es la que le tocara
+      // segun el goteo calculado arriba (mismo orden de segmento, bloqueadas ya fuera
+      // del reparto). Si la revalidacion en esta transaccion la vuelve bloqueada
+      // (dato cambio entre el calculo de goteo y este punto), no tiene fecha de
+      // goteo asignada -- cae al fallback de "ahora" igual que antes, sin goteo.
+      const fechaGoteo = idContactoDest != null ? fechaProgramadaPorEmpresa.get(emp.id) : undefined;
+      // fechaInscripcion se guarda siempre ISO completo (mismo formato que el resto del
+      // repository); el goteo solo calcula la fecha "YYYY-MM-DD" del dia que le toca, asi
+      // que se ancla a medianoche de ese dia.
+      const fechaInscripcionFinal = fechaGoteo ? `${fechaGoteo}T00:00:00.000Z` : ahora;
       const ins = tx
         .insert(inscripcion)
-        .values({ idCampana, idEmpresa: emp.id, estado, pasoActual: 0, fechaInscripcion: ahora, createdAt: ahora, updatedAt: ahora })
+        .values({ idCampana, idEmpresa: emp.id, estado, pasoActual: 0, fechaInscripcion: fechaInscripcionFinal, createdAt: ahora, updatedAt: ahora })
         .run();
 
       if (idContactoDest != null) {
