@@ -37,7 +37,13 @@ export function AgendaHoy({
         visibles.map((fila, i) => {
           const pill = pillParaEstado(fila.estado);
           return (
-            <div key={fila.id} className={cn("group border-b border-line py-3", fila.actual && "bg-hover/60")}>
+            <div
+              key={fila.id}
+              className={cn(
+                "group border-b border-line py-3 transition-colors duration-150 hover:bg-hover/40",
+                fila.actual && "bg-hover/60 hover:bg-hover/60",
+              )}
+            >
               <Link href={`/llamada/${fila.id}`} className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-3">
                   <span className="mono w-5 shrink-0 text-[12px] text-faint">{i + 1}</span>
@@ -50,7 +56,10 @@ export function AgendaHoy({
                   {fila.severidadTexto}
                 </SeverityText>
               </Link>
-              <form action={registrarTapAction} className="mt-1.5 hidden items-center gap-2 pl-8 group-hover:flex">
+              <form
+                action={registrarTapAction}
+                className="animate-fade-up mt-1.5 hidden items-center gap-2 pl-8 group-hover:flex"
+              >
                 <input type="hidden" name="idEmpresa" value={fila.id} />
                 <input
                   name="objecion"

@@ -46,7 +46,7 @@ export function DashboardHeader({
           ))}
         </div>
       </div>
-      <div className="flex gap-8">
+      <div className="flex gap-8 max-sm:w-full max-sm:justify-between max-sm:gap-4">
         <Stat value={pendientes} label="pendientes" tone="neutral" />
         <Stat value={vencidas} label="vencidas" tone="overdue" />
         <Stat value={cerradas} label="cerradas" tone="done" />

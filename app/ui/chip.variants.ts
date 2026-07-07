@@ -1,6 +1,6 @@
 import { cva } from "class-variance-authority";
 
-export const chip = cva("cursor-pointer rounded-full border px-[15px] py-2 text-[12px]", {
+export const chip = cva("cursor-pointer rounded-full border px-[15px] py-2 text-[12px] transition-colors duration-150", {
   variants: {
     on: {
       true: "border-white bg-white text-[#0a0a0b]",
