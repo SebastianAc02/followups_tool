@@ -104,6 +104,15 @@ export function crearDbPrueba() {
       UNIQUE(proveedor, id_usuario)
     );
 
+    CREATE TABLE conector_config (
+      proveedor TEXT PRIMARY KEY,
+      modo TEXT NOT NULL,
+      habilitado INTEGER NOT NULL DEFAULT 1,
+      agregado_por TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE empresa_alias (
       id_alias INTEGER PRIMARY KEY AUTOINCREMENT,
       id_empresa TEXT NOT NULL,

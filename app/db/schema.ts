@@ -105,6 +105,20 @@ export const conector = sqliteTable('conector', {
   updatedAt: text('updated_at'),
 });
 
+// Rediseño conectores: política a nivel workspace (qué conectores están habilitados y
+// en qué modo). SEPARADA de `conector` (que guarda los secretos): esta tabla la controla
+// el admin y la puede leer todo el mundo; nunca guarda credenciales. modo = 'personal'
+// (cada quien su credencial) | 'admin' (una global para el equipo). habilitado=0 = dormido
+// (quitado por el admin) sin borrar sus credenciales, para poder re-agregar sin perder nada.
+export const conectorConfig = sqliteTable('conector_config', {
+  proveedor: text('proveedor').primaryKey(),
+  modo: text('modo').notNull(),
+  habilitado: integer('habilitado').notNull().default(1),
+  agregadoPor: text('agregado_por'),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+});
+
 // V3.1: patron outbox. Se escribe en la MISMA transaccion que el cambio real; el
 // worker (V3.5/V3.7) drena hacia Notion con reintentos, nunca la app llama a Notion
 // directo.
