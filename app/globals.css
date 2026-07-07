@@ -20,7 +20,7 @@
 
   /* Cockpit de campañas (dirección 2A): acento violeta para acción/selección/foco. */
   --color-accent: #8b7cff;
-  --color-accent-soft: #c4b5fd;
+  --color-accent-soft: #a99cff;
   --color-accent-glow: rgba(139, 124, 255, 0.35);
   --color-warn: #e07a3f;
 
@@ -38,6 +38,16 @@
   /* Chip de filtro activo (AgendaHoy): tono propio, distinto del surface-hi de la fila. */
   --color-chip-active-bg: #1c2530;
   --color-chip-active-border: #2d4066;
+
+  /* Rediseño home (2026-07-07): superficies del shell (sidebar/top bar/main oscuro). */
+  --color-accent-bg: #1a1730;
+  --color-accent-ink: #e7e3ff;
+  --color-shell: #0b0c0f;
+  --color-shell-2: #0f1014;
+  --color-card: #111218;
+  --color-card-hover: #16171e;
+  --color-line-shell: #1b1d25;
+  --color-line-card: #1f212b;
 
   --font-sans: var(--ff-sans), system-ui, sans-serif;
   --font-mono: var(--ff-mono), ui-monospace, monospace;
@@ -636,4 +646,12 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 480px) {
   .ac-inner, .ac-inner.ac-login-inner { padding: 30px 24px; }
   .ac-card { min-height: 0; }
+}
+
+/* Punto "En vivo" pulsante del top bar (rediseño home). Se usa con
+   animate-[pulseLive_2s_ease-in-out_infinite]. No es CSS viejo: es la capa de animación
+   de Tailwind, declarada una vez. */
+@keyframes pulseLive {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
 }

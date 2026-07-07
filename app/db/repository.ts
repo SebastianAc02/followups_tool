@@ -50,6 +50,7 @@ import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
+import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -339,6 +340,39 @@ export function contadoresHoy(hoy: string, owner: string): ContadoresHoy {
   }
 
   return { porCanal, porResultado, total: filas.length };
+}
+
+// Cuenta de empresas por estado_notion (rediseño home). Solo lectura. Los null (empresas
+// sin etapa en el funnel) NO se incluyen: no representan una etapa. Con owner filtra a ese
+// owner; sin owner cuenta toda la base. Acceso solo por el Repository (regla de arquitectura).
+export function contarPorEstado(owner?: string): Record<string, number> {
+  const filas = db
+    .select({ estado: empresa.estadoNotion, n: sql<number>`count(*)` })
+    .from(empresa)
+    .where(owner ? eq(empresa.owner, owner) : undefined)
+    .groupBy(empresa.estadoNotion)
+    .all();
+
+  const out: Record<string, number> = {};
+  for (const f of filas) {
+    if (f.estado) out[f.estado] = Number(f.n);
+  }
+  return out;
+}
+
+// Resumen del home (rediseño): las 4 métricas de las stat cards. Reusa colaDelDia (cola de
+// hoy = vencidos + para hoy) y contarPorEstado sobre toda la base para deals calientes y
+// cuentas activas. Solo lectura.
+export function resumenHome(owner: string, hoy: string) {
+  const cola = colaDelDia(hoy, owner);
+  const toquesHoy = cola.length;
+  const vencidos = cola.filter((c) => (c.fecha ?? '') < hoy).length;
+
+  const porEstado = contarPorEstado();
+  const dealsCalientes = ESTADOS_CALIENTES.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
+  const cuentasActivas = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
+
+  return { toquesHoy, vencidos, dealsCalientes, cuentasActivas };
 }
 
 // Repartir el backlog de follow-ups de un owner: N por día hábil, lo más caliente primero.
