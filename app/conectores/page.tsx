@@ -1,81 +1,66 @@
 import Link from "next/link";
-import { estadoConector, type EstadoConector } from "../db/repository";
+import { estadoConector, listarConfigConectores } from "../db/repository";
 import { requireSession } from "../lib/session";
-import { guardarGranolaAction, guardarNotionAction } from "./actions";
-
-// V3.8: link fijo al CRM real. No es un secreto (cualquiera del workspace ya tiene
-// acceso vía Notion), por eso vive en env con default en vez de en `conector`.
-const NOTION_CRM_URL =
-  process.env.NOTION_CRM_URL ?? "https://app.notion.com/p/f5e2be53a1514d42ac6db30fd7c5202a";
-
-function semaforo(estado: EstadoConector): { color: "verde" | "amarillo" | "rojo" | "gris"; texto: string } {
-  if (!estado.tieneCredencial) return { color: "gris", texto: "Sin configurar" };
-  if (estado.ultimoResultado?.startsWith("error")) return { color: "rojo", texto: "Caído" };
-  if (estado.ultimoResultado === "ok") return { color: "verde", texto: "Vivo" };
-  return { color: "amarillo", texto: "Configurado, sin corridas todavía" };
-}
-
-function EstadoCard({ estado }: { estado: EstadoConector }) {
-  const s = semaforo(estado);
-  return (
-    <div className="conector-estado">
-      <span className={`conector-dot ${s.color}`} aria-hidden="true" />
-      <span className="conector-texto">{s.texto}</span>
-      {estado.ultimaCorrida && (
-        <span className="conector-meta mono">
-          última corrida {estado.ultimaCorrida.slice(0, 16).replace("T", " ")}
-        </span>
-      )}
-      {estado.ultimoResultado && estado.ultimoResultado !== "ok" && (
-        <span className="conector-resultado">{estado.ultimoResultado}</span>
-      )}
-    </div>
-  );
-}
+import { CATALOGO_CONECTORES, conectorDelCatalogo, type ModoConector } from "./catalogo.ts";
+import { vistaEstado, contarEstados } from "./estado-ui.ts";
+import { EstadoResumen } from "./EstadoResumen";
+import { ConectorRow } from "./ConectorRow";
+import { AgregarConector } from "./AgregarConector";
 
 export default async function Conectores() {
   const sesion = await requireSession();
-  const granola = estadoConector("granola", sesion.id);
-  const notion = estadoConector("notion");
+  const config = listarConfigConectores();
+
+  // Cruzar config (DB) con el catalogo (codigo). Ignorar filas cuyo proveedor ya no existe
+  // en el catalogo (defensivo). Para admin-mode leemos el estado GLOBAL; para personal, el
+  // del usuario en sesion.
+  const activos = config
+    .map((c) => {
+      const cat = conectorDelCatalogo(c.proveedor);
+      if (!cat) return null;
+      const modo = c.modo as ModoConector;
+      const estado = estadoConector(c.proveedor, modo === "personal" ? sesion.id : undefined);
+      return { cat, modo, estado };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  const resumen = contarEstados(activos.map((a) => vistaEstado(a.estado)));
+
+  const agregados = new Set(activos.map((a) => a.cat.id));
+  const disponibles = CATALOGO_CONECTORES.filter((c) => !agregados.has(c.id));
 
   return (
-    <div className="wrap">
-      <Link href="/" className="back">
+    <div className="mx-auto max-w-3xl px-4 py-16 font-[family-name:var(--ff-inter)] md:px-8">
+      <Link href="/" className="text-sm text-muted hover:text-ink">
         ← Inicio
       </Link>
-      <div className="h-title" style={{ marginBottom: 24 }}>
-        Conectores
+
+      <div className="mb-12 mt-6">
+        <p className="mb-4 text-xs uppercase tracking-widest text-muted">Operación</p>
+        <h1 className="mb-4 font-[family-name:var(--ff-grotesk)] text-4xl font-semibold tracking-tight text-ink md:text-5xl">
+          Conectores
+        </h1>
+        <p className="max-w-prose text-base leading-relaxed text-muted">
+          Las integraciones que alimentan tus follow-ups. Un vistazo basta para saber qué está vivo y qué falta por
+          conectar.
+        </p>
       </div>
 
-      <div className="section-label">Granola (tu cuenta)</div>
-      <p className="conector-desc">
-        Cada quien conecta su propia cuenta de Granola. Se pega una vez, se guarda cifrada y
-        nunca vuelve a mostrarse.
-      </p>
-      <EstadoCard estado={granola} />
-      <form action={guardarGranolaAction} className="conector-form">
-        <input name="credencial" type="password" placeholder="grn_..." autoComplete="off" />
-        <button type="submit">Guardar</button>
-      </form>
+      <EstadoResumen r={resumen} />
 
-      <div className="section-label" style={{ marginTop: 32 }}>
-        Notion (CRM del equipo)
-      </div>
-      <p className="conector-desc">
-        Un solo CRM para todos.{" "}
-        <a href={NOTION_CRM_URL} target="_blank" rel="noreferrer">
-          Abrir el CRM →
-        </a>
-      </p>
-      <EstadoCard estado={notion} />
-      {sesion.admin ? (
-        <form action={guardarNotionAction} className="conector-form">
-          <input name="credencial" type="password" placeholder="Token de integración de Notion" autoComplete="off" />
-          <button type="submit">Guardar</button>
-        </form>
+      {activos.length === 0 ? (
+        <p className="py-9 text-sm text-muted">
+          {sesion.admin
+            ? "Todavía no hay conectores. Agrega el primero abajo."
+            : "Todavía no hay conectores configurados. Tu admin los agrega."}
+        </p>
       ) : (
-        <p className="conector-desc conector-solo-admin">Solo un admin puede configurar esta credencial.</p>
+        activos.map((a) => (
+          <ConectorRow key={a.cat.id} cat={a.cat} estado={a.estado} modo={a.modo} esAdmin={sesion.admin} />
+        ))
       )}
+
+      {sesion.admin && <AgregarConector disponibles={disponibles} />}
     </div>
   );
 }

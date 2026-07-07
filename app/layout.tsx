@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Newsreader, Archivo_Black, Space_Mono, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader, Archivo_Black, Space_Mono, IBM_Plex_Sans, IBM_Plex_Mono, Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
 
 // Cockpit de campañas (Fase 0): Newsreader (títulos, --ff-serif) + IBM Plex Sans
@@ -14,6 +14,11 @@ const spaceMono = Space_Mono({ variable: "--ff-space-mono", subsets: ["latin"], 
 const body = IBM_Plex_Sans({ variable: "--ff-body", subsets: ["latin"], weight: ["400", "500", "600"] });
 const monoTag = IBM_Plex_Mono({ variable: "--ff-mono-tag", subsets: ["latin"], weight: ["400", "500"] });
 
+// Conectores (rediseño): Space Grotesk (titulos) + Inter (cuerpo) del pad "Conectores
+// Minimal". Scopeadas via --ff-grotesk / --ff-inter, solo las usa /conectores.
+const grotesk = Space_Grotesk({ variable: "--ff-grotesk", subsets: ["latin"], weight: ["500", "600"] });
+const inter = Inter({ variable: "--ff-inter", subsets: ["latin"], weight: ["400", "500", "600"] });
+
 export const metadata: Metadata = {
   title: "Follow-ups OnePay",
   description: "Cockpit de follow-ups comerciales",
@@ -25,7 +30,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${serif.variable} ${display.variable} ${spaceMono.variable} ${body.variable} ${monoTag.variable}`}>
+    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${serif.variable} ${display.variable} ${spaceMono.variable} ${body.variable} ${monoTag.variable} ${grotesk.variable} ${inter.variable}`}>
       <body>{children}</body>
     </html>
   );
