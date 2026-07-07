@@ -5,11 +5,13 @@ import Link from "next/link";
 import { cn } from "../ui/cn";
 import { Chip } from "../ui/Chip";
 import { CanalDot } from "../ui/CanalTag";
-import { Pill } from "../ui/Pill";
+import { CANAL_DOT_HALO } from "../ui/canal-tag.variants.ts";
 import { pillParaEstado } from "../ui/pill.variants.ts";
 import { SeverityText } from "../ui/SeverityText";
 import { FILTROS_ORDEN, filtrarPorCanal, conteosPorCanal, type FilaAgenda, type FiltroCanal } from "./agenda.ts";
 
+// Traduccion literal de la tarjeta interna de #today-agenda en Arc (Sales Followup
+// Cockpit / index.html): header con contador, chips de filtro, hairline, filas.
 export function AgendaHoy({
   filas,
   registrarTapAction,
@@ -22,60 +24,70 @@ export function AgendaHoy({
   const visibles = filtrarPorCanal(filas, filtro);
 
   return (
-    <div className="mb-8 rounded-2xl border border-line bg-surface px-7 py-[22px]">
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <div className="text-[11.5px] tracking-[0.14em] text-faint uppercase">Tu agenda de hoy</div>
-        <div className="text-[12.5px] text-faint">
+    <div className="overflow-hidden rounded-xl border border-line-card-now bg-surface">
+      <div className="flex items-baseline justify-between px-7 pt-6 pb-4">
+        <span className="text-xs font-semibold uppercase tracking-widest text-faint">Tu agenda de hoy</span>
+        <span className="text-xs text-faint">
           {visibles.length} de {filas.length} toques
-        </div>
+        </span>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 px-7 pb-4">
         {FILTROS_ORDEN.map(({ filtro: f, label }) => (
           <Chip key={f} tone="accent" on={filtro === f} onClick={() => setFiltro(f)}>
-            {f !== "todos" && <CanalDot canal={f} />}
-            {label} <span className="mono text-[11px] opacity-70">{conteos[f]}</span>
+            {f !== "todos" && <CanalDot canal={f} className="size-1.5" />}
+            {label} <span className="font-bold opacity-60">{conteos[f]}</span>
           </Chip>
         ))}
       </div>
 
+      <div className="mx-7 h-px bg-line-card-now" />
+
       {visibles.length === 0 ? (
-        <div className="py-6 text-[13px] text-muted">Nada en este canal.</div>
+        <div className="py-6 text-center text-[13px] text-muted">Nada en este canal.</div>
       ) : (
-        <div className="flex flex-col">
+        <div className="flex flex-col px-4 py-3">
           {visibles.map((fila, i) => {
             const pill = pillParaEstado(fila.estado);
             return (
-              <div
-                key={fila.id}
-                className={cn(
-                  "group rounded-lg px-4 py-[11px] transition-colors duration-150 hover:bg-hover",
-                  fila.actual && "mb-1 rounded-[10px] border border-border-accent bg-surface-hi px-4 py-[13px] hover:bg-surface-hi",
-                )}
-              >
-                <Link href={`/llamada/${fila.id}`} className="flex items-center justify-between gap-4">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="mono w-5 shrink-0 text-[12px] text-faint">{i + 1}</span>
-                    <CanalDot canal={fila.canal} />
-                    <span className={cn("truncate text-ink", fila.actual ? "font-semibold" : "font-medium")}>
+              <div key={fila.id} className="group">
+                <Link
+                  href={`/llamada/${fila.id}`}
+                  className={cn(
+                    "flex items-center gap-4 rounded-lg px-3 py-3.5 transition-colors duration-150 hover:bg-hover",
+                    fila.actual && "mb-1 rounded-xl border border-border-accent bg-surface-hi px-3 py-4 hover:bg-surface-hi",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "w-12 flex-shrink-0 text-sm tabular-nums",
+                      fila.actual ? "font-serif text-base leading-none text-ink" : "text-muted",
+                    )}
+                  >
+                    {i + 1}
+                  </div>
+                  <CanalDot canal={fila.canal} className={cn(fila.actual && CANAL_DOT_HALO[fila.canal])} />
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <span className={cn("truncate text-sm", fila.actual ? "font-semibold text-ink" : "font-medium text-ink-soft")}>
                       {fila.empresa}
                     </span>
-                    {pill && <Pill tone={pill.tone}>{pill.label}</Pill>}
-                    {fila.ciudad && <span className="shrink-0 text-[13px] text-muted">{fila.ciudad}</span>}
+                    {(pill || fila.ciudad) && (
+                      <span className="shrink-0 truncate text-xs text-faint">
+                        · {[pill?.label, fila.ciudad].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
                   </div>
                   {fila.actual ? (
-                    <span className="mono shrink-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-acento">
-                      Ahora
-                    </span>
+                    <span className="shrink-0 text-xs font-semibold uppercase tracking-widest text-acento">Ahora</span>
                   ) : (
-                    <SeverityText variant={fila.sev} className="shrink-0">
+                    <SeverityText variant={fila.sev} className="shrink-0 text-xs">
                       {fila.severidadTexto}
                     </SeverityText>
                   )}
                 </Link>
                 <form
                   action={registrarTapAction}
-                  className="animate-fade-up mt-1.5 hidden items-center gap-2 pl-8 group-hover:flex"
+                  className="animate-fade-up mt-1.5 hidden items-center gap-2 pl-[76px] group-hover:flex"
                 >
                   <input type="hidden" name="idEmpresa" value={fila.id} />
                   <input
@@ -95,6 +107,8 @@ export function AgendaHoy({
           })}
         </div>
       )}
+
+      <div className="pb-4" />
     </div>
   );
 }

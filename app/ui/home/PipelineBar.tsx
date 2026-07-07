@@ -10,37 +10,37 @@ export function PipelineBar({ porEstado }: { porEstado: Record<string, number> }
   const total = segmentos.reduce((s, x) => s + x.n, 0);
 
   return (
-    <div className="mb-9">
-      <div className="mb-3.5 flex items-center justify-between">
+    <div className="mb-8">
+      <div className="mb-3 flex items-center justify-between">
         <SectionLabel className="mb-0">Pipeline por etapa</SectionLabel>
-        <Link href="/panel" className="text-[12.5px] font-semibold text-accent-soft">
+        <Link href="/panel" className="text-xs font-semibold text-accent-soft transition-colors hover:text-accent">
           Ver módulo →
         </Link>
       </div>
 
       {total === 0 ? (
-        <div className="text-[13px] text-muted">Nada en el funnel todavía.</div>
+        <div className="text-sm text-muted">Nada en el funnel todavía.</div>
       ) : (
         <>
-          <div className="flex h-[46px] gap-[3px] overflow-hidden rounded-[12px]">
+          <div className="flex h-11 gap-0.5 overflow-hidden rounded-lg">
             {segmentos.map((s) => (
               <div
                 key={s.estado}
-                className={`flex flex-col items-center justify-center ${s.colorClass}`}
+                className={`flex flex-col items-center justify-center transition-all duration-150 ${s.colorClass}`}
                 style={{ width: `${(s.n / total) * 100}%` }}
               >
-                <span className="text-[14px] font-extrabold text-white">{s.n}</span>
+                <span className="font-heading text-sm leading-none text-white">{s.n}</span>
               </div>
             ))}
           </div>
-          <div className="mt-2 flex gap-[3px]">
+          <div className="mt-2 flex gap-0.5">
             {segmentos.map((s) => (
               <div
                 key={s.estado}
-                className="overflow-hidden text-ellipsis whitespace-nowrap px-0.5 text-center"
+                className="overflow-hidden px-1 text-center"
                 style={{ width: `${(s.n / total) * 100}%` }}
               >
-                <span className="text-[11px] text-muted">{s.label}</span>
+                <span className="block truncate text-xs text-muted">{s.label}</span>
               </div>
             ))}
           </div>

@@ -1,19 +1,18 @@
-import Link from "next/link";
-import { cn } from "../ui/cn";
 import { Stat } from "../ui/Stat";
-import { chip } from "../ui/chip.variants.ts";
-import { formatoFechaLargaEsCo, saludoPorHora } from "../lib/date-utils.ts";
+import { formatoFechaLargaEsCo, formatoHoraEsCo, saludoPorHora } from "../lib/date-utils.ts";
 
-const OWNERS = [
-  { key: "Sebastian Acosta Molina", label: "Sebastián" },
-  { key: "Felipe Castro", label: "Felipe" },
-  { key: "Thomas Schumacher", label: "Thomas" },
+const NAV_LINKS = [
+  { href: "#current-follow-up", label: "Ahora" },
+  { href: "#today-agenda", label: "Tu agenda de hoy" },
 ];
 
+// Traduccion literal del <header> de Arc (Sales Followup Cockpit / index.html):
+// sticky, eyebrow fecha+hora, saludo serif grande, stats en linea, hairline, nav.
+// El switch de owners y el logout salieron de aqui (decision explicita del
+// 2026-07-07: pureza visual sobre el mockup, ver memoria de sesion).
 export function DashboardHeader({
   nombre,
   hoy,
-  owner,
   pendientes,
   vencidas,
   cerradas,
@@ -28,29 +27,36 @@ export function DashboardHeader({
   const hora = new Date().getHours();
 
   return (
-    <div className="mb-8 flex flex-wrap items-start justify-between gap-6 border-b border-line pb-6">
-      <div>
-        <div className="font-serif text-[28px] font-medium tracking-[-0.01em] text-ink">
-          {saludoPorHora(hora)}, {nombre}
+    <header className="sticky top-0 z-40 border-b border-line bg-bg/95 backdrop-blur">
+      <div className="mx-auto max-w-6xl px-4 py-5 md:px-8 lg:px-16">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="mb-2 text-xs uppercase tracking-widest text-muted">
+              {formatoFechaLargaEsCo(hoy)} · {formatoHoraEsCo(new Date())}
+            </div>
+            <h1 className="font-serif text-4xl leading-tight tracking-tight text-ink md:text-5xl">
+              {saludoPorHora(hora)}, {nombre}
+            </h1>
+          </div>
+          <div className="flex flex-row items-baseline gap-6">
+            <Stat value={pendientes} label="pendientes" tone="neutral" />
+            <Stat value={cerradas} label="cerradas" tone="done" />
+            <Stat value={vencidas} label="vencidas" tone="overdue" />
+          </div>
         </div>
-        <div className="mt-1 text-[13px] text-muted">{formatoFechaLargaEsCo(hoy)}</div>
-        <div className="mt-4 flex gap-1.5">
-          {OWNERS.map((o) => (
-            <Link
-              key={o.key}
-              href={`/cola?owner=${encodeURIComponent(o.key)}`}
-              className={cn(chip({ on: o.key === owner }), "inline-block")}
+        <div className="mt-5 h-px bg-line" />
+        <nav className="flex items-center gap-6 pt-3 pb-1">
+          {NAV_LINKS.map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              className="text-xs uppercase tracking-widest text-muted transition-colors duration-150 hover:text-ink"
             >
-              {o.label}
-            </Link>
+              {l.label}
+            </a>
           ))}
-        </div>
+        </nav>
       </div>
-      <div className="flex gap-8 max-sm:w-full max-sm:justify-between max-sm:gap-4">
-        <Stat value={pendientes} label="pendientes" tone="neutral" />
-        <Stat value={vencidas} label="vencidas" tone="overdue" />
-        <Stat value={cerradas} label="cerradas" tone="done" />
-      </div>
-    </div>
+    </header>
   );
 }

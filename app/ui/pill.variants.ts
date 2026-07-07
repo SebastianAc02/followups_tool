@@ -2,15 +2,19 @@ import { cva } from "class-variance-authority";
 
 export type PillTone = "hot" | "warm" | "cold";
 
-export const pill = cva("rounded-[7px] px-[9px] py-0.5 text-[11px] font-medium", {
-  variants: {
-    tone: {
-      hot: "bg-today-bg text-today",
-      warm: "bg-surface-2 text-ink-soft",
-      cold: "bg-surface-2 text-muted",
-    } satisfies Record<PillTone, string>,
-  },
-});
+// Calca el pill de estado de la tarjeta "Ahora" en Arc (Sales Followup Cockpit):
+// shell neutro plano (bg #1c1c20 / borde #232327 / texto #a9a9ad) para las 3 tonos --
+// el mockup solo diferencia por el color del punto, no por el fondo del pill.
+export const pill = cva(
+  "inline-flex items-center gap-1.5 rounded-[7px] border border-[#232327] bg-[#1c1c20] px-[11px] py-[3px] text-[11.5px] font-semibold text-[#a9a9ad]",
+);
+
+// Color del punto dentro del pill, por tono -- unico elemento que varia.
+export const pillDot: Record<PillTone, string> = {
+  hot: "bg-today",
+  warm: "bg-ink-soft",
+  cold: "bg-faint",
+};
 
 const ESTADO_PILL: Record<string, { label: string; tone: PillTone }> = {
   reunion_agendada: { label: "reunión", tone: "hot" },

@@ -7,7 +7,7 @@ export const chip = cva("inline-flex cursor-pointer items-center gap-2 border tr
   variants: {
     tone: {
       invert: "rounded-full px-[15px] py-2 text-[12px]",
-      accent: "rounded-lg px-[13px] py-[7px] text-[12.5px] font-semibold",
+      accent: "rounded-lg px-3 py-1.5 text-xs font-semibold",
     },
     on: {
       true: "",

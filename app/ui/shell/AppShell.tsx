@@ -64,7 +64,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
         {/* glow ambiental (arbitrary Tailwind, no CSS) */}
         <div className="pointer-events-none absolute -top-[140px] left-[40%] h-[340px] w-[520px] bg-[radial-gradient(closest-side,rgba(139,124,255,0.16),transparent)]" />
         <TopBar fecha={fechaCorta(ahora)} iniciales={iniciales(owner)} />
-        <div className="relative z-[1] flex-1 overflow-auto px-[30px] pb-11 pt-[30px]">{children}</div>
+        <div className="relative z-[1] flex-1 overflow-auto px-6 pb-10 pt-6 lg:px-8 lg:pt-8">{children}</div>
       </div>
     </div>
   );

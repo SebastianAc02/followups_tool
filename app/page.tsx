@@ -36,13 +36,13 @@ export default async function Dashboard() {
 
   return (
     <AppShell>
-      <div className="mb-[26px]">
-        <div className="text-[24px] font-bold tracking-[-0.01em] text-ink">{saludo(ahora, owner)}</div>
-        <div className="mt-[3px] text-[13.5px] text-muted">Esto es lo que pide tu atención hoy.</div>
+      <div className="mb-8">
+        <h2 className="font-heading text-2xl tracking-tight text-ink md:text-3xl">{saludo(ahora, owner)}</h2>
+        <p className="mt-1 text-sm text-muted">Esto es lo que pide tu atención hoy.</p>
       </div>
 
       {/* Stats */}
-      <div className="mb-[34px] grid grid-cols-4 gap-3.5 max-lg:grid-cols-2 max-sm:grid-cols-1">
+      <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Toques para hoy" valor={resumen.toquesHoy} sub={`${resumen.toquesHoy} en cola`} />
         <StatCard
           label="Vencidos"
@@ -59,15 +59,15 @@ export default async function Dashboard() {
       <PipelineBar porEstado={porEstado} />
 
       {/* Campañas */}
-      <div className="mb-1.5 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <SectionLabel className="mb-0">Campañas activas</SectionLabel>
-        <Link href="/campanas" className="text-[12.5px] font-semibold text-accent-soft">
+        <Link href="/campanas" className="text-xs font-semibold text-accent-soft transition-colors hover:text-accent">
           Abrir módulo →
         </Link>
       </div>
-      <div className="overflow-hidden rounded-[15px] border border-line-card bg-card">
+      <div className="overflow-hidden rounded-xl border border-line-card bg-card">
         {campanas.length === 0 ? (
-          <div className="px-5 py-[15px] text-[13px] text-muted">Sin campañas todavía.</div>
+          <div className="px-5 py-4 text-sm text-muted">Sin campañas todavía.</div>
         ) : (
           campanas.map((c, i) => <CampaignRow key={c.id} c={c} primero={i === 0} />)
         )}

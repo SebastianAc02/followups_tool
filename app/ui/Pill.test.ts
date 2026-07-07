@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pill, pillParaEstado } from './pill.variants.ts';
+import { pill, pillDot, pillParaEstado } from './pill.variants.ts';
 
-test('pill: variante hot rinde el token de today', () => {
-  assert.match(pill({ tone: 'hot' }), /text-today/);
+test('pill: shell plano, calca el pill de estado del mockup (Arc)', () => {
+  assert.match(pill(), /bg-\[#1c1c20\]/);
 });
 
-test('pill: variante cold rinde el token muted', () => {
-  assert.match(pill({ tone: 'cold' }), /text-muted/);
+test('pillDot: cada tono tiene su color de punto', () => {
+  assert.equal(pillDot.hot, 'bg-today');
+  assert.equal(pillDot.warm, 'bg-ink-soft');
+  assert.equal(pillDot.cold, 'bg-faint');
 });
 
 test('pillParaEstado: mapea un estado conocido a su tono', () => {

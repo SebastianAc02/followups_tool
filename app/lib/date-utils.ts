@@ -56,3 +56,12 @@ export function saludoPorHora(hora: number): string {
   if (hora >= 12 && hora < 19) return 'Buenas tardes';
   return 'Buenas noches';
 }
+
+// Hora corta es-CO para el header del dashboard: "9:02 a.m.". Formateo manual (no
+// Intl) para fijar el patron exacto -- minusculas, puntos, sin cero a la izquierda.
+export function formatoHoraEsCo(date: Date): string {
+  const minutos = String(date.getMinutes()).padStart(2, '0');
+  const ampm = date.getHours() < 12 ? 'a.m.' : 'p.m.';
+  const horas12 = date.getHours() % 12 || 12;
+  return `${horas12}:${minutos} ${ampm}`;
+}

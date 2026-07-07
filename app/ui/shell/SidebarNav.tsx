@@ -33,18 +33,16 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
             key={item.href}
             href={item.href}
             className={cx(
-              'relative flex items-center gap-[11px] rounded-[10px] px-[11px] py-[9px] text-[13.5px] transition-colors',
+              'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
               activo
-                ? 'bg-accent-bg font-semibold text-accent-ink'
+                ? 'bg-nav font-semibold text-nav-ink'
                 : 'text-[#9ca0ab] hover:bg-card-hover hover:text-ink',
             )}
           >
             {activo && (
-              <span className="absolute -left-3 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-[3px] bg-accent" />
+              <span className="absolute -left-3 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
             )}
-            <span className={cx('shrink-0', activo ? 'text-accent-soft' : 'text-current')}>
-              {item.icon}
-            </span>
+            <span className="shrink-0 text-current">{item.icon}</span>
             <span className="flex-1">{item.label}</span>
             {item.badge && (
               <span
