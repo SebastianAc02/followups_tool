@@ -378,7 +378,7 @@ git add app/core/canales-empresa.ts app/core/canales-empresa.test.ts
 git commit -m "feat(core): readiness de canal por empresa con regla de faltante (puro)"
 ```
 
-### Task A5: Migración + columna `campana.regla_faltante`
+### Task A5: Migración + columnas `campana.regla_faltante` e `intake_diario`
 
 **Files:**
 - Modify: `app/db/schema.ts:199-214`
@@ -419,12 +419,18 @@ Agregar a `campanaInputSchema` (junto a `modo`):
 
 ```ts
   reglaFaltante: z.enum(REGLAS_FALTANTE).optional().default('cola'),
+  // intake_diario: cuantas cuentas nuevas arrancan la cadencia por dia. Opcional;
+  // sin el, todas entran el dia 1.
+  intakeDiario: z.number().int().positive().optional(),
 ```
 
 En `app/db/schema.ts`, dentro de `campana`, tras `modo`:
 
 ```ts
   reglaFaltante: text('regla_faltante').notNull().default('cola'),
+  // intake_diario: cuantas cuentas nuevas arrancan la cadencia por dia (goteo). null =
+  // todas el dia 1. Lo usa el preview dia a dia (Fase E) y el arranque real.
+  intakeDiario: integer('intake_diario'),
 ```
 
 - [ ] **Step 4: Ver que pasa (dominio)**
@@ -438,6 +444,7 @@ Crear `scripts/migrate_campanas_p5_regla_faltante.py` copiando la estructura de 
 
 ```sql
 ALTER TABLE campana ADD COLUMN regla_faltante TEXT NOT NULL DEFAULT 'cola';
+ALTER TABLE campana ADD COLUMN intake_diario INTEGER;
 ```
 
 - [ ] **Step 6: Correr dryrun y revisar**
@@ -445,15 +452,15 @@ ALTER TABLE campana ADD COLUMN regla_faltante TEXT NOT NULL DEFAULT 'cola';
 Run: `python3 scripts/migrate_campanas_p5_regla_faltante.py --dryrun`
 Expected: imprime el ALTER y el estado, sin escribir. Revisar a ojo. Luego `--apply` cuando esté OK.
 
-- [ ] **Step 7: `crearCampana` persiste `regla_faltante`**
+- [ ] **Step 7: `crearCampana` persiste `regla_faltante` e `intake_diario`**
 
-En `app/db/repository.ts`, en `crearCampana`, incluir `reglaFaltante` en el insert (leyendo del input ya parseado). Agregar test en `app/db/repository.test.ts` que crea una campaña con `reglaFaltante: 'saltar'` y la lee de vuelta.
+En `app/db/repository.ts`, en `crearCampana`, incluir `reglaFaltante` e `intakeDiario` en el insert (leyendo del input ya parseado). Agregar test en `app/db/repository.test.ts` que crea una campaña con `reglaFaltante: 'saltar'`, `intakeDiario: 50` y los lee de vuelta.
 
 - [ ] **Step 8: Commit**
 
 ```bash
 git add app/db/schema.ts app/db/validation.ts app/db/validation.test.ts app/db/repository.ts app/db/repository.test.ts scripts/migrate_campanas_p5_regla_faltante.py
-git commit -m "feat(campana): regla_faltante (reemplazar/saltar/cola) en dominio, schema y migracion"
+git commit -m "feat(campana): regla_faltante e intake_diario en dominio, schema y migracion"
 ```
 
 ### Task A6: Repository — empresas con readiness + conteos
@@ -890,7 +897,8 @@ Entrega: vista 3 (cadencia editable con columna Aprobación, reusa parser existe
 - **Cadencia:** reusar `ConstructorCadencia.tsx` y el parser (`parsearCadenciaMarkdown`/`Csv`). Agregar columna "Aprobación" que setea `esManual` por paso (ya existe en `pasoParseadoSchema`). "Tu cadencia por pasos" se genera de la tabla de toques.
 - **Destinatarios por rol:** nuevo `contactosPorRol(idsEmpresa, roles): Map<idEmpresa, Contacto[]>` en el Repository (query de lectura). UI: chips de rol (gerente/dueño/técnico/todos) que filtran a quién se inscribe.
 - **Regla de faltante:** `ReglaFaltante.tsx` con las 3 opciones (texto exacto del mockup: "Reemplazar por llamada" / "Saltar el paso" / "Cola de contacto"). El valor va a `crearCampana` (columna ya creada en A5).
-- **Resumen de envío (factura):** `ResumenEnvio.tsx` — "Vas a inscribir a N contactos ... cadencia X · K toques en D días". N/K/D salen de `conteosReadiness` + la cadencia. Botón "Lanzar" -> server action que llama `crearCampana` (con `reglaFaltante`) + `inscribirCampana` (existe). Las empresas `sin_canal`/`cola` quedan como inscripción `bloqueada` (el schema ya lo contempla: índice parcial solo cuenta `activa`).
+- **Ritmo de entrada diario:** input "cuántas cuentas nuevas por día" -> `intakeDiario` (columna ya creada en A5). Vacío = todas el día 1. Lo consume el preview día a día (Fase E).
+- **Resumen de envío (factura):** `ResumenEnvio.tsx` — "Vas a inscribir a N contactos ... cadencia X · K toques en D días". N/K/D salen de `conteosReadiness` + la cadencia. Botón "Lanzar" -> server action que llama `crearCampana` (con `reglaFaltante` e `intakeDiario`) + `inscribirCampana` (existe). Las empresas `sin_canal`/`cola` quedan como inscripción `bloqueada` (el schema ya lo contempla: índice parcial solo cuenta `activa`).
 
 **Verify:** crear una cadencia de 4 toques, marcar el toque 1 como manual, elegir solo gerentes, poner regla "saltar", lanzar; confirmar en DB temporal/dev que la campaña quedó con `regla_faltante='saltar'` y las inscripciones en el estado correcto.
 
@@ -903,12 +911,12 @@ Entrega: el toggle Preview con timeline por cuenta (scrub + animación por canal
 ### Core (TDD):
 
 - **`app/core/render-copy.ts`** — `renderCopy(plantilla: string, datos: Record<string,string>): string` sustituye `[nombre]`, `[empresa]`, etc. Tests: sustituye variables conocidas; deja intacta una variable sin dato y la reporta (para no mandar "[nombre]" en un correo real). Reusa la extracción de `variables` que ya hace el parser.
-- **`app/core/simulacion-campana.ts`** — `simularTimeline(empresa, contactos, cadencia, regla, anchor): NodoTimeline[]` y `simularCohorte(inscripciones, cadencia, config, rango): DiaCohorte[]`. Se apoya en `calcularCalendario`/`proximoPasoDebido`/`elegirVersionPorPeso` (ya existen) + `readinessEmpresa` (A4) + `renderCopy`. Tipos:
+- **`app/core/simulacion-campana.ts`** — `simularTimeline(empresa, contactos, cadencia, regla, anchor): NodoTimeline[]` y `simularCohorte(empresas, cadencia, config, intakeDiario, rango): DiaCohorte[]`. Se apoya en `calcularCalendario`/`proximoPasoDebido`/`elegirVersionPorPeso` (ya existen) + `readinessEmpresa` (A4) + `renderCopy`. `intakeDiario` escalona las entradas: con 90 empresas e `intakeDiario=50`, el día 0 arrancan 50 y el día 1 las otras 40 (y sus toques se corren en consecuencia); `null` = todas el día 0. Tipos:
   ```ts
   type NodoTimeline = { orden: number; dia: number; canal: Canal; asunto?: string; cuerpo: string; estado: 'ok' | 'reemplazado' | 'saltado' };
   type DiaCohorte = { dia: number; porCanal: Record<Canal, number>; nuevasCuentas: number };
   ```
-  Tests deterministas: una cadencia [correo d0, llamada d3, correo d7] sobre una empresa sin correo con regla `saltar` produce nodos con el paso de correo `saltado`; con `reemplazar`, `reemplazado` a llamada. El copy sale personalizado con el nombre real del contacto. La cohorte suma bien por día.
+  Tests deterministas: una cadencia [correo d0, llamada d3, correo d7] sobre una empresa sin correo con regla `saltar` produce nodos con el paso de correo `saltado`; con `reemplazar`, `reemplazado` a llamada. El copy sale personalizado con el nombre real del contacto. La cohorte con `intakeDiario=50` sobre 90 empresas mete 50 el día 0 y 40 el día 1, y suma bien los toques por día.
 
 ### UI (build + verify, WAAPI):
 
@@ -952,7 +960,7 @@ Cada fase de UI (C, D, E-UI, F) se expande a su propio `docs/superpowers/plans/`
 - 3.3 readiness + regla de faltante -> A4 (core), A5 (columna), A6 (conteos), C/D (UI). ✓
 - 3.4 destinatarios por rol -> A2/A3 (filtro rol) + D (contactosPorRol + UI). ✓
 - 4 wizard + hub -> C (seg), D (cadencia/dest), E (preview), F (hub). ✓
-- 5 preview cinemático (timeline + día a día) -> Fase E (simulacion-campana + UI). ✓
+- 5 preview cinemático (timeline + día a día con intake_diario) -> Fase E (simulacion-campana + UI) + A5 (columna) + D (config de lanzamiento). ✓
 - 6 dirección de diseño -> Fase C (tokens globals.css + fuentes). ✓
 - 7 modelo de datos (regla_faltante, campos/ops nuevos, sin tablas nuevas) -> A. ✓
 - Refinamientos mockup (2): Copiloto BETA (B/C), aprobación por toque (D), resumen factura (D), pulso hub (F), nav Plantillas/Reportes (F). ✓

@@ -163,7 +163,8 @@ preview sale de `proximoPasoDebido()` + `calcularCalendario()` + `elegirVersionP
 ### 5b · Día a día (cohorte)
 Calendario NO tradicional. El usuario desliza día por día y ve el volumen y tipo de toque de
 toda la campaña: "Día 1: entran 50 cuentas, 50 correos del paso 1". "Día 3: 50 llamadas del
-paso 2". Deriva del mismo motor sobre todas las inscripciones simuladas.
+paso 2". El "50 por día" sale de `campana.intake_diario` (goteo configurable); vacío = todas
+el día 1. Deriva del mismo motor sobre todas las inscripciones simuladas.
 
 ## 6. Dirección de diseño (del mockup elegido)
 
@@ -180,6 +181,8 @@ Extiende `app/globals.css` (dark cálido, ya existe). Se agregan variables, no s
 
 Casi todo existe (schema Fase 4 completo). Cambios nuevos, mínimos:
 - `campana.regla_faltante` (text: `reemplazar`|`saltar`|`cola`; default `cola`). NUEVO.
+- `campana.intake_diario` (integer, nullable): cuántas cuentas nuevas arrancan la cadencia
+  por día. null = todas el día 1. Lo usa el preview día a día y el arranque real. NUEVO.
 - Derivación de canales alcanzables: función PURA en core, no columna (se calcula de
   `contacto.email`/`telefono`). Si el cómputo pesa, se cachea después; no ahora.
 - `DefinicionSegmento`: extender `CAMPOS_SEGMENTO` con `departamento` y rol de contacto, el
