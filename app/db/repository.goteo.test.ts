@@ -12,7 +12,7 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { crearCadencia, guardarSegmento, crearCampana, inscribirCampana, historialInscripciones } = await import('./repository.ts');
+const { crearCadencia, guardarSegmento, crearCampana, inscribirCampana, historialInscripciones, guardarProveedorCampanaId, campanaParaLanzar } = await import('./repository.ts');
 
 const MARTES = '2026-07-07';
 
@@ -89,6 +89,28 @@ test('sin intakeDiario, todas las elegibles entran el mismo dia (comportamiento 
   assert.equal(fecha('e2'), '2026-07-07');
   assert.equal(fecha('e4'), '2026-07-07');
   assert.equal(fecha('e5'), '2026-07-07');
+});
+
+// Lanzar (pedido puntual de Sebastian): guardarProveedorCampanaId persiste el id de la
+// secuencia externa de Apollo y se puede releer via campanaParaLanzar. El flujo completo
+// de lanzarCampanaAction llamando al adaptador real de Apollo no tiene inyeccion de
+// dependencias (crea crearApolloAdapter() directo) -- ese camino se prueba manualmente
+// contra la cuenta real, no aca.
+test('guardarProveedorCampanaId persiste el id de la secuencia externa y se puede leer de vuelta', () => {
+  const idSegmento3 = guardarSegmento({ nombre: 'goteo-proveedor', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
+  const idCampana = crearCampana({ nombre: 'Camp proveedor', idCadencia, idSegmento: idSegmento3, fechaInicio: MARTES });
+
+  guardarProveedorCampanaId(idCampana, 'apollo-seq-123');
+
+  const raw = new Database(dbPath);
+  const fila = raw.prepare('SELECT proveedor_campana_id FROM campana WHERE id_campana = ?').get(idCampana) as { proveedor_campana_id: string };
+  raw.close();
+  assert.equal(fila.proveedor_campana_id, 'apollo-seq-123');
+
+  // campanaParaLanzar no expone proveedorCampanaId hoy (no lo necesita la pantalla de
+  // Lanzar); se verifica que la campana sigue siendo legible sin romperse tras el UPDATE.
+  const camp = campanaParaLanzar(idCampana);
+  assert.equal(camp?.nombre, 'Camp proveedor');
 });
 
 test.after(() => {

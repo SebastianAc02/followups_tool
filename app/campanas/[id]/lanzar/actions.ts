@@ -5,6 +5,7 @@ import {
   campanaParaLanzar,
   actualizarConfigLanzamiento,
   inscribirCampana,
+  guardarProveedorCampanaId,
   toquesGlobalesHoy,
   type CampanaParaLanzar,
   type ConfigLanzamientoInput,
@@ -12,6 +13,7 @@ import {
 } from '../../../db/repository';
 import { requireSession } from '../../../lib/session';
 import { calcularGoteo, type ResultadoGoteo } from '../../../core/goteo';
+import { crearApolloAdapter } from '../../../adapters/apollo';
 
 // Fase 8 (Lanzar), Task 8.4: recalcula la barra "asi se distribuye" con los valores QUE
 // EL USUARIO TIENE EN PANTALLA, sin guardar nada todavia -- mismo patron que
@@ -57,16 +59,36 @@ export async function guardarConfigLanzamientoAction(idCampana: number, config: 
 
 // Botón "Lanzar hoy": persiste la config final y dispara inscribirCampana (que ya usa el
 // goteo internamente, Task 8.3 -- esta action no reimplementa el enrollment, solo lo llama).
-export type LanzarCampanaResultado = { ok: true; resultado: ResultadoInscripcion } | { ok: false; error: string };
+export type LanzarCampanaResultado =
+  | { ok: true; resultado: ResultadoInscripcion; avisoSecuenciaExterna?: string }
+  | { ok: false; error: string };
 
 export async function lanzarCampanaAction(idCampana: number, config: ConfigLanzamientoInput): Promise<LanzarCampanaResultado> {
   await requireSession();
   try {
     actualizarConfigLanzamiento(idCampana, config);
     const resultado = inscribirCampana(idCampana);
+
+    // La campana YA quedo inscrita en la DB local en este punto (fuente de la verdad).
+    // Crear la secuencia en Apollo es un paso adicional: si falla (sin credencial,
+    // timeout, etc.) no se revierte lo inscrito ni se bloquea la accion -- se avisa
+    // en el resultado para que la UI lo muestre, nada mas.
+    let avisoSecuenciaExterna: string | undefined;
+    try {
+      const camp = campanaParaLanzar(idCampana);
+      if (camp) {
+        const proveedorCampanaId = await crearApolloAdapter().crearCampanaExterna(camp.nombre);
+        guardarProveedorCampanaId(idCampana, proveedorCampanaId);
+      }
+    } catch (e) {
+      avisoSecuenciaExterna = `la campaña se lanzó pero no se pudo crear la secuencia en Apollo: ${
+        e instanceof Error ? e.message : String(e)
+      }`;
+    }
+
     revalidatePath(`/campanas/${idCampana}/lanzar`);
     revalidatePath('/campanas');
-    return { ok: true, resultado };
+    return { ok: true, resultado, ...(avisoSecuenciaExterna ? { avisoSecuenciaExterna } : {}) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo lanzar la campaña' };
   }

@@ -45,6 +45,7 @@ export function LanzarCockpit({
   const [cargaGlobal, setCargaGlobal] = useState(cargaGlobalInicial);
   const [error, setError] = useState('');
   const [resultado, setResultado] = useState<{ inscritas: number; bloqueadas: number } | null>(null);
+  const [avisoSecuenciaExterna, setAvisoSecuenciaExterna] = useState('');
   const [pendienteCalculo, startCalculo] = useTransition();
   const [pendienteLanzar, startLanzar] = useTransition();
 
@@ -101,6 +102,7 @@ export function LanzarCockpit({
         return;
       }
       setResultado({ inscritas: res.resultado.inscritas, bloqueadas: res.resultado.bloqueadas });
+      if (res.avisoSecuenciaExterna) setAvisoSecuenciaExterna(res.avisoSecuenciaExterna);
       router.refresh();
     });
   }
@@ -125,6 +127,7 @@ export function LanzarCockpit({
             {resultado.inscritas} {resultado.inscritas === 1 ? 'cuenta entró' : 'cuentas entraron'} a la secuencia
             {resultado.bloqueadas > 0 && ` · ${resultado.bloqueadas} quedaron en cola de revisión`}.
           </p>
+          {avisoSecuenciaExterna && <p className="mt-3 text-sm text-amber-600">{avisoSecuenciaExterna}</p>}
         </section>
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">

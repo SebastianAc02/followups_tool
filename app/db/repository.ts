@@ -1181,6 +1181,17 @@ export function actualizarReglaFaltante(idCampana: number, regla: ReglaFaltante)
     .run();
 }
 
+// Lanzar (nuevo, pedido puntual de Sebastian): guarda el id de la secuencia externa que
+// devuelve EnvioAdapter.crearCampanaExterna. UPDATE simple de un solo campo, mismo patron
+// que actualizarReglaFaltante -- se llama una sola vez, justo despues de crear la secuencia
+// en Apollo al lanzar la campana.
+export function guardarProveedorCampanaId(idCampana: number, proveedorCampanaId: string): void {
+  db.update(campana)
+    .set({ proveedorCampanaId, updatedAt: new Date().toISOString() })
+    .where(eq(campana.idCampana, idCampana))
+    .run();
+}
+
 // Draft persistente (creacion de campana): UPDATE parcial para los dos campos que
 // el paso de Cadencia deja editar mientras la campana sigue en 'borrador' (nombre y
 // modo). Mismo patron que actualizarReglaFaltante: valida con el enum de dominio y
