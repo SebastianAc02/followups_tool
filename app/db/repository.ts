@@ -1616,6 +1616,22 @@ export function metricasHub() {
   return { toquesSemana, tasaRespuesta, empresasEnSecuencia, bloqueadasEsperandoRegla };
 }
 
+// Fase 8 (Lanzar), Task 8.1: agregado INFORMATIVO de la carga total del dia, sumando
+// topeToquesDia (si esta fijado) o intakeDiario (si no) de toda campana activa. No
+// impone ningun limite: es el numero que la UI de Lanzar (Task 8.4) le muestra a
+// Sebastian para que el mismo decida bajarle el tope a la campana que esta armando.
+// Por eso vive como query de solo lectura, sin tocar inscribirCampana ni el enrollment.
+export function toquesGlobalesHoy(): { totalHoy: number; campanasActivas: number } {
+  const filas = db
+    .select({ topeToquesDia: campana.topeToquesDia, intakeDiario: campana.intakeDiario })
+    .from(campana)
+    .where(eq(campana.estado, 'activa'))
+    .all();
+
+  const totalHoy = filas.reduce((acc, f) => acc + (f.topeToquesDia ?? f.intakeDiario ?? 0), 0);
+  return { totalHoy, campanasActivas: filas.length };
+}
+
 // Task 1.6: tabla de empresas inscritas del hub (activas + bloqueadas, cualquier
 // campana). Reusa el mismo inscripcion.estado que inscripcionesBloqueadas() y
 // listarCampanas() -- no inventa un estado "limite diario": la unica distincion real

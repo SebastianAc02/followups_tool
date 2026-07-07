@@ -166,6 +166,13 @@ export type ModoCampana = (typeof MODOS_CAMPANA)[number];
 export const REGLAS_FALTANTE = ['reemplazar', 'saltar', 'cola'] as const;
 export type ReglaFaltanteInput = (typeof REGLAS_FALTANTE)[number];
 
+// Fase 8 (Lanzar): ritmo del goteo de INGRESO (cuando arranca cada cuenta nueva),
+// no del calendario de toques (eso ya lo fija dia_offset en paso_cadencia).
+// 'personalizado' se deja abierto para el detalle que arme calcularGoteo (Task 8.2),
+// no se cierra aqui a una forma concreta.
+export const RITMOS_INGRESO = ['diario', 'dia_si_dia_no', 'personalizado'] as const;
+export type RitmoIngresoInput = (typeof RITMOS_INGRESO)[number];
+
 export const campanaInputSchema = z.object({
   nombre: z.string().min(1),
   idCadencia: z.number().int().positive(),
@@ -179,6 +186,12 @@ export const campanaInputSchema = z.object({
   // intake_diario: cuantas cuentas nuevas arrancan la cadencia por dia (goteo).
   // undefined = todas el dia 1.
   intakeDiario: z.number().int().positive().optional(),
+  ritmoIngreso: z.enum(RITMOS_INGRESO).optional().default('diario'),
+  // topeToquesDia: control REAL por campana (Fase 8), editable en el wizard de Lanzar.
+  // undefined/null = sin tope.
+  topeToquesDia: z.number().int().positive().optional(),
+  // fechaInicio: ISO date. undefined = arranca hoy.
+  fechaInicio: z.string().min(1).optional(),
 });
 
 // z.input (no z.infer/z.output): modo tiene default(), asi que en la salida ya

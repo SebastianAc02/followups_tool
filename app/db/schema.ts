@@ -227,6 +227,12 @@ export const campana = sqliteTable('campana', {
   // intake_diario: cuantas cuentas nuevas arrancan la cadencia por dia (goteo). null =
   // todas el dia 1. Lo usa el preview dia a dia (Fase E) y el arranque real.
   intakeDiario: integer('intake_diario'),
+  // Fase 8 (Lanzar): ritmoIngreso rige que dias del calendario cuentan como "dia activo"
+  // de goteo (ver RITMOS_INGRESO en validation.ts); topeToquesDia es el control REAL por
+  // campana (editable en el wizard, no un agregado). fechaInicio null = arranca hoy.
+  ritmoIngreso: text('ritmo_ingreso').notNull().default('diario'),
+  topeToquesDia: integer('tope_toques_dia'),
+  fechaInicio: text('fecha_inicio'),
   owner: text('owner'),
   proveedorCampanaId: text('proveedor_campana_id'),
   createdAt: text('created_at'),
