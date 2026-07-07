@@ -3,8 +3,27 @@
 Fecha: 2026-07-07 · Rama: fase4-cadencias · Feature: F3 (campañas y cadencias),
 la mitad de "creación". La ejecución/tracking (P4/P5) queda para el spec siguiente.
 
-Mockup de referencia: `2026-07-07-cockpit-campanas-mockup.html` (Claude Design).
+Mockup de referencia: `2026-07-07-cockpit-campanas-mockup-completo.html` (flujo completo,
+Claude Design; el primero `...-mockup.html` es la exploración de direcciones).
 Dirección elegida: **2A para el flujo de creación + 1C para el dashboard/tarjetas.**
+
+### Refinamientos del mockup completo (2), incorporados al plan
+- **Copiloto (IA):** panel lateral en la vista de segmentación, estado BETA. "Describe tu
+  segmento" -> botón "Traducir" -> chips "traducido a ..." + "editables a mano abajo". Es el
+  contrato `frase -> DefinicionSegmento` (3.1) ya con nombre de producto: Copiloto.
+- **Wizard, breadcrumb fijo:** Segmento › Cadencia › Reglas/Destinatarios › Preview › Lanzar.
+- **Cadencia con aprobación por toque:** columna "Aprobación"; se marcan los toques a revisar
+  antes de enviar (el manual-email de Tier 1, F3.5). "Tu cadencia por pasos" se genera de los
+  toques de arriba.
+- **Resumen de envío tipo factura:** antes de lanzar, "Vas a inscribir a N contactos ... cada
+  uno recibe la cadencia X · K toques en D días. Revísalo como una factura antes de lanzar."
+- **Hub con pulso (1C):** "empresas en secuencia hoy · bloqueadas esperando regla", "toques
+  esta semana", "tasa de respuesta"; tabs Todas / Activas / Pausada / Borrador. Los dos
+  últimos números son tracking (F4): en este spec salen de simulación o quedan como pulso
+  placeholder; el dato real llega con el spec de ejecución.
+- **Nav global:** Campañas · Contactos · Plantillas · Reportes. Plantillas = librería de
+  cadencias reutilizables (reusa `listarCadencias()`); Reportes = tracking, spec siguiente
+  (stub). Contactos existe aparte.
 
 ---
 
