@@ -1,16 +1,10 @@
 import type { ReactNode } from "react";
-import { cx } from "./cx";
+import { cn } from "./cn";
+import { pill, type PillTone } from "./pill.variants.ts";
 
-const TONE = {
-  hot: "bg-today-bg text-today",
-  warm: "bg-surface-2 text-ink-soft",
-  cold: "bg-surface-2 text-muted",
-} as const;
+export type { PillTone } from "./pill.variants.ts";
+export { pillParaEstado } from "./pill.variants.ts";
 
-export function Pill({ tone, children }: { tone: keyof typeof TONE; children: ReactNode }) {
-  return (
-    <span className={cx("rounded-[7px] px-[9px] py-0.5 text-[11px] font-medium", TONE[tone])}>
-      {children}
-    </span>
-  );
+export function Pill({ tone, children, className }: { tone: PillTone; children: ReactNode; className?: string }) {
+  return <span className={cn(pill({ tone }), className)}>{children}</span>;
 }

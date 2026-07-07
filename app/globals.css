@@ -18,6 +18,11 @@
   --color-done: #57c98a;
   --color-ring: rgba(255, 255, 255, 0.12);
 
+  --color-canal-llamada: #8fb0e0;
+  --color-canal-correo: #d3a0a6;
+  --color-canal-whatsapp: #84c99e;
+  --color-acento: #6f9fd0;
+
   --font-sans: var(--ff-sans), system-ui, sans-serif;
   --font-mono: var(--ff-mono), ui-monospace, monospace;
   --font-serif: var(--ff-serif), Georgia, serif;
