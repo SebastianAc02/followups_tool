@@ -70,6 +70,8 @@ import {
   RESULTADOS,
   type Canal,
   type Resultado,
+  RITMOS_INGRESO,
+  type RitmoIngresoInput,
 } from './validation';
 
 // Único punto de acceso a datos. El resto de la app no toca SQL ni la DB directo.
@@ -1536,6 +1538,38 @@ export function campanaParaPreview(idCampana: number): CampanaParaPreview | null
   return { ...fila, reglaFaltante: fila.reglaFaltante as ReglaFaltante };
 }
 
+// Task 10.1 (panel de control por campana, Fase 10): cabecera minima para el
+// Resumen -- estado (activa/pausada/borrador/finalizada) y el idCadencia real para
+// enlazar a /cadencias/[id] (la ruta usa el id de LA CADENCIA, no el de la campana).
+// Variante de solo lectura de campanaParaPreview: no la reusa porque esa no trae
+// estado ni idCadencia y extenderla ahi tocaria un tipo ya consumido por Destinatarios.
+export type CampanaResumen = {
+  idCampana: number;
+  nombre: string;
+  estado: string;
+  idCadencia: number;
+  cadencia: string;
+  segmento: string;
+};
+
+export function campanaResumen(idCampana: number): CampanaResumen | null {
+  const fila = db
+    .select({
+      idCampana: campana.idCampana,
+      nombre: campana.nombre,
+      estado: campana.estado,
+      idCadencia: campana.idCadencia,
+      cadencia: cadencia.nombre,
+      segmento: segmento.nombre,
+    })
+    .from(campana)
+    .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
+    .innerJoin(segmento, eq(segmento.idSegmento, campana.idSegmento))
+    .where(eq(campana.idCampana, idCampana))
+    .get();
+  return fila ?? null;
+}
+
 // Fase 6 (V4 Destinatarios): una fila de la tabla de destinatarios, con los datos
 // de contacto/empresa ya resueltos (la UI no arma el join). El calculo de estado y
 // cadencia ajustada viene tal cual de previsualizarInscripcion (core, puro).
@@ -1661,16 +1695,34 @@ export function listarCampanas() {
 // los ultimos 7 dias; tasaRespuesta es una cohorte por toque (no un ratio de filas
 // sueltas): de esos toques 'enviado' en la ventana, la fraccion cuyo id_paso_inscripcion
 // tiene tambien un evento 'respondio' en cualquier fecha (join enviado->respondio).
-export function metricasHub() {
+//
+// Task 10.1 (panel de control por campana): filtro opcional `idCampana`, aditivo —
+// sin argumento se comporta exactamente igual que antes (todas las campanas, uso del
+// hub). Con idCampana, evento_tracking se une hasta inscripcion.id_campana (mismo
+// join que ya usa pushCandidatos) y activa/bloqueada tambien se restringen a esa campana.
+export function metricasHub(idCampana?: number) {
   const desde = new Date();
   desde.setDate(desde.getDate() - 7);
   const desdeIso = desde.toISOString();
 
-  const enviados = db
+  const enviadosQuery = db
     .select({ idPasoInscripcion: eventoTracking.idPasoInscripcion })
     .from(eventoTracking)
-    .where(and(eq(eventoTracking.tipo, 'enviado'), sql`${eventoTracking.fechaEvento} >= ${desdeIso}`))
-    .all();
+    .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion));
+
+  const enviados = (
+    idCampana != null
+      ? enviadosQuery.where(
+          and(
+            eq(eventoTracking.tipo, 'enviado'),
+            sql`${eventoTracking.fechaEvento} >= ${desdeIso}`,
+            eq(inscripcion.idCampana, idCampana),
+          ),
+        )
+      : enviadosQuery.where(and(eq(eventoTracking.tipo, 'enviado'), sql`${eventoTracking.fechaEvento} >= ${desdeIso}`))
+  ).all();
 
   const toquesSemana = enviados.length;
 
@@ -1689,13 +1741,21 @@ export function metricasHub() {
   const empresasEnSecuencia = db
     .select({ n: sql<number>`count(*)` })
     .from(inscripcion)
-    .where(eq(inscripcion.estado, 'activa'))
+    .where(
+      idCampana != null
+        ? and(eq(inscripcion.estado, 'activa'), eq(inscripcion.idCampana, idCampana))
+        : eq(inscripcion.estado, 'activa'),
+    )
     .get()!.n;
 
   const bloqueadasEsperandoRegla = db
     .select({ n: sql<number>`count(*)` })
     .from(inscripcion)
-    .where(eq(inscripcion.estado, 'bloqueada'))
+    .where(
+      idCampana != null
+        ? and(eq(inscripcion.estado, 'bloqueada'), eq(inscripcion.idCampana, idCampana))
+        : eq(inscripcion.estado, 'bloqueada'),
+    )
     .get()!.n;
 
   return { toquesSemana, tasaRespuesta, empresasEnSecuencia, bloqueadasEsperandoRegla };
@@ -1715,6 +1775,87 @@ export function toquesGlobalesHoy(): { totalHoy: number; campanasActivas: number
 
   const totalHoy = filas.reduce((acc, f) => acc + (f.topeToquesDia ?? f.intakeDiario ?? 0), 0);
   return { totalHoy, campanasActivas: filas.length };
+}
+
+// Fase 8 (Lanzar), Task 8.4: cabecera + config de goteo para la pantalla /campanas/[id]/lanzar.
+// El conteo de elegibles NO reimplementa la clasificacion lista/con_ajuste/bloqueada: reusa
+// previsualizarInscripcionCampana (Fase 6, ya probado) y cuenta cuantas filas tienen destinatario
+// (idContacto != null), que es exactamente el criterio que inscribirCampana usa para decidir
+// quien consume un cupo de calcularGoteo (Task 8.3). Sin este reuso, la barra "asi se distribuye"
+// de la UI podria mostrar un total distinto al que el enrollment real va a inscribir.
+export type CampanaParaLanzar = {
+  idCampana: number;
+  nombre: string;
+  estado: string;
+  intakeDiario: number | null;
+  ritmoIngreso: RitmoIngresoInput;
+  topeToquesDia: number | null;
+  fechaInicio: string | null;
+  totalElegibles: number;
+  totalBloqueadas: number;
+};
+
+export function campanaParaLanzar(idCampana: number): CampanaParaLanzar | null {
+  const camp = db
+    .select({
+      idCampana: campana.idCampana,
+      nombre: campana.nombre,
+      estado: campana.estado,
+      intakeDiario: campana.intakeDiario,
+      ritmoIngreso: campana.ritmoIngreso,
+      topeToquesDia: campana.topeToquesDia,
+      fechaInicio: campana.fechaInicio,
+    })
+    .from(campana)
+    .where(eq(campana.idCampana, idCampana))
+    .get();
+  if (!camp) return null;
+
+  const filas = previsualizarInscripcionCampana(idCampana) ?? [];
+  const totalElegibles = filas.filter((f) => f.idContacto != null).length;
+  const totalBloqueadas = filas.filter((f) => f.idContacto == null).length;
+
+  return {
+    idCampana: camp.idCampana,
+    nombre: camp.nombre,
+    estado: camp.estado,
+    intakeDiario: camp.intakeDiario,
+    ritmoIngreso: camp.ritmoIngreso as RitmoIngresoInput,
+    topeToquesDia: camp.topeToquesDia,
+    fechaInicio: camp.fechaInicio,
+    totalElegibles,
+    totalBloqueadas,
+  };
+}
+
+// Fase 8 (Lanzar), Task 8.4: UPDATE parcial de la config de goteo, mismo patron que
+// actualizarReglaFaltante (Fase 5) -- solo los campos que la pantalla de Lanzar edita, sin
+// tocar nombre/cadencia/segmento. fechaInicio: string vacio o null limpia el campo (= "hoy").
+export type ConfigLanzamientoInput = {
+  intakeDiario?: number | null;
+  ritmoIngreso?: RitmoIngresoInput;
+  topeToquesDia?: number | null;
+  fechaInicio?: string | null;
+};
+
+export function actualizarConfigLanzamiento(idCampana: number, cambios: ConfigLanzamientoInput): void {
+  if (cambios.ritmoIngreso != null && !RITMOS_INGRESO.includes(cambios.ritmoIngreso)) {
+    throw new Error(`ritmoIngreso invalido: ${cambios.ritmoIngreso}`);
+  }
+  if (cambios.intakeDiario != null && (!Number.isInteger(cambios.intakeDiario) || cambios.intakeDiario <= 0)) {
+    throw new Error('intakeDiario debe ser un entero positivo');
+  }
+  if (cambios.topeToquesDia != null && (!Number.isInteger(cambios.topeToquesDia) || cambios.topeToquesDia <= 0)) {
+    throw new Error('topeToquesDia debe ser un entero positivo');
+  }
+
+  const sets: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+  if ('intakeDiario' in cambios) sets.intakeDiario = cambios.intakeDiario ?? null;
+  if ('ritmoIngreso' in cambios && cambios.ritmoIngreso != null) sets.ritmoIngreso = cambios.ritmoIngreso;
+  if ('topeToquesDia' in cambios) sets.topeToquesDia = cambios.topeToquesDia ?? null;
+  if ('fechaInicio' in cambios) sets.fechaInicio = cambios.fechaInicio || null;
+
+  db.update(campana).set(sets).where(eq(campana.idCampana, idCampana)).run();
 }
 
 // Task 1.6: tabla de empresas inscritas del hub (activas + bloqueadas, cualquier
