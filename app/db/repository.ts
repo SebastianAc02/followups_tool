@@ -810,6 +810,7 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
       estado: empresa.estadoNotion,
       categoria: empresa.categoria,
       usuarios: empresaUsuarios.usuariosEstimados,
+      ciudad: empresa.ciudadPrincipal,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
@@ -890,7 +891,15 @@ export function valoresDistintosCampo(campo: CampoSegmento): string[] {
   return filas.map((f) => String(f.v));
 }
 
-export type FilaReadiness = { id: string; nombre: string; canales: Canal[]; readiness: Readiness };
+export type FilaReadiness = {
+  id: string;
+  nombre: string;
+  ciudad: string | null;
+  usuarios: number | null;
+  estado: string | null;
+  canales: Canal[];
+  readiness: Readiness;
+};
 export type ConteosReadiness = { total: number; listas: number; parciales: number; sinCanal: number; sinContacto: number };
 
 // Parte 5 campanas: contactos (email/telefono) de un lote de empresas, agrupados por
@@ -920,7 +929,15 @@ export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos:
   return empresas.map((e) => {
     const contactos = contactosPorEmpresa.get(e.id) ?? [];
     const disponibles = canalesDisponibles(contactos);
-    return { id: e.id, nombre: e.nombre, canales: [...disponibles], readiness: readinessEmpresa(disponibles, canalesRequeridos, regla) };
+    return {
+      id: e.id,
+      nombre: e.nombre,
+      ciudad: e.ciudad,
+      usuarios: e.usuarios,
+      estado: e.estado,
+      canales: [...disponibles],
+      readiness: readinessEmpresa(disponibles, canalesRequeridos, regla),
+    };
   });
 }
 
