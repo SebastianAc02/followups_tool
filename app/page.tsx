@@ -3,6 +3,7 @@ import { colaDelDia, contadoresHoy, listarCadencias, listarCampanas, estadoConec
 import { CANALES } from "./db/validation";
 import { requireSession } from "./lib/session";
 import TopNav from "./TopNav";
+import ProbarClaude from "./ProbarClaude";
 
 const CANAL_LABEL: Record<string, string> = { llamada: "llamadas", whatsapp: "whatsapp", correo: "correos" };
 
@@ -149,6 +150,8 @@ export default async function Dashboard() {
           Conectores <span className="mono">({conectados} {conectados === 1 ? "conectado" : "conectados"})</span>
         </Link>
       </div>
+
+      <ProbarClaude />
     </div>
   );
 }

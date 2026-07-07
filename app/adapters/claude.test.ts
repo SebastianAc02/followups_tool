@@ -9,8 +9,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 // Variables de entorno minimas que necesita el adaptador para construir el cliente.
-process.env.ANTHROPIC_BASE_URL = 'http://localhost:3456';
-process.env.ANTHROPIC_API_KEY  = 'dario';
+process.env.DARIO_URL = 'http://localhost:3456';
+process.env.DARIO_KEY = 'dario';
 
 const { crearClaudeAdapter } = await import('./claude.ts');
 
