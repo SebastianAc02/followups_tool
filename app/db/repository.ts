@@ -1,4 +1,20 @@
-import { and, eq, lte, isNotNull, isNull, inArray, notInArray, between, desc, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  lte,
+  gt,
+  lt,
+  isNotNull,
+  isNull,
+  inArray,
+  notInArray,
+  between,
+  exists,
+  notExists,
+  desc,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { db } from './index';
 import {
@@ -679,13 +695,16 @@ export function getCadencia(idCadencia: number) {
 // IN compare bien contra la afinidad INTEGER de la columna. Este mapa es la unica
 // puerta: un campo que no este aca ni siquiera llega (Zod lo rechaza antes), pero el
 // mapa garantiza que solo columnas conocidas entran a la consulta.
-const COLUMNA_SEGMENTO: Record<CampoSegmento, { col: SQLiteColumn; numerico: boolean }> = {
+// rol no tiene columna propia (vive en contacto, 1-a-muchos): se resuelve aparte
+// en condicionRol, nunca por este mapa.
+const COLUMNA_SEGMENTO: Record<Exclude<CampoSegmento, 'rol'>, { col: SQLiteColumn; numerico: boolean }> = {
   estado: { col: empresa.estadoNotion, numerico: false },
   categoria: { col: empresa.categoria, numerico: false },
   estado_comercial: { col: empresa.estadoComercial, numerico: false },
   prioridad: { col: empresa.prioridadComercial, numerico: true },
   es_cliente: { col: empresa.esCliente, numerico: true },
   ciudad: { col: empresa.ciudadPrincipal, numerico: false },
+  departamento: { col: empresa.departamento, numerico: false },
   owner: { col: empresa.owner, numerico: false },
   usuarios: { col: empresaUsuarios.usuariosEstimados, numerico: true },
 };
@@ -702,11 +721,47 @@ function coercer(valores: string[], numerico: boolean, campo: string): string[] 
   return nums;
 }
 
+// Parte 5 campanas: rol vive en contacto (1-a-muchos), no en empresa. Se resuelve
+// con un EXISTS/NOT EXISTS correlacionado (subconsulta autocontenida), nunca con un
+// join en la consulta principal: un join duplicaria filas de empresa y arruinaria
+// el COUNT de personas si las dos condiciones aparecen juntas (ver condicionPersonas).
+// Solo en/no_en tienen sentido sobre una relacion 1-a-muchos; es_null/no_null se
+// rechazan explicitos en vez de inventar una semantica ambigua.
+type CondRol = { op: 'en' | 'no_en'; valores: string[] } | { op: 'es_null' | 'no_null' };
+function condicionRol(c: CondRol): SQL {
+  if (c.op !== 'en' && c.op !== 'no_en') {
+    throw new Error(`el campo 'rol' solo soporta los operadores en/no_en, llego '${c.op}'`);
+  }
+  const sub = db
+    .select({ uno: sql`1` })
+    .from(contacto)
+    .where(and(eq(contacto.idEmpresa, empresa.idEmpresa), inArray(contacto.cargoCategoria, c.valores)));
+  return c.op === 'en' ? exists(sub) : notExists(sub);
+}
+
+// Parte 5 campanas: personas = cantidad de contactos de la empresa. Subconsulta
+// escalar correlacionada (COUNT), mismo motivo que condicionRol: no se puede volver
+// un join sin arruinar el resto de condiciones ANDeadas.
+type CondPersonas = { op: 'entre'; desde: number; hasta: number } | { op: 'mayor_que' | 'menor_que'; valor: number };
+function condicionPersonas(c: CondPersonas): SQL {
+  const cantidad = sql<number>`(SELECT COUNT(*) FROM ${contacto} WHERE ${contacto.idEmpresa} = ${empresa.idEmpresa})`;
+  switch (c.op) {
+    case 'entre':
+      return between(cantidad, c.desde, c.hasta);
+    case 'mayor_que':
+      return gt(cantidad, c.valor);
+    case 'menor_que':
+      return lt(cantidad, c.valor);
+  }
+}
+
 // Traduce una definicion YA validada a un WHERE de drizzle. Las condiciones se ANDean.
 // El switch (no ifs sueltos) deja que TS estreche cada rama: en 'en'/'no_en' sabe que
 // existe c.valores; en 'es_null'/'no_null' que no.
 function compilarSegmento(def: DefinicionSegmento): SQL | undefined {
   const conds = def.condiciones.map((c): SQL => {
+    if (c.campo === 'rol') return condicionRol(c);
+    if (c.campo === 'personas') return condicionPersonas(c);
     const { col, numerico } = COLUMNA_SEGMENTO[c.campo];
     switch (c.op) {
       case 'es_null':
@@ -721,6 +776,10 @@ function compilarSegmento(def: DefinicionSegmento): SQL | undefined {
         // NULL nunca matchea un rango (semantica SQL): empresa sin dato queda fuera.
         // La UI avisa cuantas quedaron fuera; aca no se inventa un default.
         return between(col, c.desde, c.hasta);
+      case 'mayor_que':
+        return gt(col, c.valor);
+      case 'menor_que':
+        return lt(col, c.valor);
     }
   });
   return and(...conds);
@@ -787,6 +846,17 @@ export function listarSegmentos() {
 // builder (estilo Apollo). Solo campos de texto: los numericos se filtran por rango,
 // no por lista, y ademas usuarios vive en otra tabla.
 export function valoresDistintosCampo(campo: CampoSegmento): string[] {
+  // rol vive en contacto, no en empresa (mismo motivo que en compilarSegmento):
+  // el dropdown de roles sale de cargo_categoria, no de COLUMNA_SEGMENTO.
+  if (campo === 'rol') {
+    const filas = db
+      .selectDistinct({ v: contacto.cargoCategoria })
+      .from(contacto)
+      .where(isNotNull(contacto.cargoCategoria))
+      .orderBy(contacto.cargoCategoria)
+      .all();
+    return filas.map((f) => String(f.v));
+  }
   const { col, numerico } = COLUMNA_SEGMENTO[campo];
   if (numerico) {
     throw new Error(`el campo '${campo}' es numerico: se filtra por rango, no por lista de valores`);
