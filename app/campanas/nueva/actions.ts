@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { parsearCadenciaCsv, parsearCadenciaMarkdown } from '../../core/cadencia-parser';
+import { parsearCadenciaPorFormato, type FormatoCadencia } from '../../core/cadencia-parser';
 import { crearCadencia, crearCampana, inscribirCampana, type ResultadoInscripcion } from '../../db/repository';
 import type { ModoCampana } from '../../db/validation';
 import { requireSession } from '../../lib/session';
@@ -21,11 +21,10 @@ type PasoPreview = {
 // variables, firma) antes de persistir nada. Solo corre el parser puro; no toca DB.
 export type PreviewCadencia = { ok: true; nombre: string; descripcion?: string; pasos: PasoPreview[] } | { ok: false; error: string };
 
-export async function previsualizarCadenciaAction(formato: 'md' | 'csv', contenido: string, nombreCsv?: string): Promise<PreviewCadencia> {
+export async function previsualizarCadenciaAction(formato: FormatoCadencia, contenido: string, nombreCsv?: string): Promise<PreviewCadencia> {
   await requireSession();
   try {
-    const parseada =
-      formato === 'csv' ? parsearCadenciaCsv(contenido, { nombre: nombreCsv || 'Cadencia sin nombre' }) : parsearCadenciaMarkdown(contenido);
+    const parseada = parsearCadenciaPorFormato(formato, contenido, { nombre: nombreCsv || 'Cadencia sin nombre' });
     return {
       ok: true,
       nombre: parseada.nombre,
@@ -47,7 +46,7 @@ export type CrearCampanaResultado =
 export async function crearCampanaConCadenciaAction(input: {
   nombreCampana: string;
   idSegmento: number;
-  formato: 'md' | 'csv';
+  formato: FormatoCadencia;
   contenido: string;
   nombreCsv?: string;
   modo: ModoCampana;
@@ -57,10 +56,7 @@ export async function crearCampanaConCadenciaAction(input: {
   if (!nombreCampana) return { ok: false, error: 'La campaña necesita un nombre' };
 
   try {
-    const parseada =
-      input.formato === 'csv'
-        ? parsearCadenciaCsv(input.contenido, { nombre: input.nombreCsv || nombreCampana })
-        : parsearCadenciaMarkdown(input.contenido);
+    const parseada = parsearCadenciaPorFormato(input.formato, input.contenido, { nombre: input.nombreCsv || nombreCampana });
     const idCadencia = crearCadencia(parseada);
     const idCampana = crearCampana({ nombre: nombreCampana, idCadencia, idSegmento: input.idSegmento, modo: input.modo });
     const resultado = inscribirCampana(idCampana);

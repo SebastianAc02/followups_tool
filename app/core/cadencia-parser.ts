@@ -296,3 +296,20 @@ export function parsearCadenciaJson(texto: string): CadenciaParseada {
 
   return { nombre, descripcion, pasos };
 }
+
+// --- Dispatch por formato ----------------------------------------------
+
+export type FormatoCadencia = 'md' | 'csv' | 'json';
+
+// Punto unico donde la UI/actions eligen el parser segun el formato subido. Vive en
+// el core (no en actions.ts) porque es logica pura de dominio, no un server action.
+export function parsearCadenciaPorFormato(formato: FormatoCadencia, texto: string, meta: { nombre: string; descripcion?: string }): CadenciaParseada {
+  switch (formato) {
+    case 'csv':
+      return parsearCadenciaCsv(texto, meta);
+    case 'json':
+      return parsearCadenciaJson(texto);
+    case 'md':
+      return parsearCadenciaMarkdown(texto);
+  }
+}

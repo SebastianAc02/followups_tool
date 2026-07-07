@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsearCadenciaCsv, parsearCadenciaMarkdown, parsearCadenciaJson } from './cadencia-parser.ts';
+import { parsearCadenciaCsv, parsearCadenciaMarkdown, parsearCadenciaJson, parsearCadenciaPorFormato } from './cadencia-parser.ts';
 
 test('CSV: encabezado + pasos, orden explicito, columnas en cualquier orden', () => {
   const csv = [
@@ -195,4 +195,25 @@ test('JSON: sin nombre o sin pasos lanza error estructural', () => {
 test('JSON: paso sin diaOffset o sin canal lanza error estructural', () => {
   assert.throws(() => parsearCadenciaJson(JSON.stringify({ nombre: 'C', pasos: [{ canal: 'correo' }] })), /dia_offset|diaOffset/);
   assert.throws(() => parsearCadenciaJson(JSON.stringify({ nombre: 'C', pasos: [{ diaOffset: 0 }] })), /canal/);
+});
+
+// Task 3.2: dispatch por formato (lo que llama previsualizarCadenciaAction), los tres formatos.
+test('parsearCadenciaPorFormato: csv usa el meta.nombre', () => {
+  const csv = 'dia_offset,canal\n0,correo';
+  const cad = parsearCadenciaPorFormato('csv', csv, { nombre: 'Desde CSV' });
+  assert.equal(cad.nombre, 'Desde CSV');
+  assert.equal(cad.pasos[0].canal, 'correo');
+});
+
+test('parsearCadenciaPorFormato: md ignora meta.nombre (el titulo sale del "# ")', () => {
+  const md = '# Titulo MD\n## Día 0 · correo\nCuerpo';
+  const cad = parsearCadenciaPorFormato('md', md, { nombre: 'Ignorado' });
+  assert.equal(cad.nombre, 'Titulo MD');
+});
+
+test('parsearCadenciaPorFormato: json ignora meta.nombre (el nombre sale del JSON)', () => {
+  const json = JSON.stringify({ nombre: 'Desde JSON', pasos: [{ diaOffset: 0, canal: 'whatsapp' }] });
+  const cad = parsearCadenciaPorFormato('json', json, { nombre: 'Ignorado' });
+  assert.equal(cad.nombre, 'Desde JSON');
+  assert.equal(cad.pasos[0].canal, 'whatsapp');
 });
