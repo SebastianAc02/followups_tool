@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Estado (2026-07-07, fin de sesión):** Fases 0, 1, 3, 4 implementadas y commiteadas en `feat/campanas-cockpit`. Fase 2 resultó estar mayormente ya hecha (heredada de una consolidación anterior a esta rama), falta solo la UI final. Además de lo planeado, esta sesión rehízo `/campanas/nueva` desde cero (pedido explícito de Sebastián a mitad de sesión, no estaba en el plan original) y eliminó `/campanas/segmentos` (ruta muerta). Ver **"Bitácora de ejecución"** al final del documento para el detalle completo: qué se hizo, qué se encontró, bugs corregidos, decisiones tomadas y qué sigue. Lee esa sección ANTES de retomar.
+
 **Goal:** Construir el cockpit de campañas completo (7 vistas: hub, segmentación con Copiloto, importar cadencia, cadencia, reglas, destinatarios, preview cinemático, lanzar, por revisar) sobre el backend de cadencias que ya existe en seco (Fases 4-5), rediseñando la UI con los mockups y cerrando los huecos de core que las vistas destapan.
 
 **Architecture:** Hexagonal. El core (dominio puro, sin deps externas) ya tiene 11 tablas, parser de cadencias, motor de fechas, readiness, enrollment, envío (Apollo) y tracking. Este plan NO recrea nada de eso: agrega los huecos faltantes (parser JSON, NL→segmento, preview no destructivo, render de variables, goteo de ingreso, métricas) como funciones de core testeables, y encima construye la UI en React consumiendo el Repository y los primitivos de diseño. Antes de todo, una Fase 0 consolida los tokens de diseño en una fuente única (requisito explícito de Sebastián: cambiar tipografía y colores desde un solo lado).
@@ -59,11 +61,11 @@ Base: `/Users/sebastianacostamolina/Arc/html vistas 1-7/`
 
 | Fase | Vista | Hueco de core | Estado del plan |
 |------|-------|---------------|-----------------|
-| 0 | (fundacional) | Tokens en fuente única | **Detallado, listo** |
-| 1 | V1 Campañas (hub) | Métricas agregadas | **Detallado, listo** |
-| 2 | V2 Segmentación · Copiloto | NL→DefinicionSegmento + loop reactivo | Core detallado; UI se expande al iniciar |
-| 3 | V2.9 Importar cadencia | Parser JSON | **Detallado, listo** |
-| 4 | V3 Cadencia | (editar copy inline) | Core existe; UI se expande al iniciar |
+| 0 | (fundacional) | Tokens en fuente única | ✅ **HECHO** (3 commits) |
+| 1 | V1 Campañas (hub) | Métricas agregadas | ✅ **HECHO** (6 commits) |
+| 2 | V2 Segmentación · Copiloto | NL→DefinicionSegmento + loop reactivo | ⚠️ **Backend ya existía** (heredado); falta solo UI final (Task 2.3+) |
+| 3 | V2.9 Importar cadencia | Parser JSON | ✅ **HECHO** (3 commits), pero no quedó wireada al flujo real hasta el rediseño fuera-de-plan |
+| 4 | V3 Cadencia | (editar copy inline) | ⚠️ **UI hecha, con gap real**: faltan mutators de `pasoCadencia` en el Repository (task suelta #11 en el tracker) |
 | 5 | V-Reglas (nueva) | (existe `reglaFaltante`) | UI a diseñar; se expande al iniciar |
 | 6 | V4 Destinatarios · Readiness | Preview no destructivo | Core detallado; UI se expande al iniciar |
 | 7 | V5 Preview cinemático | Render de variables | Core detallado; UI (port Vite) se expande |
@@ -87,7 +89,7 @@ Cada fase produce software que corre y se testea por sí solo. Dependencias: la 
 
 Decisión de dominio de diseño: qué roles semánticos existen y a qué primitivo apunta cada uno. Sebastián confirma la lista de roles y el valor actual de las 3 familias tipográficas.
 
-- [ ] **Step 1: Escribir `docs/design-tokens.md`** con dos tablas.
+- [x] **Step 1: Escribir `docs/design-tokens.md`** con dos tablas.
 
 Capa 1, primitivos (valores crudos, se definen una vez):
 ```
@@ -105,7 +107,7 @@ Capa 2, semánticos (roles que consume la UI; apuntan a un primitivo):
 --font-heading → --ff-serif · --font-body → --ff-body · --font-eyebrow → --ff-mono
 --text-primary → --ink · --text-muted → --muted
 ```
-- [ ] **Step 2: Commit** — `git commit -m "docs(tokens): contrato de tokens primitivos y semanticos"`
+- [x] **Step 2: Commit** — `git commit -m "docs(tokens): contrato de tokens primitivos y semanticos"` → `843753f`
 
 > **Nota para Sebastián (checkpoint):** el valor actual de `--font-body` lo pongo en IBM Plex Sans para calcar el mockup (el serif Newsreader ya coincide con el proyecto). Como todo pasa por el token, cambiarlo a Space Mono o a Inter después es una línea. Confírmame los roles antes de que el agente toque `globals.css`.
 
@@ -113,7 +115,7 @@ Capa 2, semánticos (roles que consume la UI; apuntan a un primitivo):
 
 **Files:** Modify `app/globals.css:3-72`
 
-- [ ] **Step 1:** Dentro de `@theme`, agregar primero el bloque de primitivos (los `--violet-*`, `--green`, neutros, etc. de la doc). No borrar los nombres semánticos que ya usan los componentes (`--color-accent`, `--color-surface`, `--color-done`, `--color-overdue`, `--color-today`, `--color-warn`, los `--color-canal-*`): reapuntarlos a los primitivos con `var()`. Ejemplo:
+- [x] **Step 1:** Dentro de `@theme`, agregar primero el bloque de primitivos (los `--violet-*`, `--green`, neutros, etc. de la doc). No borrar los nombres semánticos que ya usan los componentes (`--color-accent`, `--color-surface`, `--color-done`, `--color-overdue`, `--color-today`, `--color-warn`, los `--color-canal-*`): reapuntarlos a los primitivos con `var()`. Ejemplo:
 ```css
 @theme {
   /* Capa 1: primitivos */
@@ -127,19 +129,19 @@ Capa 2, semánticos (roles que consume la UI; apuntan a un primitivo):
   /* ...resto de roles... */
 }
 ```
-- [ ] **Step 2:** Definir el vocabulario tipográfico semántico del cockpit apuntando a las familias: `--font-heading: var(--ff-serif)`, `--font-body: var(--ff-body)`, `--font-eyebrow: var(--ff-mono)`. Mantener `--font-serif/--font-mono/--font-sans` como alias para no romper lo migrado.
-- [ ] **Step 3: Verificar build** — `npm run build`. Expected: compila sin errores de CSS.
-- [ ] **Step 4: Verificar `/cola` no se rompió** — `npm run dev`, abrir `/cola` con preview, confirmar que colores y tipografía se ven igual que antes (los semánticos no cambiaron de valor, solo de origen).
-- [ ] **Step 5: Commit** — `git commit -m "refactor(tokens): separar primitivos de semanticos en @theme"`
+- [x] **Step 2:** Definir el vocabulario tipográfico semántico. **DESVIACIÓN:** `--font-heading` NO se reapuntó a `--ff-serif` como decía el plan — ya estaba en uso en producción (home dashboard, Archivo Black). Se dejó `--font-heading` intacto (solo home) y se usa `--font-serif` (ya existía, Newsreader) para los títulos del cockpit de campañas. Documentado en `docs/design-tokens.md`.
+- [x] **Step 3: Verificar build** — `npm run build`. Compila sin errores.
+- [x] **Step 4: Verificar `/cola` no se rompió** — verificado por lectura de código + build (no por preview visual, ver bitácora).
+- [x] **Step 5: Commit** — `git commit -m "refactor(tokens): separar primitivos de semanticos en @theme"` → `2df24bc`
 
 ### Task 0.3: Alinear las fuentes en layout `[AGENTE]`
 
 **Files:** Modify `app/layout.tsx:2-12`
 
-- [ ] **Step 1:** Confirmar que `Newsreader` (→`--ff-serif`) e `IBM_Plex_Mono` (→`--ff-mono-tag`/`--ff-mono`) ya están importados. Agregar `IBM_Plex_Sans` como `--ff-body` si se eligió como cuerpo. Dejar `Archivo_Black`/`Space_Mono` como escape hatch dormido (no borrar; otras páginas legacy los usan).
-- [ ] **Step 2:** Ajustar los alias en `@theme`: `--ff-body` apunta a la variable de IBM Plex Sans.
-- [ ] **Step 3: Verificar** — `npm run dev`, abrir `/cola`, confirmar que el cuerpo cambió a IBM Plex Sans sin romper layout.
-- [ ] **Step 4: Commit** — `git commit -m "feat(tokens): IBM Plex Sans como font-body del cockpit"`
+- [x] **Step 1:** `IBM_Plex_Sans` agregado como `--ff-body`. `Space_Mono` quedó como `--ff-space-mono` dormido (ya no es el body, no se borró).
+- [x] **Step 2:** `--ff-body` apunta a IBM Plex Sans.
+- [x] **Step 3: Verificar** — build limpio (ver nota de verificación visual en la bitácora).
+- [x] **Step 4: Commit** — `git commit -m "feat(tokens): IBM Plex Sans como font-body del cockpit"` → `bc0cf69`
 
 ---
 
@@ -157,67 +159,37 @@ Decisión de dominio: qué es "toques esta semana" (¿pasos enviados en los últ
 - Modify: `app/db/repository.ts` (agregar `metricasHub()`)
 - Test: `app/db/repository.metricas.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla** en `app/db/repository.metricas.test.ts`:
-```ts
-import { test } from "node:test";
-import assert from "node:assert/strict";
-import { metricasHub } from "./repository.ts";
-// usar el helper de DB en memoria que usan los otros repository.*.test.ts (revisar repository.cadencia.test.ts para el patrón de setup)
-test("metricasHub cuenta toques de la semana y tasa de respuesta", () => {
-  // seed: 3 eventos 'enviado' esta semana, 1 'respondio'
-  const m = metricasHub(/* db */);
-  assert.equal(m.toquesSemana, 3);
-  assert.equal(m.tasaRespuesta, 0.33); // 1/3, redondeo a definir en checkpoint
-});
-```
-- [ ] **Step 2: Correr y ver que falla** — `TESTONE app/db/repository.metricas.test.ts`. Expected: FAIL ("metricasHub is not a function").
-- [ ] **Step 3: Implementar `metricasHub`** en `repository.ts` con la fórmula que Sebastián fijó (query Drizzle sobre `eventoTracking`, sin SQL crudo suelto). Devuelve `{ toquesSemana, tasaRespuesta, empresasEnSecuencia, bloqueadasEsperandoRegla }`.
-- [ ] **Step 4: Correr y ver que pasa** — `TESTONE app/db/repository.metricas.test.ts`. Expected: PASS.
-- [ ] **Step 5: Commit** — `git commit -m "feat(repo): metricasHub para el header del hub de campanas"`
+- [x] **Steps 1-5: TDD completo.** El ejemplo de arriba (ratio simple 1/3) quedó OBSOLETO: Sebastián pidió cohorte real vía checkpoint interactivo — "de los toques 'enviado' en la ventana, cuántos tienen un evento 'respondio' asociado por `idPasoInscripcion`, sin importar cuándo llegó la respuesta" (no un ratio de conteos sueltos en la misma ventana de 7 días). `empresasEnSecuencia`/`bloqueadasEsperandoRegla` se resolvieron con `inscripcion.estado = 'activa'/'bloqueada'` (global, no por campaña), reusando el mismo criterio que `inscripcionesBloqueadas()` — no se inventó un estado nuevo. Commit → `a741472`
 
 ### Task 1.2: Primitivo `Tabs` para filtro por estado `[AGENTE]`
 
 **Files:** Create `app/ui/Tabs.tsx` (+ `tabs.variants.ts` si aplica), Test `app/ui/Tabs.test.ts`
 
-- [ ] **Step 1:** Investigar en `HTML1 Campaigns/index.html` el markup de "Todas 5 / Activas 3 / Pausada 1 / Borrador 1" (chip con dot de color y contador).
-- [ ] **Step 2:** Crear `Tabs` como client component controlado (`value`, `onChange`, `items: {key,label,count,tone}[]`), consumiendo solo tokens semánticos (`text-accent`, `bg-surface`, etc.) y el patrón `cn`. Reusar `Dot` para el punto de color.
-- [ ] **Step 3:** Test de render mínimo (`app/ui/Tabs.test.ts`) que verifica que marca activo el `value` dado. Correr con `TESTONE`.
-- [ ] **Step 4: Commit** — `git commit -m "feat(ui): primitivo Tabs para filtro por estado"`
+- [x] **Steps 1-4.** `Tabs` creado, extendió `Dot` (antes solo `overdue|today`) con tonos `done`/`faint` — cambio de bajo riesgo, primitivo sin uso previo. Commit → `04da43c`
 
 ### Task 1.3: Componente `CampanaCard` `[AGENTE]`
 
 **Files:** Create `app/campanas/CampanaCard.tsx`
 
-- [ ] **Step 1:** Investigar la tarjeta en `HTML1 Campaigns/index.html`: nombre (serif), pill de estado (Activa/Pausada/Borrador), línea "3 toques · 7 días · ISP >200k · Valle", `CanalTag` del canal principal, y los dos números grandes (INSCRITAS / BLOQ.).
-- [ ] **Step 2:** Crear `CampanaCard` (server component) que recibe una fila de `listarCampanas()` y mapea: estado→`Pill`, canal→`CanalTag`, inscritas/bloqueadas→`Stat`. Solo tokens semánticos. Nombre en `font-heading`.
-- [ ] **Step 3: Verificar** con preview que una tarjeta calca el mockup (usar `preview_inspect` para color/tipografía, no screenshot).
-- [ ] **Step 4: Commit** — `git commit -m "feat(campanas): CampanaCard segun mockup V1"`
+- [x] **Steps 1-4.** Nombre en `font-serif` (NO `font-heading` — ver desviación de Fase 0). `listarCampanas()` se extendió (aditivo, sin romper consumidores) con `pasos`/`dias`/`canalPrincipal`/`descripcionSegmento` porque el schema no tiene tier/región estructurados como asume el mockup ("ISP >200k · Valle"). Sin ruta de detalle (`/campanas/[id]` no existe), quedó como `<article>` no interactivo, no un link roto. Verificación visual NO se hizo con preview (dev server de otra sesión bloqueaba el puerto) — solo lectura de mockup + `tsc`/build/tests. Commit → `aae1017`
 
 ### Task 1.4: Header del hub con stats `[AGENTE]`
 
 **Files:** Create `app/campanas/HubHeader.tsx`
 
-- [ ] **Step 1:** Investigar el header del mockup ("Campañas" en serif grande + "332 empresas en secuencia hoy · 49 bloqueadas" + los dos stats a la derecha).
-- [ ] **Step 2:** Crear `HubHeader` que recibe el resultado de `metricasHub()` y lo pinta con `Stat` + `SectionLabel`. Título en `font-heading`.
-- [ ] **Step 3: Commit** — `git commit -m "feat(campanas): HubHeader con metricas"`
+- [x] **Steps 1-3.** Título en `font-serif` (no `font-heading`). Commit → `e5dc999`
 
 ### Task 1.5: Ensamblar `/campanas` `[AGENTE]`
 
 **Files:** Modify `app/campanas/page.tsx`
 
-- [ ] **Step 1:** Reescribir `page.tsx` (server component) para: llamar `listarCampanas()` y `metricasHub()`, renderizar `HubHeader`, `Tabs` (filtro cliente sobre las campañas), grid de `CampanaCard`, y la tarjeta "Nueva campaña" que enlaza a `/campanas/nueva`. Envolver en el shell existente (`AppShell`).
-- [ ] **Step 2:** Borrar los estilos legacy (`.wrap`, `.chip`, `.save`) que quedaban en esta página; ahora todo por Tailwind/tokens.
-- [ ] **Step 3: Verificar** con preview: `/campanas` calca el mockup, tabs filtran, links funcionan, cero errores en consola.
-- [ ] **Step 4: Commit** — `git commit -m "feat(campanas): hub /campanas rediseñado segun mockup V1"`
+- [x] **Steps 1-4.** Envuelto en `AppShell`. Commit → `08554db`
 
 ### Task 1.6: Tabla de empresas inscritas del hub `[AGENTE]`
 
 **Files:** Create `app/campanas/InscritasTable.tsx`, Modify `app/db/repository.ts` (si falta un `listarInscritasHub()`), `app/campanas/page.tsx`
 
-- [ ] **Step 1:** Investigar la tabla inferior del mockup (Electro Valle / Grupo Fibra / estados "Límite diario", "Esperando regla"). Confirmar en `repository.ts` si ya hay una query que devuelva empresas inscritas con su estado; si no, agregar `listarInscritasHub()` (misma lógica de `inscripcion.estado`, sin SQL crudo) con su test.
-- [ ] **Step 2:** Crear `InscritasTable` (server component) consumiendo esa query, estados→`Pill`/`SeverityText`.
-- [ ] **Step 3:** Montar en `page.tsx` debajo del grid.
-- [ ] **Step 4: Commit** — `git commit -m "feat(campanas): tabla de empresas inscritas en el hub"`
+- [x] **Steps 1-4. DESVIACIÓN encontrada:** "Límite diario"/"Esperando regla" NO son estados reales (el schema solo tiene `activa/bloqueada/finalizada/pausada`; "límite diario" no existe en ningún lado). Se usó el label `"Bloqueada · cola de revisión"` en vez del literal del mockup, porque es el significado real de `bloqueada` en este dominio. Además, la tabla del mockup en realidad vive en un panel "Contactos" separado (`data-panel-id="contactos"`), no bajo el grid de Campañas — se montó donde pedía el plan de todas formas (instrucción explícita, no se inventó una ruta nueva fuera de alcance). Commit → `c36045c`
 
 ---
 
@@ -229,33 +201,19 @@ test("metricasHub cuenta toques de la semana y tasa de respuesta", () => {
 
 ### Task 2.0: Auditar el Copiloto existente `[CHECKPOINT]`
 
-- [ ] **Step 1:** Leer `app/campanas/nueva/copiloto.ts`, `copiloto.test.ts`, `app/core/ports/ia.ts`, `app/adapters/claude.ts`. Reportar en 5-10 líneas: qué hace hoy el copiloto, si ya llama a `IAPort.generar`, y qué falta para producir un `DefinicionSegmento` válido desde texto. Sebastián decide si se extiende lo existente o se reescribe.
+- [x] **Step 1: HECHO — resultado cambió el alcance de 2.1/2.2.** `pedirAlCopiloto` en `copiloto.ts` YA hace NL→`DefinicionSegmento` completo, multi-turno, cableado correctamente por `IAPort` (nunca toca Claude directo). NO se reescribió.
 
-### Task 2.1: Core `interpretarSegmento(texto) → DefinicionSegmento` `[CHECKPOINT]`
+### Task 2.1: Core `interpretarSegmento(texto) → DefinicionSegmento` `[CHECKPOINT]` — **OBSOLETO, no se hizo tal como estaba escrito**
 
-Decisión de dominio: el prompt y el schema con que la IA traduce "quiero de 50k a 100k usuarios en el Valle" al DSL. El core solo depende de `IAPort` (puerto), nunca de Claude directo.
+`pedirAlCopiloto` ya cumplía este rol. No se creó `segmento-ia.ts` nuevo. El único gap real era que `campos: CampoDisponible[]` se pasaba `[]` (placeholder) por falta de `Repository.valoresDistintosCampo` — y AL INVESTIGAR se encontró que **eso también ya existía**, heredado de una consolidación de ramas anterior a `feat/campanas-cockpit` (commit `db9b497` y relacionados, ancestros tanto de `main` como de esta rama). Ver bitácora para el detalle de cómo se verificó esto (git log inicialmente no lo mostraba por profundidad, hubo que rastrear por hash).
 
-**Files:**
-- Create/Modify: `app/core/segmento-ia.ts` (o extender `copiloto.ts` según el checkpoint 2.0)
-- Test: `app/core/segmento-ia.test.ts` (con un `IAPort` fake que devuelve un JSON fijo)
+### Task 2.2: Server action reactiva del segmento `[AGENTE]` — **YA EXISTÍA, ubicación distinta a la que asumía el plan**
 
-- [ ] **Step 1: Test que falla** con un `IAPort` fake: dado texto → llama `ia.generar` con el schema `definicionSegmentoSchema` → devuelve una `DefinicionSegmento` válida que `empresasDeSegmento` puede compilar.
-- [ ] **Step 2: Correr y ver fallar** — `TESTONE app/core/segmento-ia.test.ts`.
-- [ ] **Step 3: Implementar** `interpretarSegmento(texto, ia: IAPort)` con el prompt que Sebastián fije, validando la salida contra `definicionSegmentoSchema`. Sin importar Claude: recibe el puerto.
-- [ ] **Step 4: Correr y ver pasar.**
-- [ ] **Step 5: Commit** — `git commit -m "feat(core): interpretarSegmento traduce lenguaje natural al DSL"`
+No están en `app/campanas/nueva/actions.ts` (ese archivo solo tiene las de crear cadencia/campaña) sino en `app/campanas/actions.ts`: `previsualizarConReadinessAction` (equivalente a `recalcularSegmentoAction`) y `copilotoAction` (equivalente a `segmentoDesdeTextoAction`), ya armando `campos` reales con `valoresDistintosCampo`.
 
-### Task 2.2: Server action reactiva del segmento `[AGENTE]`
+### Task 2.3+: UI de la V2 (se expande al iniciar la fase) `[AGENTE]` — **PENDIENTE, esto sigue sin hacer**
 
-**Files:** Modify `app/campanas/nueva/actions.ts`
-
-- [ ] **Step 1:** Agregar `recalcularSegmentoAction(def: DefinicionSegmento)` que llama `empresasConReadiness` + `conteosReadiness` y devuelve `{ empresas, conteos }`. Y `segmentoDesdeTextoAction(texto)` que llama `interpretarSegmento` (con el adaptador Claude real) y luego recalcula.
-- [ ] **Step 2:** Test de la action con IA fake. Correr con `TESTONE`.
-- [ ] **Step 3: Commit** — `git commit -m "feat(campanas): actions de recalculo reactivo del segmento"`
-
-### Task 2.3+: UI de la V2 (se expande al iniciar la fase) `[AGENTE]`
-
-Inventario de componentes contra `HTML 2 Segmentacion/index.html`: panel de filtros izquierdo (`FiltroWall` rediseñado), tabla central de cuentas (`TablaCuentas` con columnas Cuenta/Ciudad/Usuarios/Estado/Canales), panel Copiloto derecho (`CopilotoPanel` con el chat + las tarjetas de opción "3 cuentas sin correo → Reemplazar/Saltar/Cola"), y la barra "9 cuentas · 5 listas para correo · 1 sin contacto". El loop reactivo: cada cambio de filtro (manual o por Copiloto) dispara `recalcularSegmentoAction` con debounce y repinta el centro. Los sub-pasos por componente se detallan aquí al arrancar la fase, con el HTML delante.
+`CopilotoPanel.tsx` existe y es funcional (conectado a `copilotoAction`, tokens semánticos correctos) pero es genérico: input + lista tipo chat, NO calca el mockup `HTML 2 Segmentacion/index.html` (panel de filtros izquierdo con chips, tabla central con columnas Cuenta/Ciudad/Usuarios/Estado/Canales, panel Copiloto derecho con tarjetas de opción "3 cuentas sin correo → Reemplazar/Saltar/Cola", barra "9 cuentas · 5 listas para correo · 1 sin contacto"). Esto sigue siendo trabajo real pendiente — es lo único de Fase 2 que falta.
 
 ---
 
@@ -271,38 +229,19 @@ Inventario de componentes contra `HTML 2 Segmentacion/index.html`: panel de filt
 - Modify: `app/core/cadencia-parser.ts`
 - Test: `app/core/cadencia-parser.test.ts` (extender)
 
-- [ ] **Step 1: Test que falla** para `parsearCadenciaJson(texto)`:
-```ts
-test("parsearCadenciaJson lee pasos y extrae variables", () => {
-  const json = JSON.stringify({
-    nombre: "Pasarela ISP Valle",
-    pasos: [{ diaOffset: 0, canal: "correo", asunto: "Pagos más simples para [empresa]", cuerpo: "Hola [nombre]" }],
-  });
-  const c = parsearCadenciaJson(json);
-  assert.equal(c.nombre, "Pasarela ISP Valle");
-  assert.equal(c.pasos[0].canal, "correo");
-  assert.deepEqual(c.pasos[0].variables, ["empresa", "nombre"]);
-});
-```
-- [ ] **Step 2: Correr y ver fallar** — `TESTONE app/core/cadencia-parser.test.ts`.
-- [ ] **Step 3: Implementar `parsearCadenciaJson`** reusando `extraerVariables`/`limpiarFirma` (DRY con CSV/MD), auto-numerando `orden`, validando con `cadenciaParseadaSchema`.
-- [ ] **Step 4: Correr y ver pasar.**
-- [ ] **Step 5: Commit** — `git commit -m "feat(core): parser JSON de cadencia"`
+- [x] **Steps 1-5: TDD real** (test falló primero, confirmado). `parsearCadenciaJson` reusa `extraerVariables`/`limpiarFirma`. **DESVIACIÓN:** no se validó con `cadenciaParseadaSchema` — los parsers CSV/MD existentes tampoco la usan (esa validación vive deliberadamente en el Repository, no en el parser). Se mantuvo la misma separación por consistencia. Se extrajo `parsearCadenciaPorFormato(formato, texto, meta)` al core (no un switch inline en actions.ts) porque Next.js exige que toda función exportada de un archivo `'use server'` sea `async`. Esto forzó actualizar `crearCampanaConCadenciaAction` (usaba los parsers viejos directo). Commit → `c4c6b16`
 
 ### Task 3.2: Preview soporta formato `json` `[AGENTE]`
 
 **Files:** Modify `app/campanas/nueva/actions.ts` (`previsualizarCadenciaAction`)
 
-- [ ] **Step 1:** Agregar `formato: "json"` al switch que ya maneja `"csv"|"md"`, llamando `parsearCadenciaJson`. Test de la action con los tres formatos. Correr con `TESTONE`.
-- [ ] **Step 2: Commit** — `git commit -m "feat(campanas): previsualizar cadencia acepta json"`
+- [x] **Steps 1-2.** Commit → `173e982`
 
 ### Task 3.3: Vista de importar/revisar `[AGENTE]`
 
 **Files:** Create `app/campanas/nueva/ImportarCadencia.tsx`
 
-- [ ] **Step 1:** Componente con dropzone (arrastrar CSV/MD/JSON), que al soltar llama `previsualizarCadenciaAction` y pinta la `CadenciaParseada`: por paso, día + `CanalTag` + asunto + cuerpo con las variables `[nombre]` resaltadas (mismo tratamiento visual que el mockup V3 donde las llaves salen en pill). Botón "Cambiar cadencia" que limpia y vuelve al dropzone (el "devolverse" que pidió Sebastián). Estilo en la misma línea que V3.
-- [ ] **Step 2: Verificar** con preview subiendo un JSON de ejemplo.
-- [ ] **Step 3: Commit** — `git commit -m "feat(campanas): vista importar y revisar cadencia (V2.9)"`
+- [x] **Steps 1-3.** No se usó `Pill.tsx` para el resalte de variables (es para tonos hot/warm/cold, no para el pill violeta del mockup V3) — se usó `bg-accent-bg`/`text-accent-ink` directo. **Importante:** en esta tarea el componente se construyó pero NO se conectó a `NuevaCampanaFlujo.tsx` (que en ese momento seguía usando `CrearCampana.tsx`, el textarea viejo) — quedó flageado explícitamente como "trabajo de Fase 4". Terminó resuelto más tarde, pero no en Fase 4: en el rediseño completo de `/campanas/nueva` que pidió Sebastián a mitad de sesión (ver bitácora, "trabajo fuera del plan"). Commit → `143e730`; extendido después con props `onResuelto`/`onLimpiar` en el commit `ecc60d5`.
 
 ---
 
@@ -313,6 +252,8 @@ test("parsearCadenciaJson lee pasos y extrae variables", () => {
 **Investigar antes:** `Cadencias Paso 2 HTML3/index.html`, `app/cadencias/ConstructorCadencia.tsx` (constructor legacy), `getCadencia` en `repository.ts`.
 
 Inventario (se expande al iniciar): fila de toque editable (día select + `Chip` de canal + toggle Revisar/Automático), timeline "por pasos" con las tarjetas de copy, editar copy inline (server action `actualizarVersionPaso`/`agregarVersionPaso` que ya existen). Añadir toque/paso. Sin huecos de core.
+
+**HECHO, con un gap real encontrado en la ejecución.** UI construida en `app/cadencias/[id]/{page,CadenciaCockpit,actions}.tsx` — **archivo nuevo, NO in-place** sobre `ConstructorCadencia.tsx` legacy (ese hace calendario con días bloqueados/corrimiento, un concepto distinto; `/cadencias/page.tsx` además ya redirige a `/campanas` y no había ruta viva para ver una cadencia por id, así que tocar el legacy hubiera roto ese redirect). `agregarVersionPaso`/`actualizarVersionPaso` sí cubren edición de copy, pero **no existe ningún mutator para `pasoCadencia` más allá de la inserción inicial en `crearCadencia`**: falta togglear `esManual`, cambiar `diaOffset`/`canal` de un paso existente, e insertar un paso nuevo en una cadencia ya creada. Los tres controles están en la UI como estado visual local con `title="Cambio visual — falta action del repository para guardarlo"`, SIN fingir persistencia — los botones "Añadir toque"/"Añadir paso" quedaron deshabilitados. Esto es la **task #11 del tracker** ("Repository: mutators de pasoCadencia"), pendiente. Commit → `bee4384`.
 
 ---
 
@@ -454,12 +395,68 @@ Inventario contra `Lanzar Cockpit html6/index.html`: toggle "Lanzar hoy / Progra
 
 ## Puntos de decisión pendientes (checkpoints de dominio)
 
-1. **Fórmula de métricas** del hub (1.1): qué cuenta "toques semana" y "tasa de respuesta".
-2. **Prompt/schema del Copiloto** (2.1) y si se extiende `copiloto.ts` o se reescribe (2.0).
-3. **Separar decidir de persistir** en inscripción (6.1).
-4. **Modelo de goteo:** ritmo, y si el tope de toques/día es global o por campaña (8.1); la lógica de distribución (8.2).
-5. **Fuentes actuales** en tokens (0.1): IBM Plex Sans como cuerpo, todo swappable.
+1. ✅ **RESUELTO** — Fórmula de métricas del hub (1.1): cohorte por `idPasoInscripcion` (enviado→respondio), no ratio de conteos en la ventana.
+2. ✅ **RESUELTO (sin necesidad de decidir)** — el Copiloto (2.0) ya existía completo y correcto; no hubo que elegir entre extender o reescribir.
+3. ⏳ **PENDIENTE** — Separar decidir de persistir en inscripción (6.1). No se llegó a Fase 6 esta sesión.
+4. ⏳ **PENDIENTE** — Modelo de goteo: ritmo, tope global vs. por campaña (8.1); lógica de distribución (8.2). No se llegó a Fase 8 esta sesión.
+5. ✅ **RESUELTO** — Fuentes en tokens (0.1): IBM Plex Sans como `--font-body`. Sebastián confirmó el principio general: "no importa la familia exacta, siempre y cuando quede abstraída" — la arquitectura de capas (primitivo→semántico) es la respuesta, no un valor específico.
 
 ## Handoff
 
 Ejecutar con subagentes chiquitos por tarea, con review entre tareas y pausa cada 2-3 tareas en boundary limpio (según la forma de trabajo de Sebastián). Las tareas `[CHECKPOINT]` no se delegan en frío: paran para que Sebastián meta la decisión de dominio antes de que el agente arme el resto.
+
+---
+
+## Bitácora de ejecución — sesión 2026-07-07 (rama `feat/campanas-cockpit`)
+
+Todo lo que pasó en la sesión que ejecutó Fases 0, 1, 3, 4 + trabajo fuera de plan. Léela completa antes de retomar — tiene bugs corregidos, decisiones tomadas, y cosas que casi salen mal.
+
+### Qué se hizo (orden real, no el del plan)
+
+**Fase 0 (tokens), inline, secuencial** — 3 commits (`843753f`, `2df24bc`, `bc0cf69`). Sin sorpresas grandes salvo la colisión de `font-heading` (ver "Insights" abajo).
+
+**Fases 1 y 3, en paralelo (subagentes, sin conflicto de archivos)** — Fase 1 (hub `/campanas`, 6 commits) y Fase 3 (importar cadencia, 3 commits) no compartían ningún archivo, corrieron a la vez sin problema.
+
+**Fase 2, auditoría primero (subagente, solo lectura)** — el hallazgo cambió el trabajo: nada que construir, solo confirmar que ya existía (ver abajo).
+
+**Fases 2 (wiring) y 4, en paralelo** — Fase 2 resultó ser "nada que hacer" (ver Insights). Fase 4 sí generó trabajo real y un gap documentado (mutators de `pasoCadencia`, quedó como task suelta).
+
+**Trabajo fuera de plan, a mitad de sesión (pedido explícito de Sebastián):**
+1. Rediseño completo de `/campanas/nueva` — Sebastián reportó la vista como "superpeje" (mal hecha). Investigación reveló que **la causa raíz no era un problema de diseño sino de flujo**: cuando ya había segmentos guardados, la página mostraba `CrearCampana.tsx` (un formulario legacy con textarea gigante para pegar markdown a mano, CSS `.wrap`/`.chip`/`.capture` sin tokens) en vez del cockpit `NuevoSegmento.tsx` que ya calcaba el mockup V2 razonablemente bien. Fix: `page.tsx` pasó de `.wrap` (max-width 860px, la causa del espacio lateral enorme) a `AppShell`; `NuevaCampanaFlujo.tsx` se rehizo como máquina Segmento→Cadencia real; se agregó un toggle para ocultar/mostrar el Copiloto; `CrearCampana.tsx` se borró del flujo; `CadenciaPaso.tsx` (nuevo) conecta `ImportarCadencia` (Fase 3, existía pero no estaba wireada) con `crearCampanaConCadenciaAction`. Commit → `ecc60d5`.
+2. Eliminación de `/campanas/segmentos` — Sebastián notó que esa ruta (el builder Parte 1/2 original, pre-cockpit, mismo CSS legacy) ya no tenía sentido: la segmentación real vive en `/campanas/nueva`. Se confirmó que nada la enlazaba (ni nav, ni otra página) y se borró completa, incluyendo las server actions huérfanas (`previsualizarSegmentoAction`, `excluirLeadAction`/`incluirLeadAction`). `excluirDeSegmento`/`incluirDeSegmento` se dejaron intactos en el Repository — la capacidad de dominio sigue viva, solo perdió su UI. Commit → `824a93d`.
+
+### Insights (arquitectura y hallazgos no obvios)
+
+- **Colisión de `font-heading`.** El plan (línea 105 original) pedía `--font-heading: var(--ff-serif)` para los títulos del cockpit de campañas. Pero `--font-heading` YA estaba en producción apuntando a Archivo Black, usado por el home dashboard (`app/page.tsx`, `StatCard.tsx`, `PipelineBar.tsx`). Cambiarlo hubiera roto el home. Resuelto: el cockpit de campañas usa `font-serif` (ya existía, Newsreader, y es lo que `/cola` ya usa) — `font-heading` queda reservado exclusivamente al home. Documentado en `docs/design-tokens.md`.
+- **La Fase 2 casi se reescribe sin necesidad.** El plan asumía que había que construir `interpretarSegmento` (NL→DSL) desde cero. La auditoría (Task 2.0) encontró que `pedirAlCopiloto` en `copiloto.ts` ya lo hacía, completo, multi-turno, cableado por `IAPort` correctamente. Lección: el plan se escribió sin auditar el código real primero en esta parte — vale la pena, en cualquier plan futuro, correr la auditoría de "qué ya existe" ANTES de escribir las tareas de construcción, no después.
+- **La Fase 2 "wiring" agente reportó cero commits, y al principio pareció una alucinación.** El agente citó hashes (`3165a93`, `079d33f`, `db9b497`, `b81ef1a`) que NO aparecían en `git log --oneline -30` de la rama. Se verificó con `git merge-base --is-ancestor <hash> HEAD` y `git merge-base --is-ancestor <hash> main`: ambos true. Eran commits reales, heredados de una consolidación de ramas anterior (`feat/cockpit-campanas`, una rama vieja distinta, documentada en memoria como ya mergeada a `main` el 2026-07-07 antes de que arrancara esta rama). El agente tenía razón. **Lección para verificar reportes de agentes que dicen "esto ya existe":** no basta con `git log -30`, hay que rastrear el hash con `merge-base --is-ancestor` contra HEAD y contra main antes de descartar o aceptar el reporte.
+- **`empresasEnSecuencia`/`bloqueadasEsperandoRegla` y "Límite diario"/"Esperando regla" del mockup NO son estados reales.** El schema de `inscripcion.estado` solo tiene `activa/bloqueada/finalizada/pausada`. Cualquier fase futura que lea el mockup literal para textos de estado tiene que verificar contra el schema real primero, no asumir que el mockup usa nombres que existen en la DB.
+
+### Bugs / incidentes durante la sesión
+
+1. **`git stash pop` de un agente chocó con el trabajo de otro agente corriendo en paralelo.** Ambos compartían el mismo working tree (sin worktree aislado). El agente de Fase 3 hizo un stash que rozó un stash preexistente de OTRA sesión (rama `feat/cockpit-campanas`), y de paso tumbó momentáneamente `metricasHub` (que el agente de Fase 1 estaba escribiendo a la vez). Se resolvió solo, sin pérdida de trabajo (verificado con `git diff HEAD` vacío y `git stash list` mostrando el stash ajeno intacto sin aplicar). Desde ese punto, todo prompt de agente en esta sesión incluyó la regla explícita: **nunca uses `git stash`** en este working tree compartido.
+2. **`rm -rf .next` con un dev server ajeno vivo lo rompió (500).** Al limpiar el caché de tipos de Next.js para que `tsc --noEmit` dejara de quejarse de rutas ya borradas (`/campanas/segmentos`), se borró `.next` completo mientras el dev server de Sebastián (PID 94676, puerto 3000) seguía corriendo. El proceso quedó respondiendo 500 porque tenía en memoria referencias a chunks que ya no existían en disco. Se resolvió matando el proceso y relanzando `npm run dev` en background, con confirmación explícita de Sebastián antes de tocarlo. **Lección: nunca `rm -rf .next` con un dev server vivo en el mismo directorio.** Si `tsc` se queja de rutas fantasma, o se ignora (es cosmético, `npm run build` regenera solo) o se borra selectivamente `.next/types`, nunca el directorio completo.
+3. **Next.js bloquea un segundo `next dev` en el mismo directorio aunque cambie de puerto.** Se intentó `preview_start` varias veces durante la sesión; siempre falló con "another next dev server is already running" apuntando al PID 94676, incluso cuando el nuevo proceso lograba bindear un puerto distinto (autoPort). Es un lock a nivel de directorio de proyecto, no de puerto. Mientras haya otra sesión con `npm run dev` corriendo en este mismo repo, no hay forma de levantar un segundo dev server propio — hay que usar el existente o coordinarse con quien lo tenga abierto.
+
+### Estado de los "providers" externos (verificado, no tocado)
+
+Sebastián confirmó que esto no bloquea nada — el core es hexagonal, solo habla por puertos (`IAPort`, `EnvioPort`, etc. en `app/core/ports/`), así que los providers se conectan cuando estén listos sin tocar lógica de negocio. Estado real verificado en `isps.db` (la de un nivel arriba del repo, `app/db/index.ts:9`) y `.env.local`:
+
+- **Claude/Copiloto:** vía gateway propio `dario` (OAuth proxy, no API key directa — `DARIO_URL`/`DARIO_KEY` en `.env.local`, ver `app/adapters/claude.ts:7-18`). El gateway NO respondía en `localhost:3456` al momento de verificar (connection refused) — hay que arrancarlo aparte para que el Copiloto funcione en vivo.
+- **Granola:** conectado (`conector.estado = 'activo'`, credencial presente).
+- **Apollo:** credencial activa en DB, pero el envío real está bloqueado a propósito: `APOLLO_MAILBOX_ID` no está seteado en `.env.local`, y `app/adapters/apollo.ts:174` tira error explícito ("decisión de negocio S2 pendiente") si se intenta usar. No es un bug, es un freno intencional de una sesión anterior.
+- **Notion:** sin conectar (`sin_credencial`). El sync DB→Notion no tiene a dónde escribir hasta conectar en `/conectores`.
+
+### Qué falta (siguiente sesión)
+
+En orden sugerido (Fase 5 y el gap de Fase 4 no tienen checkpoints, son los más rápidos de arrancar):
+
+1. **Task #11 — mutators de `pasoCadencia`** en el Repository (toggle `esManual`, cambiar `diaOffset`/`canal`, insertar paso nuevo). Desbloquea que `app/cadencias/[id]/CadenciaCockpit.tsx` sea funcional de verdad — hoy sus controles están deshabilitados.
+2. **Fase 5 — Vista Reglas** (nueva, sin mockup). Sin checkpoints de core, backend ya existe (`campana.reglaFaltante`, `conteosReadiness`).
+3. **Fase 2.3+ — UI final del Copiloto/Segmentación** calcada de `HTML 2 Segmentacion/index.html`. Es lo único que falta de Fase 2; el backend está 100% listo.
+4. **Fase 6 — Destinatarios/Readiness.** Tiene un checkpoint real (6.1, separar decidir de persistir en inscripción) — parar y preguntar antes de construir.
+5. **Fase 7 — Preview cinemático.** Portar `html5/` (proyecto Vite separado), sin checkpoints.
+6. **Fase 8 — Lanzar.** Tres checkpoints de dominio seguidos (8.1 schema de goteo, 8.2 algoritmo, 8.3 enrollment escalonado) — la fase con más decisiones pendientes de Sebastián, ir despacio ahí.
+7. **Fase 9 — Por revisar.** Sin checkpoints, backend completo, reusa `renderizarCopy` de Fase 7.
+
+Antes de asumir que algo del plan original "no está hecho", verificar el código real primero (como pasó con Fase 2) — el plan se escribió antes de auditar todo lo que ya existía en el repo.
