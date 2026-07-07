@@ -17,6 +17,7 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { z } from 'zod';
 import { db } from './index';
 import {
   empresa,
@@ -672,6 +673,95 @@ export function crearCadencia(parseada: CadenciaParseada): number {
   });
 }
 
+// Fase 4 (cockpit de cadencia): cambios de un paso existente (dia/canal/aprobacion).
+// UPDATE parcial: solo toca las columnas que vienen en `cambios`, las demas quedan
+// como estaban (a diferencia de crearCadencia, que siempre escribe la fila completa
+// porque nace de cero). canal se valida contra el mismo enum de dominio que usa el
+// resto del repository (CANALES), asi el mutator no puede dejar un canal invalido
+// aunque la UI se salte el chip cerrado que hoy lo restringe.
+const actualizarPasoCadenciaSchema = z.object({
+  diaOffset: z.number().int().nonnegative().optional(),
+  canal: z.enum(CANALES).optional(),
+  esManual: z.boolean().optional(),
+});
+
+export function actualizarPasoCadencia(
+  idPaso: number,
+  cambios: { diaOffset?: number; canal?: Canal; esManual?: boolean },
+): void {
+  const val = actualizarPasoCadenciaSchema.parse(cambios);
+
+  const set: Partial<typeof pasoCadencia.$inferInsert> = {};
+  if (val.diaOffset !== undefined) set.diaOffset = val.diaOffset;
+  if (val.canal !== undefined) set.canal = val.canal;
+  if (val.esManual !== undefined) set.esManual = val.esManual ? 1 : 0;
+
+  if (Object.keys(set).length === 0) return; // nada que cambiar, no pega un UPDATE vacio
+
+  db.update(pasoCadencia).set(set).where(eq(pasoCadencia.idPaso, idPaso)).run();
+}
+
+// Fase 4 (cockpit de cadencia): agrega un paso nuevo a una cadencia YA creada (el
+// boton "+ Añadir paso"/"+ Añadir toque" de la UI). Mismo patron que el loop de
+// crearCadencia (paso + su version_paso default) pero para un solo paso, dentro de
+// su propia transaccion. orden es el siguiente correlativo: no lo elige el caller,
+// asi nunca hay huecos ni duplicados aunque la UI mande varios clics rapido.
+const agregarPasoCadenciaSchema = z.object({
+  diaOffset: z.number().int().nonnegative(),
+  canal: z.enum(CANALES),
+  objetivo: z.string().min(1).optional(),
+  esManual: z.boolean().optional().default(false),
+  asunto: z.string().min(1).optional(),
+  cuerpo: z.string().min(1).optional(),
+});
+
+export function agregarPasoCadencia(
+  idCadencia: number,
+  paso: { diaOffset: number; canal: Canal; objetivo?: string; esManual?: boolean; asunto?: string; cuerpo?: string },
+): number {
+  const val = agregarPasoCadenciaSchema.parse(paso);
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    const maxOrden = tx
+      .select({ maxOrden: sql<number | null>`max(${pasoCadencia.orden})` })
+      .from(pasoCadencia)
+      .where(eq(pasoCadencia.idCadencia, idCadencia))
+      .get();
+    const orden = (maxOrden?.maxOrden ?? 0) + 1;
+
+    const insPaso = tx
+      .insert(pasoCadencia)
+      .values({
+        idCadencia,
+        orden,
+        diaOffset: val.diaOffset,
+        canal: val.canal,
+        objetivo: val.objetivo ?? null,
+        esManual: val.esManual ? 1 : 0,
+        createdAt: ahora,
+      })
+      .run();
+    const idPaso = Number(insPaso.lastInsertRowid);
+
+    tx.insert(versionPaso)
+      .values({
+        idPaso,
+        nombre: 'default',
+        asunto: val.asunto ?? null,
+        cuerpo: val.cuerpo ?? null,
+        esDefault: 1,
+        activa: 1,
+        peso: 1,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+
+    return idPaso;
+  });
+}
+
 // V4.2: lista las cadencias como templates, con el conteo de pasos de cada una. Para la
 // pantalla de "mis cadencias" (V4.7) y para elegir cadencia al armar una campana (V4.5).
 export function listarCadencias() {
@@ -704,6 +794,7 @@ export function getCadencia(idCadencia: number) {
       diaOffset: pasoCadencia.diaOffset,
       canal: pasoCadencia.canal,
       objetivo: pasoCadencia.objetivo,
+      esManual: pasoCadencia.esManual,
       idVersion: versionPaso.idVersion,
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
@@ -720,6 +811,7 @@ export function getCadencia(idCadencia: number) {
   // array aca (unico punto de lectura), asi el caller nunca toca JSON.parse directo.
   const pasos = filas.map((f) => ({
     ...f,
+    esManual: f.esManual === 1,
     firmaApollo: f.firmaApollo === 1,
     variables: f.variables ? (JSON.parse(f.variables) as string[]) : [],
   }));
@@ -984,6 +1076,57 @@ export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Can
     sinCanal: filas.filter((f) => f.readiness.estado === 'sin_canal').length,
     sinContacto: filas.filter((f) => f.canales.length === 0).length,
   };
+}
+
+// Fase 5 (vista Reglas): trae lo que la pantalla /campanas/[id]/reglas necesita para
+// calcular readiness — cabecera de la campana, los canales que pide su cadencia (en
+// orden, para reemplazar/saltar) y la definicion del segmento (para volver a correr
+// conteosReadiness live cuando el usuario cambia de regla sin guardar todavia).
+export type CampanaConReglas = {
+  idCampana: number;
+  nombre: string;
+  reglaFaltante: ReglaFaltante;
+  idSegmento: number;
+  definicionSegmento: DefinicionSegmento;
+  canalesRequeridos: Canal[];
+};
+
+export function campanaConReglas(idCampana: number): CampanaConReglas | null {
+  const camp = db
+    .select({ idCampana: campana.idCampana, nombre: campana.nombre, reglaFaltante: campana.reglaFaltante, idCadencia: campana.idCadencia, idSegmento: campana.idSegmento })
+    .from(campana)
+    .where(eq(campana.idCampana, idCampana))
+    .get();
+  if (!camp) return null;
+
+  const seg = db.select({ definicion: segmento.definicion }).from(segmento).where(eq(segmento.idSegmento, camp.idSegmento)).get();
+  if (!seg) return null;
+
+  const pasos = db
+    .select({ canal: pasoCadencia.canal })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, camp.idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+
+  return {
+    idCampana: camp.idCampana,
+    nombre: camp.nombre,
+    reglaFaltante: camp.reglaFaltante as ReglaFaltante,
+    idSegmento: camp.idSegmento,
+    definicionSegmento: definicionSegmentoSchema.parse(JSON.parse(seg.definicion)),
+    canalesRequeridos: pasos.map((p) => p.canal as Canal),
+  };
+}
+
+// Fase 5 (vista Reglas): UPDATE simple del campo. La revision humana pasa antes de
+// llamar esto — la pantalla solo persiste cuando el usuario confirma "Guardar regla",
+// nunca al tocar las opciones (eso solo recalcula conteos en memoria).
+export function actualizarReglaFaltante(idCampana: number, regla: ReglaFaltante): void {
+  db.update(campana)
+    .set({ reglaFaltante: regla, updatedAt: new Date().toISOString() })
+    .where(eq(campana.idCampana, idCampana))
+    .run();
 }
 
 // V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el

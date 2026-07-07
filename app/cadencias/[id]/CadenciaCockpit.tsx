@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { editarCopyPasoAction } from './actions';
+import { editarCopyPasoAction, actualizarPasoCadenciaAction, agregarPasoCadenciaAction } from './actions';
 import { CanalTag, type Canal } from '../../ui/CanalTag';
 import { cn } from '../../ui/cn';
 
@@ -11,6 +11,7 @@ export type PasoCadenciaUI = {
   diaOffset: number;
   canal: string;
   objetivo: string | null;
+  esManual: boolean;
   idVersion: number | null;
   asunto: string | null;
   cuerpo: string | null;
@@ -45,29 +46,73 @@ function conVariablesResaltadas(texto: string) {
   );
 }
 
-// Fase 4: esManual, dia y canal no tienen action de escritura en el repository
-// todavia (crearCadencia solo escribe al crear; no hay actualizarPasoCadencia). El
-// toggle/selector queda en estado local con esta bandera visible, en vez de fingir
-// que persiste — reportado a Sebastian como gap real, no se improvisa la escritura
-// aca porque tocaria app/db/repository.ts (fuera de alcance, otro agente lo usa).
-const PERSISTENCIA_PENDIENTE = 'Cambio visual — falta action del repository para guardarlo';
-
 export function CadenciaCockpit({ idCadencia, nombre, pasos }: { idCadencia: number; nombre: string; pasos: PasoCadenciaUI[] }) {
-  const [filas, setFilas] = useState(
-    pasos.map((p) => ({ ...p, esManualLocal: false })),
-  );
+  const [filas, setFilas] = useState(pasos);
   const [editando, setEditando] = useState<number | null>(null);
+  const [, startTransition] = useTransition();
+  const [addPending, startAddTransition] = useTransition();
+  const [error, setError] = useState('');
+
+  // Optimista + revert: pinta el cambio ya, y si la action falla vuelve al valor previo
+  // y muestra el error. Mismo patron try/catch que PasoTimelineItem.guardar(), pero acá
+  // el estado optimista evita que cada click en un chip espere el roundtrip del server.
+  function guardarCambio(idPaso: number, cambios: { diaOffset?: number; canal?: Canal; esManual?: boolean }) {
+    setError('');
+    const previas = filas;
+    setFilas((fs) => fs.map((f) => (f.idPaso === idPaso ? { ...f, ...cambios } : f)));
+    startTransition(async () => {
+      const res = await actualizarPasoCadenciaAction(idPaso, cambios, idCadencia);
+      if (!res.ok) {
+        setFilas(previas);
+        setError(res.error);
+      }
+    });
+  }
 
   function setCanalLocal(idPaso: number, canal: Canal) {
-    setFilas((fs) => fs.map((f) => (f.idPaso === idPaso ? { ...f, canal } : f)));
+    guardarCambio(idPaso, { canal });
   }
 
   function toggleAprobacionLocal(idPaso: number) {
-    setFilas((fs) => fs.map((f) => (f.idPaso === idPaso ? { ...f, esManualLocal: !f.esManualLocal } : f)));
+    const fila = filas.find((f) => f.idPaso === idPaso);
+    if (!fila) return;
+    guardarCambio(idPaso, { esManual: !fila.esManual });
   }
 
   function setDiaLocal(idPaso: number, diaOffset: number) {
-    setFilas((fs) => fs.map((f) => (f.idPaso === idPaso ? { ...f, diaOffset } : f)));
+    guardarCambio(idPaso, { diaOffset });
+  }
+
+  function agregarPaso() {
+    setError('');
+    const ultimoDia = filas.length > 0 ? filas[filas.length - 1].diaOffset : 0;
+    startAddTransition(async () => {
+      const res = await agregarPasoCadenciaAction(idCadencia, {
+        diaOffset: ultimoDia + 1,
+        canal: 'correo',
+        esManual: false,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setFilas((fs) => [
+        ...fs,
+        {
+          idPaso: res.idPaso,
+          orden: fs.length + 1,
+          diaOffset: ultimoDia + 1,
+          canal: 'correo',
+          objetivo: null,
+          esManual: false,
+          idVersion: null,
+          asunto: null,
+          cuerpo: null,
+          firmaApollo: false,
+          variables: [],
+        },
+      ]);
+    });
   }
 
   return (
@@ -84,6 +129,7 @@ export function CadenciaCockpit({ idCadencia, nombre, pasos }: { idCadencia: num
         <p className="mb-5 text-[13px] text-muted">
           Define cada toque de forma explícita: número, día y canal. Marca los que quieras revisar y aprobar antes de que se envíen.
         </p>
+        {error && <p className="mb-3 text-xs text-overdue">{error}</p>}
 
         <div className="grid grid-cols-[88px_140px_1fr_160px] gap-3.5 px-1 pb-2 font-mono-tag text-[10px] uppercase tracking-widest text-faint">
           <span>Toque</span>
@@ -105,7 +151,6 @@ export function CadenciaCockpit({ idCadencia, nombre, pasos }: { idCadencia: num
                   value={f.diaOffset}
                   onChange={(e) => setDiaLocal(f.idPaso, Number(e.target.value) || 0)}
                   className="w-full bg-transparent font-mono-tag text-ink outline-none"
-                  title={PERSISTENCIA_PENDIENTE}
                 />
               </label>
 
@@ -115,7 +160,6 @@ export function CadenciaCockpit({ idCadencia, nombre, pasos }: { idCadencia: num
                     key={canal}
                     type="button"
                     onClick={() => setCanalLocal(f.idPaso, canal)}
-                    title={PERSISTENCIA_PENDIENTE}
                     className={cn(
                       'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
                       f.canal === canal ? CANAL_CHIP_ON[canal] : 'border-line text-muted hover:text-ink',
@@ -129,15 +173,14 @@ export function CadenciaCockpit({ idCadencia, nombre, pasos }: { idCadencia: num
               <button
                 type="button"
                 onClick={() => toggleAprobacionLocal(f.idPaso)}
-                title={PERSISTENCIA_PENDIENTE}
                 className={cn(
                   'inline-flex w-fit items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                  f.esManualLocal
+                  f.esManual
                     ? 'border-accent/40 bg-accent-bg text-accent-ink'
                     : 'border-line text-muted hover:text-ink',
                 )}
               >
-                {f.esManualLocal ? '✦ Revisar' : 'Automático'}
+                {f.esManual ? '✦ Revisar' : 'Automático'}
               </button>
             </div>
           ))}
@@ -145,11 +188,11 @@ export function CadenciaCockpit({ idCadencia, nombre, pasos }: { idCadencia: num
 
         <button
           type="button"
-          disabled
-          title={PERSISTENCIA_PENDIENTE}
-          className="mt-3 w-full rounded-[11px] border border-dashed border-line px-3 py-3 text-[13px] text-muted opacity-60"
+          onClick={agregarPaso}
+          disabled={addPending}
+          className="mt-3 w-full rounded-[11px] border border-dashed border-line px-3 py-3 text-[13px] text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60"
         >
-          + Añadir toque
+          {addPending ? 'Añadiendo…' : '+ Añadir toque'}
         </button>
       </section>
 
@@ -177,11 +220,11 @@ export function CadenciaCockpit({ idCadencia, nombre, pasos }: { idCadencia: num
 
         <button
           type="button"
-          disabled
-          title={PERSISTENCIA_PENDIENTE}
-          className="mt-2 w-full rounded-[11px] border border-dashed border-line px-3 py-3 text-[13px] text-muted opacity-60"
+          onClick={agregarPaso}
+          disabled={addPending}
+          className="mt-2 w-full rounded-[11px] border border-dashed border-line px-3 py-3 text-[13px] text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60"
         >
-          + Añadir paso
+          {addPending ? 'Añadiendo…' : '+ Añadir paso'}
         </button>
       </section>
     </div>
@@ -196,7 +239,7 @@ function PasoTimelineItem({
   onEditar,
   onCerrar,
 }: {
-  paso: PasoCadenciaUI & { esManualLocal: boolean };
+  paso: PasoCadenciaUI;
   esUltimo: boolean;
   idCadencia: number;
   editando: boolean;
