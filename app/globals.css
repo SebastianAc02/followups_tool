@@ -29,6 +29,16 @@
   --color-canal-whatsapp: #84c99e;
   --color-acento: #6f9fd0;
 
+  /* Rediseño home (2026-07-07): superficies del shell (sidebar/top bar/main oscuro). */
+  --color-accent-bg: #1a1730;
+  --color-accent-ink: #e7e3ff;
+  --color-shell: #0b0c0f;
+  --color-shell-2: #0f1014;
+  --color-card: #111218;
+  --color-card-hover: #16171e;
+  --color-line-shell: #1b1d25;
+  --color-line-card: #1f212b;
+
   --font-sans: var(--ff-sans), system-ui, sans-serif;
   --font-mono: var(--ff-mono), ui-monospace, monospace;
   --font-serif: var(--ff-serif), Georgia, serif;
@@ -77,17 +87,6 @@
   --today-bg: rgba(242, 183, 56, 0.13);
   --done: #57c98a;
   --ring: rgba(255, 255, 255, 0.12);
-  /* Rediseño home (2026-07-07): acento morado + superficies del shell. */
-  --color-accent: #8b7cff;
-  --color-accent-soft: #a99cff;
-  --color-accent-bg: #1a1730;
-  --color-accent-ink: #e7e3ff;
-  --color-shell: #0b0c0f;
-  --color-shell-2: #0f1014;
-  --color-card: #111218;
-  --color-card-hover: #16171e;
-  --color-line-shell: #1b1d25;
-  --color-line-card: #1f212b;
   color-scheme: dark;
 }
 
