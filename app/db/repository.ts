@@ -46,6 +46,7 @@ import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
 import type { EventoProveedor } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
+import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import {
@@ -863,6 +864,51 @@ export function valoresDistintosCampo(campo: CampoSegmento): string[] {
   }
   const filas = db.selectDistinct({ v: col }).from(empresa).where(isNotNull(col)).orderBy(col).all();
   return filas.map((f) => String(f.v));
+}
+
+export type FilaReadiness = { id: string; nombre: string; canales: Canal[]; readiness: Readiness };
+export type ConteosReadiness = { total: number; listas: number; parciales: number; sinCanal: number; sinContacto: number };
+
+// Parte 5 campanas: contactos (email/telefono) de un lote de empresas, agrupados por
+// id_empresa. Query de solo lectura; el calculo de readiness lo hace el core puro.
+function _contactosDe(idsEmpresa: string[]): Map<string, { email: string | null; telefono: string | null }[]> {
+  const mapa = new Map<string, { email: string | null; telefono: string | null }[]>();
+  if (idsEmpresa.length === 0) return mapa;
+  const filas = db
+    .select({ idEmpresa: contacto.idEmpresa, email: contacto.email, telefono: contacto.telefono })
+    .from(contacto)
+    .where(inArray(contacto.idEmpresa, idsEmpresa))
+    .all();
+  for (const f of filas) {
+    const lista = mapa.get(f.idEmpresa) ?? [];
+    lista.push({ email: f.email, telefono: f.telefono });
+    mapa.set(f.idEmpresa, lista);
+  }
+  return mapa;
+}
+
+// Parte 5 campanas: trae las empresas del segmento con su readiness de canal segun la
+// cadencia (canalesRequeridos) y la regla de faltante. La query es solo lectura; el
+// calculo (canalesDisponibles/readinessEmpresa) vive en core, puro y testeado aparte.
+export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): FilaReadiness[] {
+  const empresas = empresasDeSegmento(def);
+  const contactosPorEmpresa = _contactosDe(empresas.map((e) => e.id));
+  return empresas.map((e) => {
+    const contactos = contactosPorEmpresa.get(e.id) ?? [];
+    const disponibles = canalesDisponibles(contactos);
+    return { id: e.id, nombre: e.nombre, canales: [...disponibles], readiness: readinessEmpresa(disponibles, canalesRequeridos, regla) };
+  });
+}
+
+export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): ConteosReadiness {
+  const filas = empresasConReadiness(def, canalesRequeridos, regla);
+  return {
+    total: filas.length,
+    listas: filas.filter((f) => f.readiness.estado === 'lista').length,
+    parciales: filas.filter((f) => f.readiness.estado === 'parcial').length,
+    sinCanal: filas.filter((f) => f.readiness.estado === 'sin_canal').length,
+    sinContacto: filas.filter((f) => f.canales.length === 0).length,
+  };
 }
 
 // V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el
