@@ -26,6 +26,7 @@ import {
   toque,
   syncCambios,
   conector,
+  conectorConfig,
   empresaAlias,
   outbox,
   cadencia,
@@ -501,6 +502,52 @@ export function leerCredencialConector(proveedor: string, idUsuario?: string): s
     .get();
   if (!fila?.credencialCiphertext) return null;
   return descifrar(fila.credencialCiphertext);
+}
+
+// Rediseño conectores: CRUD de la POLITICA (conector_config), separado de los secretos.
+// El modo aqui decide, server-side, si una credencial es global (admin) o por usuario
+// (personal). listar solo devuelve habilitados; quitar deja la fila dormida (habilitado=0)
+// para no perder credenciales asociadas: re-agregar la revive.
+export type ConfigConector = { proveedor: string; modo: 'personal' | 'admin'; habilitado: boolean };
+
+export function listarConfigConectores(): ConfigConector[] {
+  return db
+    .select({ proveedor: conectorConfig.proveedor, modo: conectorConfig.modo, habilitado: conectorConfig.habilitado })
+    .from(conectorConfig)
+    .where(eq(conectorConfig.habilitado, 1))
+    .all()
+    .map((f) => ({ proveedor: f.proveedor, modo: f.modo as 'personal' | 'admin', habilitado: Boolean(f.habilitado) }));
+}
+
+export function agregarConfigConector(proveedor: string, modo: 'personal' | 'admin', agregadoPor: string) {
+  const ahora = new Date().toISOString();
+  const existente = db
+    .select({ proveedor: conectorConfig.proveedor })
+    .from(conectorConfig)
+    .where(eq(conectorConfig.proveedor, proveedor))
+    .get();
+  if (existente) {
+    db.update(conectorConfig).set({ modo, habilitado: 1, updatedAt: ahora }).where(eq(conectorConfig.proveedor, proveedor)).run();
+  } else {
+    db.insert(conectorConfig).values({ proveedor, modo, habilitado: 1, agregadoPor, createdAt: ahora, updatedAt: ahora }).run();
+  }
+}
+
+export function actualizarModoConector(proveedor: string, modo: 'personal' | 'admin') {
+  db.update(conectorConfig).set({ modo, updatedAt: new Date().toISOString() }).where(eq(conectorConfig.proveedor, proveedor)).run();
+}
+
+export function quitarConfigConector(proveedor: string) {
+  db.update(conectorConfig).set({ habilitado: 0, updatedAt: new Date().toISOString() }).where(eq(conectorConfig.proveedor, proveedor)).run();
+}
+
+export function modoConector(proveedor: string): 'personal' | 'admin' | null {
+  const f = db
+    .select({ modo: conectorConfig.modo })
+    .from(conectorConfig)
+    .where(and(eq(conectorConfig.proveedor, proveedor), eq(conectorConfig.habilitado, 1)))
+    .get();
+  return (f?.modo as 'personal' | 'admin' | undefined) ?? null;
 }
 
 // V3.4: arma los terminos de busqueda para el matcher (nombre oficial, normalizado y
