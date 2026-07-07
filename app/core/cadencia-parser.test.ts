@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsearCadenciaCsv, parsearCadenciaMarkdown } from './cadencia-parser.ts';
+import { parsearCadenciaCsv, parsearCadenciaMarkdown, parsearCadenciaJson } from './cadencia-parser.ts';
 
 test('CSV: encabezado + pasos, orden explicito, columnas en cualquier orden', () => {
   const csv = [
@@ -144,4 +144,55 @@ test('Markdown: sin titulo lanza', () => {
 
 test('Markdown: paso sin canal lanza', () => {
   assert.throws(() => parsearCadenciaMarkdown('# C\n## Día 0\nx'), /sin canal/);
+});
+
+// Parte 3 campanas (Fase 3): parser JSON, mismo tratamiento de copy que CSV/Markdown.
+test('parsearCadenciaJson lee pasos y extrae variables', () => {
+  const json = JSON.stringify({
+    nombre: 'Pasarela ISP Valle',
+    pasos: [{ diaOffset: 0, canal: 'correo', asunto: 'Pagos más simples para [empresa]', cuerpo: 'Hola [nombre]' }],
+  });
+  const c = parsearCadenciaJson(json);
+  assert.equal(c.nombre, 'Pasarela ISP Valle');
+  assert.equal(c.pasos[0].canal, 'correo');
+  assert.deepEqual(c.pasos[0].variables, ['empresa', 'nombre']);
+});
+
+test('JSON: orden se auto-numera por posicion cuando no viene en el paso', () => {
+  const json = JSON.stringify({
+    nombre: 'C',
+    pasos: [
+      { diaOffset: 0, canal: 'correo', cuerpo: 'Uno' },
+      { diaOffset: 3, canal: 'whatsapp', cuerpo: 'Dos' },
+    ],
+  });
+  const c = parsearCadenciaJson(json);
+  assert.equal(c.pasos[0].orden, 1);
+  assert.equal(c.pasos[1].orden, 2);
+});
+
+test('JSON: respeta descripcion opcional y [[firma]] en el cuerpo', () => {
+  const json = JSON.stringify({
+    nombre: 'C',
+    descripcion: 'desc',
+    pasos: [{ diaOffset: 0, canal: 'correo', cuerpo: 'Cuerpo.\n[[firma]]' }],
+  });
+  const c = parsearCadenciaJson(json);
+  assert.equal(c.descripcion, 'desc');
+  assert.equal(c.pasos[0].firmaApollo, true);
+  assert.equal(c.pasos[0].cuerpo, 'Cuerpo.');
+});
+
+test('JSON: texto invalido (no parseable) lanza error estructural', () => {
+  assert.throws(() => parsearCadenciaJson('{ no es json'), /JSON/);
+});
+
+test('JSON: sin nombre o sin pasos lanza error estructural', () => {
+  assert.throws(() => parsearCadenciaJson(JSON.stringify({ pasos: [{ diaOffset: 0, canal: 'correo' }] })), /nombre/);
+  assert.throws(() => parsearCadenciaJson(JSON.stringify({ nombre: 'C', pasos: [] })), /paso/);
+});
+
+test('JSON: paso sin diaOffset o sin canal lanza error estructural', () => {
+  assert.throws(() => parsearCadenciaJson(JSON.stringify({ nombre: 'C', pasos: [{ canal: 'correo' }] })), /dia_offset|diaOffset/);
+  assert.throws(() => parsearCadenciaJson(JSON.stringify({ nombre: 'C', pasos: [{ diaOffset: 0 }] })), /canal/);
 });

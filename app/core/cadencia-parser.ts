@@ -235,3 +235,64 @@ export function parsearCadenciaMarkdown(texto: string): CadenciaParseada {
 
   return { nombre, descripcion: descLineas.join('\n').trim() || undefined, pasos };
 }
+
+// --- JSON --------------------------------------------------------------
+
+// Formato esperado: { nombre, descripcion?, pasos: [{ diaOffset, canal, asunto?, cuerpo?, objetivo? }] }.
+// Igual que CSV/Markdown, solo valida estructura (JSON parseable, nombre, al menos un
+// paso, diaOffset/canal presentes); la validacion de dominio la hace el Repository.
+export function parsearCadenciaJson(texto: string): CadenciaParseada {
+  let datos: unknown;
+  try {
+    datos = JSON.parse(texto);
+  } catch {
+    throw new Error('El texto no es JSON valido');
+  }
+
+  if (typeof datos !== 'object' || datos === null) {
+    throw new Error('El JSON debe ser un objeto con "nombre" y "pasos"');
+  }
+  const raiz = datos as { nombre?: unknown; descripcion?: unknown; pasos?: unknown };
+
+  const nombre = typeof raiz.nombre === 'string' ? raiz.nombre.trim() : '';
+  if (!nombre) throw new Error('El JSON no tiene "nombre" de cadencia');
+
+  if (!Array.isArray(raiz.pasos) || raiz.pasos.length === 0) {
+    throw new Error('El JSON no tiene pasos (se esperaba al menos un paso en "pasos")');
+  }
+
+  const pasos: PasoParseado[] = raiz.pasos.map((p, k) => {
+    const paso = p as {
+      orden?: unknown;
+      diaOffset?: unknown;
+      canal?: unknown;
+      asunto?: unknown;
+      cuerpo?: unknown;
+      objetivo?: unknown;
+    };
+    if (typeof paso.diaOffset !== 'number' || !Number.isInteger(paso.diaOffset)) {
+      throw new Error(`Se esperaba un entero en diaOffset (paso ${k + 1}), se encontro: "${String(paso.diaOffset)}"`);
+    }
+    const canal = typeof paso.canal === 'string' ? paso.canal.trim() : '';
+    if (!canal) throw new Error(`Paso sin canal (paso ${k + 1})`);
+
+    const asuntoCrudo = typeof paso.asunto === 'string' ? paso.asunto.trim() || undefined : undefined;
+    const cuerpoCrudo = typeof paso.cuerpo === 'string' ? paso.cuerpo.trim() || undefined : undefined;
+    const copy = procesarCopy(asuntoCrudo, cuerpoCrudo);
+
+    return {
+      orden: typeof paso.orden === 'number' && Number.isInteger(paso.orden) ? paso.orden : k + 1,
+      diaOffset: paso.diaOffset,
+      canal,
+      asunto: copy.asunto,
+      cuerpo: copy.cuerpo,
+      objetivo: typeof paso.objetivo === 'string' ? paso.objetivo.trim() || undefined : undefined,
+      variables: copy.variables,
+      firmaApollo: copy.firmaApollo,
+    };
+  });
+
+  const descripcion = typeof raiz.descripcion === 'string' ? raiz.descripcion.trim() || undefined : undefined;
+
+  return { nombre, descripcion, pasos };
+}
