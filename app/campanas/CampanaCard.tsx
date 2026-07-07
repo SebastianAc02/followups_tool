@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Pill } from '../ui/Pill';
 import { CanalTag, type Canal } from '../ui/CanalTag';
 import { Stat } from '../ui/Stat';
@@ -39,7 +40,10 @@ export function CampanaCard({ campana }: { campana: CampanaCardVM }) {
     .join(' · ');
 
   return (
-    <article className="rounded-2xl border border-line bg-card p-[18px] transition-all duration-150 hover:-translate-y-0.5 hover:bg-card-hover hover:shadow-lg">
+    <Link
+      href={`/campanas/${campana.id}`}
+      className="block rounded-2xl border border-line bg-card p-[18px] transition-all duration-150 hover:-translate-y-0.5 hover:bg-card-hover hover:shadow-lg"
+    >
       <div className="mb-3 flex items-center justify-between">
         <span className="font-serif text-base tracking-tight text-ink">{campana.nombre}</span>
         <Pill tone={tone} dot>
@@ -54,6 +58,6 @@ export function CampanaCard({ campana }: { campana: CampanaCardVM }) {
           <Stat value={campana.bloqueadas} label="bloq." tone={campana.bloqueadas > 0 ? 'overdue' : 'neutral'} />
         </div>
       </div>
-    </article>
+    </Link>
   );
 }
