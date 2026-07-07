@@ -425,3 +425,144 @@ a { color: inherit; text-decoration: none; }
 .panel-bar-fill.panel-bar-mid { background: var(--today); }
 .panel-bar-fill.panel-bar-neg { background: var(--faint); }
 .panel-bar-value { font-size: 12.5px; color: var(--muted); text-align: right; }
+
+/* ============ Auth Cockpit Nocturno (rama feat/auth-cockpit-nocturno) ============ */
+/* Namespaced bajo .auth-cockpit para no filtrar el look a la app. */
+
+@keyframes ac-breathe {
+  0%, 100% { border-color: #2f8f5f; box-shadow: 0 0 0 0 rgba(61, 220, 139, 0.0); }
+  50%      { border-color: #3ddc8b; box-shadow: 0 0 0 4px rgba(61, 220, 139, 0.08); }
+}
+
+.auth-cockpit {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  background: #08090b;
+}
+
+.ac-card {
+  position: relative;
+  width: 452px;
+  max-width: 100%;
+  min-height: 640px;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid #20262d;
+  background: radial-gradient(120% 90% at 15% 0%, #14181d 0%, #0b0d10 62%);
+}
+.ac-card.ac-login { background: radial-gradient(120% 90% at 85% 0%, #14181d 0%, #0b0d10 62%); }
+
+.ac-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.025) 1px, transparent 0);
+  background-size: 22px 22px;
+  pointer-events: none;
+}
+
+.ac-inner { position: relative; padding: 38px 40px; }
+.ac-inner.ac-login-inner { min-height: 640px; display: flex; flex-direction: column; }
+
+.ac-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 44px; }
+.ac-brand-mark {
+  width: 30px; height: 30px; border-radius: 8px; background: #3ddc8b;
+  display: flex; align-items: center; justify-content: center;
+}
+.ac-brand-name {
+  font-family: var(--font-display), sans-serif; font-size: 15px; font-weight: 600;
+  color: #e7ecef; letter-spacing: -0.01em;
+}
+
+.ac-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 26px; }
+.ac-seg { height: 3px; flex: 1; border-radius: 2px; background: #232a31; }
+.ac-seg.on { background: #3ddc8b; }
+.ac-step {
+  font-family: var(--font-mono-tag), monospace; font-size: 11px; color: #8a939b; margin-left: 6px;
+}
+
+.ac-h {
+  font-family: var(--font-display), sans-serif; font-weight: 600; color: #e7ecef;
+  letter-spacing: -0.02em; margin: 0 0 6px;
+}
+.ac-h.big { font-size: 29px; margin-bottom: 8px; }
+.ac-h.med { font-size: 26px; }
+.ac-sub { font-size: 13.5px; color: #8a939b; margin: 0 0 28px; line-height: 1.5; }
+.ac-sub em { color: #c7cdd3; font-style: normal; }
+
+.ac-label {
+  display: block; font-size: 12px; font-weight: 500; color: #8a939b; margin-bottom: 8px;
+}
+
+.ac-field {
+  display: flex; align-items: center; gap: 11px; height: 50px; padding: 0 14px;
+  border-radius: 11px; background: #0f1317; border: 1px solid #232a31; margin-bottom: 18px;
+}
+.ac-field:focus-within { animation: ac-breathe 3.2s ease-in-out infinite; }
+.ac-field svg { flex: 0 0 auto; }
+.ac-field input {
+  flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent;
+  font: inherit; font-size: 14.5px; color: #e7ecef; letter-spacing: normal;
+}
+.ac-field input::placeholder { color: #5b636e; }
+
+.ac-field.ac-select { padding: 0; }
+.ac-field.ac-select select {
+  flex: 1; height: 100%; padding: 0 40px 0 14px; border: none; outline: none; background: transparent;
+  font: inherit; font-size: 14.5px; color: #e7ecef; -webkit-appearance: none; appearance: none; cursor: pointer;
+}
+.ac-field.ac-select { position: relative; }
+.ac-field.ac-select::after {
+  content: ""; position: absolute; right: 16px; top: 50%; width: 10px; height: 10px;
+  transform: translateY(-70%) rotate(45deg); border-right: 2px solid #5b636e; border-bottom: 2px solid #5b636e;
+  pointer-events: none;
+}
+
+.ac-orgchip {
+  display: flex; align-items: center; gap: 12px; height: 50px; padding: 0 14px;
+  border-radius: 11px; background: #0f1317; border: 1px solid #232a31; margin-bottom: 20px;
+}
+.ac-orgchip-badge {
+  width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, #3ddc8b, #1e8f5b);
+  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0b0d10;
+}
+.ac-orgchip-name { flex: 1; font-size: 14.5px; color: #e7ecef; }
+
+.ac-remember {
+  display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: #8a939b;
+  margin-bottom: 24px; cursor: pointer; user-select: none;
+}
+.ac-remember input { width: 15px; height: 15px; accent-color: #3ddc8b; cursor: pointer; }
+
+.ac-btn {
+  width: 100%; height: 50px; border: none; border-radius: 11px; background: #3ddc8b; color: #08120c;
+  font-family: var(--font-display), sans-serif; font-size: 15px; font-weight: 600; cursor: pointer;
+  transition: background 0.14s;
+}
+.ac-btn:hover { background: #4ee79a; }
+.ac-btn:disabled { opacity: 0.55; cursor: default; }
+
+.ac-error {
+  color: #ff8b7d; font-size: 13px; margin: 0 0 16px; line-height: 1.4;
+}
+
+.ac-foot { text-align: center; margin-top: 18px; font-size: 13px; }
+.ac-foot .muted { color: #5b636e; }
+.ac-foot a { color: #e7ecef; font-weight: 500; }
+.ac-foot a:hover { color: #3ddc8b; }
+
+.ac-back {
+  display: block; text-align: center; margin-top: 18px; font-size: 13px; color: #5b636e;
+  background: none; border: none; width: 100%; cursor: pointer; font: inherit;
+}
+.ac-back:hover { color: #8a939b; }
+
+.ac-login-body { margin-top: auto; margin-bottom: auto; padding: 40px 0; }
+
+@media (max-width: 480px) {
+  .ac-inner, .ac-inner.ac-login-inner { padding: 30px 24px; }
+  .ac-card { min-height: 0; }
+}
