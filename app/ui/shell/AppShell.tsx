@@ -58,7 +58,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
   ];
 
   return (
-    <div className="flex h-screen overflow-hidden bg-shell font-sans text-ink">
+    <div className="flex h-screen overflow-hidden bg-shell font-body text-ink">
       <Sidebar ownerNombre={owner} items={items} conectores={conectores} />
       <div className="relative flex min-w-0 flex-1 flex-col bg-shell">
         {/* glow ambiental (arbitrary Tailwind, no CSS) */}
