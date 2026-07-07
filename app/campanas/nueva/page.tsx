@@ -1,6 +1,6 @@
-import Link from 'next/link';
 import { listarSegmentos, valoresDistintosCampo } from '../../db/repository';
 import { requireSession } from '../../lib/session';
+import { AppShell } from '../../ui/shell/AppShell';
 import { NuevaCampanaFlujo } from './NuevaCampanaFlujo';
 
 // Parte 3 campanas: crear una campana = elegir un segmento YA revisado (Parte 2) +
@@ -22,18 +22,8 @@ export default async function NuevaCampana() {
   };
 
   return (
-    <div className="wrap">
-      <Link href="/campanas/segmentos" className="back">
-        ← Segmentos
-      </Link>
-      <div className="h-title" style={{ marginBottom: 24 }}>
-        Nueva campaña
-      </div>
-      <p className="conector-desc" style={{ marginBottom: 24 }}>
-        Elige el segmento ya revisado o arma uno nuevo, sube la cadencia (Markdown o CSV) y confirma para inscribir.
-      </p>
-
+    <AppShell>
       <NuevaCampanaFlujo segmentosIniciales={segmentos} opciones={opciones} />
-    </div>
+    </AppShell>
   );
 }

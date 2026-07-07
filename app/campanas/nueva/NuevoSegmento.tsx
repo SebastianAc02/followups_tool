@@ -6,17 +6,18 @@ import { previsualizarConReadinessAction, guardarSegmentoAction, type PreviewCon
 import { FiltroWall } from './FiltroWall';
 import { CopilotoPanel } from './CopilotoPanel';
 import { TablaCuentas } from './TablaCuentas';
-
-type Opciones = Record<'estado' | 'categoria' | 'estado_comercial' | 'ciudad' | 'departamento' | 'owner' | 'rol', string[]>;
+import type { Opciones, Segmento } from './NuevaCampanaFlujo';
 
 const VACIO: DefinicionSegmento = { condiciones: [] };
 
 type Props = {
   opciones: Opciones;
-  onGuardado: (s: { id: number; nombre: string; descripcionNatural: string | null }) => void;
+  segmentosGuardados: Segmento[];
+  onGuardado: (s: Segmento) => void;
+  onElegirGuardado: (s: Segmento) => void;
 };
 
-export function NuevoSegmento({ opciones, onGuardado }: Props) {
+export function NuevoSegmento({ opciones, segmentosGuardados, onGuardado, onElegirGuardado }: Props) {
   const [def, setDef] = useState<DefinicionSegmento>(VACIO);
   // ids de la version ANTERIOR del segmento; se usan una sola vez para marcar
   // "relajada" las filas que el relleno del Copiloto sumo, luego se limpian.
@@ -26,6 +27,7 @@ export function NuevoSegmento({ opciones, onGuardado }: Props) {
   const [ultimaFrase, setUltimaFrase] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState('');
+  const [mostrarCopiloto, setMostrarCopiloto] = useState(true);
   const [, startTransition] = useTransition();
 
   useEffect(() => {
@@ -78,13 +80,58 @@ export function NuevoSegmento({ opciones, onGuardado }: Props) {
           <span className="text-faint">Preview</span>
         </div>
         <div className="flex items-center gap-3">
+          {segmentosGuardados.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                const s = segmentosGuardados.find((seg) => seg.id === id);
+                if (s) onElegirGuardado(s);
+              }}
+              className="rounded-lg border border-line-strong bg-surface px-3 py-[9px] text-[13px] text-ink-soft outline-none"
+            >
+              <option value="" disabled>
+                Usar un segmento guardado…
+              </option>
+              {segmentosGuardados.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nombre}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={() => setMostrarCopiloto((v) => !v)}
+            aria-pressed={mostrarCopiloto}
+            title={mostrarCopiloto ? 'Ocultar Copiloto' : 'Mostrar Copiloto'}
+            className="flex items-center gap-[7px] rounded-lg border border-line-strong px-3 py-[9px] text-[13px] text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
+          >
+            <span className="text-accent">✦</span>
+            Copiloto
+            <span
+              className={
+                mostrarCopiloto
+                  ? 'relative h-[14px] w-[24px] rounded-full bg-accent transition-colors'
+                  : 'relative h-[14px] w-[24px] rounded-full bg-line-strong transition-colors'
+              }
+            >
+              <span
+                className={
+                  mostrarCopiloto
+                    ? 'absolute right-[2px] top-[2px] h-[10px] w-[10px] rounded-full bg-bg transition-all'
+                    : 'absolute left-[2px] top-[2px] h-[10px] w-[10px] rounded-full bg-bg transition-all'
+                }
+              />
+            </span>
+          </button>
           {error && <span className="text-[13px] text-overdue">{error}</span>}
           {preview?.ok && def.condiciones.length > 0 && (
             <input
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               placeholder="Nombre del segmento"
-              className="w-[220px]"
+              className="w-[220px] rounded-lg border border-line-strong bg-surface px-3 py-[9px] text-[13px] text-ink outline-none placeholder:text-faint focus:border-ink-soft"
             />
           )}
           <button
@@ -98,7 +145,7 @@ export function NuevoSegmento({ opciones, onGuardado }: Props) {
         </div>
       </div>
 
-      <div className="grid grid-cols-[220px_1fr_340px]">
+      <div className={mostrarCopiloto ? 'grid grid-cols-[220px_1fr_340px]' : 'grid grid-cols-[220px_1fr]'}>
         <FiltroWall value={def} onChange={setDef} opciones={opciones} />
 
         {preview?.ok ? (
@@ -113,15 +160,17 @@ export function NuevoSegmento({ opciones, onGuardado }: Props) {
           </div>
         )}
 
-        <CopilotoPanel
-          estadoActual={def}
-          total={preview?.ok ? preview.conteos.total : undefined}
-          onResultado={(r) => {
-            if (r.relleno && preview?.ok) setIdsPrevios(preview.filas.map((f) => f.id));
-            setUltimaFrase(r.frase);
-            setDef(r.estado);
-          }}
-        />
+        {mostrarCopiloto && (
+          <CopilotoPanel
+            estadoActual={def}
+            total={preview?.ok ? preview.conteos.total : undefined}
+            onResultado={(r) => {
+              if (r.relleno && preview?.ok) setIdsPrevios(preview.filas.map((f) => f.id));
+              setUltimaFrase(r.frase);
+              setDef(r.estado);
+            }}
+          />
+        )}
       </div>
     </div>
   );

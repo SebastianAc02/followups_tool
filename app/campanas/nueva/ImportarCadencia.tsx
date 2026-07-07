@@ -32,7 +32,14 @@ function conVariablesResaltadas(texto: string) {
   );
 }
 
-export function ImportarCadencia() {
+export type CadenciaResuelta = { formato: FormatoCadencia; contenido: string; nombreCsv: string; preview: Extract<PreviewCadencia, { ok: true }> };
+
+type Props = {
+  onResuelto?: (r: CadenciaResuelta) => void;
+  onLimpiar?: () => void;
+};
+
+export function ImportarCadencia({ onResuelto, onLimpiar }: Props = {}) {
   const [preview, setPreview] = useState<PreviewCadencia | null>(null);
   const [cargando, setCargando] = useState(false);
   const [arrastrando, setArrastrando] = useState(false);
@@ -45,8 +52,11 @@ export function ImportarCadencia() {
     }
     setCargando(true);
     const contenido = await file.text();
-    setPreview(await previsualizarCadenciaAction(formato, contenido, file.name.replace(/\.[^.]+$/, '')));
+    const nombreCsv = file.name.replace(/\.[^.]+$/, '');
+    const resultado = await previsualizarCadenciaAction(formato, contenido, nombreCsv);
+    setPreview(resultado);
     setCargando(false);
+    if (resultado.ok) onResuelto?.({ formato, contenido, nombreCsv, preview: resultado });
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -58,6 +68,7 @@ export function ImportarCadencia() {
 
   function cambiarCadencia() {
     setPreview(null);
+    onLimpiar?.();
   }
 
   if (!preview) {

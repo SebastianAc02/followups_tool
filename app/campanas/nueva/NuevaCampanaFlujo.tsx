@@ -1,42 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import CrearCampana from './CrearCampana';
 import { NuevoSegmento } from './NuevoSegmento';
+import { CadenciaPaso } from './CadenciaPaso';
 
-type Segmento = { id: number; nombre: string; descripcionNatural: string | null };
-type Opciones = Record<'estado' | 'categoria' | 'estado_comercial' | 'ciudad' | 'departamento' | 'owner' | 'rol', string[]>;
+export type Segmento = { id: number; nombre: string; descripcionNatural: string | null };
+export type Opciones = Record<'estado' | 'categoria' | 'estado_comercial' | 'ciudad' | 'departamento' | 'owner' | 'rol', string[]>;
 
 export function NuevaCampanaFlujo({ segmentosIniciales, opciones }: { segmentosIniciales: Segmento[]; opciones: Opciones }) {
   const [segmentos, setSegmentos] = useState(segmentosIniciales);
-  const [mostrarBuilder, setMostrarBuilder] = useState(segmentosIniciales.length === 0);
+  const [segmentoElegido, setSegmentoElegido] = useState<Segmento | null>(null);
 
-  function onGuardado(s: Segmento) {
-    setSegmentos((prev) => [s, ...prev]);
-    setMostrarBuilder(false);
+  if (!segmentoElegido) {
+    return (
+      <NuevoSegmento
+        opciones={opciones}
+        segmentosGuardados={segmentos}
+        onGuardado={(s) => {
+          setSegmentos((prev) => [s, ...prev]);
+          setSegmentoElegido(s);
+        }}
+        onElegirGuardado={setSegmentoElegido}
+      />
+    );
   }
 
-  return (
-    <div>
-      {!mostrarBuilder && segmentos.length > 0 && (
-        <>
-          <CrearCampana segmentos={segmentos} />
-          <button type="button" className="mt-4 text-[13px] text-muted underline" onClick={() => setMostrarBuilder(true)}>
-            Armar un segmento nuevo
-          </button>
-        </>
-      )}
-
-      {mostrarBuilder && (
-        <>
-          <NuevoSegmento opciones={opciones} onGuardado={onGuardado} />
-          {segmentos.length > 0 && (
-            <button type="button" className="mt-4 text-[13px] text-muted underline" onClick={() => setMostrarBuilder(false)}>
-              Usar un segmento guardado
-            </button>
-          )}
-        </>
-      )}
-    </div>
-  );
+  return <CadenciaPaso segmento={segmentoElegido} onVolver={() => setSegmentoElegido(null)} />;
 }
