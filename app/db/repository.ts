@@ -1228,6 +1228,50 @@ export function listarCampanas() {
     .all();
 }
 
+// Task 1.1: metricas del header del hub. toquesSemana cuenta eventos 'enviado' de
+// los ultimos 7 dias; tasaRespuesta es una cohorte por toque (no un ratio de filas
+// sueltas): de esos toques 'enviado' en la ventana, la fraccion cuyo id_paso_inscripcion
+// tiene tambien un evento 'respondio' en cualquier fecha (join enviado->respondio).
+export function metricasHub() {
+  const desde = new Date();
+  desde.setDate(desde.getDate() - 7);
+  const desdeIso = desde.toISOString();
+
+  const enviados = db
+    .select({ idPasoInscripcion: eventoTracking.idPasoInscripcion })
+    .from(eventoTracking)
+    .where(and(eq(eventoTracking.tipo, 'enviado'), sql`${eventoTracking.fechaEvento} >= ${desdeIso}`))
+    .all();
+
+  const toquesSemana = enviados.length;
+
+  let respondidos = 0;
+  if (toquesSemana > 0) {
+    const ids = enviados.map((e) => e.idPasoInscripcion);
+    const conRespuesta = db
+      .select({ idPasoInscripcion: eventoTracking.idPasoInscripcion })
+      .from(eventoTracking)
+      .where(and(eq(eventoTracking.tipo, 'respondio'), inArray(eventoTracking.idPasoInscripcion, ids)))
+      .all();
+    respondidos = new Set(conRespuesta.map((r) => r.idPasoInscripcion)).size;
+  }
+  const tasaRespuesta = toquesSemana > 0 ? respondidos / toquesSemana : 0;
+
+  const empresasEnSecuencia = db
+    .select({ n: sql<number>`count(*)` })
+    .from(inscripcion)
+    .where(eq(inscripcion.estado, 'activa'))
+    .get()!.n;
+
+  const bloqueadasEsperandoRegla = db
+    .select({ n: sql<number>`count(*)` })
+    .from(inscripcion)
+    .where(eq(inscripcion.estado, 'bloqueada'))
+    .get()!.n;
+
+  return { toquesSemana, tasaRespuesta, empresasEnSecuencia, bloqueadasEsperandoRegla };
+}
+
 // V4.5: cola de revision: las inscripciones bloqueadas (sin email) esperando resolucion
 // manual, con el nombre de la empresa.
 export function inscripcionesBloqueadas() {
