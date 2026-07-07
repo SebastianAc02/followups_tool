@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { parsearCadenciaPorFormato, type FormatoCadencia } from '../../core/cadencia-parser';
-import { crearCadencia, crearCampana, inscribirCampana, type ResultadoInscripcion } from '../../db/repository';
+import { crearCadencia, crearCampana, actualizarCampanaBasico } from '../../db/repository';
 import type { ModoCampana } from '../../db/validation';
 import { requireSession } from '../../lib/session';
 
@@ -36,33 +36,43 @@ export async function previsualizarCadenciaAction(formato: FormatoCadencia, cont
   }
 }
 
-export type CrearCampanaResultado =
-  | { ok: true; idCampana: number; resultado: ResultadoInscripcion }
-  | { ok: false; error: string };
+export type CrearBorradorResultado = { ok: true; idCampana: number } | { ok: false; error: string };
 
-// Parte 3 campanas: al confirmar, persiste todo de una vez (cadencia + campana +
-// inscripcion sobre el set curado por la revision de Parte 2). Reusa el mismo
-// parser de la previsualizacion: lo que se vio en pantalla es lo que se guarda.
-export async function crearCampanaConCadenciaAction(input: {
-  nombreCampana: string;
+// Draft persistente: en cuanto la cadencia parsea bien, nace la campana en estado
+// 'borrador' (crearCampana NO inscribe a nadie). El punto mas temprano posible: el
+// schema exige id_cadencia + id_segmento NOT NULL, y aca ya estan los dos. Si el
+// usuario cierra la pestaña despues de esto, el draft sigue vivo con su propio id
+// y se retoma desde /campanas (hub) -> tarjeta -> /campanas/[id].
+export async function crearBorradorDesdeCadenciaAction(input: {
   idSegmento: number;
   formato: FormatoCadencia;
   contenido: string;
   nombreCsv?: string;
-  modo: ModoCampana;
-}): Promise<CrearCampanaResultado> {
+}): Promise<CrearBorradorResultado> {
   await requireSession();
-  const nombreCampana = input.nombreCampana.trim();
-  if (!nombreCampana) return { ok: false, error: 'La campaña necesita un nombre' };
-
   try {
-    const parseada = parsearCadenciaPorFormato(input.formato, input.contenido, { nombre: input.nombreCsv || nombreCampana });
+    const parseada = parsearCadenciaPorFormato(input.formato, input.contenido, { nombre: input.nombreCsv || 'Cadencia sin nombre' });
     const idCadencia = crearCadencia(parseada);
-    const idCampana = crearCampana({ nombre: nombreCampana, idCadencia, idSegmento: input.idSegmento, modo: input.modo });
-    const resultado = inscribirCampana(idCampana);
-    revalidatePath('/campanas/nueva');
-    return { ok: true, idCampana, resultado };
+    const idCampana = crearCampana({ nombre: parseada.nombre, idCadencia, idSegmento: input.idSegmento, modo: 'prioritaria' });
+    revalidatePath('/campanas');
+    return { ok: true, idCampana };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'No se pudo crear la campaña' };
+    return { ok: false, error: e instanceof Error ? e.message : 'No se pudo crear el borrador' };
+  }
+}
+
+export type ActualizarBorradorResultado = { ok: true } | { ok: false; error: string };
+
+export async function actualizarBorradorAction(
+  idCampana: number,
+  cambios: { nombre?: string; modo?: ModoCampana },
+): Promise<ActualizarBorradorResultado> {
+  await requireSession();
+  try {
+    actualizarCampanaBasico(idCampana, cambios);
+    revalidatePath('/campanas');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'No se pudo guardar el cambio' };
   }
 }

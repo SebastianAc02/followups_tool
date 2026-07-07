@@ -66,6 +66,8 @@ import {
   type VersionPasoInput,
   campanaInputSchema,
   type CampanaInput,
+  MODOS_CAMPANA,
+  type ModoCampana,
   CANALES,
   RESULTADOS,
   type Canal,
@@ -1177,6 +1179,27 @@ export function actualizarReglaFaltante(idCampana: number, regla: ReglaFaltante)
     .set({ reglaFaltante: regla, updatedAt: new Date().toISOString() })
     .where(eq(campana.idCampana, idCampana))
     .run();
+}
+
+// Draft persistente (creacion de campana): UPDATE parcial para los dos campos que
+// el paso de Cadencia deja editar mientras la campana sigue en 'borrador' (nombre y
+// modo). Mismo patron que actualizarReglaFaltante: valida con el enum de dominio y
+// solo escribe las columnas presentes en `cambios`, nunca pega un UPDATE vacio.
+const actualizarCampanaBasicoSchema = z.object({
+  nombre: z.string().min(1).optional(),
+  modo: z.enum(MODOS_CAMPANA).optional(),
+});
+
+export function actualizarCampanaBasico(idCampana: number, cambios: { nombre?: string; modo?: ModoCampana }): void {
+  const val = actualizarCampanaBasicoSchema.parse(cambios);
+
+  const sets: Record<string, unknown> = {};
+  if (val.nombre !== undefined) sets.nombre = val.nombre;
+  if (val.modo !== undefined) sets.modo = val.modo;
+  if (Object.keys(sets).length === 0) return;
+
+  sets.updatedAt = new Date().toISOString();
+  db.update(campana).set(sets).where(eq(campana.idCampana, idCampana)).run();
 }
 
 // V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el
