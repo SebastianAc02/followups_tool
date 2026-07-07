@@ -77,6 +77,17 @@
   --today-bg: rgba(242, 183, 56, 0.13);
   --done: #57c98a;
   --ring: rgba(255, 255, 255, 0.12);
+  /* Rediseño home (2026-07-07): acento morado + superficies del shell. */
+  --color-accent: #8b7cff;
+  --color-accent-soft: #a99cff;
+  --color-accent-bg: #1a1730;
+  --color-accent-ink: #e7e3ff;
+  --color-shell: #0b0c0f;
+  --color-shell-2: #0f1014;
+  --color-card: #111218;
+  --color-card-hover: #16171e;
+  --color-line-shell: #1b1d25;
+  --color-line-card: #1f212b;
   color-scheme: dark;
 }
 
@@ -626,4 +637,12 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 480px) {
   .ac-inner, .ac-inner.ac-login-inner { padding: 30px 24px; }
   .ac-card { min-height: 0; }
+}
+
+/* Punto "En vivo" pulsante del top bar (rediseño home). Se usa con
+   animate-[pulseLive_2s_ease-in-out_infinite]. No es CSS viejo: es la capa de animación
+   de Tailwind, declarada una vez. */
+@keyframes pulseLive {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
 }
