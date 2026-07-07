@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Estado (2026-07-07, sesión 2):** Fases 0, 1, 2, 3, 4, 5, 9 completas. Fase 7 solo tiene su core (`renderizarCopy`, Task 7.1); falta portar la UI (Task 7.2). Quedan por delante Fase 6 (Destinatarios, con checkpoint real) y Fase 8 (Lanzar, tres checkpoints seguidos). Esta sesión corrió 5 tareas `[AGENTE]` en dos rondas paralelas (3 + 2 agentes, sin conflicto de archivos, con verificación manual de cada commit antes de darlo por bueno). Ver **"Bitácora de ejecución — sesión 2026-07-07 (ronda 2, paralela)"** al final del documento para el detalle completo. La sesión 1 (Fases 0/1/3/4 iniciales) sigue documentada en la bitácora original, léela primero si no tienes el contexto de cómo se llegó hasta acá.
+> **Estado (2026-07-07, sesión 3):** **Plan completo, Fases 0-10 todas hechas.** Esta sesión cerró Fase 6 (Destinatarios), Fase 7 Task 7.2 (preview cinemático), Fase 8 entera (goteo, 3 checkpoints seguidos con Sebastián) y Fase 10 (nueva, panel de control por campaña, pedida a mitad de sesión). Ver **"Bitácora de ejecución — sesión 2026-07-07 (sesión 3, checkpoints + paralelo)"** al final para el detalle completo, incluidos los checkpoints resueltos y los incidentes de working tree compartido. Queda un gap anotado fuera de alcance de este plan: tarjetas de excepción por cuenta/lote del Copiloto V2 (ver "Qué falta" al final de la sesión 2).
 
 **Goal:** Construir el cockpit de campañas completo (7 vistas: hub, segmentación con Copiloto, importar cadencia, cadencia, reglas, destinatarios, preview cinemático, lanzar, por revisar) sobre el backend de cadencias que ya existe en seco (Fases 4-5), rediseñando la UI con los mockups y cerrando los huecos de core que las vistas destapan.
 
@@ -69,9 +69,9 @@ Base: `/Users/sebastianacostamolina/Arc/html vistas 1-7/`
 | 5 | V-Reglas (nueva) | (existe `reglaFaltante`) | ✅ **HECHO** (`fe71106`) — standalone en `/campanas/[id]/reglas`, no colgada aún de ningún wizard |
 | 6 | V4 Destinatarios · Readiness | Preview no destructivo | ⚠️ **Core hecho** (`previsualizarInscripcion`, `ea59e60`, checkpoint resuelto: siempre revalidar); falta la UI (Task 6.2) |
 | 7 | V5 Preview cinemático | Render de variables | ✅ **HECHO** (`f9f6025` core + `97c46d0` UI) — componente listo, sin enchufar a ruta real (espera Fases 6/8) |
-| 8 | V6 Lanzar | Goteo de ingreso + ritmo + tope + fecha inicio | **PENDIENTE** — 3 checkpoints de dominio seguidos, no delegado sin decisión de Sebastián |
+| 8 | V6 Lanzar | Goteo de ingreso + ritmo + tope + fecha inicio | ✅ **HECHO** (`3e6a1ff` schema, `0e94a6d` goteo, `a270a33` enrollment, `3f0a269` UI) — 3 checkpoints resueltos con Sebastián |
 | 9 | V7 Por revisar | (existe `pasosManualesPendientes`) + render variables | ✅ **HECHO** (`58e4ef4`) — inbox permanente en `/por-revisar` + nav badge. La entrada desde la cola (Task 9.2) ya existía de antes en `CadenciasHoy.tsx`, no hubo que construirla |
-| 10 | Panel de control de campaña (nuevo, sin mockup) | Métricas por campaña + errores | **PENDIENTE** — pedido explícito de Sebastián a mitad de sesión, `[AGENTE]` puro (arquitectura ya decidida) |
+| 10 | Panel de control de campaña (nuevo, sin mockup) | Métricas por campaña + errores | ✅ **HECHO** (`4e597f7`) — `CampanaCard` es link real, sub-nav a Cadencia/Reglas/Destinatarios/Lanzar |
 
 Cada fase produce software que corre y se testea por sí solo. Dependencias: la Fase 0 es prerequisito de toda UI. El "render de variables" de la Fase 7 lo reusa la Fase 9 (se construye una vez).
 
@@ -373,7 +373,9 @@ Decisión de dominio: la lógica de "20 por día, día sí día no → estos ent
 
 ### Task 8.4: UI de la V6 (se expande al iniciar) `[AGENTE]`
 
-Inventario contra `Lanzar Cockpit html6/index.html`: toggle "Lanzar hoy / Programar", slider "contactos por día" (`intakeDiario`), `Seg` para ritmo, stepper "máximo de toques por día", la barra "así se distribuye" (D1..D9, alimentada por `calcularGoteo`), tarjeta "Envía una prueba", botón "Lanzar hoy". Sin core nuevo aquí.
+- [x] **HECHO** (`3f0a269`). `app/campanas/[id]/lanzar/{page,LanzarCockpit,actions}.tsx`. Toggle hoy/programar, slider+stepper `intakeDiario`, `Seg` de ritmo, stepper tope, barra D1-D9 en vivo (recalcula sin persistir vía `recalcularGoteoAction`), bloque de carga global informativo (`toquesGlobalesHoy`), tarjeta "Envía una prueba" no-op, botón Lanzar → `inscribirCampana`. `repository.ts` ganó `campanaParaLanzar` y `actualizarConfigLanzamiento`. 337/337 tests, tsc/build limpios.
+
+**DESVIACIÓN:** `Field` en este repo es de solo display (label/value), no un input — se usaron inputs nativos + `Seg`/`SegButton` en su lugar.
 
 ---
 
@@ -410,10 +412,9 @@ Inventario contra `Lanzar Cockpit html6/index.html`: toggle "Lanzar hoy / Progra
 
 **Files:** Modify `app/campanas/CampanaCard.tsx` (envolver en `Link` a `/campanas/[id]`), Create `app/campanas/[id]/layout.tsx` (sub-nav: Resumen/Cadencia/Reglas/Destinatarios/Lanzar), Create `app/campanas/[id]/page.tsx` (Resumen).
 
-- [ ] **Step 1:** `CampanaCard` pasa de `<article>` a `<Link href={`/campanas/${id}`}>`.
-- [ ] **Step 2:** `app/campanas/[id]/layout.tsx` con sub-nav (reusar patrón de `AppShell`/`SidebarNav` si aplica, o una barra de tabs simple con los primitivos existentes).
-- [ ] **Step 3:** `app/campanas/[id]/page.tsx` (Resumen): estado de la campaña, métricas filtradas por `idCampana` (extender `metricasHub` o crear variante — investigar si acepta filtro), errores recientes (`sync_cambios` o el log de fallidos, filtrado por campaña si el schema lo permite).
-- [ ] **Step 4:** Verificar `tsc`/build/tests, commit — `git commit -m "feat(campanas): panel de control por campana con sub-nav"`.
+- [x] **HECHO** (`4e597f7`). `CampanaCard` ahora es `Link` a `/campanas/[id]`. `app/campanas/[id]/{layout,page,CampanaSubNav}.tsx`. `metricasHub` se extendió con `idCampana?: number` opcional y aditivo (mismo join que ya usaba). `campanaResumen()` nueva (estado, cadencia, segmento, `idCadencia` real para el link a `/cadencias/[id]`). 337/337 tests, tsc/build limpios.
+
+**DESVIACIÓN:** `layout.tsx` NO envuelve en `AppShell` — las sub-rutas hijas (Reglas/Destinatarios/Lanzar) ya lo hacen cada una por su cuenta (patrón standalone); duplicarlo hubiera anidado sidebars. La sub-nav vive dentro del `AppShell` de la propia `page.tsx` de Resumen; las otras sub-rutas todavía no la tienen (fuera de este alcance). `sync_cambios` no tiene columna que relacione con campaña — la sección de errores queda como placeholder "sin errores registrados", no se inventó una relación inexistente en el schema.
 
 ---
 
@@ -515,3 +516,28 @@ Continuación de la sesión 1 (ver bitácora arriba). Objetivo: cerrar todas las
 ### Gap nuevo encontrado (no estaba en el plan original)
 
 El mockup V2 (`HTML 2 Segmentacion/index.html`) incluye tarjetas de acción del Copiloto para resolver excepciones de canal por cuenta o lote (ej. "3 cuentas sin correo → Reemplazar/Saltar/Cola"), distinto de la regla global de campaña que ya cubre la Fase 5 (`campana.reglaFaltante`, aplica igual a todos). No existe backend para esto. Queda anotado en "Qué falta" como candidato a `[CHECKPOINT]` — hay que decidir el nivel (cuenta vs. paso de cadencia) y dónde se persiste antes de construirlo.
+
+---
+
+## Bitácora de ejecución — sesión 2026-07-07 (sesión 3, checkpoints + paralelo)
+
+Continuación directa de la ronda 2. Objetivo: cerrar TODO lo que quedaba pendiente (Fase 6, Fase 7 Task 7.2, Fase 8 completa) resolviendo los checkpoints de dominio en conversación con Sebastián antes de delegar cada tarea, más una fase nueva (10) pedida a mitad de sesión.
+
+### Checkpoints resueltos con Sebastián (en orden)
+
+1. **6.1 (revalidar vs. confiar en snapshot):** siempre revalidar. `inscribirCampana` nunca confía en un preview externo, recalcula contra la DB en el momento de escribir.
+2. **8.1 (tope global vs. por campaña):** las dos, con jerarquía. `topeToquesDia` es control real por campaña (editable en el wizard); además hay un agregado global de solo lectura (`toquesGlobalesHoy`) para que Sebastián vea la carga total entre campañas activas antes de lanzar — informativo, sin enforcement automático.
+3. **8.2 (reparto en `dia_si_dia_no`):** el cupo completo entra en cada día activo, sin repartir a la mitad; los días "no" no meten a nadie.
+4. **8.3 (orden de entrada del goteo):** orden de rank del segmento tal cual llega (sin reordenar por readiness); las `bloqueada` se excluyen del reparto (no consumen turno, necesitan resolverse antes).
+
+### Qué se hizo (7 agentes, con paralelismo cuando los archivos no se pisaban)
+
+7.2 (preview cinemático, solo) → 6.1 (core preview-inscripcion, solo) → 6.2 (UI Destinatarios) + 8.1 (schema) + 8.2 (`calcularGoteo`) en paralelo → 8.3 (enrollment escalonado, solo, esperado por depender de 8.1+8.2) → 8.4 (UI Lanzar) + 10.1 (panel de control) en paralelo. Commits: `97c46d0`, `ea59e60`, `e61b9f7`, `0e94a6d`, `3e6a1ff`, `a270a33`, `3f0a269`, `4e597f7` — más `8983427` (bitácora). 337/337 tests verdes al cierre.
+
+### Incidentes (mismo patrón que sesiones anteriores, ya documentado — no se repite el detalle)
+
+Working tree compartido con al menos otra sesión activa (rediseño de `/conectores`) durante toda la sesión. Dos agentes violaron la regla explícita "nunca `git stash`" (uno en Task 6.2, revertido de inmediato sin pérdida; uno en Task 10.1, con `--keep-index`, diff vacío, quedó un `stash@{0}` inerte pendiente de que Sebastián confirme el drop). Un commit (`3f0a269`) terminó absorbiendo cambios de repository.ts de otro agente en curso (mismo patrón que `f2665d7` en la ronda 2) — verificado sin pérdida de código. Ninguna verificación visual en preview (puerto ocupado por sesión ajena todo el tiempo); toda la validación fue tests + `tsc` + `build`.
+
+### Estado final del plan
+
+Fases 0-10 completas. El único pendiente fuera de este plan es el gap de excepciones por cuenta/lote del Copiloto (arriba), que necesita su propio checkpoint antes de construirse.
