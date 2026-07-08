@@ -27,6 +27,10 @@ Familias: --ff-serif (Newsreader) · --ff-body (IBM Plex Sans) · --ff-mono (Gei
 --color-today → --amber · --color-warn → --orange
 --color-bg/--color-shell → --n-0 · --color-surface → --n-2 · --color-card → --n-1
 
+--color-avatar-{violeta,verde,ambar,rosa} → primitivos existentes (perfil, colorAvatar)
+--color-avatar-accent-{from,to} → gris de dos tonos, default del avatar antes de Fase 2
+  (mapeo id→clase en app/ui/shell/avatar-colores.ts, punto único de cambio)
+
 --font-body → --ff-body       (cuerpo de texto, todo el cockpit)
 --font-serif → --ff-serif     (títulos/encabezados del cockpit de campañas y /cola)
 --font-heading → --ff-display (SOLO home dashboard: page.tsx, StatCard, PipelineBar — Archivo Black)

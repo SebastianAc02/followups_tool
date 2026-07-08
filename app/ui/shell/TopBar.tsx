@@ -1,6 +1,9 @@
 // Top bar del shell (server). Buscador es placeholder visual (no funcional en v1). La fecha
 // se pasa ya formateada desde AppShell (server) para no meter una isla cliente de reloj.
-export function TopBar({ fecha, iniciales }: { fecha: string; iniciales: string }) {
+import type { Perfil } from '../../core/perfil';
+import { PerfilMenu } from './PerfilMenu';
+
+export function TopBar({ fecha, perfil }: { fecha: string; perfil: Perfil }) {
   return (
     <div className="relative z-10 flex flex-none items-center gap-4 border-b border-card-hover px-[30px] py-3.5">
       <div className="flex max-w-[420px] flex-1 items-center gap-2.5 rounded-[11px] border border-line-card bg-card px-[13px] py-[9px]">
@@ -19,9 +22,7 @@ export function TopBar({ fecha, iniciales }: { fecha: string; iniciales: string 
         En vivo
       </div>
       <span className="text-[12.5px] text-faint">{fecha}</span>
-      <span className="flex h-8 w-8 items-center justify-center rounded-full border border-line-card bg-gradient-to-br from-[#3a3f4c] to-[#22252f] text-[12px] font-bold text-ink-soft">
-        {iniciales}
-      </span>
+      <PerfilMenu perfil={perfil} />
     </div>
   );
 }

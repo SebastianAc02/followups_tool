@@ -36,6 +36,18 @@
   --color-accent-glow: rgba(139, 124, 255, 0.35);
   --color-warn: var(--orange);
 
+  /* Perfil Fase 2: paleta elegible para el avatar (preferencias.colorAvatar). "accent"
+     es el gris de dos tonos que ya traía el avatar por defecto (no es --color-accent
+     violeta, es el nombre que Sebastián le dio en app/core/perfil.ts); las demas
+     opciones son solidas sobre los primitivos ya existentes. Unico punto de cambio:
+     app/ui/shell/avatar-colores.ts mapea estos tokens a clases. */
+  --color-avatar-accent-from: #3a3f4c;
+  --color-avatar-accent-to: #22252f;
+  --color-avatar-violeta: var(--violet-500);
+  --color-avatar-verde: var(--green);
+  --color-avatar-ambar: var(--amber);
+  --color-avatar-rosa: var(--rose);
+
   --color-canal-llamada: var(--blue);
   --color-canal-correo: var(--rose);
   --color-canal-whatsapp: #84c99e;

@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { colaDelDia, listarCampanas, estadoConector, contarPorEstado, pasosManualesPendientes } from '../../db/repository';
 import { ESTADOS_ACTIVOS } from '../../db/funnel';
 import { requireSession } from '../../lib/session';
+import { cargarPerfil } from '../../lib/perfil';
 import { Sidebar, type ConectorEstado } from './Sidebar';
 import { TopBar } from './TopBar';
 import type { NavItem } from './SidebarNav';
@@ -18,11 +19,6 @@ function fechaCorta(d: Date) {
   const dia = DIAS[d.getDay()];
   const cap = dia.charAt(0).toUpperCase() + dia.slice(1);
   return `${cap} ${d.getDate()} ${MESES[d.getMonth()]} · ${hh}:${mm}`;
-}
-
-function iniciales(nombre: string) {
-  const partes = nombre.trim().split(/\s+/);
-  return ((partes[0]?.[0] ?? '') + (partes[1]?.[0] ?? '')).toUpperCase() || 'SV';
 }
 
 // Compartido con rutas que aun no adoptan AppShell completo (con TopBar) pero ya
@@ -66,17 +62,16 @@ export async function datosSidebar() {
 }
 
 export async function AppShell({ children }: { children: ReactNode }) {
-  const { usuario, items, conectores } = await datosSidebar();
-  const owner = usuario.owner;
+  const [{ usuario, items, conectores }, perfil] = await Promise.all([datosSidebar(), cargarPerfil()]);
   const ahora = new Date();
 
   return (
     <div className="flex h-screen overflow-hidden bg-shell font-body text-ink">
-      <Sidebar ownerNombre={owner} items={items} conectores={conectores} />
+      <Sidebar ownerNombre={usuario.owner} items={items} conectores={conectores} />
       <div className="relative flex min-w-0 flex-1 flex-col bg-shell">
         {/* glow ambiental (arbitrary Tailwind, no CSS) */}
         <div className="pointer-events-none absolute -top-[140px] left-[40%] h-[340px] w-[520px] bg-[radial-gradient(closest-side,rgba(139,124,255,0.16),transparent)]" />
-        <TopBar fecha={fechaCorta(ahora)} iniciales={iniciales(owner)} />
+        <TopBar fecha={fechaCorta(ahora)} perfil={perfil} />
         <div className="relative z-[1] flex-1 overflow-auto px-6 pb-10 pt-6 lg:px-8 lg:pt-8">{children}</div>
       </div>
     </div>

@@ -5,7 +5,7 @@ import { db as dbSingleton } from './index';
 import * as schema from './schema';
 import * as authSchema from './auth-schema';
 
-const { organizacionMiembro } = schema;
+const { organizacionMiembro, organizacion } = schema;
 const { user } = authSchema;
 
 type DbInstancia = typeof dbSingleton;
@@ -16,6 +16,23 @@ export function miembrosLibres(idOrganizacion: number, db: DbInstancia = dbSingl
     .from(organizacionMiembro)
     .where(and(eq(organizacionMiembro.idOrganizacion, idOrganizacion), isNull(organizacionMiembro.idUser)))
     .all();
+}
+
+// Solo-lectura para /perfil (Fase 1 de la abstraccion de Perfil): el miembro de
+// organizacion ya reclamado por este usuario, con el nombre de la organizacion.
+// A diferencia de miembrosLibres/miembroLibrePorId (idUser IS NULL), aca se busca
+// exactamente lo contrario: la membresia YA asignada a este idUser.
+export function organizacionDeUsuario(idUser: string, db: DbInstancia = dbSingleton) {
+  return db
+    .select({
+      nombreOrganizacion: organizacion.nombre,
+      nombreDisplay: organizacionMiembro.nombreDisplay,
+      ownerCanonico: organizacionMiembro.ownerCanonico,
+    })
+    .from(organizacionMiembro)
+    .innerJoin(organizacion, eq(organizacion.idOrganizacion, organizacionMiembro.idOrganizacion))
+    .where(eq(organizacionMiembro.idUser, idUser))
+    .get();
 }
 
 export function miembroLibrePorId(idMiembro: number, db: DbInstancia = dbSingleton) {

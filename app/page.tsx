@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { resumenHome, contarPorEstado, listarCampanas } from './db/repository';
-import { requireSession } from './lib/session';
+import { cargarPerfil } from './lib/perfil';
 import { AppShell } from './ui/shell/AppShell';
 import { SectionLabel } from './ui/SectionLabel';
 import { StatCard } from './ui/home/StatCard';
@@ -9,14 +9,13 @@ import { CampaignRow, type CampaignVM } from './ui/home/CampaignRow';
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
-function saludo(d: Date, nombre: string) {
-  const primerNombre = nombre.trim().split(/\s+/)[0] || nombre;
+function saludo(d: Date, primerNombre: string) {
   return `Buen ${DIAS[d.getDay()]}, ${primerNombre}`;
 }
 
 export default async function Dashboard() {
-  const usuario = await requireSession();
-  const owner = usuario.owner;
+  const perfil = await cargarPerfil();
+  const owner = perfil.nombre;
 
   const ahora = new Date();
   const hoy = ahora.toISOString().slice(0, 10);
@@ -37,7 +36,7 @@ export default async function Dashboard() {
   return (
     <AppShell>
       <div className="mb-8">
-        <h2 className="font-heading text-2xl tracking-tight text-ink md:text-3xl">{saludo(ahora, owner)}</h2>
+        <h2 className="font-heading text-2xl tracking-tight text-ink md:text-3xl">{saludo(ahora, perfil.primerNombre)}</h2>
         <p className="mt-1 text-sm text-muted">Esto es lo que pide tu atención hoy.</p>
       </div>
 

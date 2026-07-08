@@ -326,3 +326,19 @@ export const organizacionMiembro = sqliteTable('organizacion_miembro', {
   idUser: text('id_user'),
   createdAt: text('created_at'),
 });
+
+// Perfil Fase 2 (ver docs/superpowers/specs/2026-07-08-perfil-abstraccion-design.md):
+// una fila por usuario, columnas nullable. Sin fila = usa PREFERENCIAS_DEFAULT
+// (app/core/perfil.ts); el adapter (app/adapters/preferencias-db.ts) es quien aplica
+// ese fallback, nunca el core. No sync a Notion: son ajustes locales del usuario.
+export const preferenciaUsuario = sqliteTable('preferencia_usuario', {
+  idUser: text('id_user').primaryKey(),
+  colorAvatar: text('color_avatar'),
+  vistaInicio: text('vista_inicio'),
+  // cargo/telefono: contacto editable en /perfil (referencia visual: mockup "Nodalis
+  // Cockpit"). No son "preferencias" en sentido estricto pero comparten fila/ciclo de
+  // vida con el resto (una fila por usuario, ajuste local, sin sync a Notion).
+  cargo: text('cargo'),
+  telefono: text('telefono'),
+  updatedAt: text('updated_at'),
+});

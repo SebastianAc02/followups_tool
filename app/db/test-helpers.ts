@@ -286,6 +286,15 @@ export function crearDbPrueba() {
 
     CREATE UNIQUE INDEX ux_organizacion_miembro_id_user
       ON organizacion_miembro(id_user) WHERE id_user IS NOT NULL;
+
+    CREATE TABLE preferencia_usuario (
+      id_user TEXT PRIMARY KEY,
+      color_avatar TEXT,
+      vista_inicio TEXT,
+      cargo TEXT,
+      telefono TEXT,
+      updated_at TEXT
+    );
   `);
 
   sqlite.close();
