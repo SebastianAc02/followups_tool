@@ -4,6 +4,7 @@
 // oculto, se abre como flyout al pasar el mouse por el borde izquierdo. Recibe los datos ya
 // resueltos (nav items, conectores, owner) desde AppShell (server).
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { SidebarNav, type NavItem } from './SidebarNav';
 import { IconSidebarToggle } from './icons';
 import { cx } from '../cx';
@@ -78,7 +79,7 @@ export function Sidebar({
       >
         {/* Workspace switcher */}
         <div className="mb-[18px] flex items-center gap-2.5">
-          <div className="flex flex-1 cursor-pointer items-center gap-2.5 rounded-[11px] px-2.5 py-2 hover:bg-card-hover">
+          <Link href="/perfil" className="flex flex-1 items-center gap-2.5 rounded-[11px] px-2.5 py-2 hover:bg-card-hover">
             <span className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-accent to-[#5d4bd6] text-[14px] font-extrabold text-white shadow-[0_2px_10px_rgba(139,124,255,0.4)]">
               O
             </span>
@@ -86,7 +87,7 @@ export function Sidebar({
               <div className="text-[13.5px] font-semibold text-ink">OnePay</div>
               <div className="text-[11px] text-faint">{ownerNombre}</div>
             </div>
-          </div>
+          </Link>
           <button
             type="button"
             onClick={alternarPin}

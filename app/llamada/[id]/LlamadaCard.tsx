@@ -1,7 +1,6 @@
 import type { ContextoToque } from "../../db/repository";
 import type { Calificacion } from "../../core/calificacion";
 import { Pill, pillParaEstado } from "../../ui/Pill";
-import { Stat } from "../../ui/Stat";
 import { SecuenciaRail } from "./SecuenciaRail";
 import { CalificacionChecklist } from "./CalificacionChecklist";
 import { RegistrarToqueToggle } from "./RegistrarToqueToggle";
@@ -11,6 +10,20 @@ import { RegistrarToqueToggle } from "./RegistrarToqueToggle";
 // calificacion) a la derecha. El breadcrumb es solo el rotulo visual; el boton "Registrar
 // toque" (RegistrarToqueToggle, Tarea 8) revela <CapturaLlamada> debajo sin romper el layout
 // flex de la fila.
+
+// Tile de "La cuenta": a diferencia de <Stat> (pensado para un numero grande de
+// dashboard), aca el valor es texto corto y variable (ciudad, estado, fecha+canal) --
+// tamano moderado + truncate para que un valor largo nunca reviente el grid de 3 columnas.
+function FichaDato({ label, valor }: { label: string; valor: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-line bg-shell-2 p-2">
+      <div className="truncate text-[13px] font-semibold text-ink" title={valor}>
+        {valor}
+      </div>
+      <div className="mt-0.5 font-toque-mono text-[9.5px] uppercase tracking-wide text-muted">{label}</div>
+    </div>
+  );
+}
 
 function iniciales(nombre: string | null | undefined): string {
   if (!nombre) return "?";
@@ -94,18 +107,12 @@ export function LlamadaCard({
           <div>
             <div className="mb-2 text-xs font-semibold text-ink-soft">La cuenta</div>
             <div className="mb-2 grid grid-cols-3 gap-2">
-              <div className="rounded-lg border border-line bg-shell-2 p-2">
-                <Stat value={emp?.ciudad ?? "—"} label="Ciudad" />
-              </div>
-              <div className="rounded-lg border border-line bg-shell-2 p-2">
-                <Stat value={emp?.estado ?? "—"} label="Estado" />
-              </div>
-              <div className="rounded-lg border border-line bg-shell-2 p-2">
-                <Stat
-                  value={ultimoToque ? `${fechaCorta(ultimoToque.fecha)} · ${ultimoToque.canal}` : "Sin toques previos"}
-                  label="Último toque"
-                />
-              </div>
+              <FichaDato label="Ciudad" valor={emp?.ciudad ?? "—"} />
+              <FichaDato label="Estado" valor={estadoPill?.label ?? emp?.estado ?? "—"} />
+              <FichaDato
+                label="Último toque"
+                valor={ultimoToque ? `${fechaCorta(ultimoToque.fecha)} · ${ultimoToque.canal}` : "Sin toques previos"}
+              />
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-line bg-shell p-2">
               <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Próximo paso</span>

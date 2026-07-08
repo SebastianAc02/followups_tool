@@ -30,7 +30,10 @@ type Entrada = {
 
 function formatear(campo: CampoCalificacion, valor: number | string | null): string | null {
   if (valor === null || valor === '') return null;
-  if (campo === 'usuarios') return Math.round(Number(valor)).toLocaleString('es-CO');
+  // Coma de miles fija (no es-CO): calca el mockup ("1,240 usuarios") en el Toque 1
+  // y en el receipt de Confirmacion -- es una convencion propia de esta UI, no la
+  // de es-CO que usa el resto del cockpit (HubHeader, TablaCuentas).
+  if (campo === 'usuarios') return Math.round(Number(valor)).toLocaleString('en-US');
   return String(valor);
 }
 

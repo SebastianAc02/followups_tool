@@ -6,7 +6,7 @@ test('calificar marca presente el campo con valor y ausente el vacio', () => {
   const r = calificar({ usuarios: 1240, crm: 'Zoho', pasarela: null, recaudo: '' });
   const porNombre = Object.fromEntries(r.items.map((i) => [i.campo, i]));
   assert.equal(porNombre.usuarios.estado, 'tengo');
-  assert.equal(porNombre.usuarios.valor, '1.240'); // es-CO real (ya usado en HubHeader/TablaCuentas): punto de miles
+  assert.equal(porNombre.usuarios.valor, '1,240'); // coma fija: calca el mockup del Toque 1/Confirmacion
   assert.equal(porNombre.crm.estado, 'tengo');
   assert.equal(porNombre.pasarela.estado, 'preguntar');
   assert.equal(porNombre.recaudo.estado, 'preguntar');
