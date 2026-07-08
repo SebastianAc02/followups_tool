@@ -70,6 +70,7 @@ import {
   type ModoCampana,
   CANALES,
   RESULTADOS,
+  RESULTADO_LABELS,
   type Canal,
   type Resultado,
   RITMOS_INGRESO,
@@ -102,6 +103,29 @@ function encolarOutboxNotion(tx: Tx, idEmpresa: string, cambio: Omit<CambioNotio
       createdAt: new Date().toISOString(),
     })
     .run();
+}
+
+// Nombres de canal legibles para el render de "Toques" (Tarea 6). CANALES en validation.ts
+// vive en minuscula porque es un valor de dominio (enum de Zod), esto es solo texto de
+// presentacion para Notion, no se reusa como valor de negocio en otro lado.
+const CANAL_LEGIBLE: Record<Canal, string> = {
+  llamada: 'Llamada',
+  whatsapp: 'WhatsApp',
+  correo: 'Correo',
+};
+
+// Tarea 6: arma la tabla en texto plano de "toques hechos" que se manda a Notion (una
+// linea por toque, mas reciente primero). RESULTADO_LABELS ya es el mapeo compartido con
+// la UI (page.tsx), reusarlo aqui evita un segundo lugar con el mismo texto duplicado.
+function renderToquesHechos(filas: { fecha: string | null; canal: string | null; resultado: string | null }[]): string {
+  return filas
+    .map((f) => {
+      const fecha = f.fecha ? f.fecha.slice(0, 10) : '?';
+      const canal = f.canal && f.canal in CANAL_LEGIBLE ? CANAL_LEGIBLE[f.canal as Canal] : (f.canal ?? '?');
+      const resultado = f.resultado && f.resultado in RESULTADO_LABELS ? RESULTADO_LABELS[f.resultado as Resultado] : (f.resultado ?? '?');
+      return `${fecha} · ${canal} · ${resultado}`;
+    })
+    .join('\n');
 }
 
 // Calor de la cuenta (prioridad): lo más cerca del cierre, primero.
@@ -176,6 +200,7 @@ export function getCuenta(id: string) {
       proximoPaso: empresa.proximoPaso,
       fecha: empresa.proximoFollowUpFecha,
       usuarios: empresaUsuarios.usuariosEfectivos,
+      notionPageId: empresa.notionPageId,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
@@ -256,6 +281,17 @@ export function registrarToque(input: RegistrarToqueInput) {
       }
     }
 
+    // Tarea 6: fechaPrimerContacto solo se manda la primera vez (empresa sin toques
+    // previos a este). Se cuenta ANTES del insert de abajo, dentro de la misma
+    // transaccion, para que la respuesta no dependa de una condicion de carrera con
+    // otro toque escribiendose al mismo tiempo.
+    const previos = tx
+      .select({ n: sql<number>`count(*)` })
+      .from(toque)
+      .where(eq(toque.idEmpresa, parsed.idEmpresa))
+      .get();
+    const esPrimerToque = (previos?.n ?? 0) === 0;
+
     tx.insert(toque)
       .values({
         idEmpresa: parsed.idEmpresa,
@@ -282,12 +318,24 @@ export function registrarToque(input: RegistrarToqueInput) {
     // V3.7: outbox en la MISMA transaccion que el cambio (patron outbox). Si la empresa
     // no tiene notion_page_id todavia (nadie la enlazo a mano, ver nota en V3.1b/V3.7)
     // no hay a donde sincronizar, se omite en silencio, no es un error.
-    if (parsed.proximoFollowUp || parsed.quePaso) {
-      encolarOutboxNotion(tx, parsed.idEmpresa, {
-        proximoPaso: parsed.quePaso,
-        fechaProximoPaso: parsed.proximoFollowUp,
-      });
-    }
+    //
+    // Tarea 6: a diferencia de proximoPaso/fechaProximoPaso (que dependen de que el
+    // cockpit haya llenado esos campos), fechaUltimoContacto y toquesHechos se mandan
+    // SIEMPRE que se registra un toque, porque un toque acaba de ocurrir.
+    const todosLosToques = tx
+      .select({ fecha: toque.fecha, canal: toque.canal, resultado: toque.resultado })
+      .from(toque)
+      .where(eq(toque.idEmpresa, parsed.idEmpresa))
+      .orderBy(desc(toque.idToque))
+      .all();
+
+    encolarOutboxNotion(tx, parsed.idEmpresa, {
+      proximoPaso: parsed.quePaso,
+      fechaProximoPaso: parsed.proximoFollowUp,
+      fechaUltimoContacto: ahora.slice(0, 10),
+      ...(esPrimerToque ? { fechaPrimerContacto: ahora.slice(0, 10) } : {}),
+      toquesHechos: renderToquesHechos(todosLosToques),
+    });
 
     if (parsed.usuarios != null && !Number.isNaN(parsed.usuarios)) {
       tx.insert(empresaUsuarios)
@@ -2750,4 +2798,138 @@ export function empresasPorCadencia(): { cadencia: string; empresas: number }[] 
     .where(eq(inscripcion.estado, 'activa'))
     .groupBy(cadencia.nombre)
     .all();
+}
+
+// ---------------------------------------------------------------------------
+// Tarea 2 (rediseño UI de toque): getContextoToque compone en una sola llamada lo
+// que el cockpit de /llamada/[id] necesita: cuenta (reusa getCuenta), contacto
+// principal ya extraído, y la secuencia de la cadencia SOLO si la empresa tiene
+// una inscripcion activa hoy -- si no la tiene, `secuencia` queda vacía y la UI
+// cae al riel degradado (sin cadencia no hay pasos que mostrar, no es un error).
+
+export type PasoSecuencia = {
+  idPaso: number;
+  orden: number;
+  diaOffset: number;
+  canal: string;
+  objetivo: string | null;
+  estado: 'hecho' | 'activo' | 'pendiente';
+};
+
+export type ContextoToque = {
+  emp: ReturnType<typeof getCuenta>['emp'];
+  principal: { nombre: string | null; cargo: string | null; telefono: string | null; email: string | null } | null;
+  toques: ReturnType<typeof getCuenta>['toques'];
+  secuencia: PasoSecuencia[];
+  objetivo: string | null; // objetivo del paso activo, o null si no hay secuencia
+  // Tarea 12 (rediseño UI de toque): id del paso_inscripcion pendiente de HOY, si lo hay.
+  // Los editores de correo/whatsapp lo necesitan para enviarToqueCanalAction (aprobar ese
+  // paso puntual). null cuando no hay secuencia activa (toque suelto, sin cadencia).
+  idPasoInscripcionActivo: number | null;
+};
+
+export function getContextoToque(id: string): ContextoToque {
+  const { emp, contactos, toques } = getCuenta(id);
+
+  // Contacto principal: el marcado esPrincipal; si ninguno lo está (dato legado
+  // sin migrar), el primero de la lista es mejor default que null -- la UI siempre
+  // necesita A QUIEN se le habla, aunque el seed de Notion no haya marcado principal.
+  const principalRaw = contactos.find((c) => c.esPrincipal === 1) ?? contactos[0] ?? null;
+  const principal = principalRaw
+    ? { nombre: principalRaw.nombre, cargo: principalRaw.cargo, telefono: principalRaw.telefono, email: principalRaw.email }
+    : null;
+
+  const inscripcionActiva = db
+    .select({ idInscripcion: inscripcion.idInscripcion, idCadencia: campana.idCadencia })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(inscripcion.idEmpresa, id), eq(inscripcion.estado, 'activa')))
+    .get();
+
+  if (!inscripcionActiva) {
+    return { emp, principal, toques, secuencia: [], objetivo: null, idPasoInscripcionActivo: null };
+  }
+
+  const pasos = db
+    .select({
+      idPaso: pasoCadencia.idPaso,
+      orden: pasoCadencia.orden,
+      diaOffset: pasoCadencia.diaOffset,
+      canal: pasoCadencia.canal,
+      objetivo: pasoCadencia.objetivo,
+    })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, inscripcionActiva.idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+
+  // Estado real por paso: 'enviada' en paso_inscripcion (via destinatario de ESTA
+  // inscripcion) es lo unico que cuenta como 'hecho'. Mismo join que
+  // historialPasosDestinatario, pero a nivel inscripcion (puede haber mas de un
+  // destinatario) en vez de un solo idDestinatario. idPasoInscripcion se trae aqui
+  // tambien porque el paso 'activo' (Tarea 12) lo necesita para enviarToqueCanalAction.
+  const enviados = db
+    .select({
+      idPaso: pasoInscripcion.idPaso,
+      estado: pasoInscripcion.estado,
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .where(eq(destinatario.idInscripcion, inscripcionActiva.idInscripcion))
+    .all();
+  const estadoPorPaso = new Map(enviados.map((e) => [e.idPaso, e.estado]));
+  const idPasoInscripcionPorPaso = new Map(enviados.map((e) => [e.idPaso, e.idPasoInscripcion]));
+
+  // El primer paso que NO está 'enviada' (en orden) es el pendiente de hoy
+  // ('activo'); los que vienen despues son 'pendiente' (todavia no les toca).
+  let activoAsignado = false;
+  let objetivoActivo: string | null = null;
+  let idPasoInscripcionActivo: number | null = null;
+  const secuencia: PasoSecuencia[] = pasos.map((p) => {
+    let estado: PasoSecuencia['estado'];
+    if (estadoPorPaso.get(p.idPaso) === 'enviada') {
+      estado = 'hecho';
+    } else if (!activoAsignado) {
+      estado = 'activo';
+      activoAsignado = true;
+      objetivoActivo = p.objetivo;
+      idPasoInscripcionActivo = idPasoInscripcionPorPaso.get(p.idPaso) ?? null;
+    } else {
+      estado = 'pendiente';
+    }
+    return { idPaso: p.idPaso, orden: p.orden, diaOffset: p.diaOffset, canal: p.canal, objetivo: p.objetivo, estado };
+  });
+
+  return { emp, principal, toques, secuencia, objetivo: objetivoActivo, idPasoInscripcionActivo };
+}
+
+// Tarea 9 (rediseño UI de toque): versiones A/B/C de un paso, para la barra lateral
+// de EditorCorreo/EditorWhatsapp. La activa (esDefault=1) primero, luego el resto por
+// nombre -- así la UI siempre muestra "la que se está usando" arriba.
+export type VersionDePaso = {
+  idVersion: number;
+  nombre: string | null;
+  asunto: string | null;
+  cuerpo: string | null;
+  esDefault: boolean;
+  fecha: string | null;
+};
+
+export function versionesDePaso(idPaso: number): VersionDePaso[] {
+  const filas = db
+    .select({
+      idVersion: versionPaso.idVersion,
+      nombre: versionPaso.nombre,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      esDefault: versionPaso.esDefault,
+      fecha: versionPaso.createdAt,
+    })
+    .from(versionPaso)
+    .where(eq(versionPaso.idPaso, idPaso))
+    .orderBy(desc(versionPaso.esDefault), versionPaso.nombre)
+    .all();
+
+  return filas.map((f) => ({ ...f, esDefault: f.esDefault === 1 }));
 }

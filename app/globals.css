@@ -41,6 +41,20 @@
   --color-canal-whatsapp: #84c99e;
   --color-acento: #6f9fd0;
 
+  /* Acento por canal para las UIs de toque (Toque 1/2/3). El violeta de --color-accent
+     ya sirve para llamada; correo y whatsapp reciben su propio rol de acento + fondo suave.
+     Cambiar la identidad de un canal = tocar SOLO estas líneas. */
+  --color-accent-llamada: var(--color-accent);
+  --color-accent-llamada-soft: rgba(139, 124, 255, 0.12);
+  --color-accent-correo: var(--blue);
+  --color-accent-correo-soft: rgba(143, 176, 224, 0.12);
+  --color-accent-whatsapp: #29c98f;
+  --color-accent-whatsapp-soft: rgba(41, 201, 143, 0.12);
+  /* Estados de calificación / secuencia (checklist del Toque 1 y receipt de Confirmación) */
+  --color-check: var(--green);
+  --color-pending: var(--amber);
+  --color-pending-soft: rgba(242, 183, 56, 0.07);
+
   /* Fila "actual" en AgendaHoy: mismo criterio que la fila --now del mockup
      (Cockpit (1).html) -- se marca con borde azulado, no con fondo mas claro. */
   --color-surface-hi: #101317;
@@ -82,6 +96,11 @@
      /cola usan font-serif (Newsreader) para títulos -- ver docs/design-tokens.md. */
   --font-heading: var(--ff-display), system-ui, sans-serif;
   --font-body: var(--ff-body), system-ui, sans-serif;
+
+  /* Roles tipográficos de las UIs de toque. Apuntan a --ff-* para que el punto único
+     de cambio sea la carga de next/font, no los componentes. */
+  --font-toque-heading: var(--ff-toque-heading), Georgia, serif;
+  --font-toque-mono: var(--ff-toque-mono), ui-monospace, monospace;
 }
 
 @utility mono {
@@ -268,22 +287,7 @@
 /* Pantalla de llamada */
 .back { color: var(--muted); font-size: 13px; }
 .back:hover { color: var(--ink); }
-.call-head { margin: 22px 0 26px; }
-.call-title { font-family: var(--ff-serif), Georgia, serif; font-size: 36px; font-weight: 500; letter-spacing: -0.015em; line-height: 1.1; }
-.call-sub { color: var(--muted); margin-top: 10px; }
-.call-sub .mono { color: var(--ink-soft); }
 .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); margin: 28px 0 8px; font-weight: 500; }
-.field { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.f-label { color: var(--muted); }
-.field.has .f-value { font-weight: 500; }
-.field.miss .f-value { color: var(--overdue); background: var(--overdue-bg); padding: 3px 11px; border-radius: 999px; font-size: 12px; font-weight: 500; }
-
-.tq { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
-.tq-res { font-size: 12px; font-weight: 600; }
-.tq-res.pos { color: var(--done); }
-.tq-res.neg { color: var(--muted); }
-.tq-txt { color: var(--ink-soft); }
-.tq-date { color: var(--faint); font-size: 12px; }
 
 /* V3.4: busqueda/confirmacion de grabacion de Granola, colgada del historial de toques */
 .tq-buscar, .tq-confirmar {

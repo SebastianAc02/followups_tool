@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Newsreader, Archivo_Black, Space_Mono, IBM_Plex_Sans, IBM_Plex_Mono, Space_Grotesk, Inter } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader, Archivo_Black, Space_Mono, IBM_Plex_Sans, IBM_Plex_Mono, Space_Grotesk, Inter, EB_Garamond, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
 // Cockpit de campañas (Fase 0): Newsreader (títulos, --ff-serif) + IBM Plex Sans
@@ -19,6 +19,11 @@ const monoTag = IBM_Plex_Mono({ variable: "--ff-mono-tag", subsets: ["latin"], w
 const grotesk = Space_Grotesk({ variable: "--ff-grotesk", subsets: ["latin"], weight: ["500", "600"] });
 const inter = Inter({ variable: "--ff-inter", subsets: ["latin"], weight: ["400", "500", "600"] });
 
+// Cockpit de toque (Toque 1/2/3, rediseño 2026-07-08): EB Garamond + JetBrains Mono
+// calcan los mockups de "/Arc/toques ui". Scopeadas via --ff-toque-*, ver globals.css.
+const toqueHeading = EB_Garamond({ variable: "--ff-toque-heading", subsets: ["latin"], weight: ["600"] });
+const toqueMono = JetBrains_Mono({ variable: "--ff-toque-mono", subsets: ["latin"], weight: ["400"], style: ["normal", "italic"] });
+
 export const metadata: Metadata = {
   title: "Follow-ups OnePay",
   description: "Cockpit de follow-ups comerciales",
@@ -30,7 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${serif.variable} ${display.variable} ${spaceMono.variable} ${body.variable} ${monoTag.variable} ${grotesk.variable} ${inter.variable}`}>
+    <html lang="es" className={`${geistSans.variable} ${geistMono.variable} ${serif.variable} ${display.variable} ${spaceMono.variable} ${body.variable} ${monoTag.variable} ${grotesk.variable} ${inter.variable} ${toqueHeading.variable} ${toqueMono.variable}`}>
       <body>{children}</body>
     </html>
   );

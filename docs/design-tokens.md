@@ -31,7 +31,23 @@ Familias: --ff-serif (Newsreader) · --ff-body (IBM Plex Sans) · --ff-mono (Gei
 --font-serif → --ff-serif     (títulos/encabezados del cockpit de campañas y /cola)
 --font-heading → --ff-display (SOLO home dashboard: page.tsx, StatCard, PipelineBar — Archivo Black)
 --font-mono-tag → --ff-mono-tag (etiquetas mono chicas, eyebrow)
+
+--color-accent-llamada → --color-accent (violeta, ya existente)
+--color-accent-correo → --blue
+--color-accent-whatsapp → #29c98f
+(cada uno con su -soft: fondo suave rgba al 12%, para tarjetas de acento por canal)
+--color-check → --green (item de calificación/secuencia con dato)
+--color-pending → --amber (item por preguntar; -soft: caja punteada)
+
+--font-toque-heading → --ff-toque-heading (EB Garamond) — títulos del cockpit de toque (Toque 1/2/3)
+--font-toque-mono → --ff-toque-mono (JetBrains Mono) — eyebrows/labels mono del cockpit de toque
 ```
+
+**Nota (Tarea 0, rediseño de toques 2026-07-08):** los componentes de `app/llamada/[id]/*`
+consumen exclusivamente `text-accent-{llamada,correo,whatsapp}`, `bg-accent-{canal}-soft`,
+`text-check`, `text-pending`, `font-toque-heading` y `font-toque-mono` — nunca un hex ni
+`EB Garamond`/`JetBrains Mono` crudos. Punto único de cambio: este archivo + `app/layout.tsx`
+(carga de `next/font`).
 
 **Nota de convención (no en el plan original, resuelta al ejecutar Fase 0):**
 el plan hablaba de "font-heading" para los títulos serif de la Vista 1. Pero
