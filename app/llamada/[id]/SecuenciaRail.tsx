@@ -8,7 +8,8 @@ import { cn } from "../../ui/cn";
 // pasos llega vacio -- no es un error, es el caso "llamada suelta" y el riel degrada a
 // mostrar los ultimos toques en vez de inventar una secuencia que no existe.
 
-function canalLegible(canal: string): string {
+function canalLegible(canal: string | null): string {
+  if (!canal) return "Sin canal";
   return CANAL_LABEL[canal as Canal] ?? canal.charAt(0).toUpperCase() + canal.slice(1);
 }
 
