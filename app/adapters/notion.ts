@@ -19,6 +19,11 @@ function trocearRichText(texto: string): { text: { content: string } }[] {
   return trozos;
 }
 
+// Tarea 6: fechaPrimerContacto, fechaUltimoContacto y toquesHechos son campos NUEVOS.
+// Los nombres de propiedad de abajo ("Fecha Primer Contacto", "Fecha Último Contacto",
+// "Toques") son CANDIDATOS, igual que la nota de `Estado` mas abajo: no estan
+// verificados contra el "Sales Pipeline" real de Notion. No activar esto en produccion
+// sin confirmar esos 3 nombres en vivo (mismo checkpoint que ya aplica para Estado).
 function construirPropiedades(cambio: CambioNotion): Record<string, unknown> {
   const props: Record<string, unknown> = {};
   if (cambio.notasDiscovery !== undefined) {
@@ -29,6 +34,15 @@ function construirPropiedades(cambio: CambioNotion): Record<string, unknown> {
   }
   if (cambio.fechaProximoPaso !== undefined) {
     props['Fecha Próximo Paso'] = { date: { start: cambio.fechaProximoPaso } };
+  }
+  if (cambio.fechaPrimerContacto !== undefined) {
+    props['Fecha Primer Contacto'] = { date: { start: cambio.fechaPrimerContacto } };
+  }
+  if (cambio.fechaUltimoContacto !== undefined) {
+    props['Fecha Último Contacto'] = { date: { start: cambio.fechaUltimoContacto } };
+  }
+  if (cambio.toquesHechos !== undefined) {
+    props['Toques'] = { rich_text: trocearRichText(cambio.toquesHechos) };
   }
   return props;
 }

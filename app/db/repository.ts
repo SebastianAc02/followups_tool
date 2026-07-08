@@ -70,6 +70,7 @@ import {
   type ModoCampana,
   CANALES,
   RESULTADOS,
+  RESULTADO_LABELS,
   type Canal,
   type Resultado,
   RITMOS_INGRESO,
@@ -101,6 +102,29 @@ function encolarOutboxNotion(tx: Tx, idEmpresa: string, cambio: Omit<CambioNotio
       createdAt: new Date().toISOString(),
     })
     .run();
+}
+
+// Nombres de canal legibles para el render de "Toques" (Tarea 6). CANALES en validation.ts
+// vive en minuscula porque es un valor de dominio (enum de Zod), esto es solo texto de
+// presentacion para Notion, no se reusa como valor de negocio en otro lado.
+const CANAL_LEGIBLE: Record<Canal, string> = {
+  llamada: 'Llamada',
+  whatsapp: 'WhatsApp',
+  correo: 'Correo',
+};
+
+// Tarea 6: arma la tabla en texto plano de "toques hechos" que se manda a Notion (una
+// linea por toque, mas reciente primero). RESULTADO_LABELS ya es el mapeo compartido con
+// la UI (page.tsx), reusarlo aqui evita un segundo lugar con el mismo texto duplicado.
+function renderToquesHechos(filas: { fecha: string | null; canal: string | null; resultado: string | null }[]): string {
+  return filas
+    .map((f) => {
+      const fecha = f.fecha ? f.fecha.slice(0, 10) : '?';
+      const canal = f.canal && f.canal in CANAL_LEGIBLE ? CANAL_LEGIBLE[f.canal as Canal] : (f.canal ?? '?');
+      const resultado = f.resultado && f.resultado in RESULTADO_LABELS ? RESULTADO_LABELS[f.resultado as Resultado] : (f.resultado ?? '?');
+      return `${fecha} · ${canal} · ${resultado}`;
+    })
+    .join('\n');
 }
 
 // Calor de la cuenta (prioridad): lo más cerca del cierre, primero.
@@ -256,6 +280,17 @@ export function registrarToque(input: RegistrarToqueInput) {
       }
     }
 
+    // Tarea 6: fechaPrimerContacto solo se manda la primera vez (empresa sin toques
+    // previos a este). Se cuenta ANTES del insert de abajo, dentro de la misma
+    // transaccion, para que la respuesta no dependa de una condicion de carrera con
+    // otro toque escribiendose al mismo tiempo.
+    const previos = tx
+      .select({ n: sql<number>`count(*)` })
+      .from(toque)
+      .where(eq(toque.idEmpresa, parsed.idEmpresa))
+      .get();
+    const esPrimerToque = (previos?.n ?? 0) === 0;
+
     tx.insert(toque)
       .values({
         idEmpresa: parsed.idEmpresa,
@@ -282,12 +317,24 @@ export function registrarToque(input: RegistrarToqueInput) {
     // V3.7: outbox en la MISMA transaccion que el cambio (patron outbox). Si la empresa
     // no tiene notion_page_id todavia (nadie la enlazo a mano, ver nota en V3.1b/V3.7)
     // no hay a donde sincronizar, se omite en silencio, no es un error.
-    if (parsed.proximoFollowUp || parsed.quePaso) {
-      encolarOutboxNotion(tx, parsed.idEmpresa, {
-        proximoPaso: parsed.quePaso,
-        fechaProximoPaso: parsed.proximoFollowUp,
-      });
-    }
+    //
+    // Tarea 6: a diferencia de proximoPaso/fechaProximoPaso (que dependen de que el
+    // cockpit haya llenado esos campos), fechaUltimoContacto y toquesHechos se mandan
+    // SIEMPRE que se registra un toque, porque un toque acaba de ocurrir.
+    const todosLosToques = tx
+      .select({ fecha: toque.fecha, canal: toque.canal, resultado: toque.resultado })
+      .from(toque)
+      .where(eq(toque.idEmpresa, parsed.idEmpresa))
+      .orderBy(desc(toque.idToque))
+      .all();
+
+    encolarOutboxNotion(tx, parsed.idEmpresa, {
+      proximoPaso: parsed.quePaso,
+      fechaProximoPaso: parsed.proximoFollowUp,
+      fechaUltimoContacto: ahora.slice(0, 10),
+      ...(esPrimerToque ? { fechaPrimerContacto: ahora.slice(0, 10) } : {}),
+      toquesHechos: renderToquesHechos(todosLosToques),
+    });
 
     if (parsed.usuarios != null && !Number.isNaN(parsed.usuarios)) {
       tx.insert(empresaUsuarios)
