@@ -69,6 +69,25 @@ export function calcularCalendario(pasos: PasoOffset[], anchor: string, config: 
     });
 }
 
+// --- Traduccion a Apollo (subir/editar copy, sesion 2026-07-08) ------------
+
+export type WaitApollo = { orden: number; waitMode: 'day'; waitTime: number };
+
+// TODO (Sebastian): Apollo numera el espaciado de sus emailer_steps de forma RELATIVA
+// (cuanto esperar desde el paso anterior, wait_mode/wait_time -- ver
+// planning/experimento-apollo.md, Hallazgo real #4), pero paso_cadencia.dia_offset es
+// ABSOLUTO (offset desde el dia de inscripcion, ver schema.ts). Hay que traducir un
+// modelo al otro para poder subir los pasos via POST /emailer_steps, y no hay una
+// unica respuesta correcta -- ver la conversacion en la sesion de hoy para las
+// preguntas abiertas (wait del primer paso, offsets empatados, dias bloqueados).
+//
+// Implementa esta funcion. calcularWaitApollo(pasos) recibe los pasos de UNA cadencia
+// (mismo tipo PasoOffset que ya usa calcularCalendario) y devuelve, por cada uno, cuanto
+// tiene que esperar Apollo desde el paso anterior antes de mandarlo.
+export function calcularWaitApollo(pasos: PasoOffset[]): WaitApollo[] {
+  throw new Error('calcularWaitApollo: pendiente de diseno (Sebastian)');
+}
+
 // Un paso ya ejecutado, con la fecha REAL en que salio (no la planeada).
 export type EjecutadoPaso = { orden: number; fechaReal: string };
 

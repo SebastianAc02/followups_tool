@@ -2,8 +2,10 @@
 
 import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { crearBorradorDesdeCadenciaAction, actualizarBorradorAction } from './actions';
+import { crearBorradorDesdeCadenciaAction, actualizarBorradorAction, abandonarBorradorAction } from './actions';
 import { ImportarCadencia, type CadenciaResuelta } from './ImportarCadencia';
+import { CadenciaCockpit, type PasoCadenciaUI } from '../../cadencias/[id]/CadenciaCockpit';
+import { PasosWizard, type PasoWizardItem } from './PasosWizard';
 import { Seg, SegButton } from '../../ui/Seg';
 import type { ModoCampana } from '../../db/validation';
 import type { Segmento } from './NuevaCampanaFlujo';
@@ -12,6 +14,8 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
   const router = useRouter();
   const [cadencia, setCadencia] = useState<CadenciaResuelta | null>(null);
   const [idCampana, setIdCampana] = useState<number | null>(null);
+  const [idCadencia, setIdCadencia] = useState<number | null>(null);
+  const [pasosCadencia, setPasosCadencia] = useState<PasoCadenciaUI[]>([]);
   const [nombreCampana, setNombreCampana] = useState('');
   const [modo, setModo] = useState<ModoCampana>('prioritaria');
   const [guardandoBorrador, setGuardandoBorrador] = useState(false);
@@ -36,6 +40,8 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
     setGuardandoBorrador(false);
     if (res.ok) {
       setIdCampana(res.idCampana);
+      setIdCadencia(res.idCadencia);
+      setPasosCadencia(res.pasos);
       setNombreCampana(nombreInicial);
       nombreGuardadoRef.current = nombreInicial;
     } else {
@@ -43,9 +49,15 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
     }
   }
 
+  // "Cambiar cadencia" no reusa el borrador: crearBorradorDesdeCadenciaAction siempre
+  // arma uno nuevo. Sin este cleanup, el anterior quedaba vivo para siempre como
+  // borrador huerfano (nadie mas lo referencia, pero tampoco se borra solo).
   function onLimpiarCadencia() {
+    if (idCampana) void abandonarBorradorAction(idCampana);
     setCadencia(null);
     setIdCampana(null);
+    setIdCadencia(null);
+    setPasosCadencia([]);
     setNombreCampana('');
   }
 
@@ -65,34 +77,31 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
     if (!res.ok) setError(res.error);
   }
 
-  function continuarALanzar() {
+  // Antes iba directo a /lanzar: quien recibe la campana quedaba oculto hasta despues
+  // de crearla. Ahora el siguiente paso del flujo es Destinatarios (la factura de a
+  // quien se inscribe), y de ahi Lanzar es la accion final -- ver DestinatariosCockpit.
+  function continuarADestinatarios() {
     if (!idCampana) return;
     setNavegando(true);
-    router.push(`/campanas/${idCampana}/lanzar`);
+    router.push(`/campanas/${idCampana}/destinatarios`);
   }
+
+  // Destinatarios/Preview/Lanzar ya tienen ruta real en cuanto existe idCampana (nace
+  // apenas la cadencia resuelve) -- dejarlos como link deja "espiar" el resto del
+  // flujo sin tener que terminar Cadencia primero.
+  const pasos: PasoWizardItem[] = [
+    { label: 'Segmento', onClick: onVolver },
+    { label: 'Cadencia' },
+    { label: 'Destinatarios', href: idCampana ? `/campanas/${idCampana}/destinatarios` : undefined },
+    { label: 'Preview', href: idCampana ? `/campanas/${idCampana}/preview` : undefined },
+    { label: 'Lanzar', href: idCampana ? `/campanas/${idCampana}/lanzar` : undefined },
+  ];
 
   return (
     <div className="overflow-hidden rounded-[18px] border border-line bg-bg shadow-[0_30px_70px_-28px_rgba(0,0,0,.6)]">
-      <div className="flex items-center justify-between border-b border-line px-6 py-[15px]">
-        <div className="flex items-center gap-3 text-[13px]">
-          <span className="text-faint">Nueva campaña</span>
-          <span className="text-line-strong">·</span>
-          <button type="button" onClick={onVolver} className="text-ink-soft hover:text-ink">
-            Segmento
-          </button>
-          <span className="text-line-strong">›</span>
-          <span className="flex items-center gap-[7px]">
-            <span className="grid h-[18px] w-[18px] place-items-center rounded-[5px] bg-accent font-mono text-[11px] font-semibold text-bg">
-              2
-            </span>
-            <span className="font-semibold text-ink">Cadencia</span>
-          </span>
-          <span className="text-line-strong">›</span>
-          <span className="text-faint">Reglas</span>
-          <span className="text-line-strong">›</span>
-          <span className="text-faint">Preview</span>
-        </div>
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between border-b border-line">
+        <PasosWizard pasos={pasos} activo="Cadencia" />
+        <div className="flex shrink-0 items-center gap-3 pr-6 text-[13px]">
           {idCampana && (
             <span className="text-[12px] text-faint">
               {guardandoBorrador ? 'Guardando borrador…' : `Guardado como borrador #${idCampana}`}
@@ -105,10 +114,12 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
       </div>
 
       <div className="mx-auto max-w-[720px] px-8 py-8">
-        <ImportarCadencia onResuelto={onCadenciaResuelta} onLimpiar={onLimpiarCadencia} />
+        <ImportarCadencia onResuelto={onCadenciaResuelta} onLimpiar={onLimpiarCadencia} ocultarPasosResueltos />
+      </div>
 
-        {cadencia && (
-          <div className="mt-8 flex flex-col gap-4 border-t border-line pt-6">
+      {cadencia && (
+        <div className="flex flex-col gap-6 border-t border-line px-8 py-8">
+          <div className="mx-auto flex w-full max-w-[900px] flex-col gap-4">
             <div className="flex items-center gap-3">
               <input
                 value={nombreCampana}
@@ -131,20 +142,30 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
                 ? 'Revisás y personalizás lead por lead antes de mandar.'
                 : 'El copy sale igual para todo el grupo del día; podés editarlo antes de confirmar.'}
             </p>
+          </div>
 
+          {/* Mismo editor que ve una campana ya creada al entrar a su tab Cadencia --
+              una sola vista en todos lados, sin variantes. key={idCadencia} lo
+              remonta limpio si "Cambiar cadencia" trae otro id. */}
+          {idCadencia && (
+            <div className="mx-auto w-full max-w-[900px]">
+              <CadenciaCockpit key={idCadencia} idCadencia={idCadencia} nombre={nombreCampana} pasos={pasosCadencia} />
+            </div>
+          )}
+
+          <div className="mx-auto flex w-full max-w-[900px] flex-col gap-3">
             {error && <p className="text-[13px] text-overdue">{error}</p>}
-
             <button
               type="button"
-              onClick={continuarALanzar}
+              onClick={continuarADestinatarios}
               disabled={!idCampana || !nombreCampana.trim() || navegando}
               className="self-start rounded-[9px] bg-accent px-5 py-[10px] text-[13px] font-semibold text-bg disabled:opacity-40"
             >
-              {navegando ? 'Abriendo…' : 'Continuar a Lanzar'}
+              {navegando ? 'Abriendo…' : 'Continuar a Destinatarios'}
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

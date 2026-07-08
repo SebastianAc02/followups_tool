@@ -160,6 +160,10 @@ export const pasoCadencia = sqliteTable('paso_cadencia', {
   // esManual (V5.6): FLAG del paso, no una rama de codigo. Un paso manual nunca lo
   // dispara el push automatico (V5.4); espera revision humana (aprobarPasoManual).
   esManual: integer('es_manual').notNull().default(0),
+  // proveedorStepId (sesion 2026-07-08): el id de emailer_step que Apollo devuelve
+  // al subir este paso (sincronizarCopy). Nace null; sin el, resincronizar crearia
+  // un step duplicado en vez de actualizar el existente.
+  proveedorStepId: text('proveedor_step_id'),
   createdAt: text('created_at'),
 });
 
@@ -180,6 +184,11 @@ export const versionPaso = sqliteTable('version_paso', {
   // UI del toque sepa que personalizar sin volver a parsear texto.
   firmaApollo: integer('firma_apollo').notNull().default(0),
   variables: text('variables'),
+  // proveedorTemplateId (sesion 2026-07-08): el id de emailer_template que Apollo
+  // devuelve al subir esta version (sincronizarCopy). Mismo motivo que
+  // pasoCadencia.proveedorStepId: sin el, editar y resubir crearia un template nuevo
+  // en vez de hacer PUT sobre el existente.
+  proveedorTemplateId: text('proveedor_template_id'),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });

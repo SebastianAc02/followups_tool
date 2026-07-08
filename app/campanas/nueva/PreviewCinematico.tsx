@@ -469,9 +469,28 @@ export function PreviewCinematico({ pasos, datos }: { pasos: PasoPreview[]; dato
 
       {/* Timeline */}
       <div className="px-6 pb-6 pt-8 md:px-10">
+        {/* Los nodos se posicionan por % (left), no por flex -- con poco ancho (sidebar
+            angosto) se amontonan en vez de reflow. min-width + overflow-x-auto los
+            separa siempre y el excedente se scrollea, en vez de superponerse. */}
+        <div className="overflow-x-auto pb-1">
+        {/* El padding va ACA, en un envoltorio aparte de trackRef, no en trackRef
+            mismo: el 0%/100% de un hijo absoluto se ancla al borde EXTERIOR del
+            padding-box de su contenedor relativo, asi que padding puesto directo en
+            ese contenedor relativo (mi intento anterior) no corre el 0%/100% ni un
+            pixel. Con el padding en ESTE div de afuera, trackRef queda metido hacia
+            adentro y lo que sobresale cae dentro del padding de este envoltorio --
+            adentro de su propia caja, nunca recortado.
+            px-10 (40px), no menos: cada nodo (circulo + "Dia X" + canal) vive en una
+            columna de width:80px centrada sobre su %, o sea la mitad de esos 80px
+            (40px) puede sobresalir del track en el primer/ultimo nodo. Con menos
+            padding el CIRCULO se veia completo pero el TEXTO ("Dia 0") seguia
+            recortado -- 40px es lo que de verdad cubre el peor caso (la columna
+            entera), no solo el circulo. */}
+        <div className="px-10">
         <div
           ref={trackRef}
           className={cn('relative h-14 touch-none select-none', isDragging ? 'cursor-grabbing' : 'cursor-grab')}
+          style={{ minWidth: `${n * 90}px` }}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -512,8 +531,12 @@ export function PreviewCinematico({ pasos, datos }: { pasos: PasoPreview[]; dato
                     isActive ? 'scale-150 shadow-lg' : isPast ? 'opacity-80' : 'opacity-40',
                   )}
                 />
+                {/* El nodo "Listo" reusa el dia del ultimo paso real solo para
+                    posicionarse en el track (no tiene dia propio) -- mostrar "Día X"
+                    ahi tambien duplicaba el numero del paso anterior, como si fueran
+                    dos dias distintos que resultan ser el mismo. */}
                 <span className={cn('mt-2.5 font-mono text-[10px] transition-colors duration-150', isActive ? 'text-ink' : 'text-muted')}>
-                  Día {dia}
+                  {paso ? `Día ${dia}` : 'Fin'}
                 </span>
                 <span
                   className={cn(
@@ -527,9 +550,16 @@ export function PreviewCinematico({ pasos, datos }: { pasos: PasoPreview[]; dato
             );
           })}
         </div>
+        </div>
+        </div>
 
-        {/* Franja de calendario 0..diaMax */}
-        <div className="mt-6 grid grid-cols-8 gap-1.5">
+        {/* Franja de calendario 0..diaMax. flex+wrap+justify-center en vez de grid-cols-8:
+            un grid deja la ULTIMA fila incompleta pegada a la izquierda (no tiene forma
+            nativa de centrarla) -- flex-wrap si centra cada fila, la ultima incluida,
+            porque justify-content actua por fila, no sobre la grilla entera. Cada
+            cajon lleva un ancho fijo (8 por fila, 7 gaps de 6px = 42px) para que el
+            wrap caiga exactamente cada 8, igual que antes con grid-cols-8. */}
+        <div className="mt-6 flex flex-wrap justify-center gap-1.5">
           {Array.from({ length: Math.max(diaMax + 1, 8) }, (_, d) => d).map((d) => {
             const pasoDelDia = pasos.find((p) => p.dia === d);
             const esHoy = d === diaActual && !esResumen;
@@ -538,7 +568,7 @@ export function PreviewCinematico({ pasos, datos }: { pasos: PasoPreview[]; dato
               <div
                 key={d}
                 className={cn(
-                  'rounded-xl border px-1.5 py-2 text-center transition-all duration-150 ease-out',
+                  'w-[calc((100%-42px)/8)] shrink-0 rounded-xl border px-1.5 py-2 text-center transition-all duration-150 ease-out',
                   esHoy ? 'border-accent-soft/40 bg-accent/10' : esPasado ? 'border-line/30 bg-surface/40' : 'border-line/20 bg-transparent',
                 )}
               >

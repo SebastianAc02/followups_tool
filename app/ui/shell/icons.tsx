@@ -66,3 +66,12 @@ export function IconPorRevisar({ className }: IconProps) {
     </svg>
   );
 }
+
+export function IconSidebarToggle({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4Z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

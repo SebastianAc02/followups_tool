@@ -3,15 +3,27 @@
 import { revalidatePath } from 'next/cache';
 import {
   guardarSegmento,
+  actualizarSegmento,
+  obtenerSegmento,
   empresasConReadiness,
   conteosReadiness,
   valoresDistintosCampo,
+  eliminarCampanaBorrador,
 } from '../db/repository';
 import { CANALES, type Canal, definicionSegmentoSchema, type DefinicionSegmento } from '../db/validation';
 import { requireSession } from '../lib/session';
 import { crearClaudeAdapter } from '../adapters/claude';
 import { pedirAlCopiloto, type CampoDisponible } from './nueva/copiloto';
 import { marcarRelajadas } from '../core/relleno-segmento';
+
+export type EliminarBorradorResultado = { ok: true } | { ok: false; error: string };
+
+export async function eliminarCampanaBorradorAction(idCampana: number): Promise<EliminarBorradorResultado> {
+  await requireSession();
+  const res = eliminarCampanaBorrador(idCampana);
+  if (res.ok) revalidatePath('/campanas');
+  return res;
+}
 
 export type GuardarSegmentoResultado = { ok: true; idSegmento: number } | { ok: false; error: string };
 
@@ -26,6 +38,37 @@ export async function guardarSegmentoAction(nombre: string, def: DefinicionSegme
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo guardar el segmento' };
   }
+}
+
+export type ActualizarSegmentoResultado = { ok: true } | { ok: false; error: string };
+
+// Fase 7 (autosave silencioso): actualiza el MISMO segmento que ya autoguardo esta
+// sesion (ver NuevoSegmento.tsx) -- nombre y/o definicion, lo que haya cambiado.
+export async function actualizarSegmentoAction(
+  idSegmento: number,
+  cambios: { nombre?: string; definicion?: DefinicionSegmento },
+): Promise<ActualizarSegmentoResultado> {
+  await requireSession();
+  try {
+    actualizarSegmento(idSegmento, cambios);
+    revalidatePath('/campanas/nueva');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'No se pudo actualizar el segmento' };
+  }
+}
+
+export type ObtenerSegmentoResultado =
+  | { ok: true; segmento: { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } }
+  | { ok: false; error: string };
+
+// Fase 7 (volver a Segmento sin perder el progreso): reabre NuevoSegmento pre-cargado
+// con la MISMA definicion que ya se habia armado, en vez de vacio.
+export async function obtenerSegmentoAction(idSegmento: number): Promise<ObtenerSegmentoResultado> {
+  await requireSession();
+  const segmento = obtenerSegmento(idSegmento);
+  if (!segmento) return { ok: false, error: 'El segmento no existe' };
+  return { ok: true, segmento };
 }
 
 export type PreviewConReadiness =

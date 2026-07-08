@@ -12,7 +12,7 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { crearCadencia, actualizarPasoCadencia, agregarPasoCadencia, getCadencia } = await import('./repository.ts');
+const { crearCadencia, actualizarPasoCadencia, agregarPasoCadencia, eliminarPasoCadencia, getCadencia } = await import('./repository.ts');
 
 const idCadencia = crearCadencia({
   nombre: 'C',
@@ -22,9 +22,9 @@ const idCadencia = crearCadencia({
   ],
 });
 
-function idPasoOrden(orden: number) {
+function idPasoOrden(orden: number, deCadencia = idCadencia) {
   const raw = new Database(dbPath);
-  const fila = raw.prepare('SELECT id_paso FROM paso_cadencia WHERE id_cadencia = ? AND orden = ?').get(idCadencia, orden) as
+  const fila = raw.prepare('SELECT id_paso FROM paso_cadencia WHERE id_cadencia = ? AND orden = ?').get(deCadencia, orden) as
     | { id_paso: number }
     | undefined;
   raw.close();
@@ -107,6 +107,58 @@ test('agregarPasoCadencia queda visible via getCadencia', () => {
   const despues = getCadencia(idCadencia)!.pasos;
   assert.equal(despues.length, antes + 1);
   assert.equal(despues[despues.length - 1].orden, antes + 1);
+});
+
+// Fase 7 (editor de cadencia): objetivo es el unico campo channel-agnostic editable
+// despues de creado, y vive en paso_cadencia (no version_paso) porque no se versiona.
+test('actualizarPasoCadencia guarda y limpia objetivo', () => {
+  const idPaso = idPasoOrden(1);
+  actualizarPasoCadencia(idPaso, { objetivo: 'Agendar 15 min' });
+  assert.equal(getCadencia(idCadencia)!.pasos.find((p) => p.idPaso === idPaso)!.objetivo, 'Agendar 15 min');
+
+  actualizarPasoCadencia(idPaso, { objetivo: '   ' });
+  assert.equal(getCadencia(idCadencia)!.pasos.find((p) => p.idPaso === idPaso)!.objetivo, null, 'objetivo en blanco se guarda como null');
+});
+
+// Fase 7 (editor de cadencia): "Eliminar" en la vista por pasos, con sus dos guardas.
+test('eliminarPasoCadencia rechaza si es el unico paso de la cadencia', () => {
+  const idCadenciaSolo = crearCadencia({ nombre: 'Solo', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
+  const idPaso = idPasoOrden(1, idCadenciaSolo);
+  const res = eliminarPasoCadencia(idPaso);
+  assert.equal(res.ok, false);
+  assert.equal(getCadencia(idCadenciaSolo)!.pasos.length, 1, 'no se borro nada');
+});
+
+test('eliminarPasoCadencia borra el paso y sus version_paso si no tiene historia de envio', () => {
+  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 20, canal: 'whatsapp', cuerpo: 'chau' });
+  const antes = getCadencia(idCadencia)!.pasos.length;
+
+  const res = eliminarPasoCadencia(idPaso);
+  assert.equal(res.ok, true);
+
+  const despues = getCadencia(idCadencia)!.pasos;
+  assert.equal(despues.length, antes - 1);
+  assert.ok(!despues.some((p) => p.idPaso === idPaso));
+
+  const raw = new Database(dbPath);
+  const version = raw.prepare('SELECT count(*) as n FROM version_paso WHERE id_paso = ?').get(idPaso) as { n: number };
+  raw.close();
+  assert.equal(version.n, 0, 'sus version_paso tambien se borraron');
+});
+
+test('eliminarPasoCadencia rechaza un paso que ya tiene historia real de envio', () => {
+  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 30, canal: 'correo', cuerpo: 'con historia' });
+  const raw = new Database(dbPath);
+  const version = raw.prepare('SELECT id_version FROM version_paso WHERE id_paso = ?').get(idPaso) as { id_version: number };
+  raw.prepare(`INSERT INTO paso_inscripcion (id_destinatario, id_paso, id_version, canal, estado) VALUES (1, ?, ?, 'correo', 'enviada')`).run(
+    idPaso,
+    version.id_version,
+  );
+  raw.close();
+
+  const res = eliminarPasoCadencia(idPaso);
+  assert.equal(res.ok, false);
+  assert.ok(getCadencia(idCadencia)!.pasos.some((p) => p.idPaso === idPaso), 'el paso sigue existiendo');
 });
 
 test.after(() => {

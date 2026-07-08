@@ -39,6 +39,9 @@ function envioFalso(comportamiento: (destinatario: { email: string }) => boolean
     async crearCampanaExterna() {
       return 'seq-fake';
     },
+    async sincronizarCopy() {
+      return [];
+    },
     async enviarPaso(_proveedorCampanaId, destinatario) {
       llamadas.push(destinatario.email);
       if (!comportamiento(destinatario)) throw new Error('fallo simulado de Apollo');

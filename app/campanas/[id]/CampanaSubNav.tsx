@@ -8,11 +8,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cx } from '../../ui/cx';
+import type { SubNavItem } from './subnav-items';
 
-export type SubNavItem = {
-  href: string;
-  label: string;
-};
+export type { SubNavItem };
 
 export function CampanaSubNav({ items }: { items: SubNavItem[] }) {
   const pathname = usePathname();

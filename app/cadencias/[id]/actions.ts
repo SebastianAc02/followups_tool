@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { agregarVersionPaso, actualizarPasoCadencia, agregarPasoCadencia, getCadencia } from '../../db/repository';
+import { agregarVersionPaso, actualizarPasoCadencia, agregarPasoCadencia, eliminarPasoCadencia, getCadencia } from '../../db/repository';
 import { requireSession } from '../../lib/session';
 import type { Canal } from '../../db/validation';
 
@@ -43,7 +43,7 @@ export type ActualizarPasoResultado = { ok: true } | { ok: false; error: string 
 
 export async function actualizarPasoCadenciaAction(
   idPaso: number,
-  cambios: { diaOffset?: number; canal?: Canal; esManual?: boolean },
+  cambios: { diaOffset?: number; canal?: Canal; esManual?: boolean; objetivo?: string | null },
   idCadencia: number,
 ): Promise<ActualizarPasoResultado> {
   await requireSession();
@@ -54,6 +54,18 @@ export async function actualizarPasoCadenciaAction(
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo guardar el cambio' };
   }
+}
+
+// Fase 7 (editor de cadencia): "Eliminar" en la vista por pasos. eliminarPasoCadencia
+// ya trae las guardas (al menos 1 paso, sin historia real de envio); esta action solo
+// traduce su resultado.
+export type EliminarPasoResultado = { ok: true } | { ok: false; error: string };
+
+export async function eliminarPasoCadenciaAction(idPaso: number, idCadencia: number): Promise<EliminarPasoResultado> {
+  await requireSession();
+  const res = eliminarPasoCadencia(idPaso);
+  if (res.ok) revalidatePath(`/cadencias/${idCadencia}`);
+  return res;
 }
 
 // Fase 4 (cockpit de cadencia): "+ Añadir toque" / "+ Añadir paso" de la UI. Crea el

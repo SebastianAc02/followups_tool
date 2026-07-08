@@ -9,7 +9,7 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { crearCadencia, guardarSegmento, crearCampana, inscribirCampana, agendaEnSeco } = await import('./repository.ts');
+const { crearCadencia, guardarSegmento, crearCampana, inscribirCampana, agendaEnSeco, pausarCampana } = await import('./repository.ts');
 
 // dos empresas on_hold, una con email (activa) y otra sin (bloqueada, no entra a la agenda)
 function seed() {
@@ -54,6 +54,22 @@ test('agendaEnSeco vacia cuando ninguna activa tiene paso debido todavia', () =>
   // hoy = 1970 (antes de cualquier inscripcion): el primer paso aun no llega
   const agenda = agendaEnSeco('1970-01-01', { diasBloqueados: [], corrimiento: 'siguiente' });
   assert.equal(agenda.length, 0);
+});
+
+// Fase 7 (pausar campana): sin este filtro, "pausar" solo cambiaria una etiqueta en
+// campana.estado pero la agenda seguiria generando pasos nuevos cada dia.
+test('agendaEnSeco no muestra pasos de una campana pausada', () => {
+  const idCampana2 = crearCampana({ nombre: 'Camp2', idCadencia, idSegmento });
+  inscribirCampana(idCampana2); // reemplaza la inscripcion de e1 en 'Camp' (test anterior)
+
+  const antes = agendaEnSeco('2099-01-01', { diasBloqueados: [], corrimiento: 'siguiente' });
+  assert.equal(antes.length, 1, 'antes de pausar, e1 sigue debido en Camp2');
+
+  const res = pausarCampana(idCampana2);
+  assert.equal(res.ok, true);
+
+  const despues = agendaEnSeco('2099-01-01', { diasBloqueados: [], corrimiento: 'siguiente' });
+  assert.equal(despues.length, 0, 'pausada: la agenda no le genera pasos nuevos');
 });
 
 test.after(() => {

@@ -8,6 +8,9 @@ function envioFalso(eventosPorCampana: Record<string, EventoProveedor[]>): Envio
     async crearCampanaExterna() {
       return 'seq-fake';
     },
+    async sincronizarCopy() {
+      return [];
+    },
     async enviarPaso() {
       throw new Error('no usado en estas pruebas');
     },
@@ -118,6 +121,9 @@ test('una campana cuyo leerEventosNuevos truena no bloquea el poll de las demas'
   const envio: EnvioAdapter = {
     async crearCampanaExterna() {
       return 'x';
+    },
+    async sincronizarCopy() {
+      return [];
     },
     async enviarPaso() {
       throw new Error('no usado');

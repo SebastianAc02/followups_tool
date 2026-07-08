@@ -20,6 +20,10 @@ const {
   resolverInscripcionBloqueada,
   excluirDeSegmento,
   listarCampanas,
+  eliminarCampanaBorrador,
+  pausarCampana,
+  reanudarCampana,
+  marcarCampanaFinalizada,
 } = await import('./repository.ts');
 
 // Seed: 4 empresas isp on_hold con distintos perfiles de contactos.
@@ -194,6 +198,70 @@ test('crearCampana persiste reglaFaltante e intakeDiario', () => {
   raw.close();
   assert.equal(fila.regla_faltante, 'saltar');
   assert.equal(fila.intake_diario, 50);
+});
+
+// Fase 7 (gestion de drafts): un borrador que nunca corrio inscribirCampana no deja
+// rastro -- se borra campana + su propia cadencia (nadie mas la usa).
+test('eliminarCampanaBorrador borra campana y cadencia si sigue en borrador', () => {
+  const idCadenciaF = crearCadencia({ nombre: 'CF', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
+  const idCampanaF = crearCampana({ nombre: 'Camp F', idCadencia: idCadenciaF, idSegmento });
+  const res = eliminarCampanaBorrador(idCampanaF);
+  assert.equal(res.ok, true);
+  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp F'), undefined);
+  const raw = new Database(dbPath);
+  const cad = raw.prepare('SELECT id_cadencia FROM cadencia WHERE id_cadencia = ?').get(idCadenciaF);
+  raw.close();
+  assert.equal(cad, undefined);
+});
+
+// No es seguro borrar una campana que ya inscribio de verdad: perderia inscripciones
+// y toques reales sin aviso. inscribirCampana la saca de 'borrador' Y crea las
+// inscripciones en el mismo paso, asi que un solo test cubre las dos guardas.
+test('eliminarCampanaBorrador rechaza una campana que ya no esta en borrador', () => {
+  const idCadenciaG = crearCadencia({ nombre: 'CG', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
+  const idCampanaG = crearCampana({ nombre: 'Camp G', idCadencia: idCadenciaG, idSegmento });
+  inscribirCampana(idCampanaG);
+  const res = eliminarCampanaBorrador(idCampanaG);
+  assert.equal(res.ok, false);
+  assert.ok(listarCampanas().find((f) => f.nombre === 'Camp G'));
+});
+
+// Fase 7 (ciclo de vida): pausar/reanudar son reversibles y solo se mueven entre
+// 'activa' <-> 'pausada'; cualquier otro origen se rechaza para no pisar un borrador
+// o una campana ya finalizada.
+test('pausarCampana/reanudarCampana solo se mueven entre activa y pausada', () => {
+  const idCadenciaH = crearCadencia({ nombre: 'CH', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
+  const idCampanaH = crearCampana({ nombre: 'Camp H', idCadencia: idCadenciaH, idSegmento });
+
+  assert.equal(pausarCampana(idCampanaH).ok, false, 'no se puede pausar un borrador');
+
+  inscribirCampana(idCampanaH);
+  assert.equal(reanudarCampana(idCampanaH).ok, false, 'no se puede reanudar algo que no esta pausado');
+
+  const p = pausarCampana(idCampanaH);
+  assert.equal(p.ok, true);
+  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp H')!.estado, 'pausada');
+
+  const r = reanudarCampana(idCampanaH);
+  assert.equal(r.ok, true);
+  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp H')!.estado, 'activa');
+});
+
+// marcarCampanaFinalizada es lo unico que "Cancelar" toca en la base (el archivado
+// real en Apollo lo hace la server action, fuera del repository). Un borrador se
+// elimina (eliminarCampanaBorrador), no se cancela -- por eso lo rechaza.
+test('marcarCampanaFinalizada rechaza un borrador y una campana ya finalizada', () => {
+  const idCadenciaI = crearCadencia({ nombre: 'CI', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
+  const idCampanaI = crearCampana({ nombre: 'Camp I', idCadencia: idCadenciaI, idSegmento });
+
+  assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'un borrador se elimina, no se cancela');
+
+  inscribirCampana(idCampanaI);
+  const primera = marcarCampanaFinalizada(idCampanaI);
+  assert.equal(primera.ok, true);
+  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp I')!.estado, 'finalizada');
+
+  assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'ya esta finalizada');
 });
 
 test.after(() => {

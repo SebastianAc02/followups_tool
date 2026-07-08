@@ -150,6 +150,7 @@ export function crearDbPrueba() {
       canal TEXT NOT NULL,
       objetivo TEXT,
       es_manual INTEGER NOT NULL DEFAULT 0,
+      proveedor_step_id TEXT,
       created_at TEXT
     );
 
@@ -164,6 +165,7 @@ export function crearDbPrueba() {
       peso INTEGER NOT NULL DEFAULT 1,
       firma_apollo INTEGER NOT NULL DEFAULT 0,
       variables TEXT,
+      proveedor_template_id TEXT,
       created_at TEXT,
       updated_at TEXT
     );

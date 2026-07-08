@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { elegirVersionPorPeso } from './motor-cadencia.ts';
+import { elegirVersionPorPeso, calcularWaitApollo } from './motor-cadencia.ts';
 
 function repartir(versiones: { id: number; peso: number }[], n: number) {
   const cuenta = new Map<number, number>();
@@ -40,4 +40,35 @@ test('una version con peso 0 no recibe trafico', () => {
 
 test('sin versiones con peso > 0 lanza', () => {
   assert.throws(() => elegirVersionPorPeso([{ id: 1, peso: 0 }], 0), /peso > 0/);
+});
+
+// --- calcularWaitApollo: TODO (Sebastian, sesion 2026-07-08) ---------------
+// Marcados como 'todo' a proposito: no rompen `npm test` mientras la funcion sigue
+// sin implementar (hoy lanza), pero documentan el contrato esperado. Cuando la
+// escribas, borra `{ todo: true }` de cada uno para que corran de verdad.
+
+test('el primer paso (offset 0) no espera nada', { todo: true }, () => {
+  const r = calcularWaitApollo([{ orden: 1, diaOffset: 0 }]);
+  assert.deepEqual(r, [{ orden: 1, waitMode: 'day', waitTime: 0 }]);
+});
+
+test('cada paso espera la diferencia contra el offset del paso anterior', { todo: true }, () => {
+  const r = calcularWaitApollo([
+    { orden: 1, diaOffset: 0 },
+    { orden: 2, diaOffset: 4 },
+    { orden: 3, diaOffset: 7 },
+  ]);
+  assert.deepEqual(r, [
+    { orden: 1, waitMode: 'day', waitTime: 0 },
+    { orden: 2, waitMode: 'day', waitTime: 4 },
+    { orden: 3, waitMode: 'day', waitTime: 3 },
+  ]);
+});
+
+test('ordena por "orden" antes de calcular, sin importar el orden de entrada', { todo: true }, () => {
+  const r = calcularWaitApollo([
+    { orden: 2, diaOffset: 4 },
+    { orden: 1, diaOffset: 0 },
+  ]);
+  assert.deepEqual(r.map((p) => p.orden), [1, 2]);
 });

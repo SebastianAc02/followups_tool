@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { cn } from '../../ui/cn';
 import type { CampoSegmentoNumerico, DefinicionSegmento } from '../../db/validation';
+import type { Segmento } from './NuevaCampanaFlujo';
 
 type Condicion = DefinicionSegmento['condiciones'][number];
 
@@ -45,9 +46,27 @@ type Props = {
   value: DefinicionSegmento;
   onChange: (def: DefinicionSegmento) => void;
   opciones: Record<(typeof CAMPOS_TEXTO)[number], string[]>;
+  segmentosGuardados?: Segmento[];
+  onElegirGuardado?: (s: Segmento) => void;
+  nombreSegmento?: string;
+  onNombreSegmentoChange?: (v: string) => void;
+  mostrarNombre?: boolean;
+  autosaveEstado?: 'idle' | 'guardando' | 'guardado';
+  error?: string;
 };
 
-export function FiltroWall({ value, onChange, opciones }: Props) {
+export function FiltroWall({
+  value,
+  onChange,
+  opciones,
+  segmentosGuardados,
+  onElegirGuardado,
+  nombreSegmento,
+  onNombreSegmentoChange,
+  mostrarNombre,
+  autosaveEstado,
+  error,
+}: Props) {
   const condiciones = value.condiciones;
   const [editando, setEditando] = useState<number | null>(null);
 
@@ -75,7 +94,53 @@ export function FiltroWall({ value, onChange, opciones }: Props) {
   const rangoDisponible = CAMPOS_RANGO.filter((c) => !camposUsados.has(c));
 
   return (
-    <div className="border-r border-line px-[18px] py-5">
+    <div className="min-h-0 min-w-0 overflow-y-auto border-r border-line px-[18px] py-5">
+      {/* Primero lo primero: nombrar el segmento nuevo, o usar uno ya guardado. Antes
+          el nombre no aparecia en ningun lado hasta que ya habia 1+ filtro (Sebastian
+          reporto que "no tengo donde ponerle nombre" al llegar a la pantalla), y el
+          dropdown vivia arriba a la derecha del todo, apretado contra Copiloto/Guardar. */}
+      {mostrarNombre && (
+        <div className="mb-5 flex flex-col gap-2 border-b border-line pb-4">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-faint">Nombra tu nuevo segmento</span>
+            {autosaveEstado && autosaveEstado !== 'idle' && (
+              <span className="text-[11px] text-faint">{autosaveEstado === 'guardando' ? 'Guardando…' : 'Guardado ✓'}</span>
+            )}
+          </div>
+          <input
+            value={nombreSegmento ?? ''}
+            onChange={(e) => onNombreSegmentoChange?.(e.target.value)}
+            placeholder="Nombre del segmento"
+            className="w-full rounded-lg border border-line-strong bg-surface px-3 py-[9px] text-[13px] text-ink outline-none placeholder:text-faint focus:border-ink-soft"
+          />
+          {error && <p className="text-[12px] text-overdue">{error}</p>}
+        </div>
+      )}
+
+      {segmentosGuardados && segmentosGuardados.length > 0 && (
+        <div className="mb-5 border-b border-line pb-4">
+          <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.1em] text-faint">Segmentos guardados</div>
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              const s = segmentosGuardados.find((seg) => seg.id === id);
+              if (s) onElegirGuardado?.(s);
+            }}
+            className="w-full rounded-lg border border-line-strong bg-surface px-3 py-[9px] text-[13px] text-ink-soft outline-none"
+          >
+            <option value="" disabled>
+              Usar un segmento guardado…
+            </option>
+            {segmentosGuardados.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="mb-4 font-mono text-[11px] uppercase tracking-[0.1em] text-faint">Filtros del Copiloto</div>
 
       <div className="flex flex-col gap-[9px]">

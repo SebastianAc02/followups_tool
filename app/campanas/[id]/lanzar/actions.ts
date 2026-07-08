@@ -6,6 +6,8 @@ import {
   actualizarConfigLanzamiento,
   inscribirCampana,
   guardarProveedorCampanaId,
+  pasosParaSincronizarCopy,
+  guardarSincronizacionCopy,
   toquesGlobalesHoy,
   type CampanaParaLanzar,
   type ConfigLanzamientoInput,
@@ -77,11 +79,24 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
     try {
       const camp = campanaParaLanzar(idCampana);
       if (camp) {
-        const proveedorCampanaId = await crearApolloAdapter().crearCampanaExterna(camp.nombre);
+        const adapter = crearApolloAdapter();
+        const proveedorCampanaId = await adapter.crearCampanaExterna(camp.nombre);
         guardarProveedorCampanaId(idCampana, proveedorCampanaId);
+
+        // Sesion 2026-07-08: sin esto la secuencia queda creada pero VACIA -- subir el
+        // copy aqui mismo es lo que hace que abrir la secuencia en Apollo ya muestre
+        // los pasos reales de la cadencia, no una secuencia en blanco. Mismo criterio
+        // que crearCampanaExterna arriba: si falla, no revierte el lanzamiento ni la
+        // secuencia ya creada, solo se avisa (y sincronizarCopyApolloAction en la
+        // ficha de la campana permite reintentar despues sin duplicar nada).
+        const pasos = pasosParaSincronizarCopy(camp.idCadencia);
+        if (pasos.length > 0) {
+          const sincronizados = await adapter.sincronizarCopy(proveedorCampanaId, pasos);
+          guardarSincronizacionCopy(sincronizados);
+        }
       }
     } catch (e) {
-      avisoSecuenciaExterna = `la campaña se lanzó pero no se pudo crear la secuencia en Apollo: ${
+      avisoSecuenciaExterna = `la campaña se lanzó pero no se pudo crear/sincronizar la secuencia en Apollo: ${
         e instanceof Error ? e.message : String(e)
       }`;
     }

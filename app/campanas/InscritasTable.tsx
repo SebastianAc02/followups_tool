@@ -5,7 +5,7 @@ import { SectionLabel } from '../ui/SectionLabel';
 export type InscritaHubVM = {
   id: number;
   empresa: string;
-  campana: string;
+  campana?: string;
   estado: string;
   canalPrincipal: string | null;
   ultimoToque: string | null;
@@ -26,7 +26,9 @@ function formatoFecha(iso: string | null): string {
   return new Date(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
 }
 
-export function InscritasTable({ inscritas }: { inscritas: InscritaHubVM[] }) {
+// mostrarCampana en false cuando ya estamos dentro de UNA campana (Destinatarios):
+// ahi la columna es redundante, todas las filas son la misma campana.
+export function InscritasTable({ inscritas, mostrarCampana = true }: { inscritas: InscritaHubVM[]; mostrarCampana?: boolean }) {
   return (
     <div className="mt-8">
       <SectionLabel className="mb-3">Empresas inscritas</SectionLabel>
@@ -38,7 +40,7 @@ export function InscritasTable({ inscritas }: { inscritas: InscritaHubVM[] }) {
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-widest text-faint">
                 <th className="px-5 py-3 font-normal">Empresa</th>
-                <th className="px-5 py-3 font-normal">Campaña</th>
+                {mostrarCampana && <th className="px-5 py-3 font-normal">Campaña</th>}
                 <th className="px-5 py-3 font-normal">Canal</th>
                 <th className="px-5 py-3 font-normal">Último toque</th>
                 <th className="px-5 py-3 font-normal">Estado</th>
@@ -48,7 +50,7 @@ export function InscritasTable({ inscritas }: { inscritas: InscritaHubVM[] }) {
               {inscritas.map((f) => (
                 <tr key={f.id} className="border-b border-line last:border-b-0 hover:bg-hover">
                   <td className="px-5 py-3.5 font-semibold text-ink">{f.empresa}</td>
-                  <td className="px-5 py-3.5 text-ink-soft">{f.campana}</td>
+                  {mostrarCampana && <td className="px-5 py-3.5 text-ink-soft">{f.campana}</td>}
                   <td className="px-5 py-3.5">
                     {f.canalPrincipal && <CanalTag canal={f.canalPrincipal as Canal} />}
                   </td>

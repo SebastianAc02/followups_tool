@@ -1,6 +1,7 @@
 import { colaDelDia, contadoresHoy, agendaHoyCadencias, historialPasosDestinatario } from "../db/repository";
 import { registrarTapAction } from "../actions";
 import { requireSession } from "../lib/session";
+import { SidebarFrame } from "../ui/shell/SidebarFrame";
 import CadenciasHoy from "./CadenciasHoy";
 import { DashboardHeader } from "./DashboardHeader";
 import { BarraAhora } from "./BarraAhora";
@@ -53,49 +54,51 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const diasActual = actual ? diasVencido(actual.fecha!, hoy) : 0;
 
   return (
-    <div className="min-h-screen bg-bg">
-      <DashboardHeader
-        nombre={usuario.owner.split(" ")[0]}
-        hoy={hoy}
-        owner={owner}
-        pendientes={cola.length}
-        vencidas={vencidos}
-        cerradas={contarCerradas(contadores)}
-      />
+    <SidebarFrame>
+      <div className="min-h-screen bg-bg">
+        <DashboardHeader
+          nombre={usuario.owner.split(" ")[0]}
+          hoy={hoy}
+          owner={owner}
+          pendientes={cola.length}
+          vencidas={vencidos}
+          cerradas={contarCerradas(contadores)}
+        />
 
-      {actual && (
-        <div className="px-4 pt-6 md:px-8 lg:px-16">
-          <BarraAhora
-            id={actual.id}
-            empresa={actual.empresa}
-            ciudad={actual.ciudad}
-            contacto={actual.contacto}
-            cargo={actual.cargo}
-            canal={actual.canal}
-            estado={actual.estado}
-            sev={diasActual > 0 ? "overdue" : "today"}
-            severidadTexto={diasActual > 0 ? `vencido ${diasActual}d` : "hoy"}
-          />
-        </div>
-      )}
+        {actual && (
+          <div className="px-4 pt-6 md:px-8 lg:px-16">
+            <BarraAhora
+              id={actual.id}
+              empresa={actual.empresa}
+              ciudad={actual.ciudad}
+              contacto={actual.contacto}
+              cargo={actual.cargo}
+              canal={actual.canal}
+              estado={actual.estado}
+              sev={diasActual > 0 ? "overdue" : "today"}
+              severidadTexto={diasActual > 0 ? `vencido ${diasActual}d` : "hoy"}
+            />
+          </div>
+        )}
 
-      <section id="today-agenda" className="bg-band px-4 py-6 md:px-8 lg:px-16">
-        <div className="mx-auto max-w-4xl">
-          {filas.length === 0 ? (
-            <div className="rounded-xl border border-line-card-now bg-surface py-8 text-center text-[13px] text-muted">
-              Sin follow-ups para hoy. Buen trabajo.
-            </div>
-          ) : (
-            <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
-          )}
+        <section id="today-agenda" className="bg-band px-4 py-6 md:px-8 lg:px-16">
+          <div className="mx-auto max-w-4xl">
+            {filas.length === 0 ? (
+              <div className="rounded-xl border border-line-card-now bg-surface py-8 text-center text-[13px] text-muted">
+                Sin follow-ups para hoy. Buen trabajo.
+              </div>
+            ) : (
+              <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
+            )}
 
-          {cadenciasHoy.length > 0 && (
-            <div className="mt-4 overflow-hidden rounded-xl border border-line-card-now bg-surface px-7 py-6">
-              <CadenciasHoy items={cadenciasHoy} hoy={hoy} />
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
+            {cadenciasHoy.length > 0 && (
+              <div className="mt-4 overflow-hidden rounded-xl border border-line-card-now bg-surface px-7 py-6">
+                <CadenciasHoy items={cadenciasHoy} hoy={hoy} />
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </SidebarFrame>
   );
 }

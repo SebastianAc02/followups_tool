@@ -2,13 +2,17 @@ import { notFound } from 'next/navigation';
 import { campanaConReglas, conteosReadiness } from '../../../db/repository';
 import { requireSession } from '../../../lib/session';
 import { AppShell } from '../../../ui/shell/AppShell';
+import { CampanaSubNav } from '../CampanaSubNav';
+import { subNavItemsCampana } from '../subnav-items';
+import { PasosWizard } from '../../nueva/PasosWizard';
+import { pasosWizardCampana } from '../../nueva/pasos-wizard-items';
 import { ReglasCockpit } from './ReglasCockpit';
 
-// Fase 5 (vista Reglas): standalone, no colgada de /campanas/nueva. El wizard de
-// creacion todavia esta en construccion en paralelo (otro agente); esta pantalla se
-// llega por url directa a una campana ya existente, igual que /cadencias/[id] es
-// standalone hoy sin estar linkeada desde ningun flujo todavia. Cuando el wizard
-// necesite este paso, solo tiene que enlazar aca — no hay nada que reestructurar.
+// Fase 5 (vista Reglas): no es uno de los 5 pasos del wizard (Segmento/Cadencia/
+// Destinatarios/Preview/Lanzar) -- se llega aca desde el link "Cambiar regla" de
+// Destinatarios, asi que mientras la campana sigue en 'borrador' el header sigue
+// resaltando "Destinatarios" (es de ahi de donde se vino, Reglas es un ajuste
+// puntual, no una parada propia) en vez de saltar a los tabs de CampanaSubNav.
 export default async function ReglasCampana({ params }: { params: Promise<{ id: string }> }) {
   await requireSession();
   const { id } = await params;
@@ -19,9 +23,15 @@ export default async function ReglasCampana({ params }: { params: Promise<{ id: 
   if (!camp) notFound();
 
   const conteosIniciales = conteosReadiness(camp.definicionSegmento, camp.canalesRequeridos, camp.reglaFaltante);
+  const esBorrador = camp.estado === 'borrador';
 
   return (
     <AppShell>
+      {esBorrador ? (
+        <PasosWizard pasos={pasosWizardCampana(camp.idCampana, camp.idCadencia, 'Destinatarios')} activo="Destinatarios" />
+      ) : (
+        <CampanaSubNav items={subNavItemsCampana(camp.idCampana, camp.idCadencia)} />
+      )}
       <ReglasCockpit
         idCampana={camp.idCampana}
         nombre={camp.nombre}

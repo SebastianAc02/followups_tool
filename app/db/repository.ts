@@ -48,7 +48,7 @@ import { calcularGoteo, type RitmoIngreso } from '../core/goteo';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
-import type { EventoProveedor } from '../core/ports/envio';
+import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { cifrar, descifrar } from '../lib/crypto';
@@ -735,11 +735,15 @@ const actualizarPasoCadenciaSchema = z.object({
   diaOffset: z.number().int().nonnegative().optional(),
   canal: z.enum(CANALES).optional(),
   esManual: z.boolean().optional(),
+  // objetivo (Fase 7): unico campo channel-agnostic a nivel de paso, ademas de
+  // asunto/cuerpo en version_paso -- vive aca (no en version_paso) porque no se
+  // versiona, es una nota de proposito ("agenda la llamada de 15 min"), no copy enviado.
+  objetivo: z.string().nullable().optional(),
 });
 
 export function actualizarPasoCadencia(
   idPaso: number,
-  cambios: { diaOffset?: number; canal?: Canal; esManual?: boolean },
+  cambios: { diaOffset?: number; canal?: Canal; esManual?: boolean; objetivo?: string | null },
 ): void {
   const val = actualizarPasoCadenciaSchema.parse(cambios);
 
@@ -747,10 +751,32 @@ export function actualizarPasoCadencia(
   if (val.diaOffset !== undefined) set.diaOffset = val.diaOffset;
   if (val.canal !== undefined) set.canal = val.canal;
   if (val.esManual !== undefined) set.esManual = val.esManual ? 1 : 0;
+  if (val.objetivo !== undefined) set.objetivo = val.objetivo?.trim() || null;
 
   if (Object.keys(set).length === 0) return; // nada que cambiar, no pega un UPDATE vacio
 
   db.update(pasoCadencia).set(set).where(eq(pasoCadencia.idPaso, idPaso)).run();
+}
+
+// Fase 7 (editor de cadencia): borra un paso y su(s) version_paso. Dos guardas: no
+// deja una cadencia sin pasos (rompe todo lo que asume al menos 1), y no borra un
+// paso que YA tiene historia real de envio (paso_inscripcion) -- eso corrompe el
+// registro de lo que de verdad se mando a una cuenta.
+export function eliminarPasoCadencia(idPaso: number): { ok: true } | { ok: false; error: string } {
+  const paso = db.select({ idCadencia: pasoCadencia.idCadencia }).from(pasoCadencia).where(eq(pasoCadencia.idPaso, idPaso)).get();
+  if (!paso) return { ok: false, error: 'El paso no existe' };
+
+  const totalPasos = db.select({ n: sql<number>`count(*)` }).from(pasoCadencia).where(eq(pasoCadencia.idCadencia, paso.idCadencia)).get();
+  if ((totalPasos?.n ?? 0) <= 1) return { ok: false, error: 'Una cadencia necesita al menos un paso' };
+
+  const conHistoria = db.select({ n: sql<number>`count(*)` }).from(pasoInscripcion).where(eq(pasoInscripcion.idPaso, idPaso)).get();
+  if ((conHistoria?.n ?? 0) > 0) return { ok: false, error: 'Este paso ya se le envió a alguna cuenta, no se puede eliminar' };
+
+  db.transaction((tx) => {
+    tx.delete(versionPaso).where(eq(versionPaso.idPaso, idPaso)).run();
+    tx.delete(pasoCadencia).where(eq(pasoCadencia.idPaso, idPaso)).run();
+  });
+  return { ok: true };
 }
 
 // Fase 4 (cockpit de cadencia): agrega un paso nuevo a una cadencia YA creada (el
@@ -1038,6 +1064,34 @@ export function guardarSegmento(input: { nombre: string; definicion: DefinicionS
   return Number(ins.lastInsertRowid);
 }
 
+// Fase 7 (volver a Segmento sin perder el progreso): la definicion completa de un
+// segmento guardado, para reabrir NuevoSegmento pre-cargado en vez de vacio. El
+// dropdown "Usar un segmento guardado..." salta directo a Cadencia con listarSegmentos
+// (solo metadata); esto es para el caso de VOLVER sobre el que ya se estaba armando.
+export function obtenerSegmento(idSegmento: number): { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } | null {
+  const fila = db
+    .select({ nombre: segmento.nombre, definicion: segmento.definicion, descripcionNatural: segmento.descripcionNatural })
+    .from(segmento)
+    .where(eq(segmento.idSegmento, idSegmento))
+    .get();
+  if (!fila) return null;
+  return { id: idSegmento, nombre: fila.nombre, definicion: definicionSegmentoSchema.parse(JSON.parse(fila.definicion)), descripcionNatural: fila.descripcionNatural };
+}
+
+// Fase 7 (autosave de segmento): actualiza un segmento YA guardado (por el autosave
+// silencioso de NuevoSegmento) en vez de crear uno nuevo por cada ajuste de filtro --
+// si no, cada tecla dejaria un segmento huerfano distinto en "Usar un segmento
+// guardado...".
+export function actualizarSegmento(idSegmento: number, cambios: { nombre?: string; definicion?: DefinicionSegmento; descripcionNatural?: string }): void {
+  const sets: Record<string, unknown> = {};
+  if (cambios.nombre !== undefined) sets.nombre = cambios.nombre;
+  if (cambios.definicion !== undefined) sets.definicion = JSON.stringify(definicionSegmentoSchema.parse(cambios.definicion));
+  if (cambios.descripcionNatural !== undefined) sets.descripcionNatural = cambios.descripcionNatural;
+  if (Object.keys(sets).length === 0) return;
+  sets.updatedAt = new Date().toISOString();
+  db.update(segmento).set(sets).where(eq(segmento.idSegmento, idSegmento)).run();
+}
+
 export function listarSegmentos() {
   return db
     .select({ id: segmento.idSegmento, nombre: segmento.nombre, descripcionNatural: segmento.descripcionNatural })
@@ -1139,13 +1193,22 @@ export type CampanaConReglas = {
   nombre: string;
   reglaFaltante: ReglaFaltante;
   idSegmento: number;
+  idCadencia: number;
+  estado: string;
   definicionSegmento: DefinicionSegmento;
   canalesRequeridos: Canal[];
 };
 
 export function campanaConReglas(idCampana: number): CampanaConReglas | null {
   const camp = db
-    .select({ idCampana: campana.idCampana, nombre: campana.nombre, reglaFaltante: campana.reglaFaltante, idCadencia: campana.idCadencia, idSegmento: campana.idSegmento })
+    .select({
+      idCampana: campana.idCampana,
+      nombre: campana.nombre,
+      reglaFaltante: campana.reglaFaltante,
+      idCadencia: campana.idCadencia,
+      idSegmento: campana.idSegmento,
+      estado: campana.estado,
+    })
     .from(campana)
     .where(eq(campana.idCampana, idCampana))
     .get();
@@ -1166,6 +1229,8 @@ export function campanaConReglas(idCampana: number): CampanaConReglas | null {
     nombre: camp.nombre,
     reglaFaltante: camp.reglaFaltante as ReglaFaltante,
     idSegmento: camp.idSegmento,
+    idCadencia: camp.idCadencia,
+    estado: camp.estado,
     definicionSegmento: definicionSegmentoSchema.parse(JSON.parse(seg.definicion)),
     canalesRequeridos: pasos.map((p) => p.canal as Canal),
   };
@@ -1190,6 +1255,71 @@ export function guardarProveedorCampanaId(idCampana: number, proveedorCampanaId:
     .set({ proveedorCampanaId, updatedAt: new Date().toISOString() })
     .where(eq(campana.idCampana, idCampana))
     .run();
+}
+
+// Subir/editar copy en Apollo (sesion 2026-07-08): lo minimo que el boton de la ficha
+// de campana necesita para llamar EnvioAdapter.sincronizarCopy -- la secuencia externa
+// (proveedorCampanaId) y la cadencia (idCadencia) para traer sus pasos. null si la
+// campana no existe o todavia no tiene secuencia externa creada (crearCampanaExterna
+// no ha corrido, nada que sincronizar).
+export function campanaParaSincronizarCopy(idCampana: number): { idCadencia: number; proveedorCampanaId: string } | null {
+  const camp = db
+    .select({ idCadencia: campana.idCadencia, proveedorCampanaId: campana.proveedorCampanaId })
+    .from(campana)
+    .where(eq(campana.idCampana, idCampana))
+    .get();
+  if (!camp || !camp.proveedorCampanaId) return null;
+  return { idCadencia: camp.idCadencia, proveedorCampanaId: camp.proveedorCampanaId };
+}
+
+// Pasos de una cadencia en la forma que pide el puerto EnvioAdapter.sincronizarCopy.
+// Mismo join que getCadencia (solo la version DEFAULT de cada paso, V4.3) -- las
+// variantes A/B no suben a Apollo en esta primera pasada (quedaria como mejora
+// futura via POST /emailer_touches, ver experimento-apollo.md); subir/editar el copy
+// principal es lo que se pidio hoy.
+export function pasosParaSincronizarCopy(idCadencia: number): PasoParaSincronizar[] {
+  const filas = db
+    .select({
+      idPaso: pasoCadencia.idPaso,
+      orden: pasoCadencia.orden,
+      diaOffset: pasoCadencia.diaOffset,
+      proveedorStepId: pasoCadencia.proveedorStepId,
+      idVersion: versionPaso.idVersion,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      proveedorTemplateId: versionPaso.proveedorTemplateId,
+    })
+    .from(pasoCadencia)
+    .innerJoin(versionPaso, and(eq(versionPaso.idPaso, pasoCadencia.idPaso), eq(versionPaso.esDefault, 1)))
+    .where(eq(pasoCadencia.idCadencia, idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+
+  return filas.map((f) => ({
+    idPaso: f.idPaso,
+    idVersion: f.idVersion,
+    orden: f.orden,
+    diaOffset: f.diaOffset,
+    asunto: f.asunto,
+    cuerpo: f.cuerpo ?? '',
+    proveedorStepId: f.proveedorStepId,
+    proveedorTemplateId: f.proveedorTemplateId,
+  }));
+}
+
+// Persiste lo que devolvio sincronizarCopy: proveedorStepId vive en paso_cadencia
+// (uno por paso), proveedorTemplateId en version_paso (uno por version). Dos UPDATEs
+// por fila porque son dos tablas distintas -- mismo motivo que separan pasoCadencia de
+// versionPaso en el schema (el A/B cuelga del paso, no es un campo mas del paso).
+export function guardarSincronizacionCopy(pasos: PasoSincronizado[]): void {
+  const ahora = new Date().toISOString();
+  for (const p of pasos) {
+    db.update(pasoCadencia).set({ proveedorStepId: p.proveedorStepId }).where(eq(pasoCadencia.idPaso, p.idPaso)).run();
+    db.update(versionPaso)
+      .set({ proveedorTemplateId: p.proveedorTemplateId, updatedAt: ahora })
+      .where(eq(versionPaso.idVersion, p.idVersion))
+      .run();
+  }
 }
 
 // Draft persistente (creacion de campana): UPDATE parcial para los dos campos que
@@ -1339,6 +1469,65 @@ export function crearCampana(input: CampanaInput): number {
     })
     .run();
   return Number(ins.lastInsertRowid);
+}
+
+// Un borrador que nunca corrio inscribirCampana no tiene inscripciones -- se puede
+// borrar limpio. Nunca toca 'activa'/'pausada'/'finalizada': esas ya tienen historia
+// real (inscripciones, toques) que no es seguro eliminar desde aca. paso_cadencia y
+// version_paso no tienen ON DELETE CASCADE en este schema, asi que el borrado es
+// manual y en orden: versiones -> pasos -> campana -> cadencia.
+export function eliminarCampanaBorrador(idCampana: number): { ok: true } | { ok: false; error: string } {
+  const camp = db.select({ estado: campana.estado, idCadencia: campana.idCadencia }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  if (!camp) return { ok: false, error: 'La campaña no existe' };
+  if (camp.estado !== 'borrador') return { ok: false, error: 'Solo se pueden eliminar campañas en borrador' };
+
+  const conInscripciones = db.select({ n: sql<number>`count(*)` }).from(inscripcion).where(eq(inscripcion.idCampana, idCampana)).get();
+  if ((conInscripciones?.n ?? 0) > 0) return { ok: false, error: 'Esta campaña ya tiene inscripciones, no se puede eliminar' };
+
+  db.transaction((tx) => {
+    const pasos = tx.select({ idPaso: pasoCadencia.idPaso }).from(pasoCadencia).where(eq(pasoCadencia.idCadencia, camp.idCadencia)).all();
+    if (pasos.length > 0) {
+      tx.delete(versionPaso)
+        .where(inArray(versionPaso.idPaso, pasos.map((p) => p.idPaso)))
+        .run();
+    }
+    tx.delete(pasoCadencia).where(eq(pasoCadencia.idCadencia, camp.idCadencia)).run();
+    tx.delete(campana).where(eq(campana.idCampana, idCampana)).run();
+    tx.delete(cadencia).where(eq(cadencia.idCadencia, camp.idCadencia)).run();
+  });
+  return { ok: true };
+}
+
+// Fase 7 (pausar/reanudar): reversible y PURAMENTE interno -- no toca Apollo. La
+// guarda real esta en agendaEnSeco/pasoInscripcionesPendientes/pasosManualesPendientes
+// (todas exigen campana.estado='activa' ahora); esta funcion solo mueve el estado.
+export function pausarCampana(idCampana: number): { ok: true } | { ok: false; error: string } {
+  const camp = db.select({ estado: campana.estado }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  if (!camp) return { ok: false, error: 'La campaña no existe' };
+  if (camp.estado !== 'activa') return { ok: false, error: 'Solo se puede pausar una campaña activa' };
+  db.update(campana).set({ estado: 'pausada', updatedAt: new Date().toISOString() }).where(eq(campana.idCampana, idCampana)).run();
+  return { ok: true };
+}
+
+export function reanudarCampana(idCampana: number): { ok: true } | { ok: false; error: string } {
+  const camp = db.select({ estado: campana.estado }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  if (!camp) return { ok: false, error: 'La campaña no existe' };
+  if (camp.estado !== 'pausada') return { ok: false, error: 'Solo se puede reanudar una campaña pausada' };
+  db.update(campana).set({ estado: 'activa', updatedAt: new Date().toISOString() }).where(eq(campana.idCampana, idCampana)).run();
+  return { ok: true };
+}
+
+// Cancelar SI toca Apollo (archivarCampana), y el repository no conoce adaptadores
+// externos (regla de capas de CLAUDE.md: el core/DB no importa Apollo). Por eso esta
+// funcion solo marca 'finalizada' y devuelve el proveedorCampanaId -- quien orquesta
+// (la server action) es quien de verdad archiva la secuencia. Ver cancelarCampanaAction.
+export function marcarCampanaFinalizada(idCampana: number): { ok: true; proveedorCampanaId: string | null } | { ok: false; error: string } {
+  const camp = db.select({ estado: campana.estado, proveedorCampanaId: campana.proveedorCampanaId }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  if (!camp) return { ok: false, error: 'La campaña no existe' };
+  if (camp.estado === 'finalizada') return { ok: false, error: 'Esta campaña ya está finalizada' };
+  if (camp.estado === 'borrador') return { ok: false, error: 'Un borrador se elimina, no se cancela' };
+  db.update(campana).set({ estado: 'finalizada', updatedAt: new Date().toISOString() }).where(eq(campana.idCampana, idCampana)).run();
+  return { ok: true, proveedorCampanaId: camp.proveedorCampanaId };
 }
 
 export type ResultadoInscripcion = {
@@ -1555,14 +1744,24 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
 export type CampanaParaPreview = {
   idCampana: number;
   nombre: string;
+  idCadencia: number;
   cadencia: string;
   segmento: string;
   reglaFaltante: ReglaFaltante;
+  estado: string;
 };
 
 export function campanaParaPreview(idCampana: number): CampanaParaPreview | null {
   const fila = db
-    .select({ idCampana: campana.idCampana, nombre: campana.nombre, cadencia: cadencia.nombre, segmento: segmento.nombre, reglaFaltante: campana.reglaFaltante })
+    .select({
+      idCampana: campana.idCampana,
+      nombre: campana.nombre,
+      idCadencia: campana.idCadencia,
+      cadencia: cadencia.nombre,
+      segmento: segmento.nombre,
+      reglaFaltante: campana.reglaFaltante,
+      estado: campana.estado,
+    })
     .from(campana)
     .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
     .innerJoin(segmento, eq(segmento.idSegmento, campana.idSegmento))
@@ -1584,6 +1783,7 @@ export type CampanaResumen = {
   idCadencia: number;
   cadencia: string;
   segmento: string;
+  proveedorCampanaId: string | null;
 };
 
 export function campanaResumen(idCampana: number): CampanaResumen | null {
@@ -1595,6 +1795,7 @@ export function campanaResumen(idCampana: number): CampanaResumen | null {
       idCadencia: campana.idCadencia,
       cadencia: cadencia.nombre,
       segmento: segmento.nombre,
+      proveedorCampanaId: campana.proveedorCampanaId,
     })
     .from(campana)
     .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
@@ -1698,6 +1899,75 @@ export function previsualizarInscripcionCampana(idCampana: number): FilaPreviewI
       toquesTotales: p.toquesTotales,
     };
   });
+}
+
+// /cadencias/[id] es standalone (tambien la usa el constructor de plantillas fuera
+// de una campana). Este lookup solo sirve para decidir si esa cadencia puntual nacio
+// de una campana (crearBorradorDesdeCadenciaAction crea una por campana, 1:1) y en
+// ese caso que header de navegacion mostrar: CampanaSubNav (tabs) si ya esta
+// lanzada, o la secuencia del wizard si sigue en 'borrador' -- ver estado.
+export function campanaPorCadencia(idCadencia: number): { idCampana: number; nombreCampana: string; estado: string } | null {
+  const fila = db
+    .select({ idCampana: campana.idCampana, nombreCampana: campana.nombre, estado: campana.estado })
+    .from(campana)
+    .where(eq(campana.idCadencia, idCadencia))
+    .get();
+  return fila ?? null;
+}
+
+// Fase 7 (preview cinematico en la creacion): un destinatario REAL del segmento para
+// rellenar las [variables] del copy en el preview. No inscribe ni escribe nada -- es
+// la misma fuente de empresas que se inscribiria (empresasParaRevision menos excluidas)
+// pero toma solo la primera con un contacto usable (nombre presente), prefiriendo
+// principal / decision maker, para mostrar "asi le llega de verdad" y no un ejemplo.
+export type DestinatarioMuestra = {
+  nombre: string;
+  cargo: string | null;
+  empresa: string;
+  ciudad: string | null;
+  telefono: string | null;
+  email: string | null;
+};
+
+export function muestraDestinatarioDeSegmento(idSegmento: number): DestinatarioMuestra | null {
+  const empresas = empresasParaRevision(idSegmento);
+  if (!empresas) return null;
+  const activas = empresas.filter((e) => !e.excluida);
+  if (activas.length === 0) return null;
+
+  const contactos = db
+    .select({
+      idEmpresa: contacto.idEmpresa,
+      nombre: contacto.nombre,
+      apellido: contacto.apellido,
+      cargo: contacto.cargo,
+      email: contacto.email,
+      telefono: contacto.telefono,
+      esPrincipal: contacto.esPrincipal,
+      esKeyDecisionMaker: contacto.esKeyDecisionMaker,
+    })
+    .from(contacto)
+    .where(inArray(contacto.idEmpresa, activas.map((e) => e.id)))
+    .all();
+
+  // Recorre las empresas en el orden del segmento y toma la primera que tenga un
+  // contacto con nombre. Dentro de la empresa, prefiere principal, luego decision maker.
+  for (const emp of activas) {
+    const suyos = contactos
+      .filter((c) => c.idEmpresa === emp.id && [c.nombre, c.apellido].some(Boolean))
+      .sort((a, b) => b.esPrincipal - a.esPrincipal || b.esKeyDecisionMaker - a.esKeyDecisionMaker);
+    if (suyos.length === 0) continue;
+    const c = suyos[0];
+    return {
+      nombre: [c.nombre, c.apellido].filter(Boolean).join(' '),
+      cargo: c.cargo,
+      empresa: emp.nombre,
+      ciudad: emp.ciudad,
+      telefono: c.telefono,
+      email: c.email,
+    };
+  }
+  return null;
 }
 
 // Parte 4 campanas: hub de /campanas. Resuelve nombre de cadencia/segmento (no ids
@@ -1820,6 +2090,7 @@ export function toquesGlobalesHoy(): { totalHoy: number; campanasActivas: number
 export type CampanaParaLanzar = {
   idCampana: number;
   nombre: string;
+  idCadencia: number;
   estado: string;
   intakeDiario: number | null;
   ritmoIngreso: RitmoIngresoInput;
@@ -1834,6 +2105,7 @@ export function campanaParaLanzar(idCampana: number): CampanaParaLanzar | null {
     .select({
       idCampana: campana.idCampana,
       nombre: campana.nombre,
+      idCadencia: campana.idCadencia,
       estado: campana.estado,
       intakeDiario: campana.intakeDiario,
       ritmoIngreso: campana.ritmoIngreso,
@@ -1852,6 +2124,7 @@ export function campanaParaLanzar(idCampana: number): CampanaParaLanzar | null {
   return {
     idCampana: camp.idCampana,
     nombre: camp.nombre,
+    idCadencia: camp.idCadencia,
     estado: camp.estado,
     intakeDiario: camp.intakeDiario,
     ritmoIngreso: camp.ritmoIngreso as RitmoIngresoInput,
@@ -1892,12 +2165,16 @@ export function actualizarConfigLanzamiento(idCampana: number, cambios: ConfigLa
   db.update(campana).set(sets).where(eq(campana.idCampana, idCampana)).run();
 }
 
-// Task 1.6: tabla de empresas inscritas del hub (activas + bloqueadas, cualquier
-// campana). Reusa el mismo inscripcion.estado que inscripcionesBloqueadas() y
-// listarCampanas() -- no inventa un estado "limite diario": la unica distincion real
-// que guarda el dominio hoy es activa/bloqueada (bloqueada = cola de revision manual,
-// ver comentario de inscripcionesBloqueadas).
-export function listarInscritasHub() {
+// Task 1.6: empresas inscritas (activas + bloqueadas). Reusa el mismo inscripcion.estado
+// que inscripcionesBloqueadas() y listarCampanas() -- no inventa un estado "limite
+// diario": la unica distincion real que guarda el dominio hoy es activa/bloqueada
+// (bloqueada = cola de revision manual, ver comentario de inscripcionesBloqueadas).
+//
+// idCampana opcional: sin el, es la vista global (ya no se usa en el hub -- ver nota
+// en /campanas/page.tsx); con el, es la factura real de UNA campana ya lanzada, la
+// que pide /campanas/[id]/destinatarios en vez del preview de "usar y tirar".
+export function listarInscritasHub(idCampana?: number) {
+  const filtroEstado = inArray(inscripcion.estado, ['activa', 'bloqueada']);
   return db
     .select({
       id: inscripcion.idInscripcion,
@@ -1915,7 +2192,7 @@ export function listarInscritasHub() {
     .from(inscripcion)
     .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
-    .where(inArray(inscripcion.estado, ['activa', 'bloqueada']))
+    .where(idCampana != null ? and(filtroEstado, eq(inscripcion.idCampana, idCampana)) : filtroEstado)
     .orderBy(desc(inscripcion.idInscripcion))
     .all();
 }
@@ -2011,7 +2288,10 @@ export function agendaEnSeco(hoy: string, config: ConfigCalendario) {
     .from(inscripcion)
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
     .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
-    .where(eq(inscripcion.estado, 'activa'))
+    // Fase 7 (pausar campana): sin este filtro, una campana pausada seguiria
+    // generando pasos nuevos dia a dia -- "pausar" solo cambiaria una etiqueta,
+    // nunca detendria nada de verdad.
+    .where(and(eq(inscripcion.estado, 'activa'), eq(campana.estado, 'activa')))
     .all();
 
   const agenda: { idEmpresa: string; empresa: string; orden: number; fecha: string }[] = [];
@@ -2096,6 +2376,9 @@ export function pasoInscripcionesPendientes(ahora: string = new Date().toISOStri
         // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
         // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
         eq(pasoCadencia.esManual, 0),
+        // Fase 7 (pausar campana): defensa en profundidad -- si un paso ya quedo
+        // pendiente ANTES de pausar, esto evita que igual se empuje a Apollo.
+        eq(campana.estado, 'activa'),
         sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
         sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
       ),
@@ -2157,7 +2440,16 @@ export function pasosManualesPendientes() {
     .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
     .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
     .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
-    .where(and(eq(pasoInscripcion.estado, 'pendiente'), eq(pasoCadencia.esManual, 1)))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(
+      and(
+        eq(pasoInscripcion.estado, 'pendiente'),
+        eq(pasoCadencia.esManual, 1),
+        // Fase 7 (pausar campana): un manual pendiente de una campana pausada no
+        // deberia seguir apareciendo en "Por revisar" como si urgiera aprobarlo.
+        eq(campana.estado, 'activa'),
+      ),
+    )
     .all();
 }
 

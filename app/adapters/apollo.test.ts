@@ -266,6 +266,50 @@ test('un mensaje sin to_email se descarta (no hay con que resolver destinatario)
   assert.strictEqual(eventos.length, 0);
 });
 
+test('sincronizarCopy con pasos YA subidos solo actualiza el template (PUT), no crea steps ni depende de calcularWaitApollo', async (t) => {
+  const llamadas: { path: string; body: unknown }[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push({ path, body: init.body ? JSON.parse(init.body as string) : null });
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  const resultado = await adapter.sincronizarCopy('seq-1', [
+    {
+      idPaso: 1,
+      idVersion: 10,
+      orden: 1,
+      diaOffset: 0,
+      asunto: 'Hola {{first_name}}',
+      cuerpo: 'cuerpo del paso 1',
+      proveedorStepId: 'step-1',
+      proveedorTemplateId: 'tpl-1',
+    },
+  ]);
+
+  assert.deepEqual(llamadas, [
+    { path: '/emailer_templates/tpl-1', body: { subject: 'Hola {{first_name}}', body_html: 'cuerpo del paso 1' } },
+  ]);
+  assert.deepEqual(resultado, [{ idPaso: 1, idVersion: 10, proveedorStepId: 'step-1', proveedorTemplateId: 'tpl-1' }]);
+});
+
+test('sincronizarCopy con un paso sin subir todavia intenta crear el step, lo que hoy depende de calcularWaitApollo (pendiente)', async (t) => {
+  t.mock.method(globalThis, 'fetch', fetchFalso(() => ({ status: 200, body: {} })));
+
+  const adapter = crearApolloAdapter();
+  await assert.rejects(
+    () =>
+      adapter.sincronizarCopy('seq-1', [
+        { idPaso: 1, idVersion: 10, orden: 1, diaOffset: 0, asunto: 'a', cuerpo: 'b', proveedorStepId: null, proveedorTemplateId: null },
+      ]),
+    /calcularWaitApollo/,
+  );
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

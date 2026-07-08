@@ -4,8 +4,11 @@ import type {
   PasoEnvio,
   EnvioResultado,
   EventoProveedor,
+  PasoParaSincronizar,
+  PasoSincronizado,
 } from '../core/ports/envio';
 import { leerCredencialConector } from '../db/repository';
+import { calcularWaitApollo } from '../core/motor-cadencia';
 
 // Base y header verificados en vivo (planning/experimento-apollo.md, 2026-07-03):
 // la doc dice "Bearer" pero lo que de verdad autentica es X-Api-Key contra
@@ -41,6 +44,18 @@ async function llamarApollo<T>(path: string, apiKey: string, init: RequestInit =
 type ContactoApollo = { id: string; email: string };
 type BulkCreateRespuesta = { created_contacts?: ContactoApollo[]; existing_contacts?: ContactoApollo[] };
 type CampanaRespuesta = { emailer_campaign?: { id: string }; id?: string };
+// NO verificado en vivo todavia (mismo estado que tenia MensajeApollo antes de G1):
+// experimento-apollo.md confirma que POST /emailer_steps "auto-crea emailer_touch +
+// emailer_template", pero no quedo registrada la forma exacta de la respuesta (que
+// campo trae el id del template auto-creado). Se prueban las 3 formas mas plausibles
+// segun como Apollo devuelve anidado en otros endpoints de este mismo adaptador
+// (emailer_campaign.id en CampanaRespuesta); esto se ajusta la primera vez que corra
+// contra la cuenta real si difiere -- igual que se hizo con MensajeApollo en V5.3.
+type EmailerStepRespuesta = {
+  emailer_step?: { id?: string; emailer_touches?: { id?: string; emailer_template?: { id?: string } }[] };
+  id?: string;
+  emailer_touches?: { id?: string; emailer_template?: { id?: string } }[];
+};
 // Campos verificados en vivo contra la cuenta real (V5.3, gate G1, 2026-07-06) --
 // NO son los que se habian supuesto antes de probar. emailer_messages NO tiene
 // opened_at/clicked_at/replied_at/bounced_at/sent_at: solo status ('completed'
@@ -162,6 +177,59 @@ export function crearApolloAdapter(): EnvioAdapter {
       const id = data.emailer_campaign?.id ?? data.id;
       if (!id) throw new Error('Apollo no devolvio id de secuencia al crearla');
       return id;
+    },
+
+    async sincronizarCopy(proveedorCampanaId: string, pasos: PasoParaSincronizar[]): Promise<PasoSincronizado[]> {
+      const apiKey = credencial();
+      const ordenados = [...pasos].sort((a, b) => a.orden - b.orden);
+      // Perezoso a proposito: calcularWaitApollo tira mientras este pendiente de
+      // implementar (ver motor-cadencia.ts), pero re-sincronizar copy de pasos que YA
+      // tienen step+template en Apollo (el caso "editar") no necesita el wait -- solo
+      // hace falta al CREAR un step nuevo. Que editar funcione hoy sin esperar a esa
+      // pieza, y que crear siga bloqueado hasta que este lista, es intencional.
+      let waitsCache: ReturnType<typeof calcularWaitApollo> | null = null;
+      function waits() {
+        if (!waitsCache) waitsCache = calcularWaitApollo(ordenados.map((p) => ({ orden: p.orden, diaOffset: p.diaOffset })));
+        return waitsCache;
+      }
+
+      const resultado: PasoSincronizado[] = [];
+      for (const [posicion, paso] of ordenados.entries()) {
+        let stepId = paso.proveedorStepId;
+        let templateId = paso.proveedorTemplateId;
+
+        if (!stepId || !templateId) {
+          const wait = waits().find((w) => w.orden === paso.orden);
+          if (!wait) throw new Error(`calcularWaitApollo no devolvio wait para el paso orden=${paso.orden}`);
+          const data = await llamarApollo<EmailerStepRespuesta>('/emailer_steps', apiKey, {
+            method: 'POST',
+            body: JSON.stringify({
+              emailer_campaign_id: proveedorCampanaId,
+              position: posicion + 1,
+              type: 'auto_email',
+              wait_mode: wait.waitMode,
+              wait_time: wait.waitTime,
+            }),
+          });
+          const step = data.emailer_step ?? data;
+          const touches = data.emailer_step?.emailer_touches ?? data.emailer_touches ?? [];
+          stepId = step.id ?? null;
+          templateId = touches[0]?.emailer_template?.id ?? null;
+          if (!stepId || !templateId) {
+            throw new Error(
+              `Apollo no devolvio step/template al crear el paso orden=${paso.orden} (forma de respuesta sin verificar en vivo, ver comentario de EmailerStepRespuesta)`,
+            );
+          }
+        }
+
+        await llamarApollo(`/emailer_templates/${templateId}`, apiKey, {
+          method: 'PUT',
+          body: JSON.stringify({ subject: paso.asunto ?? '', body_html: paso.cuerpo }),
+        });
+
+        resultado.push({ idPaso: paso.idPaso, idVersion: paso.idVersion, proveedorStepId: stepId, proveedorTemplateId: templateId });
+      }
+      return resultado;
     },
 
     async enviarPaso(

@@ -70,6 +70,31 @@ export type EnvioResultado = {
   proveedorMensajeId: string;
 };
 
+// sincronizarCopy (sesion 2026-07-08): sube/actualiza el copy de TODA la cadencia de
+// una vez, sin depender de un destinatario -- por eso es un metodo aparte de
+// enviarPaso (que si necesita un destinatario real y solo sube el paso que le toca A
+// ESE destinatario, no la cadencia completa). Sirve para dos cosas: (1) que la
+// secuencia recien creada por crearCampanaExterna deje de estar vacia, y (2) volver a
+// llamarlo despues de editar un paso en /cadencias re-sube ese mismo paso (idempotente
+// via proveedorStepId/proveedorTemplateId, nunca duplica un step en Apollo).
+export type PasoParaSincronizar = {
+  idPaso: number;
+  idVersion: number;
+  orden: number;
+  diaOffset: number;
+  asunto: string | null;
+  cuerpo: string;
+  proveedorStepId: string | null;
+  proveedorTemplateId: string | null;
+};
+
+export type PasoSincronizado = {
+  idPaso: number;
+  idVersion: number;
+  proveedorStepId: string;
+  proveedorTemplateId: string;
+};
+
 // email (V5.5): a quien le paso este evento. Necesario para resolver el destinatario
 // de dominio -- el id de mensaje de Apollo NO es lo mismo que proveedorMensajeId
 // guardado por enviarPaso (ese es el id del CONTACTO, resuelto en add_contact_ids;
@@ -100,6 +125,13 @@ export interface EnvioAdapter {
     destinatario: DestinatarioEnvio,
     paso: PasoEnvio,
   ): Promise<EnvioResultado>;
+
+  // Sube/actualiza en Apollo TODOS los pasos de la cadencia de una campana (POST
+  // /emailer_steps + PUT /emailer_templates/{id}), sin tocar destinatarios. Create-si-
+  // falta / update-si-existe segun proveedorStepId/proveedorTemplateId de cada paso;
+  // el llamador persiste los ids devueltos para que la proxima llamada actualice en
+  // vez de duplicar.
+  sincronizarCopy(proveedorCampanaId: string, pasos: PasoParaSincronizar[]): Promise<PasoSincronizado[]>;
 
   // Saca al destinatario de la secuencia externa (remove_or_stop_contact_ids).
   // No borra el contacto: Apollo no tiene DELETE por API y no hace falta, isps.db

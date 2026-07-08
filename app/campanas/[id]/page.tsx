@@ -5,6 +5,9 @@ import { AppShell } from '../../ui/shell/AppShell';
 import { Pill } from '../../ui/Pill';
 import { Stat } from '../../ui/Stat';
 import { CampanaSubNav } from './CampanaSubNav';
+import { subNavItemsCampana } from './subnav-items';
+import { CicloVidaControles } from './CicloVidaControles';
+import { SincronizarCopiaControl } from './SincronizarCopiaControl';
 
 const ESTADO_TONE = {
   activa: 'hot',
@@ -40,13 +43,7 @@ export default async function CampanaResumenPage({ params }: { params: Promise<{
   const tone = ESTADO_TONE[camp.estado as keyof typeof ESTADO_TONE] ?? 'cold';
   const label = ESTADO_LABEL[camp.estado] ?? camp.estado;
 
-  const items = [
-    { href: `/campanas/${idCampana}`, label: 'Resumen' },
-    { href: `/cadencias/${camp.idCadencia}`, label: 'Cadencia' },
-    { href: `/campanas/${idCampana}/reglas`, label: 'Reglas' },
-    { href: `/campanas/${idCampana}/destinatarios`, label: 'Destinatarios' },
-    { href: `/campanas/${idCampana}/lanzar`, label: 'Lanzar' },
-  ];
+  const items = subNavItemsCampana(idCampana, camp.idCadencia);
 
   return (
     <AppShell>
@@ -59,9 +56,13 @@ export default async function CampanaResumenPage({ params }: { params: Promise<{
             {camp.cadencia} · {camp.segmento}
           </p>
         </div>
-        <Pill tone={tone} dot>
-          {label}
-        </Pill>
+        <div className="flex flex-col items-end gap-2">
+          <Pill tone={tone} dot>
+            {label}
+          </Pill>
+          <CicloVidaControles idCampana={idCampana} estado={camp.estado} />
+          <SincronizarCopiaControl idCampana={idCampana} proveedorCampanaId={camp.proveedorCampanaId} />
+        </div>
       </div>
 
       <div className="mb-8 flex gap-8 rounded-2xl border border-line bg-card p-5">

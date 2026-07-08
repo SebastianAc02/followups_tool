@@ -25,12 +25,13 @@ function iniciales(nombre: string) {
   return ((partes[0]?.[0] ?? '') + (partes[1]?.[0] ?? '')).toUpperCase() || 'SV';
 }
 
-export async function AppShell({ children }: { children: ReactNode }) {
+// Compartido con rutas que aun no adoptan AppShell completo (con TopBar) pero ya
+// quieren el sidebar -- ver SidebarFrame. Evita duplicar las mismas queries al repository.
+export async function datosSidebar() {
   const usuario = await requireSession();
   const owner = usuario.owner;
 
-  const ahora = new Date();
-  const hoy = ahora.toISOString().slice(0, 10);
+  const hoy = new Date().toISOString().slice(0, 10);
 
   const toquesHoy = colaDelDia(hoy, owner).length;
   const campanasActivas = listarCampanas().filter((c) => c.estado === 'activa').length;
@@ -60,6 +61,14 @@ export async function AppShell({ children }: { children: ReactNode }) {
     { nombre: 'Claude', detalle: 'activo', tone: 'done' },
     { nombre: 'Notion', detalle: notion.tieneCredencial ? 'activo' : 'sin conectar', tone: notion.tieneCredencial ? 'done' : 'overdue' },
   ];
+
+  return { usuario, items, conectores };
+}
+
+export async function AppShell({ children }: { children: ReactNode }) {
+  const { usuario, items, conectores } = await datosSidebar();
+  const owner = usuario.owner;
+  const ahora = new Date();
 
   return (
     <div className="flex h-screen overflow-hidden bg-shell font-body text-ink">

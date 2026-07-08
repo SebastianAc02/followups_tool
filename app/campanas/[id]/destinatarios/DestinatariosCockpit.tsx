@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { previsualizarInscripcionAction } from './actions';
 import type { CampanaParaPreview, FilaPreviewInscripcion } from '../../../db/repository';
+import { InscritasTable, type InscritaHubVM } from '../../InscritasTable';
 import { CANAL_LABEL, type Canal } from '../../../ui/canal-tag.variants.ts';
 import { cn } from '../../../ui/cn';
 
@@ -38,9 +39,11 @@ const CANAL_BG_CLASS: Record<Canal, string> = {
 export function DestinatariosCockpit({
   campana,
   filasIniciales,
+  inscritasReales,
 }: {
   campana: CampanaParaPreview;
   filasIniciales: FilaPreviewInscripcion[];
+  inscritasReales: InscritaHubVM[] | null;
 }) {
   const [filas, setFilas] = useState(filasIniciales);
   const [error, setError] = useState('');
@@ -77,34 +80,45 @@ export function DestinatariosCockpit({
       <header className="flex flex-col gap-1">
         <p className="font-mono-tag text-xs uppercase tracking-widest text-muted">Campaña · Destinatarios</p>
         <h1 className="font-serif text-2xl text-ink">{campana.nombre}</h1>
-        <p className="text-[13px] text-muted">
-          Cada uno recibe la cadencia <span className="font-semibold text-ink">{campana.cadencia}</span> ·{' '}
-          {destinatarios.length} {destinatarios.length === 1 ? 'contacto' : 'contactos'} listos para inscribir. Revísalo
-          como una factura antes de lanzar.
-        </p>
+        {inscritasReales ? (
+          <p className="text-[13px] text-muted">
+            Cadencia <span className="font-semibold text-ink">{campana.cadencia}</span> · {inscritasReales.length}{' '}
+            {inscritasReales.length === 1 ? 'empresa inscrita' : 'empresas inscritas'} de verdad.
+          </p>
+        ) : (
+          <p className="text-[13px] text-muted">
+            Cada uno recibe la cadencia <span className="font-semibold text-ink">{campana.cadencia}</span> ·{' '}
+            {destinatarios.length} {destinatarios.length === 1 ? 'contacto' : 'contactos'} listos para inscribir. Revísalo
+            como una factura antes de lanzar.
+          </p>
+        )}
       </header>
 
-      <div className="flex items-center gap-3 rounded-[13px] border border-line bg-card px-5 py-4">
-        <span
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-bg"
-          style={{ background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent))' }}
-          aria-hidden="true"
-        >
-          ✦
-        </span>
-        <p className="text-sm text-muted">
-          Regla activa: cuando falta un canal, <span className="font-semibold text-ink">{ROTULO_REGLA[campana.reglaFaltante]}</span>.
-        </p>
-        <Link
-          href={`/campanas/${campana.idCampana}/reglas`}
-          className="ml-auto text-xs font-semibold text-accent-ink hover:underline"
-        >
-          Cambiar regla
-        </Link>
-      </div>
+      {inscritasReales ? (
+        <InscritasTable inscritas={inscritasReales} mostrarCampana={false} />
+      ) : (
+        <>
+          <div className="flex items-center gap-3 rounded-[13px] border border-line bg-card px-5 py-4">
+            <span
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-bg"
+              style={{ background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent))' }}
+              aria-hidden="true"
+            >
+              ✦
+            </span>
+            <p className="text-sm text-muted">
+              Regla activa: cuando falta un canal, <span className="font-semibold text-ink">{ROTULO_REGLA[campana.reglaFaltante]}</span>.
+            </p>
+            <Link
+              href={`/campanas/${campana.idCampana}/reglas`}
+              className="ml-auto text-xs font-semibold text-accent-ink hover:underline"
+            >
+              Cambiar regla
+            </Link>
+          </div>
 
-      <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
-        <section className="min-w-0 flex-1 overflow-hidden rounded-[18px] border border-line" aria-labelledby="tabla-destinatarios">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
+            <section className="min-w-0 flex-1 overflow-hidden rounded-[18px] border border-line" aria-labelledby="tabla-destinatarios">
           <h2 id="tabla-destinatarios" className="sr-only">
             Destinatarios
           </h2>
@@ -177,8 +191,17 @@ export function DestinatariosCockpit({
             {pendiente ? 'Recalculando…' : 'Recalcular preview'}
           </button>
           {error && <p className="mt-3 text-xs text-overdue">{error}</p>}
+
+          <Link
+            href={`/campanas/${campana.idCampana}/preview`}
+            className="mt-3 flex w-full items-center justify-center rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-bg transition-colors hover:opacity-90"
+          >
+            Continuar a Preview
+          </Link>
         </aside>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

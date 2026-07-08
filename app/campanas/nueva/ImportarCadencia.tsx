@@ -38,9 +38,14 @@ export type CadenciaResuelta = { formato: FormatoCadencia; contenido: string; no
 type Props = {
   onResuelto?: (r: CadenciaResuelta) => void;
   onLimpiar?: () => void;
+  // Fase 7: en creacion, CadenciaCockpit ya muestra la lista editable de pasos justo
+  // debajo -- repetirla aca (de solo lectura) era la fuente del "esto se ve distinto
+  // segun donde entro" que Sebastian reporto. Ocultarla aca deja solo el encabezado
+  // (nombre, conteo, Cambiar cadencia) mas la lista de importar antes de resolver.
+  ocultarPasosResueltos?: boolean;
 };
 
-export function ImportarCadencia({ onResuelto, onLimpiar }: Props = {}) {
+export function ImportarCadencia({ onResuelto, onLimpiar, ocultarPasosResueltos }: Props = {}) {
   const [preview, setPreview] = useState<PreviewCadencia | null>(null);
   const [cargando, setCargando] = useState(false);
   const [arrastrando, setArrastrando] = useState(false);
@@ -164,6 +169,7 @@ export function ImportarCadencia({ onResuelto, onLimpiar }: Props = {}) {
         </button>
       </div>
 
+      {!ocultarPasosResueltos && (
       <div className="flex flex-col gap-3">
         {preview.pasos.map((paso) => {
           const canal = CANALES_CONOCIDOS.has(paso.canal as Canal) ? (paso.canal as Canal) : null;
@@ -189,6 +195,7 @@ export function ImportarCadencia({ onResuelto, onLimpiar }: Props = {}) {
           );
         })}
       </div>
+      )}
     </div>
   );
 }
