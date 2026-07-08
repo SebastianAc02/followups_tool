@@ -175,6 +175,7 @@ export function getCuenta(id: string) {
       proximoPaso: empresa.proximoPaso,
       fecha: empresa.proximoFollowUpFecha,
       usuarios: empresaUsuarios.usuariosEfectivos,
+      notionPageId: empresa.notionPageId,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
