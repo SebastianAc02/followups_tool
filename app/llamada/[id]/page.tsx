@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { getContextoToque } from "../../db/repository";
+import { getContextoToque, versionesDePaso } from "../../db/repository";
 import { Confirmacion, type CampoConfirmacion } from "./Confirmacion";
 import { LlamadaCard } from "./LlamadaCard";
+import { EditorCorreo } from "./EditorCorreo";
+import { EditorWhatsapp } from "./EditorWhatsapp";
 import { decidirVista, urlNotionDe } from "./ToqueContexto";
 import { calificar } from "../../core/calificacion";
 import { RESULTADO_LABELS } from "../../db/validation";
@@ -98,12 +100,42 @@ export default async function Llamada({
     );
   }
 
-  // Fase 2: canal correo/whatsapp todavia no tiene editor propio.
+  // Fase 2: correo/whatsapp. El paso activo de la secuencia (si hay) trae idPaso
+  // (para versionesDePaso) e idPasoInscripcionActivo (para enviarToqueCanalAction).
+  // Sin secuencia activa es un toque suelto: no hay versiones de paso ni paso que
+  // aprobar, el editor guarda directo via registrarToqueSueltoAction.
+  const pasoActivo = ctx.secuencia.find((p) => p.estado === "activo") ?? null;
+  const versiones = pasoActivo ? versionesDePaso(pasoActivo.idPaso) : [];
+
+  if (vista === "correo") {
+    return (
+      <SidebarFrame>
+        <div className="wrap">
+          <Link href="/cola" className="back">← Cola</Link>
+          <EditorCorreo
+            ctx={ctx}
+            idEmpresa={ctx.emp.id}
+            dia={pasoActivo?.orden ?? null}
+            objetivo={ctx.objetivo}
+            versiones={versiones}
+            idPasoInscripcion={ctx.idPasoInscripcionActivo}
+          />
+        </div>
+      </SidebarFrame>
+    );
+  }
+
   return (
     <SidebarFrame>
       <div className="wrap">
         <Link href="/cola" className="back">← Cola</Link>
-        <p className="empty">Editor en camino (Fase 2).</p>
+        <EditorWhatsapp
+          ctx={ctx}
+          idEmpresa={ctx.emp.id}
+          dia={pasoActivo?.orden ?? null}
+          versiones={versiones}
+          idPasoInscripcion={ctx.idPasoInscripcionActivo}
+        />
       </div>
     </SidebarFrame>
   );

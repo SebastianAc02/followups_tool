@@ -2775,6 +2775,7 @@ export function empresasPorCadencia(): { cadencia: string; empresas: number }[] 
 // cae al riel degradado (sin cadencia no hay pasos que mostrar, no es un error).
 
 export type PasoSecuencia = {
+  idPaso: number;
   orden: number;
   diaOffset: number;
   canal: string;
@@ -2788,6 +2789,10 @@ export type ContextoToque = {
   toques: ReturnType<typeof getCuenta>['toques'];
   secuencia: PasoSecuencia[];
   objetivo: string | null; // objetivo del paso activo, o null si no hay secuencia
+  // Tarea 12 (rediseño UI de toque): id del paso_inscripcion pendiente de HOY, si lo hay.
+  // Los editores de correo/whatsapp lo necesitan para enviarToqueCanalAction (aprobar ese
+  // paso puntual). null cuando no hay secuencia activa (toque suelto, sin cadencia).
+  idPasoInscripcionActivo: number | null;
 };
 
 export function getContextoToque(id: string): ContextoToque {
@@ -2809,7 +2814,7 @@ export function getContextoToque(id: string): ContextoToque {
     .get();
 
   if (!inscripcionActiva) {
-    return { emp, principal, toques, secuencia: [], objetivo: null };
+    return { emp, principal, toques, secuencia: [], objetivo: null, idPasoInscripcionActivo: null };
   }
 
   const pasos = db
@@ -2828,19 +2833,26 @@ export function getContextoToque(id: string): ContextoToque {
   // Estado real por paso: 'enviada' en paso_inscripcion (via destinatario de ESTA
   // inscripcion) es lo unico que cuenta como 'hecho'. Mismo join que
   // historialPasosDestinatario, pero a nivel inscripcion (puede haber mas de un
-  // destinatario) en vez de un solo idDestinatario.
+  // destinatario) en vez de un solo idDestinatario. idPasoInscripcion se trae aqui
+  // tambien porque el paso 'activo' (Tarea 12) lo necesita para enviarToqueCanalAction.
   const enviados = db
-    .select({ idPaso: pasoInscripcion.idPaso, estado: pasoInscripcion.estado })
+    .select({
+      idPaso: pasoInscripcion.idPaso,
+      estado: pasoInscripcion.estado,
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+    })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
     .where(eq(destinatario.idInscripcion, inscripcionActiva.idInscripcion))
     .all();
   const estadoPorPaso = new Map(enviados.map((e) => [e.idPaso, e.estado]));
+  const idPasoInscripcionPorPaso = new Map(enviados.map((e) => [e.idPaso, e.idPasoInscripcion]));
 
   // El primer paso que NO está 'enviada' (en orden) es el pendiente de hoy
   // ('activo'); los que vienen despues son 'pendiente' (todavia no les toca).
   let activoAsignado = false;
   let objetivoActivo: string | null = null;
+  let idPasoInscripcionActivo: number | null = null;
   const secuencia: PasoSecuencia[] = pasos.map((p) => {
     let estado: PasoSecuencia['estado'];
     if (estadoPorPaso.get(p.idPaso) === 'enviada') {
@@ -2849,13 +2861,14 @@ export function getContextoToque(id: string): ContextoToque {
       estado = 'activo';
       activoAsignado = true;
       objetivoActivo = p.objetivo;
+      idPasoInscripcionActivo = idPasoInscripcionPorPaso.get(p.idPaso) ?? null;
     } else {
       estado = 'pendiente';
     }
-    return { orden: p.orden, diaOffset: p.diaOffset, canal: p.canal, objetivo: p.objetivo, estado };
+    return { idPaso: p.idPaso, orden: p.orden, diaOffset: p.diaOffset, canal: p.canal, objetivo: p.objetivo, estado };
   });
 
-  return { emp, principal, toques, secuencia, objetivo: objetivoActivo };
+  return { emp, principal, toques, secuencia, objetivo: objetivoActivo, idPasoInscripcionActivo };
 }
 
 // Tarea 9 (rediseño UI de toque): versiones A/B/C de un paso, para la barra lateral
