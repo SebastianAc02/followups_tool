@@ -79,7 +79,7 @@ const { idPaso: idPaso2 } = idsDePaso(idCadencia, 2);
 const idPasoInscripcion1 = crearPasoInscripcionPendiente({ idDestinatario, idPaso: idPaso1, idVersion: idVersion1, canal: 'llamada' });
 
 test('un paso manual NUNCA aparece en pasoInscripcionesPendientes (push automatico), sin importar la fecha', () => {
-  const pendientesPush = pasoInscripcionesPendientes('2099-01-01T00:00:00.000Z'); // muy en el futuro: "3 dias despues" y mas
+  const pendientesPush = pasoInscripcionesPendientes('llamada', '2099-01-01T00:00:00.000Z'); // muy en el futuro: "3 dias despues" y mas
   assert.ok(!pendientesPush.some((f) => f.idPasoInscripcion === idPasoInscripcion1), 'el push automatico jamas lo toca');
 });
 

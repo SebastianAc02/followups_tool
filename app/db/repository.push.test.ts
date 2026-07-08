@@ -22,6 +22,7 @@ const {
   pasoInscripcionesPendientes,
   marcarPasoInscripcionEnviada,
   marcarPasoInscripcionFallo,
+  agregarPasoCadencia,
 } = await import('./repository.ts');
 
 function raw() {
@@ -95,7 +96,7 @@ test('pasoInscripcionesPendientes trae el join completo: email, nombre, asunto, 
   const idDestinatario = idDestinatarioDe('e-push-1');
   crearPasoInscripcionPendiente({ idDestinatario, idPaso, idVersion, canal: 'correo' });
 
-  const pendientes = pasoInscripcionesPendientes();
+  const pendientes = pasoInscripcionesPendientes('correo');
   const fila = pendientes.find((f) => f.destinatario.email === 'ana@empresa.com');
 
   assert.ok(fila);
@@ -109,7 +110,7 @@ test('una campana SIN secuencia externa (proveedor_campana_id null) no aparece e
   const idDestinatario = idDestinatarioDe('e-push-2');
   crearPasoInscripcionPendiente({ idDestinatario, idPaso, idVersion, canal: 'correo' });
 
-  const pendientes = pasoInscripcionesPendientes();
+  const pendientes = pasoInscripcionesPendientes('correo');
   assert.ok(!pendientes.some((f) => f.destinatario.email === 'sin-secuencia@empresa.com'));
 });
 
@@ -117,9 +118,9 @@ test('marcarPasoInscripcionEnviada saca la fila de pendientes (ya no se reintent
   const idDestinatario = idDestinatarioDe('e-push-1');
   const id = crearPasoInscripcionPendiente({ idDestinatario, idPaso, idVersion, canal: 'correo' });
 
-  marcarPasoInscripcionEnviada(id, 'msg-1', '2026-07-06T10:00:00.000Z');
+  marcarPasoInscripcionEnviada(id, 'apollo', 'msg-1', '2026-07-06T10:00:00.000Z');
 
-  const pendientes = pasoInscripcionesPendientes();
+  const pendientes = pasoInscripcionesPendientes('correo');
   assert.ok(!pendientes.some((f) => f.idPasoInscripcion === id));
 });
 
@@ -130,11 +131,41 @@ test('marcarPasoInscripcionFallo con proximo_intento futuro excluye la fila hast
 
   marcarPasoInscripcionFallo(id, 1, '2026-07-06T12:00:00.000Z');
 
-  const antes = pasoInscripcionesPendientes('2026-07-06T11:00:00.000Z');
+  const antes = pasoInscripcionesPendientes('correo', '2026-07-06T11:00:00.000Z');
   assert.ok(!antes.some((f) => f.idPasoInscripcion === id), 'antes de la hora de reintento, no aparece');
 
-  const despues = pasoInscripcionesPendientes('2026-07-06T13:00:00.000Z');
+  const despues = pasoInscripcionesPendientes('correo', '2026-07-06T13:00:00.000Z');
   assert.ok(despues.some((f) => f.idPasoInscripcion === id), 'llegada la hora, vuelve a aparecer');
+});
+
+// Sesion 2026-07-09 (registro de proveedor por canal): pasoInscripcionesPendientes
+// ahora exige el canal -- el worker la llama una vez por cada canal con proveedor
+// registrado, nunca mezclado. Esta prueba fija el bug real que motivo el cambio: sin
+// el filtro, una fila de whatsapp se habria colado en la corrida de 'correo'.
+//
+// Paso e idDestinatario NUEVOS a proposito (no reusa `idPaso`/`idVersion` del modulo):
+// esos ya los tocaron y marcaron 'enviada'/'fallo' pruebas anteriores de este mismo
+// archivo, y crearPasoInscripcionPendiente es idempotente por (idDestinatario, idPaso)
+// -- reusarlos habria devuelto esa fila vieja en vez de crear una de verdad pendiente.
+test('pasoInscripcionesPendientes solo trae filas del canal pedido', () => {
+  const idPasoExtra = agregarPasoCadencia(idCadencia, { diaOffset: 1, canal: 'correo', cuerpo: 'extra' });
+  const db = raw();
+  const versionExtra = db.prepare('SELECT id_version FROM version_paso WHERE id_paso = ?').get(idPasoExtra) as { id_version: number };
+  db.close();
+  const idVersionExtra = versionExtra.id_version;
+  const idDestinatario = idDestinatarioDe('e-push-1');
+  const idWhatsapp = crearPasoInscripcionPendiente({
+    idDestinatario,
+    idPaso: idPasoExtra,
+    idVersion: idVersionExtra,
+    canal: 'whatsapp',
+  });
+
+  const deCorreo = pasoInscripcionesPendientes('correo');
+  const deWhatsapp = pasoInscripcionesPendientes('whatsapp');
+
+  assert.ok(!deCorreo.some((f) => f.idPasoInscripcion === idWhatsapp), 'la fila de whatsapp no aparece pidiendo correo');
+  assert.ok(deWhatsapp.some((f) => f.idPasoInscripcion === idWhatsapp), 'la fila de whatsapp si aparece pidiendo whatsapp');
 });
 
 test.after(() => {

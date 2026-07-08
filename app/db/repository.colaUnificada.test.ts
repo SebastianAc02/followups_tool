@@ -116,7 +116,7 @@ test('un toque atrasado (fecha_programada de ayer) aparece hoy', () => {
 
 test('un toque ya enviado no aparece mas en la cola', () => {
   fijarFechaProgramada(idPIAuto, '2026-07-06T09:00:00.000Z');
-  marcarPasoInscripcionEnviada(idPIAuto, 'msg-1', '2026-07-06T09:00:00.000Z');
+  marcarPasoInscripcionEnviada(idPIAuto, 'apollo', 'msg-1', '2026-07-06T09:00:00.000Z');
   const agenda = agendaHoyCadencias('2026-07-06');
   assert.ok(!agenda.some((f) => f.idPasoInscripcion === idPIAuto));
 });
@@ -186,8 +186,8 @@ const idPIHist2 = crearPasoInscripcionPendiente({ idDestinatario: idDestHist, id
 crearPasoInscripcionPendiente({ idDestinatario: idDestHist, idPaso: p3.idPaso, idVersion: p3.idVersion, canal: 'correo' });
 
 test('historialPasosDestinatario trae solo los pasos YA enviados, ordenados por orden', () => {
-  marcarPasoInscripcionEnviada(idPIHist1, 'msg-h1', '2026-07-01T10:00:00.000Z');
-  marcarPasoInscripcionEnviada(idPIHist2, 'msg-h2', '2026-07-04T11:00:00.000Z');
+  marcarPasoInscripcionEnviada(idPIHist1, 'apollo', 'msg-h1', '2026-07-01T10:00:00.000Z');
+  marcarPasoInscripcionEnviada(idPIHist2, 'apollo', 'msg-h2', '2026-07-04T11:00:00.000Z');
 
   const hist = historialPasosDestinatario(idDestHist);
   assert.deepEqual(hist.map((h) => h.orden), [1, 2]);

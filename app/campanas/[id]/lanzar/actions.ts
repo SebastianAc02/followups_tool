@@ -15,7 +15,7 @@ import {
 } from '../../../db/repository';
 import { requireSession } from '../../../lib/session';
 import { calcularGoteo, type ResultadoGoteo } from '../../../core/goteo';
-import { crearApolloAdapter } from '../../../adapters/apollo';
+import { crearRegistroEnvio } from '../../../adapters/registro-envio';
 
 // Fase 8 (Lanzar), Task 8.4: recalcula la barra "asi se distribuye" con los valores QUE
 // EL USUARIO TIENE EN PANTALLA, sin guardar nada todavia -- mismo patron que
@@ -78,8 +78,13 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
     let avisoSecuenciaExterna: string | undefined;
     try {
       const camp = campanaParaLanzar(idCampana);
-      if (camp) {
-        const adapter = crearApolloAdapter();
+      // Sesion 2026-07-09: la secuencia externa es, por definicion, el track de
+      // correo de la cadencia -- se resuelve por el registro (registro-envio.ts), no
+      // por Apollo directo. Si "correo" no tiene proveedor registrado (no deberia
+      // pasar hoy, es el unico canal automatico), se avisa igual que cualquier otro
+      // fallo en vez de asumir que Apollo siempre esta ahi.
+      const adapter = crearRegistroEnvio().correo;
+      if (camp && adapter) {
         const proveedorCampanaId = await adapter.crearCampanaExterna(camp.nombre);
         guardarProveedorCampanaId(idCampana, proveedorCampanaId);
 

@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { pushPendientes, calcularProximoIntentoPush, MAX_INTENTOS, type FilaPasoInscripcion, type PushDeps } from './push.ts';
 import type { EnvioAdapter } from './ports/envio.ts';
 
-type FilaSimulada = FilaPasoInscripcion & { estado: 'pendiente' | 'enviando' | 'enviada' | 'fallo' };
+type FilaSimulada = FilaPasoInscripcion & {
+  estado: 'pendiente' | 'enviando' | 'enviada' | 'fallo';
+  proveedorRegistrado?: string;
+};
 
 // Deps falsos que se comportan como la query real: pendientes() solo devuelve filas
 // en 'pendiente'/'fallo' (una fila 'enviada' desaparece de la lista, igual que la
@@ -20,9 +23,9 @@ function depsFalsos(filasIniciales: FilaSimulada[]) {
       const f = filas.get(id)!;
       filas.set(id, { ...f, estado: 'enviando' });
     },
-    marcarEnviada: (id) => {
+    marcarEnviada: (id, proveedor) => {
       const f = filas.get(id)!;
-      filas.set(id, { ...f, estado: 'enviada' });
+      filas.set(id, { ...f, estado: 'enviada', proveedorRegistrado: proveedor });
     },
     marcarFallo: (id, intentos) => {
       const f = filas.get(id)!;
@@ -87,6 +90,30 @@ test('un fallo a mitad de lote de 3 no bloquea a los demas, y la corrida siguien
 
   assert.deepEqual(envioSegundaCorrida.llamadas, ['beto@empresa.com']);
   assert.strictEqual(filas.get(2)!.estado, 'enviada');
+});
+
+test('marcarEnviada recibe el proveedor real del EnvioResultado, no un valor fijo (sesion 2026-07-09)', async () => {
+  const { deps, filas } = depsFalsos([filaBase(1, 'ana@empresa.com')]);
+  const envio: EnvioAdapter = {
+    async crearCampanaExterna() {
+      return 'x';
+    },
+    async sincronizarCopy() {
+      return [];
+    },
+    async enviarPaso() {
+      return { proveedor: 'un-proveedor-cualquiera', proveedorMensajeId: 'msg-1' };
+    },
+    async sacarDestinatario() {},
+    async archivarCampana() {},
+    async leerEventosNuevos() {
+      return [];
+    },
+  };
+
+  await pushPendientes(deps, envio);
+
+  assert.strictEqual(filas.get(1)!.proveedorRegistrado, 'un-proveedor-cualquiera');
 });
 
 test('push dos veces sobre una fila ya enviada no vuelve a llamar a Apollo', async () => {

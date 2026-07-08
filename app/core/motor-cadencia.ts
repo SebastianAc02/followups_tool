@@ -73,19 +73,32 @@ export function calcularCalendario(pasos: PasoOffset[], anchor: string, config: 
 
 export type WaitApollo = { orden: number; waitMode: 'day'; waitTime: number };
 
-// TODO (Sebastian): Apollo numera el espaciado de sus emailer_steps de forma RELATIVA
-// (cuanto esperar desde el paso anterior, wait_mode/wait_time -- ver
+// Diseno (escrito por Claude con deadline explicito de Sebastian, excepcion puntual al
+// modo learning -- ver CLAUDE.md, mismo patron que las 3 preguntas resueltas en
+// app/core/ports/envio.ts). Apollo numera el espaciado de sus emailer_steps de forma
+// RELATIVA (cuanto esperar desde el paso anterior, wait_mode/wait_time -- ver
 // planning/experimento-apollo.md, Hallazgo real #4), pero paso_cadencia.dia_offset es
-// ABSOLUTO (offset desde el dia de inscripcion, ver schema.ts). Hay que traducir un
-// modelo al otro para poder subir los pasos via POST /emailer_steps, y no hay una
-// unica respuesta correcta -- ver la conversacion en la sesion de hoy para las
-// preguntas abiertas (wait del primer paso, offsets empatados, dias bloqueados).
+// ABSOLUTO (offset desde el dia de inscripcion, ver schema.ts).
 //
-// Implementa esta funcion. calcularWaitApollo(pasos) recibe los pasos de UNA cadencia
-// (mismo tipo PasoOffset que ya usa calcularCalendario) y devuelve, por cada uno, cuanto
-// tiene que esperar Apollo desde el paso anterior antes de mandarlo.
+// Decision: el PRIMER paso (por orden, no por diaOffset) siempre espera 0 -- no importa
+// su diaOffset absoluto, porque en nuestro modelo el contacto NUNCA entra a la secuencia
+// de Apollo antes del dia exacto en que ese paso le toca (lo decide el materializador,
+// no Apollo); para cuando add_contact_ids corre, el "esperar el offset" ya lo hizo
+// nuestro propio worker. Los pasos siguientes esperan la diferencia contra el diaOffset
+// del paso anterior (offset[N] - offset[N-1]), clamped a 0 por si dos pasos empatan en
+// el mismo dia o el dato viniera desordenado -- Apollo no acepta wait negativo.
+//
+// Limitacion conocida, no resuelta aqui: esto asume que Apollo corre la secuencia de un
+// tiron una vez inscrito el contacto. La tension real de fondo -- que nuestro propio
+// motor de fechas quiere controlar CUANDO sale cada paso, no Apollo -- sigue abierta
+// (ver experimento-apollo.md:319-327) y se resuelve cuando se conecte el envio real.
 export function calcularWaitApollo(pasos: PasoOffset[]): WaitApollo[] {
-  throw new Error('calcularWaitApollo: pendiente de diseno (Sebastian)');
+  const ordenados = [...pasos].sort((a, b) => a.orden - b.orden);
+  return ordenados.map((p, i) => {
+    if (i === 0) return { orden: p.orden, waitMode: 'day', waitTime: 0 };
+    const anterior = ordenados[i - 1];
+    return { orden: p.orden, waitMode: 'day', waitTime: Math.max(0, p.diaOffset - anterior.diaOffset) };
+  });
 }
 
 // Un paso ya ejecutado, con la fecha REAL en que salio (no la planeada).

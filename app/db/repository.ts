@@ -74,6 +74,7 @@ import {
   type Resultado,
   RITMOS_INGRESO,
   type RitmoIngresoInput,
+  validarCanalAutomatico,
 } from './validation';
 
 // Único punto de acceso a datos. El resto de la app no toca SQL ni la DB directo.
@@ -747,6 +748,23 @@ export function actualizarPasoCadencia(
 ): void {
   const val = actualizarPasoCadenciaSchema.parse(cambios);
 
+  // Sesion 2026-07-09: si el update toca canal o esManual, hay que validar el estado
+  // FINAL (no solo lo que llega en `cambios`) contra CANALES_AUTOMATICOS -- es un UPDATE
+  // parcial, asi que un caller que solo manda { canal: 'whatsapp' } sin tocar esManual
+  // deja el esManual que ya tenia la fila, y ese es el que hay que chequear.
+  if (val.canal !== undefined || val.esManual !== undefined) {
+    const actual = db
+      .select({ canal: pasoCadencia.canal, esManual: pasoCadencia.esManual })
+      .from(pasoCadencia)
+      .where(eq(pasoCadencia.idPaso, idPaso))
+      .get();
+    if (actual) {
+      const canalFinal = val.canal ?? (actual.canal as Canal);
+      const esManualFinal = val.esManual ?? actual.esManual === 1;
+      validarCanalAutomatico(canalFinal, esManualFinal);
+    }
+  }
+
   const set: Partial<typeof pasoCadencia.$inferInsert> = {};
   if (val.diaOffset !== undefined) set.diaOffset = val.diaOffset;
   if (val.canal !== undefined) set.canal = val.canal;
@@ -798,6 +816,7 @@ export function agregarPasoCadencia(
   paso: { diaOffset: number; canal: Canal; objetivo?: string; esManual?: boolean; asunto?: string; cuerpo?: string },
 ): number {
   const val = agregarPasoCadenciaSchema.parse(paso);
+  validarCanalAutomatico(val.canal, val.esManual);
   const ahora = new Date().toISOString();
 
   return db.transaction((tx) => {
@@ -1277,6 +1296,11 @@ export function campanaParaSincronizarCopy(idCampana: number): { idCadencia: num
 // variantes A/B no suben a Apollo en esta primera pasada (quedaria como mejora
 // futura via POST /emailer_touches, ver experimento-apollo.md); subir/editar el copy
 // principal es lo que se pidio hoy.
+//
+// FIX (sesion 2026-07-09): filtra a canal='correo'. Sin esto se intentaba subir TAMBIEN
+// los pasos de llamada/whatsapp de la cadencia como si fueran emailer_steps de Apollo --
+// bug real, encontrado al construir el registro de proveedor por canal (esta funcion
+// es, por definicion, la vista de Apollo/correo de la cadencia, no toda la cadencia).
 export function pasosParaSincronizarCopy(idCadencia: number): PasoParaSincronizar[] {
   const filas = db
     .select({
@@ -1291,7 +1315,7 @@ export function pasosParaSincronizarCopy(idCadencia: number): PasoParaSincroniza
     })
     .from(pasoCadencia)
     .innerJoin(versionPaso, and(eq(versionPaso.idPaso, pasoCadencia.idPaso), eq(versionPaso.esDefault, 1)))
-    .where(eq(pasoCadencia.idCadencia, idCadencia))
+    .where(and(eq(pasoCadencia.idCadencia, idCadencia), eq(pasoCadencia.canal, 'correo')))
     .orderBy(pasoCadencia.orden)
     .all();
 
@@ -2350,7 +2374,13 @@ export function crearPasoInscripcionPendiente(input: {
 // MAX_INTENTOS, y solo de campanas que ya tienen secuencia externa creada (una
 // campana sin proveedor_campana_id no tiene a donde empujar; se salta en vez de
 // gastar un intento fallido en ella).
-export function pasoInscripcionesPendientes(ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
+//
+// Sesion 2026-07-09 (registro de proveedor por canal, app/adapters/registro-envio.ts):
+// gana el parametro `canal` -- el worker la llama UNA VEZ POR CADA canal que si tiene
+// proveedor automatico registrado (hoy solo 'correo'), nunca para todos los canales
+// mezclados. Asi push.ts sigue sin saber que existe "canal" como concepto de ruteo: solo
+// procesa la lista que le dan contra el adaptador que le dan, una vez por canal.
+export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
   const filas = db
     .select({
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
@@ -2371,13 +2401,14 @@ export function pasoInscripcionesPendientes(ahora: string = new Date().toISOStri
     .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
     .where(
       and(
+        eq(pasoInscripcion.canal, canal),
         inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
         isNotNull(campana.proveedorCampanaId),
         // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
         // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
         eq(pasoCadencia.esManual, 0),
         // Fase 7 (pausar campana): defensa en profundidad -- si un paso ya quedo
-        // pendiente ANTES de pausar, esto evita que igual se empuje a Apollo.
+        // pendiente ANTES de pausar, esto evita que igual se empuje al proveedor.
         eq(campana.estado, 'activa'),
         sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
         sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
@@ -2402,9 +2433,11 @@ export function marcarPasoInscripcionEnviando(idPasoInscripcion: number) {
   db.update(pasoInscripcion).set({ estado: 'enviando' }).where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion)).run();
 }
 
-export function marcarPasoInscripcionEnviada(idPasoInscripcion: number, proveedorMensajeId: string, fechaEnviada: string) {
+// proveedor (sesion 2026-07-09): ya no se hardcodea 'apollo' -- viene del EnvioResultado
+// real que devolvio el adaptador que de verdad mando el paso (ver push.ts).
+export function marcarPasoInscripcionEnviada(idPasoInscripcion: number, proveedor: string, proveedorMensajeId: string, fechaEnviada: string) {
   db.update(pasoInscripcion)
-    .set({ estado: 'enviada', proveedor: 'apollo', proveedorMensajeId, fechaEnviada })
+    .set({ estado: 'enviada', proveedor, proveedorMensajeId, fechaEnviada })
     .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
     .run();
 }

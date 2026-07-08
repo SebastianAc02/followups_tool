@@ -42,17 +42,14 @@ test('sin versiones con peso > 0 lanza', () => {
   assert.throws(() => elegirVersionPorPeso([{ id: 1, peso: 0 }], 0), /peso > 0/);
 });
 
-// --- calcularWaitApollo: TODO (Sebastian, sesion 2026-07-08) ---------------
-// Marcados como 'todo' a proposito: no rompen `npm test` mientras la funcion sigue
-// sin implementar (hoy lanza), pero documentan el contrato esperado. Cuando la
-// escribas, borra `{ todo: true }` de cada uno para que corran de verdad.
+// --- calcularWaitApollo (sesion 2026-07-08, ver comentario de diseno en motor-cadencia.ts) ---
 
-test('el primer paso (offset 0) no espera nada', { todo: true }, () => {
-  const r = calcularWaitApollo([{ orden: 1, diaOffset: 0 }]);
+test('el primer paso siempre espera 0, sin importar su diaOffset absoluto', () => {
+  const r = calcularWaitApollo([{ orden: 1, diaOffset: 3 }]);
   assert.deepEqual(r, [{ orden: 1, waitMode: 'day', waitTime: 0 }]);
 });
 
-test('cada paso espera la diferencia contra el offset del paso anterior', { todo: true }, () => {
+test('cada paso siguiente espera la diferencia contra el offset del paso anterior', () => {
   const r = calcularWaitApollo([
     { orden: 1, diaOffset: 0 },
     { orden: 2, diaOffset: 4 },
@@ -65,7 +62,18 @@ test('cada paso espera la diferencia contra el offset del paso anterior', { todo
   ]);
 });
 
-test('ordena por "orden" antes de calcular, sin importar el orden de entrada', { todo: true }, () => {
+test('dos pasos con el mismo diaOffset (empatados el mismo dia) no dan wait negativo', () => {
+  const r = calcularWaitApollo([
+    { orden: 1, diaOffset: 0 },
+    { orden: 2, diaOffset: 0 },
+  ]);
+  assert.deepEqual(r, [
+    { orden: 1, waitMode: 'day', waitTime: 0 },
+    { orden: 2, waitMode: 'day', waitTime: 0 },
+  ]);
+});
+
+test('ordena por "orden" antes de calcular, sin importar el orden de entrada', () => {
   const r = calcularWaitApollo([
     { orden: 2, diaOffset: 4 },
     { orden: 1, diaOffset: 0 },

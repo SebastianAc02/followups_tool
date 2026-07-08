@@ -8,6 +8,28 @@ import { z } from 'zod';
 export const CANALES = ['llamada', 'whatsapp', 'correo'] as const;
 export type Canal = (typeof CANALES)[number];
 
+// Canales con proveedor automatico HOY (sesion 2026-07-09, registro por canal en
+// app/adapters/registro-envio.ts). Vive aca -- no en el adaptador -- porque el
+// Repository (capa de datos) necesita esta lista para validar/filtrar sin depender de
+// un adaptador concreto (romperia la direccion de dependencia: adaptadores dependen del
+// Repository, nunca al reves). registro-envio.ts la reusa como fuente unica de verdad;
+// un test cruzado (registro-envio.test.ts) verifica que las dos listas no se desincronicen.
+export const CANALES_AUTOMATICOS: readonly Canal[] = ['correo'];
+
+// Regla de dominio (sesion 2026-07-09): un paso solo puede ser automatico (es_manual=
+// false) si su canal tiene proveedor registrado. Sin esto, un paso de whatsapp/llamada
+// marcado automatico por error terminaria intentando mandarse por el proveedor de
+// correo (el bug real que se encontro en las campanas 2/3/4 antes de esta regla).
+// Vive en validation.ts (no en el Repository) para que agregarPasoCadencia y
+// actualizarPasoCadencia la compartan sin duplicar el mensaje de error.
+export function validarCanalAutomatico(canal: Canal, esManual: boolean): void {
+  if (!esManual && !CANALES_AUTOMATICOS.includes(canal)) {
+    throw new Error(
+      `El canal "${canal}" todavía no tiene proveedor automático; este paso tiene que quedar manual (revisión en /cola).`,
+    );
+  }
+}
+
 export const RESULTADOS = [
   'contesto_reunion',
   'contesto_sigue_seguimiento',

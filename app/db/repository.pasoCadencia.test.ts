@@ -103,7 +103,7 @@ test('agregarPasoCadencia inserta con el siguiente orden correlativo y su versio
 
 test('agregarPasoCadencia queda visible via getCadencia', () => {
   const antes = getCadencia(idCadencia)!.pasos.length;
-  agregarPasoCadencia(idCadencia, { diaOffset: 10, canal: 'whatsapp' });
+  agregarPasoCadencia(idCadencia, { diaOffset: 10, canal: 'whatsapp', esManual: true });
   const despues = getCadencia(idCadencia)!.pasos;
   assert.equal(despues.length, antes + 1);
   assert.equal(despues[despues.length - 1].orden, antes + 1);
@@ -130,7 +130,7 @@ test('eliminarPasoCadencia rechaza si es el unico paso de la cadencia', () => {
 });
 
 test('eliminarPasoCadencia borra el paso y sus version_paso si no tiene historia de envio', () => {
-  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 20, canal: 'whatsapp', cuerpo: 'chau' });
+  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 20, canal: 'whatsapp', cuerpo: 'chau', esManual: true });
   const antes = getCadencia(idCadencia)!.pasos.length;
 
   const res = eliminarPasoCadencia(idPaso);
@@ -159,6 +159,33 @@ test('eliminarPasoCadencia rechaza un paso que ya tiene historia real de envio',
   const res = eliminarPasoCadencia(idPaso);
   assert.equal(res.ok, false);
   assert.ok(getCadencia(idCadencia)!.pasos.some((p) => p.idPaso === idPaso), 'el paso sigue existiendo');
+});
+
+// Sesion 2026-07-09 (registro de proveedor por canal): un paso automatico (esManual
+// false) solo es valido en un canal con proveedor real -- ver CANALES_AUTOMATICOS en
+// db/validation.ts y app/adapters/registro-envio.ts.
+test('agregarPasoCadencia rechaza un canal sin proveedor automatico si esManual queda en false', () => {
+  assert.throws(() => agregarPasoCadencia(idCadencia, { diaOffset: 40, canal: 'whatsapp' }), /proveedor automático/);
+});
+
+test('agregarPasoCadencia acepta whatsapp si esManual es true', () => {
+  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 41, canal: 'whatsapp', esManual: true });
+  assert.ok(getCadencia(idCadencia)!.pasos.some((p) => p.idPaso === idPaso));
+});
+
+test('agregarPasoCadencia acepta correo automatico (tiene proveedor)', () => {
+  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 42, canal: 'correo' });
+  assert.ok(getCadencia(idCadencia)!.pasos.some((p) => p.idPaso === idPaso));
+});
+
+test('actualizarPasoCadencia rechaza pasar a whatsapp sin marcar esManual (deja el false que ya tenia)', () => {
+  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 43, canal: 'correo' });
+  assert.throws(() => actualizarPasoCadencia(idPaso, { canal: 'whatsapp' }), /proveedor automático/);
+});
+
+test('actualizarPasoCadencia rechaza volver automatico (esManual: false) un paso de llamada', () => {
+  const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 44, canal: 'llamada', esManual: true });
+  assert.throws(() => actualizarPasoCadencia(idPaso, { esManual: false }), /proveedor automático/);
 });
 
 test.after(() => {

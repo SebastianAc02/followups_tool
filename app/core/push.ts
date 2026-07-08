@@ -22,7 +22,10 @@ export type PushDeps = {
   // y no se reintenta sola -- mismo tipo de riesgo que ya acepta B7 (el worker no
   // promete exactly-once).
   marcarEnviando: (idPasoInscripcion: number) => void;
-  marcarEnviada: (idPasoInscripcion: number, proveedorMensajeId: string, fechaEnviada: string) => void;
+  // proveedor (sesion 2026-07-09): viene de EnvioResultado.proveedor, NO se asume --
+  // asi el registro dice de verdad quien mando cada paso, sin importar si maniana
+  // enviarPaso lo resuelve un adaptador de Apollo, de WhatsApp o de otro proveedor.
+  marcarEnviada: (idPasoInscripcion: number, proveedor: string, proveedorMensajeId: string, fechaEnviada: string) => void;
   marcarFallo: (idPasoInscripcion: number, intentos: number, proximoIntento: string | null) => void;
 };
 
@@ -42,7 +45,7 @@ export async function pushPendientes(deps: PushDeps, envio: EnvioAdapter, ahora:
     try {
       deps.marcarEnviando(fila.idPasoInscripcion);
       const resultado = await envio.enviarPaso(fila.proveedorCampanaId, fila.destinatario, fila.paso);
-      deps.marcarEnviada(fila.idPasoInscripcion, resultado.proveedorMensajeId, ahora.toISOString());
+      deps.marcarEnviada(fila.idPasoInscripcion, resultado.proveedor, resultado.proveedorMensajeId, ahora.toISOString());
     } catch {
       const intentos = fila.intentos + 1;
       const agotado = intentos >= MAX_INTENTOS;

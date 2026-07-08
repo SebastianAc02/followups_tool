@@ -297,8 +297,41 @@ test('sincronizarCopy con pasos YA subidos solo actualiza el template (PUT), no 
   assert.deepEqual(resultado, [{ idPaso: 1, idVersion: 10, proveedorStepId: 'step-1', proveedorTemplateId: 'tpl-1' }]);
 });
 
-test('sincronizarCopy con un paso sin subir todavia intenta crear el step, lo que hoy depende de calcularWaitApollo (pendiente)', async (t) => {
-  t.mock.method(globalThis, 'fetch', fetchFalso(() => ({ status: 200, body: {} })));
+test('sincronizarCopy con un paso sin subir todavia CREA el step (POST /emailer_steps) y sube el template', async (t) => {
+  const llamadas: { path: string; body: unknown }[] = [];
+  // Forma de la respuesta de POST /emailer_steps: NO verificada en vivo (ver comentario
+  // de EmailerStepRespuesta en apollo.ts) -- se prueba aca la forma mas plausible; si
+  // difiere contra la cuenta real, este es el unico test que hay que ajustar.
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push({ path, body: init.body ? JSON.parse(init.body as string) : null });
+      if (path === '/emailer_steps') {
+        return {
+          status: 200,
+          body: { emailer_step: { id: 'step-nuevo', emailer_touches: [{ id: 'touch-1', emailer_template: { id: 'tpl-nuevo' } }] } },
+        };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  const resultado = await adapter.sincronizarCopy('seq-1', [
+    { idPaso: 1, idVersion: 10, orden: 1, diaOffset: 0, asunto: 'a', cuerpo: 'b', proveedorStepId: null, proveedorTemplateId: null },
+  ]);
+
+  assert.deepEqual(llamadas[0], {
+    path: '/emailer_steps',
+    body: { emailer_campaign_id: 'seq-1', position: 1, type: 'auto_email', wait_mode: 'day', wait_time: 0 },
+  });
+  assert.deepEqual(llamadas[1], { path: '/emailer_templates/tpl-nuevo', body: { subject: 'a', body_html: 'b' } });
+  assert.deepEqual(resultado, [{ idPaso: 1, idVersion: 10, proveedorStepId: 'step-nuevo', proveedorTemplateId: 'tpl-nuevo' }]);
+});
+
+test('sincronizarCopy sin la forma esperada en la respuesta de emailer_steps tira error explicito (no adivina un id)', async (t) => {
+  t.mock.method(globalThis, 'fetch', fetchFalso(() => ({ status: 200, body: { emailer_step: { id: 'step-huerfano' } } })));
 
   const adapter = crearApolloAdapter();
   await assert.rejects(
@@ -306,7 +339,7 @@ test('sincronizarCopy con un paso sin subir todavia intenta crear el step, lo qu
       adapter.sincronizarCopy('seq-1', [
         { idPaso: 1, idVersion: 10, orden: 1, diaOffset: 0, asunto: 'a', cuerpo: 'b', proveedorStepId: null, proveedorTemplateId: null },
       ]),
-    /calcularWaitApollo/,
+    /Apollo no devolvio step\/template/,
   );
 });
 

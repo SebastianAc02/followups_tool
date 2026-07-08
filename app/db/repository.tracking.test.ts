@@ -74,7 +74,7 @@ const hist = historialInscripciones('e-track-1').find((i) => i.estado === 'activ
 const idInscripcion = hist.id;
 const idDestinatario = destinatariosDeInscripcion(idInscripcion)[0].id;
 const idPasoInscripcion = crearPasoInscripcionPendiente({ idDestinatario, idPaso, idVersion, canal: 'correo' });
-marcarPasoInscripcionEnviada(idPasoInscripcion, 'contacto-apollo-1', '2026-07-06T10:00:00.000Z');
+marcarPasoInscripcionEnviada(idPasoInscripcion, 'apollo', 'contacto-apollo-1', '2026-07-06T10:00:00.000Z');
 
 test('campanasConSecuencia devuelve solo campanas con proveedor_campana_id', () => {
   const camps = campanasConSecuencia();

@@ -10,7 +10,7 @@ import {
   guardarSincronizacionCopy,
 } from '../../db/repository';
 import { requireSession } from '../../lib/session';
-import { crearApolloAdapter } from '../../adapters/apollo';
+import { crearRegistroEnvio } from '../../adapters/registro-envio';
 
 // Fase 7 (ciclo de vida de campana): Pausar/Reanudar son reversibles y solo tocan
 // campana.estado -- ver pausarCampana/reanudarCampana en el repository. Cancelar es
@@ -41,8 +41,10 @@ export async function cancelarCampanaAction(idCampana: number): Promise<CicloVid
   const res = marcarCampanaFinalizada(idCampana);
   if (!res.ok) return res;
   if (res.proveedorCampanaId) {
+    const adapter = crearRegistroEnvio().correo;
     try {
-      await crearApolloAdapter().archivarCampana(res.proveedorCampanaId);
+      if (!adapter) throw new Error('el canal correo no tiene proveedor configurado');
+      await adapter.archivarCampana(res.proveedorCampanaId);
     } catch (e) {
       // La campana ya quedo 'finalizada' en la base (fuente de la verdad); si Apollo
       // fallo, el residuo es una secuencia externa viva sin campana activa detras --
@@ -74,7 +76,9 @@ export async function sincronizarCopyApolloAction(idCampana: number): Promise<Si
     return { ok: false, error: 'La cadencia de esta campaña no tiene pasos con copy.' };
   }
   try {
-    const sincronizados = await crearApolloAdapter().sincronizarCopy(camp.proveedorCampanaId, pasos);
+    const adapter = crearRegistroEnvio().correo;
+    if (!adapter) return { ok: false, error: 'El canal correo no tiene proveedor configurado.' };
+    const sincronizados = await adapter.sincronizarCopy(camp.proveedorCampanaId, pasos);
     guardarSincronizacionCopy(sincronizados);
     revalidatePath(`/campanas/${idCampana}`);
     return { ok: true, pasos: sincronizados.length };
