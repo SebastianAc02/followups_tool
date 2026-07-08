@@ -12,8 +12,10 @@ import {
 import { registrarToqueSchema } from "../../db/validation";
 import { requireSession } from "../../lib/session";
 import { crearGranolaAdapter } from "../../adapters/granola";
+import { crearClaudeAdapter } from "../../adapters/claude";
 import { agruparCandidatas, type CandidataOFusion } from "../../core/matcher";
 import { confirmarTranscript } from "../../core/confirmarTranscript";
+import { estructurarToque, type ToqueEstructurado } from "../../core/estructurar-toque";
 
 export async function registrarToqueAction(formData: FormData) {
   await requireSession();
@@ -97,4 +99,13 @@ export async function confirmarGrabacionAction(idEmpresa: string, idToque: numbe
     escribirSoloPuntero: escribirTranscriptSoloPuntero,
   });
   revalidatePath(`/llamada/${idEmpresa}`);
+}
+
+// Tarea 5b: solo PROPONE un borrador estructurado a partir del dictado (texto pegado,
+// nunca audio). No escribe nada -- el owner corrige el borrador en CapturaLlamada y
+// recien registrarToqueAction (submit del form) persiste.
+export async function estructurarDictadoAction(dictado: string): Promise<ToqueEstructurado> {
+  await requireSession();
+  const ia = crearClaudeAdapter();
+  return estructurarToque(dictado, ia);
 }
