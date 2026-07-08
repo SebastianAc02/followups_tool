@@ -4,11 +4,13 @@ import { Pill, pillParaEstado } from "../../ui/Pill";
 import { Stat } from "../../ui/Stat";
 import { SecuenciaRail } from "./SecuenciaRail";
 import { CalificacionChecklist } from "./CalificacionChecklist";
+import { RegistrarToqueToggle } from "./RegistrarToqueToggle";
 
 // Ensambla la specimen card "Onepay Llamada Toque 1": header de la cuenta, riel de
 // secuencia a la izquierda y el cuerpo de trabajo (accion sugerida, datos de la cuenta,
-// calificacion) a la derecha. Registrar toque todavia no existe (Tarea 5) -- el breadcrumb
-// de abajo es solo el rotulo visual, sin boton ni <CapturaLlamada>.
+// calificacion) a la derecha. El breadcrumb es solo el rotulo visual; el boton "Registrar
+// toque" (RegistrarToqueToggle, Tarea 8) revela <CapturaLlamada> debajo sin romper el layout
+// flex de la fila.
 
 function iniciales(nombre: string | null | undefined): string {
   if (!nombre) return "?";
@@ -114,7 +116,7 @@ export function LlamadaCard({
           <CalificacionChecklist calificacion={calificacion} />
 
           {/* Bottom action row */}
-          <div className="mt-auto flex items-center justify-between border-t border-line pt-4">
+          <div className="mt-auto flex flex-col gap-4 border-t border-line pt-4">
             <div className="flex items-center gap-2 font-toque-mono text-[10.5px] font-medium text-muted">
               <span className="text-accent-llamada">Llamada</span>
               <span>·</span>
@@ -122,7 +124,7 @@ export function LlamadaCard({
               <span>·</span>
               <span>Confirmar</span>
             </div>
-            {/* TODO Tarea 5: <CapturaLlamada> */}
+            <RegistrarToqueToggle idEmpresa={emp?.id ?? ""} />
           </div>
         </div>
       </div>
