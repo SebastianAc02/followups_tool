@@ -2718,3 +2718,94 @@ export function empresasPorCadencia(): { cadencia: string; empresas: number }[] 
     .groupBy(cadencia.nombre)
     .all();
 }
+
+// ---------------------------------------------------------------------------
+// Tarea 2 (rediseño UI de toque): getContextoToque compone en una sola llamada lo
+// que el cockpit de /llamada/[id] necesita: cuenta (reusa getCuenta), contacto
+// principal ya extraído, y la secuencia de la cadencia SOLO si la empresa tiene
+// una inscripcion activa hoy -- si no la tiene, `secuencia` queda vacía y la UI
+// cae al riel degradado (sin cadencia no hay pasos que mostrar, no es un error).
+
+export type PasoSecuencia = {
+  orden: number;
+  diaOffset: number;
+  canal: string;
+  objetivo: string | null;
+  estado: 'hecho' | 'activo' | 'pendiente';
+};
+
+export type ContextoToque = {
+  emp: ReturnType<typeof getCuenta>['emp'];
+  principal: { nombre: string | null; cargo: string | null; telefono: string | null; email: string | null } | null;
+  toques: ReturnType<typeof getCuenta>['toques'];
+  secuencia: PasoSecuencia[];
+  objetivo: string | null; // objetivo del paso activo, o null si no hay secuencia
+};
+
+export function getContextoToque(id: string): ContextoToque {
+  const { emp, contactos, toques } = getCuenta(id);
+
+  // Contacto principal: el marcado esPrincipal; si ninguno lo está (dato legado
+  // sin migrar), el primero de la lista es mejor default que null -- la UI siempre
+  // necesita A QUIEN se le habla, aunque el seed de Notion no haya marcado principal.
+  const principalRaw = contactos.find((c) => c.esPrincipal === 1) ?? contactos[0] ?? null;
+  const principal = principalRaw
+    ? { nombre: principalRaw.nombre, cargo: principalRaw.cargo, telefono: principalRaw.telefono, email: principalRaw.email }
+    : null;
+
+  const inscripcionActiva = db
+    .select({ idInscripcion: inscripcion.idInscripcion, idCadencia: campana.idCadencia })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(inscripcion.idEmpresa, id), eq(inscripcion.estado, 'activa')))
+    .get();
+
+  if (!inscripcionActiva) {
+    return { emp, principal, toques, secuencia: [], objetivo: null };
+  }
+
+  const pasos = db
+    .select({
+      idPaso: pasoCadencia.idPaso,
+      orden: pasoCadencia.orden,
+      diaOffset: pasoCadencia.diaOffset,
+      canal: pasoCadencia.canal,
+      objetivo: pasoCadencia.objetivo,
+    })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, inscripcionActiva.idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+
+  // Estado real por paso: 'enviada' en paso_inscripcion (via destinatario de ESTA
+  // inscripcion) es lo unico que cuenta como 'hecho'. Mismo join que
+  // historialPasosDestinatario, pero a nivel inscripcion (puede haber mas de un
+  // destinatario) en vez de un solo idDestinatario.
+  const enviados = db
+    .select({ idPaso: pasoInscripcion.idPaso, estado: pasoInscripcion.estado })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .where(eq(destinatario.idInscripcion, inscripcionActiva.idInscripcion))
+    .all();
+  const estadoPorPaso = new Map(enviados.map((e) => [e.idPaso, e.estado]));
+
+  // El primer paso que NO está 'enviada' (en orden) es el pendiente de hoy
+  // ('activo'); los que vienen despues son 'pendiente' (todavia no les toca).
+  let activoAsignado = false;
+  let objetivoActivo: string | null = null;
+  const secuencia: PasoSecuencia[] = pasos.map((p) => {
+    let estado: PasoSecuencia['estado'];
+    if (estadoPorPaso.get(p.idPaso) === 'enviada') {
+      estado = 'hecho';
+    } else if (!activoAsignado) {
+      estado = 'activo';
+      activoAsignado = true;
+      objetivoActivo = p.objetivo;
+    } else {
+      estado = 'pendiente';
+    }
+    return { orden: p.orden, diaOffset: p.diaOffset, canal: p.canal, objetivo: p.objetivo, estado };
+  });
+
+  return { emp, principal, toques, secuencia, objetivo: objetivoActivo };
+}
