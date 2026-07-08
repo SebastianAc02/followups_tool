@@ -2857,3 +2857,33 @@ export function getContextoToque(id: string): ContextoToque {
 
   return { emp, principal, toques, secuencia, objetivo: objetivoActivo };
 }
+
+// Tarea 9 (rediseño UI de toque): versiones A/B/C de un paso, para la barra lateral
+// de EditorCorreo/EditorWhatsapp. La activa (esDefault=1) primero, luego el resto por
+// nombre -- así la UI siempre muestra "la que se está usando" arriba.
+export type VersionDePaso = {
+  idVersion: number;
+  nombre: string | null;
+  asunto: string | null;
+  cuerpo: string | null;
+  esDefault: boolean;
+  fecha: string | null;
+};
+
+export function versionesDePaso(idPaso: number): VersionDePaso[] {
+  const filas = db
+    .select({
+      idVersion: versionPaso.idVersion,
+      nombre: versionPaso.nombre,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      esDefault: versionPaso.esDefault,
+      fecha: versionPaso.createdAt,
+    })
+    .from(versionPaso)
+    .where(eq(versionPaso.idPaso, idPaso))
+    .orderBy(desc(versionPaso.esDefault), versionPaso.nombre)
+    .all();
+
+  return filas.map((f) => ({ ...f, esDefault: f.esDefault === 1 }));
+}
