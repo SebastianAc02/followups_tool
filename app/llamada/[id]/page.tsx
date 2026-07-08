@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getCuenta } from "../../db/repository";
 import CaptureForm from "./CaptureForm";
 import BuscarGrabacion from "./BuscarGrabacion";
+import { Confirmacion, type CampoConfirmacion } from "./Confirmacion";
 import { RESULTADO_LABELS, RESULTADOS_CONTESTO, type Resultado } from "../../db/validation";
 import { requireSession } from "../../lib/session";
 
@@ -25,9 +26,16 @@ function Field({ label, value }: { label: string; value: string | number | null 
   );
 }
 
-export default async function Llamada({ params }: { params: Promise<{ id: string }> }) {
+export default async function Llamada({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ vista?: string }>;
+}) {
   await requireSession();
   const { id } = await params;
+  const { vista } = await searchParams;
   const { emp, contactos, toques } = getCuenta(id);
 
   if (!emp) {
@@ -35,6 +43,38 @@ export default async function Llamada({ params }: { params: Promise<{ id: string
       <div className="wrap">
         <Link href="/cola" className="back">← Cola</Link>
         <p className="empty">Cuenta no encontrada.</p>
+      </div>
+    );
+  }
+
+  // Tarea 7: receipt post-submit. registrarToqueAction redirige aca con ?vista=confirmacion
+  // tras guardar -- esto SOLO lee lo que ya se persistio (nada de sync nuevo). El resumen de
+  // Granola no se cachea hoy en `toque` (solo el puntero transcriptId/Url si ya se confirmo
+  // una grabacion, y getCuenta().toques no expone transcriptUrl); por eso, si no hay resumen
+  // cacheado, <Confirmacion> cae al mismo flujo <BuscarGrabacion> que la vista normal.
+  if (vista === "confirmacion") {
+    const ultimo = toques[0];
+    const campos: CampoConfirmacion[] = [
+      { label: "Usuarios", valor: emp.usuarios != null ? String(Math.round(emp.usuarios)) : "sacar en la llamada" },
+      { label: "CRM / Software", valor: emp.crm ?? "sacar en la llamada" },
+      { label: "Pasarela actual", valor: emp.pasarela ?? "sacar en la llamada" },
+      { label: "Resultado", valor: labelResultado(ultimo?.resultado, ultimo?.canal) },
+    ];
+
+    return (
+      <div className="wrap">
+        <Link href="/cola" className="back">← Cola</Link>
+        <Confirmacion
+          idEmpresa={emp.id}
+          idToque={ultimo?.idToque ?? 0}
+          empresa={emp.nombre ?? "Cuenta sin nombre"}
+          dia={null}
+          duracion={null}
+          campos={campos}
+          resumenDictado={ultimo?.quePaso ?? "Sin resumen dictado."}
+          granola={{ resumen: null, url: null }}
+          sincronizado={{ notion: Boolean(emp.notionPageId), granola: Boolean(ultimo?.transcriptId) }}
+        />
       </div>
     );
   }

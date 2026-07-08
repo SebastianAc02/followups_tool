@@ -62,7 +62,8 @@ export async function registrarToqueAction(formData: FormData) {
   registrarToque(parsed);
 
   revalidatePath("/");
-  redirect("/");
+  revalidatePath(`/llamada/${idEmpresa}`);
+  redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
 }
 
 const VENTANA_HORAS = 12;
