@@ -42,7 +42,7 @@ seed();
 
 test('segmento on_hold devuelve exactamente las 4 empresas on_hold (conteo a mano)', () => {
   const def = { condiciones: [{ campo: 'estado' as const, op: 'en' as const, valores: ['on_hold'] }] };
-  const empresas = empresasDeSegmento(def);
+  const empresas = empresasDeSegmento(def, 1);
   assert.deepEqual(empresas.map((e) => e.id).sort(), ['e1', 'e2', 'e3', 'e4']);
   assert.equal(contarSegmento(def), 4);
 });
@@ -54,23 +54,23 @@ test('condiciones se ANDean: on_hold + isp excluye la utility', () => {
       { campo: 'categoria' as const, op: 'en' as const, valores: ['isp'] },
     ],
   };
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e1', 'e2', 'e3']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id).sort(), ['e1', 'e2', 'e3']);
 });
 
 test('campo numerico (prioridad) coerce string->numero y compara bien', () => {
   const def = { condiciones: [{ campo: 'prioridad' as const, op: 'en' as const, valores: ['5'] }] };
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e2', 'e3']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id).sort(), ['e2', 'e3']);
 });
 
 test('operador es_null encuentra la empresa sin estado', () => {
   const def = { condiciones: [{ campo: 'estado' as const, op: 'es_null' as const }] };
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id), ['e7']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id), ['e7']);
 });
 
 test('no_en excluye valores', () => {
   const def = { condiciones: [{ campo: 'categoria' as const, op: 'no_en' as const, valores: ['utility'] }] };
   // todas menos la utility (e4)
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e1', 'e2', 'e3', 'e5', 'e6', 'e7']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id).sort(), ['e1', 'e2', 'e3', 'e5', 'e6', 'e7']);
 });
 
 test('guardar y correr el segmento guardado da el mismo resultado', () => {
@@ -93,18 +93,18 @@ test('empresasDeSegmentoGuardado de un id inexistente devuelve null', () => {
 
 test('un campo fuera de la whitelist es rechazado por validacion (no SQL libre)', () => {
   assert.throws(
-    () => empresasDeSegmento({ condiciones: [{ campo: 'nombre_oficial', op: 'en', valores: ['x'] }] } as any),
+    () => empresasDeSegmento({ condiciones: [{ campo: 'nombre_oficial', op: 'en', valores: ['x'] }] } as any, 1),
     /invalid|enum|nombre_oficial/i,
   );
 });
 
 test('un segmento sin condiciones es rechazado', () => {
-  assert.throws(() => empresasDeSegmento({ condiciones: [] } as any), /al menos una condicion/);
+  assert.throws(() => empresasDeSegmento({ condiciones: [] } as any, 1), /al menos una condicion/);
 });
 
 test('valor no numerico en un campo numerico (prioridad) falla explicito, no en silencio', () => {
   assert.throws(
-    () => empresasDeSegmento({ condiciones: [{ campo: 'prioridad', op: 'en', valores: ['alta'] }] }),
+    () => empresasDeSegmento({ condiciones: [{ campo: 'prioridad', op: 'en', valores: ['alta'] }] }, 1),
     /numerico/,
   );
 });
@@ -123,7 +123,7 @@ seedUsuarios();
 
 test('entre sobre usuarios: 3000..10000 devuelve solo e2', () => {
   const def = { condiciones: [{ campo: 'usuarios' as const, op: 'entre' as const, desde: 3000, hasta: 10000 }] };
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id), ['e2']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id), ['e2']);
   assert.equal(contarSegmento(def), 1);
 });
 
@@ -135,27 +135,27 @@ test('entre excluye empresas sin dato de usuarios (NULL no matchea rango)', () =
       { campo: 'usuarios' as const, op: 'entre' as const, desde: 0, hasta: 999999 },
     ],
   };
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e1', 'e2', 'e3']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id).sort(), ['e1', 'e2', 'e3']);
 });
 
 test('entre sobre prioridad (campo numerico ya existente) funciona', () => {
   const def = { condiciones: [{ campo: 'prioridad' as const, op: 'entre' as const, desde: 4, hasta: 6 }] };
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e2', 'e3', 'e6']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id).sort(), ['e2', 'e3', 'e6']);
 });
 
 test('entre con desde > hasta se rechaza en validacion', () => {
   const def = { condiciones: [{ campo: 'usuarios', op: 'entre', desde: 100, hasta: 5 }] } as never;
-  assert.throws(() => empresasDeSegmento(def));
+  assert.throws(() => empresasDeSegmento(def, 1));
 });
 
 test('entre sobre campo de texto (ciudad) se rechaza en validacion', () => {
   const def = { condiciones: [{ campo: 'ciudad', op: 'entre', desde: 1, hasta: 2 }] } as never;
-  assert.throws(() => empresasDeSegmento(def));
+  assert.throws(() => empresasDeSegmento(def, 1));
 });
 
 test('es_null sobre usuarios encuentra las empresas sin dato', () => {
   const def = { condiciones: [{ campo: 'usuarios' as const, op: 'es_null' as const }] };
-  assert.deepEqual(empresasDeSegmento(def).map((e) => e.id).sort(), ['e4', 'e5', 'e6', 'e7']);
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id).sort(), ['e4', 'e5', 'e6', 'e7']);
 });
 
 test('valoresDistintosCampo devuelve valores unicos ordenados sin null', () => {
@@ -234,6 +234,24 @@ test('las exclusiones de un segmento no afectan a otro segmento (aislamiento)', 
   const revision = empresasParaRevision(idB);
   assert.ok(revision);
   assert.equal(revision.find((e) => e.id === 'e1')?.excluida, false);
+});
+
+test('empresasDeSegmento no ve empresas de otra organizacion', () => {
+  const raw = new Database(dbPath);
+  raw
+    .prepare(
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id)
+       VALUES ('e-otra-org', 'nit', 'Otra Org', 'otra org', 'activo', 'on_hold', 2)`,
+    )
+    .run();
+  raw.close();
+
+  const def = { condiciones: [{ campo: 'estado' as const, op: 'en' as const, valores: ['on_hold'] }] };
+  const desdeOrg1 = empresasDeSegmento(def, 1);
+  assert.ok(!desdeOrg1.some((e) => e.id === 'e-otra-org'), 'org 1 no debe ver el lead de la org 2');
+
+  const desdeOrg2 = empresasDeSegmento(def, 2);
+  assert.deepEqual(desdeOrg2.map((e) => e.id), ['e-otra-org']);
 });
 
 test.after(() => {

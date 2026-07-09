@@ -1170,7 +1170,7 @@ function columnaOrden(campo: CampoSegmentoNumerico): SQLiteColumn | SQL<number> 
 }
 
 // es gratis (join sobre PK) y necesario para el campo 'usuarios' del segmento.
-export function empresasDeSegmento(def: DefinicionSegmento) {
+export function empresasDeSegmento(def: DefinicionSegmento, idOrganizacion: number) {
   const val = definicionSegmentoSchema.parse(def);
   let q = db
     .select({
@@ -1183,7 +1183,7 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(compilarSegmento(val))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .$dynamic();
 
   if (val.orden) {

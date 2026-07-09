@@ -36,7 +36,7 @@ seed();
 test('filtra por departamento (columna directa)', () => {
   const soloValle = empresasDeSegmento({
     condiciones: [{ campo: 'departamento', op: 'en', valores: ['Valle del Cauca'] }],
-  });
+  }, 1);
   assert.deepEqual(
     soloValle.map((e) => e.id).sort(),
     ['valle1'],
@@ -44,7 +44,7 @@ test('filtra por departamento (columna directa)', () => {
 });
 
 test('filtra por rol via EXISTS: encuentra la empresa con ese contacto', () => {
-  const conGerente = empresasDeSegmento({ condiciones: [{ campo: 'rol', op: 'en', valores: ['gerente'] }] });
+  const conGerente = empresasDeSegmento({ condiciones: [{ campo: 'rol', op: 'en', valores: ['gerente'] }] }, 1);
   assert.deepEqual(conGerente.map((e) => e.id), ['valle1']);
 });
 
@@ -54,7 +54,7 @@ test('no_en sobre rol usa NOT EXISTS: excluye la empresa que tiene ese rol', () 
       { campo: 'departamento', op: 'en', valores: ['Valle del Cauca', 'Antioquia'] },
       { campo: 'rol', op: 'no_en', valores: ['gerente'] },
     ],
-  });
+  }, 1);
   assert.deepEqual(sinGerente.map((e) => e.id), ['antioquia1']);
 });
 
@@ -64,7 +64,7 @@ test('personas (COUNT) via mayor_que: solo la empresa con 2 contactos pasa mayor
       { campo: 'departamento', op: 'en', valores: ['Valle del Cauca', 'Antioquia'] },
       { campo: 'personas', op: 'mayor_que', valor: 1 },
     ],
-  });
+  }, 1);
   assert.deepEqual(dosOmas.map((e) => e.id), ['valle1']);
 });
 
@@ -74,13 +74,13 @@ test('personas con entre 0..0 encuentra la empresa sin contactos', () => {
       { campo: 'departamento', op: 'en', valores: ['Valle del Cauca', 'Antioquia'] },
       { campo: 'personas', op: 'entre', desde: 0, hasta: 0 },
     ],
-  });
+  }, 1);
   assert.deepEqual(sinContacto.map((e) => e.id), ['antioquia1']);
 });
 
 test('rol con operador es_null se rechaza explicito (rol solo soporta en/no_en)', () => {
   assert.throws(
-    () => empresasDeSegmento({ condiciones: [{ campo: 'rol', op: 'es_null' }] } as any),
+    () => empresasDeSegmento({ condiciones: [{ campo: 'rol', op: 'es_null' }] } as any, 1),
     /rol.*en\/no_en/,
   );
 });
