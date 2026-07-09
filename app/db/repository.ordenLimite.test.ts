@@ -34,7 +34,7 @@ test('empresasDeSegmento ordena por usuarios desc, nulos al final, respeta limit
     orden: { campo: 'usuarios' as const, dir: 'desc' as const },
     limite: 2,
   };
-  const r = empresasDeSegmento(def);
+  const r = empresasDeSegmento(def, 1);
   assert.deepEqual(
     r.map((e) => e.id),
     ['grande', 'media'],
@@ -43,7 +43,7 @@ test('empresasDeSegmento ordena por usuarios desc, nulos al final, respeta limit
 
 test('empresasDeSegmento sin orden ni limite sigue trayendo todas (comportamiento previo)', () => {
   const def = { condiciones: [{ campo: 'es_cliente' as const, op: 'entre' as const, desde: 0, hasta: 1 }] };
-  const r = empresasDeSegmento(def);
+  const r = empresasDeSegmento(def, 1);
   assert.equal(r.length, 3);
 });
 

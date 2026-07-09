@@ -57,7 +57,7 @@ function seed() {
 seed();
 
 const idCadencia = crearCadencia({ nombre: 'C', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
-const idSegmento = guardarSegmento({ nombre: 'on-hold', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
+const idSegmento = guardarSegmento({ nombre: 'on-hold', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
 
 function contactoEmail(idContacto: number): string | null {
   const raw = new Database(dbPath);
@@ -152,7 +152,7 @@ test('resolver una bloqueada la promueve a activa con su destinatario', () => {
 // inscribir. Va al final del archivo: excluir es permanente para el segmento
 // compartido de este archivo, no debe interferir con las aserciones de arriba.
 test('empresa excluida en la revision de leads no se inscribe en una campana nueva', () => {
-  excluirDeSegmento(idSegmento, 'e-primero');
+  excluirDeSegmento(idSegmento, 'e-primero', 1);
   const idCampanaC = crearCampana({ nombre: 'Camp C', idCadencia, idSegmento });
   const res = inscribirCampana(idCampanaC);
 

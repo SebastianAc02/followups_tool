@@ -28,7 +28,7 @@ const idCadencia = crearCadencia({
   ],
 });
 
-const idSegmento = guardarSegmento({ nombre: 'seg-copy-apollo', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
+const idSegmento = guardarSegmento({ nombre: 'seg-copy-apollo', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
 const idCampana = crearCampana({ nombre: 'Campana copy-apollo', idCadencia, idSegmento, fechaInicio: '2026-07-08' });
 
 test('campanaParaSincronizarCopy es null si la campana todavia no tiene secuencia externa', () => {

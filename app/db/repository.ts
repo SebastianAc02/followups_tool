@@ -1170,7 +1170,7 @@ function columnaOrden(campo: CampoSegmentoNumerico): SQLiteColumn | SQL<number> 
 }
 
 // es gratis (join sobre PK) y necesario para el campo 'usuarios' del segmento.
-export function empresasDeSegmento(def: DefinicionSegmento) {
+export function empresasDeSegmento(def: DefinicionSegmento, idOrganizacion: number) {
   const val = definicionSegmentoSchema.parse(def);
   let q = db
     .select({
@@ -1183,7 +1183,7 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(compilarSegmento(val))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .$dynamic();
 
   if (val.orden) {
@@ -1200,30 +1200,29 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
   return q.all();
 }
 
-export function contarSegmento(def: DefinicionSegmento): number {
+export function contarSegmento(def: DefinicionSegmento, idOrganizacion: number): number {
   const val = definicionSegmentoSchema.parse(def);
   const fila = db
     .select({ n: sql<number>`count(*)` })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(compilarSegmento(val))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .get();
   return fila?.n ?? 0;
 }
 
 // V4.3: guarda el filtro compilado como JSON en segmento.definicion. descripcionNatural
 // es opcional (el lenguaje natural lo llena Fase 6, aca solo se persiste si viene).
-export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }): number {
+export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }, idOrganizacion: number): number {
   const val = definicionSegmentoSchema.parse(input.definicion);
   const ahora = new Date().toISOString();
   const ins = db
     .insert(segmento)
-    // Hardcodeado a Onepay (id 1) hasta que segmentos tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: input.nombre,
       definicion: JSON.stringify(val),
       descripcionNatural: input.descripcionNatural ?? null,
-      idOrganizacion: 1,
+      idOrganizacion,
       createdAt: ahora,
       updatedAt: ahora,
     })
@@ -1235,11 +1234,11 @@ export function guardarSegmento(input: { nombre: string; definicion: DefinicionS
 // segmento guardado, para reabrir NuevoSegmento pre-cargado en vez de vacio. El
 // dropdown "Usar un segmento guardado..." salta directo a Cadencia con listarSegmentos
 // (solo metadata); esto es para el caso de VOLVER sobre el que ya se estaba armando.
-export function obtenerSegmento(idSegmento: number): { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } | null {
+export function obtenerSegmento(idSegmento: number, idOrganizacion: number): { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } | null {
   const fila = db
     .select({ nombre: segmento.nombre, definicion: segmento.definicion, descripcionNatural: segmento.descripcionNatural })
     .from(segmento)
-    .where(eq(segmento.idSegmento, idSegmento))
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
     .get();
   if (!fila) return null;
   return { id: idSegmento, nombre: fila.nombre, definicion: definicionSegmentoSchema.parse(JSON.parse(fila.definicion)), descripcionNatural: fila.descripcionNatural };
@@ -1249,20 +1248,27 @@ export function obtenerSegmento(idSegmento: number): { id: number; nombre: strin
 // silencioso de NuevoSegmento) en vez de crear uno nuevo por cada ajuste de filtro --
 // si no, cada tecla dejaria un segmento huerfano distinto en "Usar un segmento
 // guardado...".
-export function actualizarSegmento(idSegmento: number, cambios: { nombre?: string; definicion?: DefinicionSegmento; descripcionNatural?: string }): void {
+export function actualizarSegmento(idSegmento: number, cambios: { nombre?: string; definicion?: DefinicionSegmento; descripcionNatural?: string }, idOrganizacion: number): void {
   const sets: Record<string, unknown> = {};
   if (cambios.nombre !== undefined) sets.nombre = cambios.nombre;
   if (cambios.definicion !== undefined) sets.definicion = JSON.stringify(definicionSegmentoSchema.parse(cambios.definicion));
   if (cambios.descripcionNatural !== undefined) sets.descripcionNatural = cambios.descripcionNatural;
   if (Object.keys(sets).length === 0) return;
   sets.updatedAt = new Date().toISOString();
-  db.update(segmento).set(sets).where(eq(segmento.idSegmento, idSegmento)).run();
+  // Multi-organizacion (Parte 2): el UPDATE solo pega si el segmento es de idOrganizacion.
+  // Silencioso a proposito (no throw) -- ver nota de diseno al inicio del plan: coherente
+  // con que obtenerSegmento ya trata "es de otra organizacion" igual que "no existe".
+  db.update(segmento)
+    .set(sets)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .run();
 }
 
-export function listarSegmentos() {
+export function listarSegmentos(idOrganizacion: number) {
   return db
     .select({ id: segmento.idSegmento, nombre: segmento.nombre, descripcionNatural: segmento.descripcionNatural })
     .from(segmento)
+    .where(eq(segmento.idOrganizacion, idOrganizacion))
     .orderBy(desc(segmento.idSegmento))
     .all();
 }
@@ -1270,14 +1276,15 @@ export function listarSegmentos() {
 // Parte 1 campanas: valores unicos de un campo de texto para poblar el dropdown del
 // builder (estilo Apollo). Solo campos de texto: los numericos se filtran por rango,
 // no por lista, y ademas usuarios vive en otra tabla.
-export function valoresDistintosCampo(campo: CampoSegmento): string[] {
+export function valoresDistintosCampo(campo: CampoSegmento, idOrganizacion: number): string[] {
   // rol vive en contacto, no en empresa (mismo motivo que en compilarSegmento):
   // el dropdown de roles sale de cargo_categoria, no de COLUMNA_SEGMENTO.
   if (campo === 'rol') {
     const filas = db
       .selectDistinct({ v: contacto.cargoCategoria })
       .from(contacto)
-      .where(isNotNull(contacto.cargoCategoria))
+      .innerJoin(empresa, eq(empresa.idEmpresa, contacto.idEmpresa))
+      .where(and(isNotNull(contacto.cargoCategoria), eq(empresa.organizacionActivaId, idOrganizacion)))
       .orderBy(contacto.cargoCategoria)
       .all();
     return filas.map((f) => String(f.v));
@@ -1286,7 +1293,12 @@ export function valoresDistintosCampo(campo: CampoSegmento): string[] {
   if (numerico) {
     throw new Error(`el campo '${campo}' es numerico: se filtra por rango, no por lista de valores`);
   }
-  const filas = db.selectDistinct({ v: col }).from(empresa).where(isNotNull(col)).orderBy(col).all();
+  const filas = db
+    .selectDistinct({ v: col })
+    .from(empresa)
+    .where(and(isNotNull(col), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .orderBy(col)
+    .all();
   return filas.map((f) => String(f.v));
 }
 
@@ -1322,8 +1334,8 @@ function _contactosDe(idsEmpresa: string[]): Map<string, { email: string | null;
 // Parte 5 campanas: trae las empresas del segmento con su readiness de canal segun la
 // cadencia (canalesRequeridos) y la regla de faltante. La query es solo lectura; el
 // calculo (canalesDisponibles/readinessEmpresa) vive en core, puro y testeado aparte.
-export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): FilaReadiness[] {
-  const empresas = empresasDeSegmento(def);
+export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante, idOrganizacion: number): FilaReadiness[] {
+  const empresas = empresasDeSegmento(def, idOrganizacion);
   const contactosPorEmpresa = _contactosDe(empresas.map((e) => e.id));
   return empresas.map((e) => {
     const contactos = contactosPorEmpresa.get(e.id) ?? [];
@@ -1340,8 +1352,8 @@ export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos:
   });
 }
 
-export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): ConteosReadiness {
-  const filas = empresasConReadiness(def, canalesRequeridos, regla);
+export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante, idOrganizacion: number): ConteosReadiness {
+  const filas = empresasConReadiness(def, canalesRequeridos, regla, idOrganizacion);
   return {
     total: filas.length,
     listas: filas.filter((f) => f.readiness.estado === 'lista').length,
@@ -1517,24 +1529,43 @@ export function actualizarCampanaBasico(idCampana: number, cambios: { nombre?: s
 
 // V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el
 // puente que V4.5 usa para inscribir "todas las empresas de este segmento".
-export function empresasDeSegmentoGuardado(idSegmento: number) {
-  const fila = db.select({ definicion: segmento.definicion }).from(segmento).where(eq(segmento.idSegmento, idSegmento)).get();
+export function empresasDeSegmentoGuardado(idSegmento: number, idOrganizacion: number) {
+  const fila = db
+    .select({ definicion: segmento.definicion })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
   if (!fila) return null;
   const def = definicionSegmentoSchema.parse(JSON.parse(fila.definicion));
-  return empresasDeSegmento(def);
+  return empresasDeSegmento(def, idOrganizacion);
 }
 
 // Parte 2 campanas: excluir/incluir es un toggle idempotente sobre la fila unica
 // (id_segmento, id_empresa). Excluir dos veces no duplica (ON CONFLICT DO NOTHING);
 // incluir de vuelta borra la fila si existe (no truena si ya estaba incluida).
-export function excluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+export function excluirDeSegmento(idSegmento: number, idEmpresa: string, idOrganizacion: number): void {
+  // Multi-organizacion (Parte 2): guard silencioso, misma logica que actualizarSegmento --
+  // segmento_exclusion no tiene columna propia de organizacion (hereda por join a segmento),
+  // asi que se valida la propiedad del segmento antes de escribir.
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return;
   db.insert(segmentoExclusion)
     .values({ idSegmento, idEmpresa, createdAt: new Date().toISOString() })
     .onConflictDoNothing()
     .run();
 }
 
-export function incluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+export function incluirDeSegmento(idSegmento: number, idEmpresa: string, idOrganizacion: number): void {
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return;
   db.delete(segmentoExclusion)
     .where(and(eq(segmentoExclusion.idSegmento, idSegmento), eq(segmentoExclusion.idEmpresa, idEmpresa)))
     .run();
@@ -1543,8 +1574,8 @@ export function incluirDeSegmento(idSegmento: number, idEmpresa: string): void {
 // Parte 2 campanas: la pantalla de revision necesita TODAS las empresas del segmento,
 // cada una marcada si ya esta excluida (para pintar el toggle en su estado real). No
 // filtra las excluidas: las deja ver para poder des-excluirlas antes de "continuar".
-export function empresasParaRevision(idSegmento: number) {
-  const empresas = empresasDeSegmentoGuardado(idSegmento);
+export function empresasParaRevision(idSegmento: number, idOrganizacion: number) {
+  const empresas = empresasDeSegmentoGuardado(idSegmento, idOrganizacion);
   if (!empresas) return null;
   const excluidas = new Set(
     db
@@ -2103,8 +2134,8 @@ export type DestinatarioMuestra = {
   email: string | null;
 };
 
-export function muestraDestinatarioDeSegmento(idSegmento: number): DestinatarioMuestra | null {
-  const empresas = empresasParaRevision(idSegmento);
+export function muestraDestinatarioDeSegmento(idSegmento: number, idOrganizacion: number): DestinatarioMuestra | null {
+  const empresas = empresasParaRevision(idSegmento, idOrganizacion);
   if (!empresas) return null;
   const activas = empresas.filter((e) => !e.excluida);
   if (activas.length === 0) return null;

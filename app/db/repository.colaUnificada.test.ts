@@ -63,8 +63,8 @@ const idCadencia = crearCadencia({
     { orden: 2, diaOffset: 0, canal: 'llamada', objetivo: 'Tier 1', esManual: true },
   ],
 });
-const idSeg1 = guardarSegmento({ nombre: 'cola-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-1'] }] } });
-const idSeg2 = guardarSegmento({ nombre: 'cola-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-2'] }] } });
+const idSeg1 = guardarSegmento({ nombre: 'cola-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-1'] }] } }, 1);
+const idSeg2 = guardarSegmento({ nombre: 'cola-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-2'] }] } }, 1);
 
 const idCampanaAuto = crearCampana({ nombre: 'Camp auto', idCadencia, idSegmento: idSeg1 });
 inscribirCampana(idCampanaAuto);
@@ -140,7 +140,7 @@ const idCadenciaCopy = crearCadencia({
     },
   ],
 });
-const idSegCopy = guardarSegmento({ nombre: 'cola-seg-copy', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-3'] }] } });
+const idSegCopy = guardarSegmento({ nombre: 'cola-seg-copy', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-3'] }] } }, 1);
 const idCampanaCopy = crearCampana({ nombre: 'Camp copy', idCadencia: idCadenciaCopy, idSegmento: idSegCopy, modo: 'batch' });
 inscribirCampana(idCampanaCopy);
 const idInscCopy = historialInscripciones('e-cola-3').find((i) => i.estado === 'activa')!.id;
@@ -173,7 +173,7 @@ const idCadenciaHist = crearCadencia({
     { orden: 3, diaOffset: 7, canal: 'correo', cuerpo: 'p3', esManual: true },
   ],
 });
-const idSegHist = guardarSegmento({ nombre: 'cola-seg-hist', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-4'] }] } });
+const idSegHist = guardarSegmento({ nombre: 'cola-seg-hist', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-4'] }] } }, 1);
 const idCampanaHist = crearCampana({ nombre: 'Camp hist', idCadencia: idCadenciaHist, idSegmento: idSegHist });
 inscribirCampana(idCampanaHist);
 const idInscHist = historialInscripciones('e-cola-4').find((i) => i.estado === 'activa')!.id;

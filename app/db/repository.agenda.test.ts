@@ -34,7 +34,7 @@ const idCadencia = crearCadencia({
     { orden: 2, diaOffset: 3, canal: 'whatsapp', cuerpo: 'b', esManual: true },
   ],
 });
-const idSegmento = guardarSegmento({ nombre: 'on-hold', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
+const idSegmento = guardarSegmento({ nombre: 'on-hold', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
 
 test('agendaEnSeco muestra el primer paso de las inscripciones activas para hoy', () => {
   const idCampana = crearCampana({ nombre: 'Camp', idCadencia, idSegmento });
