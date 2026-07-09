@@ -192,7 +192,7 @@ test('excluirDeSegmento marca una empresa como excluida en empresasParaRevision'
     nombre: 'revision-2',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   }, 1);
-  excluirDeSegmento(idSegmento, 'e4');
+  excluirDeSegmento(idSegmento, 'e4', 1);
   const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   const e4 = revision.find((e) => e.id === 'e4');
@@ -205,8 +205,8 @@ test('excluirDeSegmento es idempotente (excluir dos veces no truena ni duplica)'
     nombre: 'revision-3',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   }, 1);
-  excluirDeSegmento(idSegmento, 'e2');
-  excluirDeSegmento(idSegmento, 'e2');
+  excluirDeSegmento(idSegmento, 'e2', 1);
+  excluirDeSegmento(idSegmento, 'e2', 1);
   const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   assert.equal(revision.filter((e) => e.id === 'e2' && e.excluida).length, 1);
@@ -217,8 +217,8 @@ test('incluirDeSegmento deshace una exclusion (toggle de vuelta)', () => {
     nombre: 'revision-4',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   }, 1);
-  excluirDeSegmento(idSegmento, 'e3');
-  incluirDeSegmento(idSegmento, 'e3');
+  excluirDeSegmento(idSegmento, 'e3', 1);
+  incluirDeSegmento(idSegmento, 'e3', 1);
   const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   assert.equal(revision.find((e) => e.id === 'e3')?.excluida, false);
@@ -233,10 +233,27 @@ test('las exclusiones de un segmento no afectan a otro segmento (aislamiento)', 
     nombre: 'revision-5b',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   }, 1);
-  excluirDeSegmento(idA, 'e1');
+  excluirDeSegmento(idA, 'e1', 1);
   const revision = empresasParaRevision(idB, 1);
   assert.ok(revision);
   assert.equal(revision.find((e) => e.id === 'e1')?.excluida, false);
+});
+
+test('excluirDeSegmento no hace nada si el segmento es de otra organizacion', () => {
+  const id = guardarSegmento({ nombre: 'excluir-otra-org', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
+  excluirDeSegmento(id, 'e1', 2);
+  const revision = empresasParaRevision(id, 1);
+  assert.ok(revision);
+  assert.equal(revision!.find((e) => e.id === 'e1')?.excluida, false, 'la organizacion 2 no debe poder excluir sobre un segmento ajeno');
+});
+
+test('incluirDeSegmento no hace nada si el segmento es de otra organizacion', () => {
+  const id = guardarSegmento({ nombre: 'incluir-otra-org', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
+  excluirDeSegmento(id, 'e2', 1);
+  incluirDeSegmento(id, 'e2', 2);
+  const revision = empresasParaRevision(id, 1);
+  assert.ok(revision);
+  assert.equal(revision!.find((e) => e.id === 'e2')?.excluida, true, 'la organizacion 2 no debe poder deshacer una exclusion ajena');
 });
 
 test('empresasDeSegmento no ve empresas de otra organizacion', () => {

@@ -1543,14 +1543,29 @@ export function empresasDeSegmentoGuardado(idSegmento: number, idOrganizacion: n
 // Parte 2 campanas: excluir/incluir es un toggle idempotente sobre la fila unica
 // (id_segmento, id_empresa). Excluir dos veces no duplica (ON CONFLICT DO NOTHING);
 // incluir de vuelta borra la fila si existe (no truena si ya estaba incluida).
-export function excluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+export function excluirDeSegmento(idSegmento: number, idEmpresa: string, idOrganizacion: number): void {
+  // Multi-organizacion (Parte 2): guard silencioso, misma logica que actualizarSegmento --
+  // segmento_exclusion no tiene columna propia de organizacion (hereda por join a segmento),
+  // asi que se valida la propiedad del segmento antes de escribir.
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return;
   db.insert(segmentoExclusion)
     .values({ idSegmento, idEmpresa, createdAt: new Date().toISOString() })
     .onConflictDoNothing()
     .run();
 }
 
-export function incluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+export function incluirDeSegmento(idSegmento: number, idEmpresa: string, idOrganizacion: number): void {
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return;
   db.delete(segmentoExclusion)
     .where(and(eq(segmentoExclusion.idSegmento, idSegmento), eq(segmentoExclusion.idEmpresa, idEmpresa)))
     .run();
