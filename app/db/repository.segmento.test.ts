@@ -18,6 +18,7 @@ const {
   listarSegmentos,
   valoresDistintosCampo,
   empresasParaRevision,
+  muestraDestinatarioDeSegmento,
   excluirDeSegmento,
   incluirDeSegmento,
 } = await import('./repository.ts');
@@ -175,7 +176,7 @@ test('empresasParaRevision devuelve todas las del segmento con excluida=false', 
     nombre: 'revision-1',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   });
-  const revision = empresasParaRevision(idSegmento);
+  const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   assert.deepEqual(
     revision.map((e) => e.id).sort(),
@@ -190,7 +191,7 @@ test('excluirDeSegmento marca una empresa como excluida en empresasParaRevision'
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   });
   excluirDeSegmento(idSegmento, 'e4');
-  const revision = empresasParaRevision(idSegmento);
+  const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   const e4 = revision.find((e) => e.id === 'e4');
   assert.equal(e4?.excluida, true);
@@ -204,7 +205,7 @@ test('excluirDeSegmento es idempotente (excluir dos veces no truena ni duplica)'
   });
   excluirDeSegmento(idSegmento, 'e2');
   excluirDeSegmento(idSegmento, 'e2');
-  const revision = empresasParaRevision(idSegmento);
+  const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   assert.equal(revision.filter((e) => e.id === 'e2' && e.excluida).length, 1);
 });
@@ -216,7 +217,7 @@ test('incluirDeSegmento deshace una exclusion (toggle de vuelta)', () => {
   });
   excluirDeSegmento(idSegmento, 'e3');
   incluirDeSegmento(idSegmento, 'e3');
-  const revision = empresasParaRevision(idSegmento);
+  const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   assert.equal(revision.find((e) => e.id === 'e3')?.excluida, false);
 });
@@ -231,7 +232,7 @@ test('las exclusiones de un segmento no afectan a otro segmento (aislamiento)', 
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   });
   excluirDeSegmento(idA, 'e1');
-  const revision = empresasParaRevision(idB);
+  const revision = empresasParaRevision(idB, 1);
   assert.ok(revision);
   assert.equal(revision.find((e) => e.id === 'e1')?.excluida, false);
 });
@@ -261,6 +262,32 @@ test('empresasDeSegmentoGuardado no corre el segmento de otra organizacion', () 
   });
   assert.equal(empresasDeSegmentoGuardado(id, 2), null, 'la organizacion 2 no puede correr un segmento que no es suyo');
   assert.ok(empresasDeSegmentoGuardado(id, 1));
+});
+
+test('empresasParaRevision devuelve null si el segmento es de otra organizacion', () => {
+  const id = guardarSegmento({
+    nombre: 'revision-otra-org',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  assert.equal(empresasParaRevision(id, 2), null);
+});
+
+test('muestraDestinatarioDeSegmento trae un contacto real del segmento, y null si es de otra organizacion', () => {
+  const raw = new Database(dbPath);
+  raw
+    .prepare(`INSERT INTO contacto (id_empresa, nombre, cargo_categoria, fuente) VALUES (?, ?, ?, ?)`)
+    .run('e1', 'Ana', 'gerente', 'seed');
+  raw.close();
+
+  const id = guardarSegmento({
+    nombre: 'muestra-1',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  const muestra = muestraDestinatarioDeSegmento(id, 1);
+  assert.ok(muestra);
+  assert.ok(muestra.nombre.length > 0);
+
+  assert.equal(muestraDestinatarioDeSegmento(id, 2), null, 'otra organizacion no debe ver el destinatario de muestra');
 });
 
 test.after(() => {

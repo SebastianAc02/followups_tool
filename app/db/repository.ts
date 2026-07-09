@@ -1547,8 +1547,8 @@ export function incluirDeSegmento(idSegmento: number, idEmpresa: string): void {
 // Parte 2 campanas: la pantalla de revision necesita TODAS las empresas del segmento,
 // cada una marcada si ya esta excluida (para pintar el toggle en su estado real). No
 // filtra las excluidas: las deja ver para poder des-excluirlas antes de "continuar".
-export function empresasParaRevision(idSegmento: number) {
-  const empresas = empresasDeSegmentoGuardado(idSegmento);
+export function empresasParaRevision(idSegmento: number, idOrganizacion: number) {
+  const empresas = empresasDeSegmentoGuardado(idSegmento, idOrganizacion);
   if (!empresas) return null;
   const excluidas = new Set(
     db
@@ -2107,8 +2107,8 @@ export type DestinatarioMuestra = {
   email: string | null;
 };
 
-export function muestraDestinatarioDeSegmento(idSegmento: number): DestinatarioMuestra | null {
-  const empresas = empresasParaRevision(idSegmento);
+export function muestraDestinatarioDeSegmento(idSegmento: number, idOrganizacion: number): DestinatarioMuestra | null {
+  const empresas = empresasParaRevision(idSegmento, idOrganizacion);
   if (!empresas) return null;
   const activas = empresas.filter((e) => !e.excluida);
   if (activas.length === 0) return null;
