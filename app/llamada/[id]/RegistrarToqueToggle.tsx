@@ -1,23 +1,24 @@
 "use client";
 
-import { useState } from "react";
 import CapturaLlamada from "./CapturaLlamada";
+import { usePreguntar } from "./PreguntarContext";
+import type { Calificacion } from "../../core/calificacion";
 
-// LlamadaCard es server component (no necesita "use client" para pintar). El unico estado
-// de UI que hace falta aca es el toggle de visibilidad del formulario -- en vez de convertir
-// toda la card a client, se aisla en este wrapper chico. Patron menos invasivo: mantiene
-// LlamadaCard como server component y solo paga el costo de hidratacion en este boton.
-export function RegistrarToqueToggle({ idEmpresa }: { idEmpresa: string }) {
-  const [abierto, setAbierto] = useState(false);
+// LlamadaCard es server component (no necesita "use client" para pintar). El estado de
+// abierto/campoEnfocado vive en PreguntarContext (2026-07-08), compartido con
+// CalificacionChecklist -- antes este componente tenia su propio useState aislado, por
+// eso un click en un item "PREGUNTAR" del checklist no podia abrir el formulario.
+export function RegistrarToqueToggle({ idEmpresa, calificacion }: { idEmpresa: string; calificacion: Calificacion }) {
+  const { abierto, campoEnfocado, abrir } = usePreguntar();
 
   if (abierto) {
-    return <CapturaLlamada idEmpresa={idEmpresa} />;
+    return <CapturaLlamada idEmpresa={idEmpresa} calificacion={calificacion} campoEnfocado={campoEnfocado} />;
   }
 
   return (
     <button
       type="button"
-      onClick={() => setAbierto(true)}
+      onClick={() => abrir()}
       className="rounded-lg bg-accent-llamada px-4 py-2 text-[12.5px] font-semibold text-ink transition-colors hover:opacity-90"
     >
       Registrar toque

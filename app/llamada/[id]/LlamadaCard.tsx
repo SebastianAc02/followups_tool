@@ -4,6 +4,7 @@ import { Pill, pillParaEstado } from "../../ui/Pill";
 import { SecuenciaRail } from "./SecuenciaRail";
 import { CalificacionChecklist } from "./CalificacionChecklist";
 import { RegistrarToqueToggle } from "./RegistrarToqueToggle";
+import { PreguntarProvider } from "./PreguntarContext";
 
 // Ensambla la specimen card "Onepay Llamada Toque 1": header de la cuenta, riel de
 // secuencia a la izquierda y el cuerpo de trabajo (accion sugerida, datos de la cuenta,
@@ -89,51 +90,53 @@ export function LlamadaCard({
       <div className="flex flex-col md:grid md:grid-cols-[192px_1fr]">
         <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} />
 
-        <div className="flex flex-col gap-4 p-5">
-          {/* Suggested action */}
-          <div>
-            <div className="rounded-xl border border-accent-llamada bg-accent-llamada-soft p-4">
-              <div className="text-base font-semibold leading-tight text-ink">Llamar a {principal?.nombre ?? "el contacto"}</div>
-              {principal?.telefono && (
-                <div className="mt-0.5 font-toque-mono text-xs font-medium text-accent-llamada">{principal.telefono}</div>
-              )}
+        <PreguntarProvider>
+          <div className="flex flex-col gap-4 p-5">
+            {/* Suggested action */}
+            <div>
+              <div className="rounded-xl border border-accent-llamada bg-accent-llamada-soft p-4">
+                <div className="text-base font-semibold leading-tight text-ink">Llamar a {principal?.nombre ?? "el contacto"}</div>
+                {principal?.telefono && (
+                  <div className="mt-0.5 font-toque-mono text-xs font-medium text-accent-llamada">{principal.telefono}</div>
+                )}
+              </div>
+              <div className="mt-2 text-[10.5px] text-muted">
+                Si no contesta, pasa al siguiente canal de la secuencia.
+              </div>
             </div>
-            <div className="mt-2 text-[10.5px] text-muted">
-              Si no contesta, pasa al siguiente canal de la secuencia.
+
+            {/* Account facts */}
+            <div>
+              <div className="mb-2 text-xs font-semibold text-ink-soft">La cuenta</div>
+              <div className="mb-2 grid grid-cols-3 gap-2">
+                <FichaDato label="Ciudad" valor={emp?.ciudad ?? "—"} />
+                <FichaDato label="Estado" valor={estadoPill?.label ?? emp?.estado ?? "—"} />
+                <FichaDato
+                  label="Último toque"
+                  valor={ultimoToque ? `${fechaCorta(ultimoToque.fecha)} · ${ultimoToque.canal}` : "Sin toques previos"}
+                />
+              </div>
+              <div className="flex items-center gap-2 rounded-lg border border-line bg-shell p-2">
+                <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Próximo paso</span>
+                <span className="text-[12px] font-medium text-ink-soft">{emp?.proximoPaso ?? "Sin definir"}</span>
+              </div>
+            </div>
+
+            <CalificacionChecklist calificacion={calificacion} />
+
+            {/* Bottom action row */}
+            <div className="mt-auto flex flex-col gap-4 border-t border-line pt-4">
+              <div className="flex items-center gap-2 font-toque-mono text-[10.5px] font-medium text-muted">
+                <span className="text-accent-llamada">Llamada</span>
+                <span>·</span>
+                <span>Registrar</span>
+                <span>·</span>
+                <span>Confirmar</span>
+              </div>
+              <RegistrarToqueToggle idEmpresa={emp?.id ?? ""} calificacion={calificacion} />
             </div>
           </div>
-
-          {/* Account facts */}
-          <div>
-            <div className="mb-2 text-xs font-semibold text-ink-soft">La cuenta</div>
-            <div className="mb-2 grid grid-cols-3 gap-2">
-              <FichaDato label="Ciudad" valor={emp?.ciudad ?? "—"} />
-              <FichaDato label="Estado" valor={estadoPill?.label ?? emp?.estado ?? "—"} />
-              <FichaDato
-                label="Último toque"
-                valor={ultimoToque ? `${fechaCorta(ultimoToque.fecha)} · ${ultimoToque.canal}` : "Sin toques previos"}
-              />
-            </div>
-            <div className="flex items-center gap-2 rounded-lg border border-line bg-shell p-2">
-              <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Próximo paso</span>
-              <span className="text-[12px] font-medium text-ink-soft">{emp?.proximoPaso ?? "Sin definir"}</span>
-            </div>
-          </div>
-
-          <CalificacionChecklist calificacion={calificacion} />
-
-          {/* Bottom action row */}
-          <div className="mt-auto flex flex-col gap-4 border-t border-line pt-4">
-            <div className="flex items-center gap-2 font-toque-mono text-[10.5px] font-medium text-muted">
-              <span className="text-accent-llamada">Llamada</span>
-              <span>·</span>
-              <span>Registrar</span>
-              <span>·</span>
-              <span>Confirmar</span>
-            </div>
-            <RegistrarToqueToggle idEmpresa={emp?.id ?? ""} />
-          </div>
-        </div>
+        </PreguntarProvider>
       </div>
     </div>
   );

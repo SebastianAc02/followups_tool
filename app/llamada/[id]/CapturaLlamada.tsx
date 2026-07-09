@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { registrarToqueAction, estructurarDictadoAction } from "./actions";
-import { RESULTADO_LABELS, RESULTADOS, type Resultado } from "../../db/validation";
+import { RESULTADO_LABELS, RESULTADOS, RESULTADOS_CONTESTO, type Resultado } from "../../db/validation";
 import { plusDias } from "../../lib/date-utils";
 import type { ToqueEstructurado } from "../../core/estructurar-toque";
+import type { Calificacion, CampoCalificacion } from "../../core/calificacion";
 
 const OUTCOMES: { v: Resultado; l: string }[] = RESULTADOS.map((v) => ({ v, l: RESULTADO_LABELS[v] }));
 const CHIPS: [string, number][] = [["+1d", 1], ["+3d", 3], ["+1sem", 7]];
@@ -17,13 +18,51 @@ const inputClase =
 // texto-a-voz externo, nunca audio en la app) y pedir que la IA lo estructure en un
 // borrador editable -- el owner siempre corrige antes de guardar. Todo tokens: cero
 // clases legacy (.capture/.oc2/.reveal), para no desentonar con el resto de la tarjeta.
-export default function CapturaLlamada({ idEmpresa }: { idEmpresa: string }) {
+export default function CapturaLlamada({
+  idEmpresa,
+  calificacion,
+  campoEnfocado,
+}: {
+  idEmpresa: string;
+  // Con qué de usuarios/CRM/pasarela ya cuenta la cuenta (2026-07-08): el form solo
+  // pide lo que el checklist de arriba marca "preguntar" -- antes repetía los tres
+  // campos siempre, aunque ya estuvieran guardados. Sin esto, no rompe: simplemente
+  // vuelve a preguntar todo (comportamiento anterior).
+  calificacion?: Calificacion;
+  // Campo en el que abrió el formulario desde un click en el checklist -- se enfoca
+  // apenas el bloque de campos queda visible.
+  campoEnfocado?: CampoCalificacion | null;
+}) {
   const [outcome, setOutcome] = useState<Resultado | "">("");
   const [fecha, setFecha] = useState(plusDias(3));
   const [dictado, setDictado] = useState("");
   const [estructurando, setEstructurando] = useState(false);
   const [borrador, setBorrador] = useState<ToqueEstructurado | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const yaTengo = new Set(
+    (calificacion?.items ?? []).filter((i) => i.estado === "tengo").map((i) => i.campo),
+  );
+  // no_contesto: nunca hubo conversación, nada que calificar ni que resumir (mismo
+  // criterio que RESULTADOS_CONTESTO ya usa para decidir si buscar en Granola).
+  const huboConversacion = outcome !== "" && RESULTADOS_CONTESTO.includes(outcome);
+  const pideUsuarios = huboConversacion && !yaTengo.has("usuarios");
+  const pideCrm = huboConversacion && !yaTengo.has("crm");
+  const pidePasarela = huboConversacion && !yaTengo.has("pasarela");
+  const pideDatosCuenta = pideUsuarios || pideCrm || pidePasarela;
+
+  const refUsuarios = useRef<HTMLInputElement>(null);
+  const refCrm = useRef<HTMLInputElement>(null);
+  const refPasarela = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!huboConversacion || !campoEnfocado) return;
+    const ref = { usuarios: refUsuarios, crm: refCrm, pasarela: refPasarela }[campoEnfocado as "usuarios" | "crm" | "pasarela"];
+    ref?.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    ref?.current?.focus();
+    // Solo la primera vez que el campo pedido queda visible -- no en cada render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [huboConversacion]);
 
   async function estructurar() {
     setEstructurando(true);
@@ -50,43 +89,46 @@ export default function CapturaLlamada({ idEmpresa }: { idEmpresa: string }) {
       <input type="hidden" name="toqueCanal" value="llamada" />
       <input type="hidden" name="canal" value="llamada" />
 
-      {/* Resumen + estructurar */}
-      <div>
-        <div className="mb-2 flex items-center gap-2">
-          <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-accent-llamada-soft text-accent-llamada">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
-              <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" />
-              <path d="M19 11a7 7 0 0 1-14 0M12 18v3" strokeLinecap="round" />
-            </svg>
-          </span>
-          <span className="font-toque-heading text-[13px] text-ink">Tu resumen</span>
-        </div>
-        <textarea
-          className={`${inputClase} resize-none`}
-          rows={3}
-          placeholder="Que paso en la llamada..."
-          value={dictado}
-          onChange={(e) => setDictado(e.target.value)}
-          disabled={estructurando}
-        />
-
-        {estructurando ? (
-          <div className="mt-2 flex items-center gap-2 rounded-lg border border-accent-llamada bg-accent-llamada-soft px-3 py-2">
-            <span className="h-3 w-3 flex-none animate-spin rounded-full border-2 border-accent-llamada border-t-transparent" />
-            <span className="font-toque-mono text-[11.5px] text-accent-llamada">Estructurando tu resumen...</span>
+      {/* Resumen + estructurar: no tiene sentido dictar un resumen de una llamada que no
+          se contestó -- nunca hubo conversación que resumir. */}
+      {outcome !== "no_contesto" && (
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-accent-llamada-soft text-accent-llamada">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" />
+                <path d="M19 11a7 7 0 0 1-14 0M12 18v3" strokeLinecap="round" />
+              </svg>
+            </span>
+            <span className="font-toque-heading text-[13px] text-ink">Tu resumen</span>
           </div>
-        ) : (
-          <button
-            type="button"
-            className="mt-2 rounded-lg bg-accent-llamada px-3.5 py-1.5 text-[12.5px] font-semibold text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
-            disabled={!dictado.trim()}
-            onClick={estructurar}
-          >
-            Estructurar con IA
-          </button>
-        )}
-        {error && <p className="mt-2 text-[12px] text-overdue">{error}</p>}
-      </div>
+          <textarea
+            className={`${inputClase} resize-none`}
+            rows={3}
+            placeholder="Que paso en la llamada..."
+            value={dictado}
+            onChange={(e) => setDictado(e.target.value)}
+            disabled={estructurando}
+          />
+
+          {estructurando ? (
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-accent-llamada bg-accent-llamada-soft px-3 py-2">
+              <span className="h-3 w-3 flex-none animate-spin rounded-full border-2 border-accent-llamada border-t-transparent" />
+              <span className="font-toque-mono text-[11.5px] text-accent-llamada">Estructurando tu resumen...</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="mt-2 rounded-lg bg-accent-llamada px-3.5 py-1.5 text-[12.5px] font-semibold text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
+              disabled={!dictado.trim()}
+              onClick={estructurar}
+            >
+              Estructurar con IA
+            </button>
+          )}
+          {error && <p className="mt-2 text-[12px] text-overdue">{error}</p>}
+        </div>
+      )}
 
       {/* Resultado */}
       <div>
@@ -111,31 +153,58 @@ export default function CapturaLlamada({ idEmpresa }: { idEmpresa: string }) {
 
       {outcome && (
         <div className="flex flex-col gap-3 border-t border-line pt-4">
-          <div className="grid grid-cols-3 gap-2">
-            <label className="flex flex-col gap-1">
-              <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Usuarios</span>
-              <input name="usuarios" type="number" inputMode="numeric" placeholder="—" defaultValue={borrador?.usuarios ?? undefined} className={inputClase} />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">CRM</span>
-              <input name="crm" placeholder="—" defaultValue={borrador?.crm ?? undefined} className={inputClase} />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Pasarela</span>
-              <input name="pasarela" placeholder="—" defaultValue={borrador?.pasarela ?? undefined} className={inputClase} />
-            </label>
-          </div>
+          {/* Solo pide lo que el checklist de arriba marca "preguntar" -- si ya tiene
+              usuarios/CRM/pasarela, no vuelve a preguntarlos. Nada de esto (ni "Qué
+              pasó") aplica si no contestó: no hubo conversación que calificar. */}
+          {pideDatosCuenta && (
+            <div className="grid grid-cols-3 gap-2">
+              {pideUsuarios && (
+                <label className="flex flex-col gap-1">
+                  <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Usuarios</span>
+                  <input
+                    ref={refUsuarios}
+                    name="usuarios"
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="—"
+                    defaultValue={borrador?.usuarios ?? undefined}
+                    className={inputClase}
+                  />
+                </label>
+              )}
+              {pideCrm && (
+                <label className="flex flex-col gap-1">
+                  <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">CRM</span>
+                  <input ref={refCrm} name="crm" placeholder="—" defaultValue={borrador?.crm ?? undefined} className={inputClase} />
+                </label>
+              )}
+              {pidePasarela && (
+                <label className="flex flex-col gap-1">
+                  <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Pasarela</span>
+                  <input
+                    ref={refPasarela}
+                    name="pasarela"
+                    placeholder="—"
+                    defaultValue={borrador?.pasarela ?? undefined}
+                    className={inputClase}
+                  />
+                </label>
+              )}
+            </div>
+          )}
 
-          <label className="flex flex-col gap-1">
-            <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Qué pasó</span>
-            <textarea
-              name="quePaso"
-              rows={2}
-              placeholder="En una línea, para que cualquiera lo entienda"
-              defaultValue={borrador?.quePaso ?? ""}
-              className={`${inputClase} resize-none`}
-            />
-          </label>
+          {huboConversacion && (
+            <label className="flex flex-col gap-1">
+              <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Qué pasó</span>
+              <textarea
+                name="quePaso"
+                rows={2}
+                placeholder="En una línea, para que cualquiera lo entienda"
+                defaultValue={borrador?.quePaso ?? ""}
+                className={`${inputClase} resize-none`}
+              />
+            </label>
+          )}
 
           {outcome === "contesto_no" && (
             <label className="flex flex-col gap-1">
