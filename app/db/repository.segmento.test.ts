@@ -45,7 +45,7 @@ test('segmento on_hold devuelve exactamente las 4 empresas on_hold (conteo a man
   const def = { condiciones: [{ campo: 'estado' as const, op: 'en' as const, valores: ['on_hold'] }] };
   const empresas = empresasDeSegmento(def, 1);
   assert.deepEqual(empresas.map((e) => e.id).sort(), ['e1', 'e2', 'e3', 'e4']);
-  assert.equal(contarSegmento(def), 4);
+  assert.equal(contarSegmento(def, 1), 4);
 });
 
 test('condiciones se ANDean: on_hold + isp excluye la utility', () => {
@@ -125,7 +125,7 @@ seedUsuarios();
 test('entre sobre usuarios: 3000..10000 devuelve solo e2', () => {
   const def = { condiciones: [{ campo: 'usuarios' as const, op: 'entre' as const, desde: 3000, hasta: 10000 }] };
   assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id), ['e2']);
-  assert.equal(contarSegmento(def), 1);
+  assert.equal(contarSegmento(def, 1), 1);
 });
 
 test('entre excluye empresas sin dato de usuarios (NULL no matchea rango)', () => {
@@ -253,6 +253,10 @@ test('empresasDeSegmento no ve empresas de otra organizacion', () => {
 
   const desdeOrg2 = empresasDeSegmento(def, 2);
   assert.deepEqual(desdeOrg2.map((e) => e.id), ['e-otra-org']);
+
+  // contarSegmento tambien filtra por organizacion
+  assert.equal(contarSegmento(def, 1), 4, 'org 1 cuenta sus 4 on_hold');
+  assert.equal(contarSegmento(def, 2), 1, 'org 2 cuenta su 1 on_hold');
 });
 
 test('empresasDeSegmentoGuardado no corre el segmento de otra organizacion', () => {

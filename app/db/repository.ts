@@ -1200,13 +1200,13 @@ export function empresasDeSegmento(def: DefinicionSegmento, idOrganizacion: numb
   return q.all();
 }
 
-export function contarSegmento(def: DefinicionSegmento): number {
+export function contarSegmento(def: DefinicionSegmento, idOrganizacion: number): number {
   const val = definicionSegmentoSchema.parse(def);
   const fila = db
     .select({ n: sql<number>`count(*)` })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(compilarSegmento(val))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .get();
   return fila?.n ?? 0;
 }
