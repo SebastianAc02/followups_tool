@@ -16,7 +16,7 @@ test('la tabla conector_config existe con sus columnas', () => {
     .map((c: any) => c.name)
     .sort();
   raw.close();
-  assert.deepEqual(cols, ['agregado_por', 'created_at', 'habilitado', 'modo', 'proveedor', 'updated_at']);
+  assert.deepEqual(cols, ['agregado_por', 'created_at', 'habilitado', 'id_organizacion', 'modo', 'proveedor', 'updated_at']);
 });
 
 test.after(() => borrarDbPrueba(dbPath));

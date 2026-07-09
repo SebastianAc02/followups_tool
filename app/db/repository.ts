@@ -1166,10 +1166,12 @@ export function guardarSegmento(input: { nombre: string; definicion: DefinicionS
   const ahora = new Date().toISOString();
   const ins = db
     .insert(segmento)
+    // Hardcodeado a Onepay (id 1) hasta que segmentos tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: input.nombre,
       definicion: JSON.stringify(val),
       descripcionNatural: input.descripcionNatural ?? null,
+      idOrganizacion: 1,
       createdAt: ahora,
       updatedAt: ahora,
     })
@@ -1570,6 +1572,7 @@ export function crearCampana(input: CampanaInput): number {
   const ahora = new Date().toISOString();
   const ins = db
     .insert(campana)
+    // Hardcodeado a Onepay (id 1) hasta que campanas tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: val.nombre,
       idCadencia: val.idCadencia,
@@ -1582,6 +1585,7 @@ export function crearCampana(input: CampanaInput): number {
       topeToquesDia: val.topeToquesDia ?? null,
       fechaInicio: val.fechaInicio ?? null,
       owner: val.owner ?? null,
+      idOrganizacion: 1,
       createdAt: ahora,
       updatedAt: ahora,
     })
@@ -2788,6 +2792,9 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
       .run();
     if (res.changes === 0) return;
     tx.insert(toque)
+      // Hardcodeado a Onepay (id 1): este toque nace del motor de cadencias, que todavia
+      // no filtra por organizacion (plan futuro). registrarToque() (Task 8) SI usa la
+      // organizacion real de la sesion.
       .values({
         idEmpresa: fila.idEmpresa,
         idContacto: fila.idContacto,
@@ -2795,6 +2802,7 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
         canal: fila.canal,
         quePaso: cuerpoFinal ?? null,
         fuente: 'cadencia_manual',
+        idOrganizacion: 1,
         createdAt: fechaEnviada,
       })
       .run();
