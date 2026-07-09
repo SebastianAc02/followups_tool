@@ -1276,14 +1276,15 @@ export function listarSegmentos(idOrganizacion: number) {
 // Parte 1 campanas: valores unicos de un campo de texto para poblar el dropdown del
 // builder (estilo Apollo). Solo campos de texto: los numericos se filtran por rango,
 // no por lista, y ademas usuarios vive en otra tabla.
-export function valoresDistintosCampo(campo: CampoSegmento): string[] {
+export function valoresDistintosCampo(campo: CampoSegmento, idOrganizacion: number): string[] {
   // rol vive en contacto, no en empresa (mismo motivo que en compilarSegmento):
   // el dropdown de roles sale de cargo_categoria, no de COLUMNA_SEGMENTO.
   if (campo === 'rol') {
     const filas = db
       .selectDistinct({ v: contacto.cargoCategoria })
       .from(contacto)
-      .where(isNotNull(contacto.cargoCategoria))
+      .innerJoin(empresa, eq(empresa.idEmpresa, contacto.idEmpresa))
+      .where(and(isNotNull(contacto.cargoCategoria), eq(empresa.organizacionActivaId, idOrganizacion)))
       .orderBy(contacto.cargoCategoria)
       .all();
     return filas.map((f) => String(f.v));
@@ -1292,7 +1293,12 @@ export function valoresDistintosCampo(campo: CampoSegmento): string[] {
   if (numerico) {
     throw new Error(`el campo '${campo}' es numerico: se filtra por rango, no por lista de valores`);
   }
-  const filas = db.selectDistinct({ v: col }).from(empresa).where(isNotNull(col)).orderBy(col).all();
+  const filas = db
+    .selectDistinct({ v: col })
+    .from(empresa)
+    .where(and(isNotNull(col), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .orderBy(col)
+    .all();
   return filas.map((f) => String(f.v));
 }
 

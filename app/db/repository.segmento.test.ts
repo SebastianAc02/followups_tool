@@ -162,13 +162,13 @@ test('es_null sobre usuarios encuentra las empresas sin dato', () => {
 });
 
 test('valoresDistintosCampo devuelve valores unicos ordenados sin null', () => {
-  assert.deepEqual(valoresDistintosCampo('estado'), ['on_hold', 'oportunidad']);
-  assert.deepEqual(valoresDistintosCampo('categoria'), ['isp', 'utility']);
+  assert.deepEqual(valoresDistintosCampo('estado', 1), ['on_hold', 'oportunidad']);
+  assert.deepEqual(valoresDistintosCampo('categoria', 1), ['isp', 'utility']);
 });
 
 test('valoresDistintosCampo rechaza campos numericos (rango, no dropdown)', () => {
-  assert.throws(() => valoresDistintosCampo('usuarios'));
-  assert.throws(() => valoresDistintosCampo('prioridad'));
+  assert.throws(() => valoresDistintosCampo('usuarios', 1));
+  assert.throws(() => valoresDistintosCampo('prioridad', 1));
 });
 
 // Parte 2 campanas: revision de leads. Un segmento nuevo, sin exclusiones todavia,
@@ -337,6 +337,20 @@ test('listarSegmentos solo lista los de mi organizacion', () => {
   const org1 = listarSegmentos(1);
   assert.ok(org1.some((s) => s.nombre === 'listar-org1'));
   assert.ok(!org1.some((s) => s.nombre === 'listar-org2'));
+});
+
+test('valoresDistintosCampo no mezcla valores de otra organizacion', () => {
+  const raw = new Database(dbPath);
+  raw
+    .prepare(
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id)
+       VALUES ('e-valores-org3', 'nit', 'Org3', 'org3', 'activo', 'solo_en_org_3', 3)`,
+    )
+    .run();
+  raw.close();
+
+  assert.ok(!valoresDistintosCampo('estado', 1).includes('solo_en_org_3'));
+  assert.deepEqual(valoresDistintosCampo('estado', 3), ['solo_en_org_3']);
 });
 
 test.after(() => {
