@@ -4,12 +4,14 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   registrarToque,
+  actualizarCampoCalificacion,
   terminosBusquedaTranscript,
   leerToqueTranscript,
   escribirTranscriptCompleto,
   escribirTranscriptSoloPuntero,
 } from "../../db/repository";
 import { registrarToqueSchema } from "../../db/validation";
+import type { CampoCalificacion } from "../../core/calificacion";
 import { requireSession } from "../../lib/session";
 import { crearGranolaAdapter } from "../../adapters/granola";
 import { crearClaudeAdapter } from "../../adapters/claude";
@@ -65,6 +67,23 @@ export async function registrarToqueAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath(`/llamada/${idEmpresa}`);
   redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
+}
+
+// Edicion inline del checklist de calificacion: guarda un solo campo (usuarios/crm/
+// pasarela) sin registrar un toque. Ver actualizarCampoCalificacion en el repository.
+export async function actualizarCampoCalificacionAction(
+  idEmpresa: string,
+  campo: CampoCalificacion,
+  valor: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireSession();
+  try {
+    actualizarCampoCalificacion(idEmpresa, campo, valor);
+    revalidatePath(`/llamada/${idEmpresa}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "No se pudo guardar" };
+  }
 }
 
 const VENTANA_HORAS = 12;

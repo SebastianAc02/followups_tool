@@ -122,7 +122,7 @@ export function LlamadaCard({
               </div>
             </div>
 
-            <CalificacionChecklist calificacion={calificacion} />
+            <CalificacionChecklist idEmpresa={emp?.id ?? ""} calificacion={calificacion} />
 
             {/* Bottom action row */}
             <div className="mt-auto flex flex-col gap-4 border-t border-line pt-4">

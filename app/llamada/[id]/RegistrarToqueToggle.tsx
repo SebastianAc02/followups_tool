@@ -9,10 +9,10 @@ import type { Calificacion } from "../../core/calificacion";
 // CalificacionChecklist -- antes este componente tenia su propio useState aislado, por
 // eso un click en un item "PREGUNTAR" del checklist no podia abrir el formulario.
 export function RegistrarToqueToggle({ idEmpresa, calificacion }: { idEmpresa: string; calificacion: Calificacion }) {
-  const { abierto, campoEnfocado, abrir } = usePreguntar();
+  const { abierto, abrir } = usePreguntar();
 
   if (abierto) {
-    return <CapturaLlamada idEmpresa={idEmpresa} calificacion={calificacion} campoEnfocado={campoEnfocado} />;
+    return <CapturaLlamada idEmpresa={idEmpresa} calificacion={calificacion} />;
   }
 
   return (

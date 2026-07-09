@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { registrarToqueAction, estructurarDictadoAction } from "./actions";
 import { RESULTADO_LABELS, RESULTADOS, RESULTADOS_CONTESTO, type Resultado } from "../../db/validation";
 import { plusDias } from "../../lib/date-utils";
 import type { ToqueEstructurado } from "../../core/estructurar-toque";
-import type { Calificacion, CampoCalificacion } from "../../core/calificacion";
+import type { Calificacion } from "../../core/calificacion";
 
 const OUTCOMES: { v: Resultado; l: string }[] = RESULTADOS.map((v) => ({ v, l: RESULTADO_LABELS[v] }));
 const CHIPS: [string, number][] = [["+1d", 1], ["+3d", 3], ["+1sem", 7]];
@@ -21,7 +21,6 @@ const inputClase =
 export default function CapturaLlamada({
   idEmpresa,
   calificacion,
-  campoEnfocado,
 }: {
   idEmpresa: string;
   // Con qué de usuarios/CRM/pasarela ya cuenta la cuenta (2026-07-08): el form solo
@@ -29,9 +28,6 @@ export default function CapturaLlamada({
   // campos siempre, aunque ya estuvieran guardados. Sin esto, no rompe: simplemente
   // vuelve a preguntar todo (comportamiento anterior).
   calificacion?: Calificacion;
-  // Campo en el que abrió el formulario desde un click en el checklist -- se enfoca
-  // apenas el bloque de campos queda visible.
-  campoEnfocado?: CampoCalificacion | null;
 }) {
   const [outcome, setOutcome] = useState<Resultado | "">("");
   const [fecha, setFecha] = useState(plusDias(3));
@@ -50,19 +46,6 @@ export default function CapturaLlamada({
   const pideCrm = huboConversacion && !yaTengo.has("crm");
   const pidePasarela = huboConversacion && !yaTengo.has("pasarela");
   const pideDatosCuenta = pideUsuarios || pideCrm || pidePasarela;
-
-  const refUsuarios = useRef<HTMLInputElement>(null);
-  const refCrm = useRef<HTMLInputElement>(null);
-  const refPasarela = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!huboConversacion || !campoEnfocado) return;
-    const ref = { usuarios: refUsuarios, crm: refCrm, pasarela: refPasarela }[campoEnfocado as "usuarios" | "crm" | "pasarela"];
-    ref?.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-    ref?.current?.focus();
-    // Solo la primera vez que el campo pedido queda visible -- no en cada render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [huboConversacion]);
 
   async function estructurar() {
     setEstructurando(true);
@@ -162,7 +145,6 @@ export default function CapturaLlamada({
                 <label className="flex flex-col gap-1">
                   <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Usuarios</span>
                   <input
-                    ref={refUsuarios}
                     name="usuarios"
                     type="number"
                     inputMode="numeric"
@@ -175,14 +157,13 @@ export default function CapturaLlamada({
               {pideCrm && (
                 <label className="flex flex-col gap-1">
                   <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">CRM</span>
-                  <input ref={refCrm} name="crm" placeholder="—" defaultValue={borrador?.crm ?? undefined} className={inputClase} />
+                  <input name="crm" placeholder="—" defaultValue={borrador?.crm ?? undefined} className={inputClase} />
                 </label>
               )}
               {pidePasarela && (
                 <label className="flex flex-col gap-1">
                   <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Pasarela</span>
                   <input
-                    ref={refPasarela}
                     name="pasarela"
                     placeholder="—"
                     defaultValue={borrador?.pasarela ?? undefined}

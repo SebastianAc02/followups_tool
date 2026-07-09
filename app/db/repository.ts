@@ -54,6 +54,7 @@ import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltant
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
+import type { CampoCalificacion } from '../core/calificacion';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -356,6 +357,36 @@ export function registrarToque(input: RegistrarToqueInput) {
       })
       .run();
   });
+}
+
+const actualizarCampoCalificacionSchema = z.object({
+  campo: z.enum(['usuarios', 'crm', 'pasarela']),
+  valor: z.string().trim().min(1),
+});
+
+// Edicion inline del checklist de calificacion (Toque 1): guarda UN campo de la cuenta
+// sin pasar por registrarToque -- no hay canal ni resultado que calificar aca, solo un
+// dato que ya se sabe (click en el item "PREGUNTAR" -> cajon de texto -> guardar).
+// "recaudo" se queda afuera a proposito: no tiene columna en empresa todavia (ver
+// core/calificacion.ts).
+export function actualizarCampoCalificacion(idEmpresa: string, campo: CampoCalificacion, valorCrudo: string): void {
+  const val = actualizarCampoCalificacionSchema.parse({ campo, valor: valorCrudo });
+
+  if (val.campo === 'usuarios') {
+    const usuarios = Number(val.valor);
+    if (!Number.isFinite(usuarios)) throw new Error('Usuarios debe ser un número');
+    db.insert(empresaUsuarios)
+      .values({ idEmpresa, usuariosEstimados: usuarios })
+      .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: { usuariosEstimados: usuarios } })
+      .run();
+    return;
+  }
+
+  const sets = val.campo === 'crm' ? { crmSoftware: val.valor } : { pasarelaActual: val.valor };
+  db.update(empresa)
+    .set({ ...sets, updatedAt: sql`datetime('now')` })
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .run();
 }
 
 export type ContadoresHoy = {

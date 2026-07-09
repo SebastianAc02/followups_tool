@@ -1,33 +1,26 @@
 'use client';
 
-// Puente chico de estado entre CalificacionChecklist (items "PREGUNTAR") y
-// RegistrarToqueToggle/CapturaLlamada (2026-07-08): antes eran dos piezas sin
-// conexion -- el checklist solo informaba, y el formulario de abajo pedía todo de
-// nuevo sin importar qué ya se sabía. Un click en un item PREGUNTAR ahora abre el
-// formulario y enfoca ESE campo. LlamadaCard (server) sigue pintando ambas piezas en
-// su posición normal; el contexto viaja a través de él sin que LlamadaCard necesite
-// volverse cliente.
+// Puente chico de estado entre RegistrarToqueToggle y CapturaLlamada: revela el
+// formulario de "Registrar toque" sin que LlamadaCard (server) necesite volverse
+// cliente. Los campos de calificacion (usuarios/crm/pasarela) ya no pasan por aca --
+// CalificacionChecklist los edita en linea y guarda directo (ver actions.ts).
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import type { CampoCalificacion } from '../../core/calificacion';
 
 type PreguntarValue = {
   abierto: boolean;
-  campoEnfocado: CampoCalificacion | null;
-  abrir: (campo?: CampoCalificacion) => void;
+  abrir: () => void;
 };
 
 const PreguntarContext = createContext<PreguntarValue | null>(null);
 
 export function PreguntarProvider({ children }: { children: ReactNode }) {
   const [abierto, setAbierto] = useState(false);
-  const [campoEnfocado, setCampoEnfocado] = useState<CampoCalificacion | null>(null);
 
-  function abrir(campo?: CampoCalificacion) {
-    setCampoEnfocado(campo ?? null);
+  function abrir() {
     setAbierto(true);
   }
 
-  return <PreguntarContext.Provider value={{ abierto, campoEnfocado, abrir }}>{children}</PreguntarContext.Provider>;
+  return <PreguntarContext.Provider value={{ abierto, abrir }}>{children}</PreguntarContext.Provider>;
 }
 
 export function usePreguntar() {
