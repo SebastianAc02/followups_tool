@@ -45,7 +45,7 @@ test('el cliente buscado NO aparece en colaDelDia ni afecta contadoresHoy de nad
   const colaSebastian = colaDelDia(hoy, 'Sebastian Acosta Molina', 1);
   assert.ok(!colaSebastian.some((c) => c.id === 'cli-1'));
 
-  const contadores = contadoresHoy(hoy, 'Sebastian Acosta Molina');
+  const contadores = contadoresHoy(hoy, 'Sebastian Acosta Molina', 1);
   assert.strictEqual(contadores.total, 0);
 });
 

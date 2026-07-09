@@ -18,25 +18,25 @@ const HOY = '2026-07-03';
 const OWNER_A = 'Sebastian Acosta Molina';
 const OWNER_B = 'Felipe Castro';
 
-function seedEmpresa(idEmpresa: string, owner: string) {
+function seedEmpresa(idEmpresa: string, owner: string, organizacionActivaId = 1) {
   const raw = new Database(dbPath);
   raw
     .prepare(
-      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner)
-       VALUES (?, 'nit', 'Empresa Test', 'empresa test', 'activo', ?)`,
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, organizacion_activa_id)
+       VALUES (?, 'nit', 'Empresa Test', 'empresa test', 'activo', ?, ?)`,
     )
-    .run(idEmpresa, owner);
+    .run(idEmpresa, owner, organizacionActivaId);
   raw.close();
 }
 
-function seedToque(idEmpresa: string, fechaISO: string, canal: string, resultado: string) {
+function seedToque(idEmpresa: string, fechaISO: string, canal: string, resultado: string, idOrganizacion = 1) {
   const raw = new Database(dbPath);
   raw
     .prepare(
-      `INSERT INTO toque (id_empresa, fecha, canal, resultado, fuente)
-       VALUES (?, ?, ?, ?, 'test')`,
+      `INSERT INTO toque (id_empresa, fecha, canal, resultado, fuente, id_organizacion)
+       VALUES (?, ?, ?, ?, 'test', ?)`,
     )
-    .run(idEmpresa, fechaISO, canal, resultado);
+    .run(idEmpresa, fechaISO, canal, resultado, idOrganizacion);
   raw.close();
 }
 
@@ -57,7 +57,7 @@ test('contadoresHoy cuenta solo los toques de HOY del owner correcto, por canal 
   // Toque de HOY pero owner B: no debe contar en el conteo de A
   seedToque('emp-b1', `${HOY}T09:00:00.000Z`, 'llamada', 'contesto_reunion');
 
-  const resultado = contadoresHoy(HOY, OWNER_A);
+  const resultado = contadoresHoy(HOY, OWNER_A, 1);
 
   assert.equal(resultado.porCanal.llamada, 2);
   assert.equal(resultado.porCanal.whatsapp, 1);
@@ -71,7 +71,7 @@ test('contadoresHoy cuenta solo los toques de HOY del owner correcto, por canal 
   assert.equal(resultado.total, 4);
 
   // Owner B solo tiene su propio toque de hoy
-  const resultadoB = contadoresHoy(HOY, OWNER_B);
+  const resultadoB = contadoresHoy(HOY, OWNER_B, 1);
   assert.equal(resultadoB.total, 1);
   assert.equal(resultadoB.porCanal.llamada, 1);
   assert.equal(resultadoB.porCanal.whatsapp, 0);
@@ -83,7 +83,7 @@ test('contadoresHoy devuelve todo en cero cuando no hay toques hoy', () => {
   seedEmpresa('emp-c1', OWNER_C);
   seedToque('emp-c1', '2026-01-01T09:00:00.000Z', 'llamada', 'contesto_reunion');
 
-  const resultado = contadoresHoy(HOY, OWNER_C);
+  const resultado = contadoresHoy(HOY, OWNER_C, 1);
 
   assert.equal(resultado.total, 0);
   assert.equal(resultado.porCanal.llamada, 0);
@@ -109,7 +109,7 @@ test('contadoresHoy: un toque con resultado legado ("contesto", pre-V1.2) cuenta
   // ningun bucket de porResultado.
   seedToque('emp-d1', `${HOY}T11:00:00.000Z`, 'llamada', 'contesto');
 
-  const resultado = contadoresHoy(HOY, OWNER_D);
+  const resultado = contadoresHoy(HOY, OWNER_D, 1);
 
   // (a) total incluye el toque legado: 2 normales + 1 legado = 3.
   assert.equal(resultado.total, 3);
@@ -124,6 +124,20 @@ test('contadoresHoy: un toque con resultado legado ("contesto", pre-V1.2) cuenta
   const sumaPorResultado = Object.values(resultado.porResultado).reduce((a, b) => a + b, 0);
   assert.equal(sumaPorResultado, resultado.total - 1);
   assert.equal(sumaPorResultado, 2);
+});
+
+test('contadoresHoy no cuenta un toque de otra organizacion aunque el owner coincida', () => {
+  // Owner dedicado (no OWNER_A) para no heredar los toques que el primer test de este
+  // archivo ya sembro para OWNER_A en la misma DB compartida (no hay limpieza entre tests).
+  const OWNER_E = 'Multi Org Owner';
+  seedEmpresa('emp-e1', OWNER_E);
+  seedToque('emp-e1', `${HOY}T09:00:00.000Z`, 'llamada', 'contesto_reunion', 2);
+
+  const resultado = contadoresHoy(HOY, OWNER_E, 1);
+  assert.equal(resultado.total, 0, 'el toque es de la organizacion 2, no debe contar en la 1');
+
+  const resultadoOrg2 = contadoresHoy(HOY, OWNER_E, 2);
+  assert.equal(resultadoOrg2.total, 1, 'desde la organizacion 2 si debe contar');
 });
 
 test.after(() => {

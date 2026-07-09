@@ -421,12 +421,18 @@ export type ContadoresHoy = {
 // Solo lectura. El toque no tiene owner directo, se filtra vía JOIN a empresa.owner (mismo
 // filtro que colaDelDia). `toque.fecha` es un datetime ISO completo, se compara solo la
 // parte de fecha con substr(fecha, 1, 10).
-export function contadoresHoy(hoy: string, owner: string): ContadoresHoy {
+export function contadoresHoy(hoy: string, owner: string, idOrganizacion: number): ContadoresHoy {
   const filas = db
     .select({ canal: toque.canal, resultado: toque.resultado })
     .from(toque)
     .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
-    .where(and(eq(empresa.owner, owner), sql`substr(${toque.fecha}, 1, 10) = ${hoy}`))
+    .where(
+      and(
+        eq(empresa.owner, owner),
+        eq(toque.idOrganizacion, idOrganizacion),
+        sql`substr(${toque.fecha}, 1, 10) = ${hoy}`,
+      ),
+    )
     .all();
 
   const porCanal = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
