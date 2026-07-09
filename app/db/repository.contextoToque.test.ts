@@ -99,6 +99,23 @@ test('getContextoToque trae los pasos de la secuencia cuando hay inscripcion act
   assert.equal(ctx.objetivo, 'Sacar reunion');
 });
 
+test('getContextoToque solo trae toques de la organizacion que consulta, aunque el lead sea compartido', () => {
+  const raw = new Database(dbPath);
+  raw
+    .prepare(
+      `INSERT INTO toque (id_empresa, fecha, canal, resultado, fuente, id_organizacion)
+       VALUES ('EMP_TEST', '2026-07-01T00:00:00.000Z', 'llamada', 'contesto_no', 'test', 2)`,
+    )
+    .run();
+  raw.close();
+
+  const ctxOrg1 = getContextoToque('EMP_TEST', 1);
+  assert.ok(!ctxOrg1.toques.some((t) => t.canal === 'llamada' && t.resultado === 'contesto_no'), 'no debe ver el toque de la organizacion 2');
+
+  const ctxOrg2 = getContextoToque('EMP_TEST', 2);
+  assert.ok(ctxOrg2.toques.some((t) => t.canal === 'llamada' && t.resultado === 'contesto_no'), 'si debe ver su propio toque');
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

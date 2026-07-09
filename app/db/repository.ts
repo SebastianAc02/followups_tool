@@ -191,7 +191,7 @@ export function buscarEmpresasPorNombre(query: string) {
     .all();
 }
 
-export function getCuenta(id: string) {
+export function getCuenta(id: string, idOrganizacion: number) {
   const emp = db
     .select({
       id: empresa.idEmpresa,
@@ -225,6 +225,7 @@ export function getCuenta(id: string) {
     .where(eq(contacto.idEmpresa, id))
     .all();
 
+  // Solo los toques de MI organizacion: el lead es compartido, el historial de contacto no.
   const toques = db
     .select({
       idToque: toque.idToque,
@@ -235,7 +236,7 @@ export function getCuenta(id: string) {
       transcriptId: toque.transcriptId,
     })
     .from(toque)
-    .where(eq(toque.idEmpresa, id))
+    .where(and(eq(toque.idEmpresa, id), eq(toque.idOrganizacion, idOrganizacion)))
     .orderBy(desc(toque.idToque))
     .limit(5)
     .all();
@@ -3077,8 +3078,8 @@ export type ContextoToque = {
   idPasoInscripcionActivo: number | null;
 };
 
-export function getContextoToque(id: string): ContextoToque {
-  const { emp, contactos, toques } = getCuenta(id);
+export function getContextoToque(id: string, idOrganizacion: number): ContextoToque {
+  const { emp, contactos, toques } = getCuenta(id, idOrganizacion);
 
   // Contacto principal: el marcado esPrincipal; si ninguno lo está (dato legado
   // sin migrar), el primero de la lista es mejor default que null -- la UI siempre
