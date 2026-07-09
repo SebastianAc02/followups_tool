@@ -97,7 +97,7 @@ test('un paso manual de llamada NO aparece en pasosManualesPendientes (no es Tie
 });
 
 test('registrar el toque real + marcarPasoInscripcionCompletadaManual cierra el paso de llamada con su resultado', () => {
-  registrarToque({ idEmpresa: 'e-manual-1', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', quePaso: 'Hablamos de precio' });
+  registrarToque({ idEmpresa: 'e-manual-1', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', quePaso: 'Hablamos de precio' }, 1);
   marcarPasoInscripcionCompletadaManual(idPasoInscripcion1, '2026-07-09T15:00:00.000Z');
 
   const db = raw();

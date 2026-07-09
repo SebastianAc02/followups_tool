@@ -26,7 +26,7 @@ function seedEmpresa(idEmpresa: string, notionPageId: string | null) {
 
 test('registrarToque encola outbox cuando la empresa tiene notion_page_id', () => {
   seedEmpresa('emp-con-notion', 'page-abc');
-  registrarToque({ idEmpresa: 'emp-con-notion', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', quePaso: 'hablamos', proximoFollowUp: '2026-07-10' });
+  registrarToque({ idEmpresa: 'emp-con-notion', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', quePaso: 'hablamos', proximoFollowUp: '2026-07-10' }, 1);
 
   const pendientes = outboxPendientes();
   assert.strictEqual(pendientes.length, 1);
@@ -36,7 +36,7 @@ test('registrarToque encola outbox cuando la empresa tiene notion_page_id', () =
 
 test('registrarToque NO encola nada si la empresa no tiene notion_page_id todavia', () => {
   seedEmpresa('emp-sin-notion', null);
-  registrarToque({ idEmpresa: 'emp-sin-notion', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', quePaso: 'hablamos', proximoFollowUp: '2026-07-10' });
+  registrarToque({ idEmpresa: 'emp-sin-notion', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', quePaso: 'hablamos', proximoFollowUp: '2026-07-10' }, 1);
 
   const raw = new Database(dbPath);
   const n = (raw.prepare("SELECT count(*) as n FROM outbox WHERE id_registro = 'emp-sin-notion'").get() as { n: number }).n;
@@ -46,7 +46,7 @@ test('registrarToque NO encola nada si la empresa no tiene notion_page_id todavi
 
 test('marcarOutboxEnviado saca la fila de pendientes (idempotencia del drenado)', () => {
   seedEmpresa('emp-enviar', 'page-enviar');
-  registrarToque({ idEmpresa: 'emp-enviar', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', proximoFollowUp: '2026-07-10' });
+  registrarToque({ idEmpresa: 'emp-enviar', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', proximoFollowUp: '2026-07-10' }, 1);
 
   const antes = outboxPendientes().filter((p) => p.payload.notionPageId === 'page-enviar');
   assert.strictEqual(antes.length, 1);
@@ -59,7 +59,7 @@ test('marcarOutboxEnviado saca la fila de pendientes (idempotencia del drenado)'
 
 test('marcarOutboxFallido con proximoIntento futuro mantiene la fila pendiente para mas tarde, no ahora', () => {
   seedEmpresa('emp-fallo', 'page-fallo');
-  registrarToque({ idEmpresa: 'emp-fallo', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', proximoFollowUp: '2026-07-10' });
+  registrarToque({ idEmpresa: 'emp-fallo', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', proximoFollowUp: '2026-07-10' }, 1);
 
   const fila = outboxPendientes().find((p) => p.payload.notionPageId === 'page-fallo')!;
   const futuro = new Date(Date.now() + 60 * 60 * 1000).toISOString();

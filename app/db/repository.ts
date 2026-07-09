@@ -247,11 +247,26 @@ export function getCuenta(id: string) {
 // La regla de negocio (4 salidas cerradas, razonPerdida obligatoria si contesto_no) es de
 // DOMINIO y se enforza aquí con Zod, no en la UI: cualquier caller futuro (ingest worker,
 // EnvioAdapter) pasa por esta misma garantía. `.parse()` lanza si el input no cumple.
-export function registrarToque(input: RegistrarToqueInput) {
+export function registrarToque(input: RegistrarToqueInput, idOrganizacion: number) {
   const parsed = registrarToqueSchema.parse(input);
   const ahora = new Date().toISOString();
 
   db.transaction((tx) => {
+    // Guard de organizacion (Parte 1): un toque solo se registra sobre un lead cuya
+    // organizacion_activa_id coincide con la del que llama. Evita que dos organizaciones
+    // se pisen el estado de un lead compartido por error (ver spec 2026-07-09).
+    const emp = tx
+      .select({ organizacionActivaId: empresa.organizacionActivaId })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .get();
+    if (!emp) throw new Error(`Empresa ${parsed.idEmpresa} no existe`);
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      throw new Error(
+        `La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`,
+      );
+    }
+
     // KDM opcional: upsert en contacto ANTES del insert del toque, para poder enlazar
     // toque.idContacto. Matching: mismo idEmpresa + mismo telefono exacto si viene telefono;
     // si no hay telefono, no hay match posible (el nombre no es clave confiable) -> insertar.
@@ -310,6 +325,7 @@ export function registrarToque(input: RegistrarToqueInput) {
         razonPerdida: parsed.razonPerdida ?? null,
         objecion: parsed.objecion ?? null,
         fuente: 'cockpit',
+        idOrganizacion,
         createdAt: ahora,
       })
       .run();
