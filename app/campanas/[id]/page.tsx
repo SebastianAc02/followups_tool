@@ -56,12 +56,14 @@ export default async function CampanaResumenPage({ params }: { params: Promise<{
             {camp.cadencia} · {camp.segmento}
           </p>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex flex-col items-end gap-3">
           <Pill tone={tone} dot>
             {label}
           </Pill>
-          <CicloVidaControles idCampana={idCampana} estado={camp.estado} />
-          <SincronizarCopiaControl idCampana={idCampana} proveedorCampanaId={camp.proveedorCampanaId} />
+          <div className="flex items-start gap-3">
+            <CicloVidaControles idCampana={idCampana} estado={camp.estado} />
+            <SincronizarCopiaControl idCampana={idCampana} proveedorCampanaId={camp.proveedorCampanaId} />
+          </div>
         </div>
       </div>
 

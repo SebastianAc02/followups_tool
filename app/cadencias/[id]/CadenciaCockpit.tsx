@@ -7,6 +7,8 @@ import { CanalTag, type Canal } from '../../ui/CanalTag';
 import { CANAL_LABEL } from '../../ui/canal-tag.variants.ts';
 import { cn } from '../../ui/cn';
 import { useConfirm } from '../../ui/useConfirm';
+import { Seg, SegButton } from '../../ui/Seg';
+import type { ModoCampana } from '../../db/validation';
 
 export type PasoCadenciaUI = {
   idPaso: number;
@@ -58,6 +60,8 @@ export function CadenciaCockpit({
   nombre,
   pasos,
   idCampanaBorrador,
+  modo,
+  onCambiarModo,
 }: {
   idCadencia: number;
   nombre: string;
@@ -65,6 +69,13 @@ export function CadenciaCockpit({
   // Presente solo cuando esta cadencia pertenece a una campaña en borrador (Fix 8):
   // habilita el CTA de avance, igual que los otros pasos del wizard de creación.
   idCampanaBorrador?: number;
+  // Prioritaria/Batch (2026-07-08): vive aca, pegado a la columna Aprobación, y no
+  // arriba junto al nombre -- son dos decisiones distintas (modo agrupa en /cola,
+  // Aprobación decide que toques esperan tu revision) que antes se confundian por
+  // estar separadas en la pantalla. Opcional: solo aplica dentro del wizard de
+  // creación, donde existe una campaña a la que asignarle el modo.
+  modo?: ModoCampana;
+  onCambiarModo?: (modo: ModoCampana) => void;
 }) {
   const [filas, setFilas] = useState(pasos);
   const [editando, setEditando] = useState<number | null>(null);
@@ -173,8 +184,27 @@ export function CadenciaCockpit({
             Arma tu cadencia
           </h2>
           <p className="mb-5 text-[13px] text-muted">
-            Define cada toque de forma explícita: número, día y canal. Marca los que quieras revisar y aprobar antes de que se envíen.
+            Define cada toque de forma explícita: número, día y canal. La columna Aprobación decide, toque por toque, cuáles
+            esperan tu revisión antes de salir.
           </p>
+
+          {modo && onCambiarModo && (
+            <div className="mb-5 flex flex-col gap-2 rounded-[13px] border border-line bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[12.5px] text-muted">
+                Cómo se agrupan tus toques manuales en <span className="font-medium text-ink-soft">/cola</span>: uno por uno o en
+                lote por día.
+              </p>
+              <Seg>
+                <SegButton on={modo === 'prioritaria'} onClick={() => onCambiarModo('prioritaria')}>
+                  Prioritaria
+                </SegButton>
+                <SegButton on={modo === 'batch'} onClick={() => onCambiarModo('batch')}>
+                  Batch
+                </SegButton>
+              </Seg>
+            </div>
+          )}
+
           {error && <p className="mb-3 text-xs text-overdue">{error}</p>}
 
           <div className="grid grid-cols-[88px_140px_1fr_160px_28px] gap-3.5 px-1 pb-2 font-mono-tag text-[10px] uppercase tracking-widest text-faint">

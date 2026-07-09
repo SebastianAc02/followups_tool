@@ -6,7 +6,6 @@ import { crearBorradorDesdeCadenciaAction, actualizarBorradorAction, abandonarBo
 import { ImportarCadencia, type CadenciaResuelta } from './ImportarCadencia';
 import { CadenciaCockpit, type PasoCadenciaUI } from '../../cadencias/[id]/CadenciaCockpit';
 import { PasosWizard, type PasoWizardItem } from './PasosWizard';
-import { Seg, SegButton } from '../../ui/Seg';
 import type { ModoCampana } from '../../db/validation';
 import type { Segmento } from './NuevaCampanaFlujo';
 
@@ -120,28 +119,13 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
       {cadencia && (
         <div className="flex flex-col gap-6 border-t border-line px-8 py-8">
           <div className="mx-auto flex w-full max-w-[900px] flex-col gap-4">
-            <div className="flex items-center gap-3">
-              <input
-                value={nombreCampana}
-                onChange={(e) => setNombreCampana(e.target.value)}
-                onBlur={guardarNombreSiCambio}
-                placeholder="Nombre de la campaña"
-                className="flex-1 rounded-lg border border-line-strong bg-surface px-3 py-[10px] text-[13px] text-ink outline-none placeholder:text-faint focus:border-ink-soft"
-              />
-              <Seg>
-                <SegButton on={modo === 'prioritaria'} onClick={() => cambiarModo('prioritaria')}>
-                  Prioritaria
-                </SegButton>
-                <SegButton on={modo === 'batch'} onClick={() => cambiarModo('batch')}>
-                  Batch
-                </SegButton>
-              </Seg>
-            </div>
-            <p className="text-[12.5px] text-muted">
-              {modo === 'prioritaria'
-                ? 'Revisás y personalizás lead por lead antes de mandar.'
-                : 'El copy sale igual para todo el grupo del día; podés editarlo antes de confirmar.'}
-            </p>
+            <input
+              value={nombreCampana}
+              onChange={(e) => setNombreCampana(e.target.value)}
+              onBlur={guardarNombreSiCambio}
+              placeholder="Nombre de la campaña"
+              className="w-full rounded-lg border border-line-strong bg-surface px-3 py-[10px] text-[13px] text-ink outline-none placeholder:text-faint focus:border-ink-soft"
+            />
           </div>
 
           {/* Mismo editor que ve una campana ya creada al entrar a su tab Cadencia --
@@ -149,7 +133,14 @@ export function CadenciaPaso({ segmento, onVolver }: { segmento: Segmento; onVol
               remonta limpio si "Cambiar cadencia" trae otro id. */}
           {idCadencia && (
             <div className="mx-auto w-full max-w-[900px]">
-              <CadenciaCockpit key={idCadencia} idCadencia={idCadencia} nombre={nombreCampana} pasos={pasosCadencia} />
+              <CadenciaCockpit
+                key={idCadencia}
+                idCadencia={idCadencia}
+                nombre={nombreCampana}
+                pasos={pasosCadencia}
+                modo={modo}
+                onCambiarModo={cambiarModo}
+              />
             </div>
           )}
 

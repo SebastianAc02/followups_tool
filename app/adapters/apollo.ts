@@ -16,6 +16,30 @@ import { calcularWaitApollo } from '../core/motor-cadencia';
 const APOLLO_API_BASE = process.env.APOLLO_API_BASE_URL ?? 'https://api.apollo.io/api/v1';
 const TIMEOUT_MS = 10_000; // un fetch colgado no puede trabar el resto del ciclo del worker
 
+// Traduce [variable] (vocabulario neutral de render-copy.ts) a los merge-tags nativos de
+// Apollo antes de subir el copy. Solo lo que este mapa reconoce se traduce; toda variable
+// sin entrada pasa igual (el autor puede escribir el {{tag}} de Apollo directo si lo
+// necesita). Misma regex de deteccion que render-copy.ts, para consistencia.
+//
+// nombre -> {{first_name}} confirmado contra la API real (planning/experimento-apollo.md,
+// gate G1). empresa -> {{company_name}} y cargo -> {{title}} son los tags que Apollo
+// documenta como estandar, pero AUN NO confirmados contra la cuenta real -- Sebastian los
+// prueba en vivo el (2026-07-09) antes de confiar en ellos en produccion. El resto
+// (ciudad, telefono, email, remitente, remitenteEmail) sigue afuera del mapa: no hay tag
+// nativo de Apollo para eso, pasan sin traducir.
+const VARIABLES_A_TAGS_APOLLO: Record<string, string> = {
+  nombre: '{{first_name}}',
+  empresa: '{{company_name}}',
+  cargo: '{{title}}',
+};
+
+function traducirVariablesApollo(texto: string): string {
+  return texto.replace(/\[([^[\]]+)\]/g, (match, nombreVariable) => {
+    const tag = VARIABLES_A_TAGS_APOLLO[nombreVariable.trim()];
+    return tag ?? match;
+  });
+}
+
 // Apollo es un conector GLOBAL (una sola cuenta de OnePay), como Notion: sin idUsuario.
 async function llamarApollo<T>(path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
@@ -224,7 +248,10 @@ export function crearApolloAdapter(): EnvioAdapter {
 
         await llamarApollo(`/emailer_templates/${templateId}`, apiKey, {
           method: 'PUT',
-          body: JSON.stringify({ subject: paso.asunto ?? '', body_html: paso.cuerpo }),
+          body: JSON.stringify({
+            subject: traducirVariablesApollo(paso.asunto ?? ''),
+            body_html: traducirVariablesApollo(paso.cuerpo),
+          }),
         });
 
         resultado.push({ idPaso: paso.idPaso, idVersion: paso.idVersion, proveedorStepId: stepId, proveedorTemplateId: templateId });
