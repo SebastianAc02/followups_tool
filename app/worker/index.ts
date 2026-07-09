@@ -13,13 +13,23 @@ import {
   pausarInscripcion,
   marcarDestinatarioSalio,
   quedanDestinatariosActivos,
+  materializarPasosDebidos,
 } from '../db/repository';
 import { drenarOutbox } from '../core/outbox';
 import { pushPendientes } from '../core/push';
 import { pollTracking } from '../core/tracking';
+import type { ConfigCalendario } from '../core/motor-cadencia';
 import { crearNotionAdapter } from '../adapters/notion';
 import { crearRegistroEnvio } from '../adapters/registro-envio';
 import type { Canal } from '../db/validation';
+
+// Calendario de la agenda real (sesion 2026-07-08, materializador): sin fin de semana
+// bloqueado todavia porque ninguna campana tiene hoy una config propia -- se corre a
+// diario y se corre hacia el siguiente dia habil si algun dia mas adelante se bloquea.
+// Es un default de arranque, no una regla de negocio fija: cuando el wizard de
+// campanas necesite pedirle esto al usuario, esta constante deja de ser la unica
+// fuente y pasa a leerse por campana.
+const CONFIG_CALENDARIO_DEFAULT: ConfigCalendario = { diasBloqueados: [], corrimiento: 'siguiente' };
 
 // B7: proceso Node aparte (npm run worker), no un setInterval dentro de Next, el
 // dev server de Next se reinicia con hot reload/deploys y se llevaria el timer con
@@ -36,6 +46,16 @@ async function tareaOutbox(): Promise<void> {
     { pendientes: outboxPendientes, marcarEnviado: marcarOutboxEnviado, marcarFallido: marcarOutboxFallido },
     crearNotionAdapter(),
   );
+}
+
+// V? (materializador): antes de esto, inscribirCampana dejaba la inscripcion activa
+// pero nunca escribia paso_inscripcion -- nada llegaba a /cola para NINGUN canal (ver
+// planning/experimento-apollo.md, Hallazgo real #4). Corre primero en el ciclo (antes
+// de tareaPush) para que el correo recien materializado alcance a salir en la misma
+// pasada, mismo catch-up-first que el resto del worker.
+async function tareaMaterializar(): Promise<void> {
+  const hoy = new Date().toISOString().slice(0, 10);
+  materializarPasosDebidos(hoy, CONFIG_CALENDARIO_DEFAULT);
 }
 
 // V5.4: push reanudable de cadencias, un proveedor real por canal. Aislada de outbox
@@ -99,6 +119,7 @@ function construirTareas(): Tarea[] {
   const registro = crearRegistroEnvio();
   return [
     { nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox },
+    { nombre: 'materializar', proveedorHeartbeat: 'materializador', ejecutar: tareaMaterializar },
     ...tareasPush(registro),
     { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: () => tareaTracking(registro.correo) },
   ];

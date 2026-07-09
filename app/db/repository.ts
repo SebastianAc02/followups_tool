@@ -2090,6 +2090,20 @@ export function listarCampanas() {
       pasos: sql<number>`(SELECT count(*) FROM paso_cadencia WHERE paso_cadencia.id_cadencia = campana.id_cadencia)`,
       dias: sql<number>`(SELECT max(paso_cadencia.dia_offset) FROM paso_cadencia WHERE paso_cadencia.id_cadencia = campana.id_cadencia)`,
       canalPrincipal: sql<string | null>`(SELECT paso_cadencia.canal FROM paso_cadencia WHERE paso_cadencia.id_cadencia = campana.id_cadencia ORDER BY paso_cadencia.orden ASC LIMIT 1)`,
+      // Cuantos toques YA se resolvieron (enviados de verdad, u omitidos por regla de
+      // canal faltante -- ver materializarPasosDebidos) contra el total de toques que
+      // le tocan a la campana completa (inscritas * pasos de la cadencia). Antes el
+      // home mostraba inscritas/(inscritas+bloqueadas) como si fuera "progreso" -- eso
+      // es la tasa de ENROLLMENT (cuantos leads sí consiguieron destinatario), no
+      // cuanto trabajo real (llamadas, correos) ya se hizo; con 0 bloqueadas eso
+      // siempre da 100% aunque nadie haya tocado un solo lead todavia.
+      toquesHechos: sql<number>`(
+        SELECT count(*) FROM paso_inscripcion
+        JOIN destinatario ON destinatario.id_destinatario = paso_inscripcion.id_destinatario
+        JOIN inscripcion AS insc_toque ON insc_toque.id_inscripcion = destinatario.id_inscripcion
+        WHERE insc_toque.id_campana = campana.id_campana
+          AND paso_inscripcion.estado IN ('enviada', 'omitida')
+      )`,
     })
     .from(campana)
     .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
@@ -2414,6 +2428,147 @@ export function agendaEnSeco(hoy: string, config: ConfigCalendario) {
     }
   }
   return agenda;
+}
+
+function versionActivaDePaso(idPaso: number): number {
+  const v = db
+    .select({ idVersion: versionPaso.idVersion })
+    .from(versionPaso)
+    .where(and(eq(versionPaso.idPaso, idPaso), eq(versionPaso.activa, 1)))
+    .orderBy(desc(versionPaso.esDefault), asc(versionPaso.idVersion))
+    .get();
+  if (!v) throw new Error(`paso ${idPaso} no tiene ninguna version activa`);
+  return v.idVersion;
+}
+
+export type ResultadoMaterializacion = { creados: number; omitidos: number };
+
+// El puente que faltaba entre agendaEnSeco (que solo MIRA que tocaria) y la cola real:
+// convierte "el motor de fechas dice que este paso ya toca" en una fila de
+// paso_inscripcion de verdad. Sin esto ninguna inscripcion activa llega jamas a /cola --
+// inscribirCampana solo crea inscripcion+destinatario (ver planning/experimento-apollo.md,
+// Hallazgo real #4: "lo primero que hay que resolver cuando se conecte el envio real").
+//
+// Barrido completo (una empresa a la vez, en su propia transaccion): para cada
+// inscripcion activa con destinatario activo, avanza pasos mientras el paso debido salga
+// 'omitido' por la regla de canal faltante (saltar/cola) -- se registran como
+// paso_inscripcion estado 'omitida' (sin canal real, sin push) SOLO para que el motor los
+// cuente como ejecutados y no se quede atascado ahi para siempre. En cuanto un paso
+// debido SI tiene canal, se materializa como 'pendiente' (real, aparece en /cola) y para
+// ahi: el siguiente paso de esa empresa lo agarra la proxima pasada del worker, mismo
+// patron anti-rafaga que ya usa proximoPasoDebido.
+export function materializarPasosDebidos(hoy: string, config: ConfigCalendario): ResultadoMaterializacion {
+  const activas = db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      idCadencia: campana.idCadencia,
+      reglaFaltante: campana.reglaFaltante,
+      anchor: inscripcion.fechaInscripcion,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(inscripcion.estado, 'activa'), eq(campana.estado, 'activa')))
+    .all();
+
+  const resultado: ResultadoMaterializacion = { creados: 0, omitidos: 0 };
+
+  for (const insc of activas) {
+    const dest = db
+      .select({ id: destinatario.idDestinatario })
+      .from(destinatario)
+      .where(and(eq(destinatario.idInscripcion, insc.idInscripcion), eq(destinatario.estado, 'activo')))
+      .get();
+    if (!dest) continue; // bloqueada (sin destinatario) o ya salio: nada que materializar
+
+    const pasos = db
+      .select({ orden: pasoCadencia.orden, diaOffset: pasoCadencia.diaOffset, canal: pasoCadencia.canal, idPaso: pasoCadencia.idPaso })
+      .from(pasoCadencia)
+      .where(eq(pasoCadencia.idCadencia, insc.idCadencia))
+      .orderBy(pasoCadencia.orden)
+      .all();
+    if (pasos.length === 0) continue;
+
+    const contactosEmpresa = db
+      .select({ email: contacto.email, telefono: contacto.telefono })
+      .from(contacto)
+      .where(eq(contacto.idEmpresa, insc.idEmpresa))
+      .all();
+    const disponibles = canalesDisponibles(contactosEmpresa);
+    const readiness = readinessEmpresa(
+      disponibles,
+      pasos.map((p) => ({ orden: p.orden, canal: p.canal as Canal })),
+      insc.reglaFaltante as ReglaFaltante,
+    );
+    const reemplazoPorOrden = new Map(readiness.reemplazos.map((r) => [r.orden, r.a]));
+    const sinCanalPorOrden = new Set(readiness.pasosSinCanal);
+    const anchor = (insc.anchor ?? hoy).slice(0, 10);
+
+    // Guard = cantidad de pasos de la cadencia: como maximo se puede avanzar un paso
+    // por cada paso que tiene la cadencia en una sola pasada (los omitidos encadenan,
+    // el real corta el loop con `break`).
+    for (let guard = 0; guard < pasos.length; guard += 1) {
+      const historial = db
+        .select({ orden: pasoCadencia.orden, estado: pasoInscripcion.estado, fechaEnviada: pasoInscripcion.fechaEnviada, fechaProgramada: pasoInscripcion.fechaProgramada })
+        .from(pasoInscripcion)
+        .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+        .where(eq(pasoInscripcion.idDestinatario, dest.id))
+        .all();
+      const ejecutados = historial
+        .filter((h) => h.estado === 'enviada' || h.estado === 'omitida')
+        .map((h) => ({ orden: h.orden, fechaReal: (h.fechaEnviada ?? h.fechaProgramada ?? hoy).slice(0, 10) }));
+
+      const debido = proximoPasoDebido(
+        pasos.map((p) => ({ orden: p.orden, diaOffset: p.diaOffset })),
+        { anchor, ejecutados },
+        hoy,
+        config,
+      );
+      if (!debido) break; // nada mas por hoy, o cadencia terminada
+
+      const paso = pasos.find((p) => p.orden === debido.orden)!;
+      const yaExiste = db
+        .select({ id: pasoInscripcion.idPasoInscripcion })
+        .from(pasoInscripcion)
+        .where(and(eq(pasoInscripcion.idDestinatario, dest.id), eq(pasoInscripcion.idPaso, paso.idPaso)))
+        .get();
+      // Si ya existe y llegamos aca, su estado no es 'enviada'/'omitida' (si no,
+      // proximoPasoDebido ya lo hubiera contado como ejecutado): es un 'pendiente'/'fallo'
+      // real esperando push o revision manual. Nada nuevo que hacer hoy.
+      if (yaExiste) break;
+
+      const ahora = new Date().toISOString();
+      if (sinCanalPorOrden.has(paso.orden)) {
+        db.insert(pasoInscripcion)
+          .values({
+            idDestinatario: dest.id,
+            idPaso: paso.idPaso,
+            idVersion: versionActivaDePaso(paso.idPaso),
+            canal: paso.canal,
+            estado: 'omitida',
+            fechaProgramada: debido.fechaObjetivo,
+            fechaEnviada: debido.fechaObjetivo,
+            createdAt: ahora,
+          })
+          .run();
+        resultado.omitidos += 1;
+        continue;
+      }
+
+      const canalFinal = reemplazoPorOrden.get(paso.orden) ?? paso.canal;
+      crearPasoInscripcionPendiente({
+        idDestinatario: dest.id,
+        idPaso: paso.idPaso,
+        idVersion: versionActivaDePaso(paso.idPaso),
+        canal: canalFinal,
+        fechaProgramada: debido.fechaObjetivo,
+      });
+      resultado.creados += 1;
+      break;
+    }
+  }
+
+  return resultado;
 }
 
 // V5.4: push reanudable (B6). crearPasoInscripcionPendiente es search-first (chequea
