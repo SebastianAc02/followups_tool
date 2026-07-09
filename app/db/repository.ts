@@ -482,12 +482,12 @@ export function contarPorEstado(owner: string | undefined, idOrganizacion: numbe
 // Resumen del home (rediseño): las 4 métricas de las stat cards. Reusa colaDelDia (cola de
 // hoy = vencidos + para hoy) y contarPorEstado sobre toda la base para deals calientes y
 // cuentas activas. Solo lectura.
-export function resumenHome(owner: string, hoy: string) {
-  const cola = colaDelDia(hoy, owner);
+export function resumenHome(owner: string, hoy: string, idOrganizacion: number) {
+  const cola = colaDelDia(hoy, owner, idOrganizacion);
   const toquesHoy = cola.length;
   const vencidos = cola.filter((c) => (c.fecha ?? '') < hoy).length;
 
-  const porEstado = contarPorEstado();
+  const porEstado = contarPorEstado(undefined, idOrganizacion);
   const dealsCalientes = ESTADOS_CALIENTES.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
   const cuentasActivas = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
 
