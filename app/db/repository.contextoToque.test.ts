@@ -29,7 +29,7 @@ test('getContextoToque trae cuenta, contacto principal y secuencia vacia si no h
   ).run();
   db.close();
 
-  const ctx = getContextoToque('EMP_TEST');
+  const ctx = getContextoToque('EMP_TEST', 1);
   assert.equal(ctx.emp?.nombre, 'RedNet');
   assert.equal(ctx.principal?.nombre, 'Carla');
   assert.deepEqual(ctx.secuencia, []); // sin cadencia => riel degradado
@@ -90,7 +90,7 @@ test('getContextoToque trae los pasos de la secuencia cuando hay inscripcion act
   pasoInsStmt.run(idDestinatario, idPaso4, idVersion, 'llamada', 'pendiente', null);
   db.close();
 
-  const ctx = getContextoToque('EMP_INSCRITA');
+  const ctx = getContextoToque('EMP_INSCRITA', 1);
   assert.equal(ctx.secuencia.length, 4);
   assert.equal(ctx.secuencia[0].estado, 'hecho');
   assert.equal(ctx.secuencia[1].estado, 'hecho');
