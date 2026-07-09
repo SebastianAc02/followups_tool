@@ -79,7 +79,7 @@ test('guardar y correr el segmento guardado da el mismo resultado', () => {
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
     descripcionNatural: 'los que estan en on-hold',
   });
-  const empresas = empresasDeSegmentoGuardado(id);
+  const empresas = empresasDeSegmentoGuardado(id, 1);
   assert.ok(empresas);
   assert.deepEqual(empresas!.map((e) => e.id).sort(), ['e1', 'e2', 'e3', 'e4']);
 
@@ -88,7 +88,7 @@ test('guardar y correr el segmento guardado da el mismo resultado', () => {
 });
 
 test('empresasDeSegmentoGuardado de un id inexistente devuelve null', () => {
-  assert.equal(empresasDeSegmentoGuardado(99999), null);
+  assert.equal(empresasDeSegmentoGuardado(99999, 1), null);
 });
 
 test('un campo fuera de la whitelist es rechazado por validacion (no SQL libre)', () => {
@@ -252,6 +252,15 @@ test('empresasDeSegmento no ve empresas de otra organizacion', () => {
 
   const desdeOrg2 = empresasDeSegmento(def, 2);
   assert.deepEqual(desdeOrg2.map((e) => e.id), ['e-otra-org']);
+});
+
+test('empresasDeSegmentoGuardado no corre el segmento de otra organizacion', () => {
+  const id = guardarSegmento({
+    nombre: 'guardado-org1',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  });
+  assert.equal(empresasDeSegmentoGuardado(id, 2), null, 'la organizacion 2 no puede correr un segmento que no es suyo');
+  assert.ok(empresasDeSegmentoGuardado(id, 1));
 });
 
 test.after(() => {

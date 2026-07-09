@@ -1517,11 +1517,15 @@ export function actualizarCampanaBasico(idCampana: number, cambios: { nombre?: s
 
 // V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el
 // puente que V4.5 usa para inscribir "todas las empresas de este segmento".
-export function empresasDeSegmentoGuardado(idSegmento: number) {
-  const fila = db.select({ definicion: segmento.definicion }).from(segmento).where(eq(segmento.idSegmento, idSegmento)).get();
+export function empresasDeSegmentoGuardado(idSegmento: number, idOrganizacion: number) {
+  const fila = db
+    .select({ definicion: segmento.definicion })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
   if (!fila) return null;
   const def = definicionSegmentoSchema.parse(JSON.parse(fila.definicion));
-  return empresasDeSegmento(def);
+  return empresasDeSegmento(def, idOrganizacion);
 }
 
 // Parte 2 campanas: excluir/incluir es un toggle idempotente sobre la fila unica
