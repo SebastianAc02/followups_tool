@@ -1248,14 +1248,20 @@ export function obtenerSegmento(idSegmento: number, idOrganizacion: number): { i
 // silencioso de NuevoSegmento) en vez de crear uno nuevo por cada ajuste de filtro --
 // si no, cada tecla dejaria un segmento huerfano distinto en "Usar un segmento
 // guardado...".
-export function actualizarSegmento(idSegmento: number, cambios: { nombre?: string; definicion?: DefinicionSegmento; descripcionNatural?: string }): void {
+export function actualizarSegmento(idSegmento: number, cambios: { nombre?: string; definicion?: DefinicionSegmento; descripcionNatural?: string }, idOrganizacion: number): void {
   const sets: Record<string, unknown> = {};
   if (cambios.nombre !== undefined) sets.nombre = cambios.nombre;
   if (cambios.definicion !== undefined) sets.definicion = JSON.stringify(definicionSegmentoSchema.parse(cambios.definicion));
   if (cambios.descripcionNatural !== undefined) sets.descripcionNatural = cambios.descripcionNatural;
   if (Object.keys(sets).length === 0) return;
   sets.updatedAt = new Date().toISOString();
-  db.update(segmento).set(sets).where(eq(segmento.idSegmento, idSegmento)).run();
+  // Multi-organizacion (Parte 2): el UPDATE solo pega si el segmento es de idOrganizacion.
+  // Silencioso a proposito (no throw) -- ver nota de diseno al inicio del plan: coherente
+  // con que obtenerSegmento ya trata "es de otra organizacion" igual que "no existe".
+  db.update(segmento)
+    .set(sets)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .run();
 }
 
 export function listarSegmentos() {

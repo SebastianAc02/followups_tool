@@ -22,6 +22,7 @@ const {
   excluirDeSegmento,
   incluirDeSegmento,
   obtenerSegmento,
+  actualizarSegmento,
 } = await import('./repository.ts');
 
 function seed() {
@@ -317,6 +318,16 @@ test('obtenerSegmento devuelve el segmento completo, y null si es de otra organi
 
   assert.equal(obtenerSegmento(id, 2), null, 'la organizacion 2 no debe poder leer el segmento de la 1');
   assert.equal(obtenerSegmento(99999, 1), null);
+});
+
+test('actualizarSegmento aplica el cambio solo si el segmento es de mi organizacion', () => {
+  const id = guardarSegmento({ nombre: 'actualizar-1', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
+
+  actualizarSegmento(id, { nombre: 'actualizar-1-otra-org' }, 2);
+  assert.equal(obtenerSegmento(id, 1)!.nombre, 'actualizar-1', 'un intento desde otra organizacion no debe cambiar nada');
+
+  actualizarSegmento(id, { nombre: 'actualizar-1-renombrado' }, 1);
+  assert.equal(obtenerSegmento(id, 1)!.nombre, 'actualizar-1-renombrado');
 });
 
 test.after(() => {
