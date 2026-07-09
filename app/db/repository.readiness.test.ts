@@ -43,7 +43,7 @@ test('empresasConReadiness clasifica lista/parcial/sin_canal', () => {
 });
 
 test('conteosReadiness agrega total/listas/parciales/sinCanal/sinContacto', () => {
-  const c = conteosReadiness(def, ['correo', 'llamada'], 'saltar');
+  const c = conteosReadiness(def, ['correo', 'llamada'], 'saltar', 1);
   assert.deepEqual(c, { total: 3, listas: 1, parciales: 1, sinCanal: 1, sinContacto: 1 });
 });
 

@@ -1340,8 +1340,8 @@ export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos:
   });
 }
 
-export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): ConteosReadiness {
-  const filas = empresasConReadiness(def, canalesRequeridos, regla);
+export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante, idOrganizacion: number): ConteosReadiness {
+  const filas = empresasConReadiness(def, canalesRequeridos, regla, idOrganizacion);
   return {
     total: filas.length,
     listas: filas.filter((f) => f.readiness.estado === 'lista').length,
