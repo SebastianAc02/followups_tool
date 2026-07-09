@@ -391,8 +391,23 @@ const actualizarCampoCalificacionSchema = z.object({
 // dato que ya se sabe (click en el item "PREGUNTAR" -> cajon de texto -> guardar).
 // "recaudo" se queda afuera a proposito: no tiene columna en empresa todavia (ver
 // core/calificacion.ts).
-export function actualizarCampoCalificacion(idEmpresa: string, campo: CampoCalificacion, valorCrudo: string): void {
+export function actualizarCampoCalificacion(
+  idEmpresa: string,
+  campo: CampoCalificacion,
+  valorCrudo: string,
+  idOrganizacion: number,
+): void {
   const val = actualizarCampoCalificacionSchema.parse({ campo, valor: valorCrudo });
+
+  const emp = db
+    .select({ organizacionActivaId: empresa.organizacionActivaId })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!emp) throw new Error(`Empresa ${idEmpresa} no existe`);
+  if (emp.organizacionActivaId !== idOrganizacion) {
+    throw new Error(`La empresa ${idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+  }
 
   if (val.campo === 'usuarios') {
     const usuarios = Number(val.valor);
