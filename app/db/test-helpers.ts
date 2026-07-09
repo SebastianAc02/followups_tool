@@ -36,6 +36,7 @@ export function crearDbPrueba() {
       proximo_paso TEXT,
       proximo_canal TEXT,
       notion_page_id TEXT,
+      organizacion_activa_id INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -71,6 +72,7 @@ export function crearDbPrueba() {
       razon_perdida TEXT,
       objecion TEXT,
       fuente TEXT NOT NULL,
+      id_organizacion INTEGER NOT NULL DEFAULT 1,
       created_at TEXT
     );
 
@@ -95,6 +97,7 @@ export function crearDbPrueba() {
       id_conector INTEGER PRIMARY KEY AUTOINCREMENT,
       proveedor TEXT NOT NULL,
       id_usuario TEXT,
+      id_organizacion INTEGER,
       credencial_ciphertext TEXT,
       estado TEXT NOT NULL DEFAULT 'sin_credencial',
       ultima_corrida TEXT,
@@ -106,6 +109,7 @@ export function crearDbPrueba() {
 
     CREATE TABLE conector_config (
       proveedor TEXT PRIMARY KEY,
+      id_organizacion INTEGER,
       modo TEXT NOT NULL,
       habilitado INTEGER NOT NULL DEFAULT 1,
       agregado_por TEXT,
@@ -175,6 +179,7 @@ export function crearDbPrueba() {
       nombre TEXT NOT NULL,
       definicion TEXT NOT NULL,
       descripcion_natural TEXT,
+      id_organizacion INTEGER NOT NULL DEFAULT 1,
       created_at TEXT,
       updated_at TEXT
     );
@@ -200,6 +205,7 @@ export function crearDbPrueba() {
       tope_toques_dia INTEGER,
       fecha_inicio TEXT,
       owner TEXT,
+      id_organizacion INTEGER NOT NULL DEFAULT 1,
       proveedor_campana_id TEXT,
       created_at TEXT,
       updated_at TEXT
