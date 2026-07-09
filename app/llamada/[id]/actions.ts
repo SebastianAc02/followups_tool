@@ -22,7 +22,7 @@ import { estructurarToque, type ToqueEstructurado } from "../../core/estructurar
 import { aprobarDesdeInboxAction, type AprobarDesdeInboxResultado } from "../../por-revisar/actions";
 
 export async function registrarToqueAction(formData: FormData) {
-  await requireSession();
+  const { idOrganizacion } = await requireSession();
   const idEmpresa = String(formData.get("idEmpresa") ?? "");
   const resultado = String(formData.get("resultado") ?? "");
   if (!idEmpresa || !resultado) return;
@@ -63,7 +63,7 @@ export async function registrarToqueAction(formData: FormData) {
     kdm,
   });
 
-  registrarToque(parsed);
+  registrarToque(parsed, idOrganizacion);
 
   // Sesion 2026-07-09: si este toque cierra el paso activo de una cadencia (llamada
   // con paso_inscripcion pendiente), el paso se marca 'enviada' aca -- el toque YA
@@ -89,9 +89,9 @@ export async function actualizarCampoCalificacionAction(
   campo: CampoCalificacion,
   valor: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  await requireSession();
+  const { idOrganizacion } = await requireSession();
   try {
-    actualizarCampoCalificacion(idEmpresa, campo, valor);
+    actualizarCampoCalificacion(idEmpresa, campo, valor, idOrganizacion);
     revalidatePath(`/llamada/${idEmpresa}`);
     return { ok: true };
   } catch (e) {
@@ -176,14 +176,14 @@ export async function enviarToqueCanalAction(
 // nuevo con su propio resultado real (via CapturaLlamada u otro flujo), no una correccion
 // de este.
 export async function registrarToqueSueltoAction(idEmpresa: string, canal: "correo" | "whatsapp", cuerpo: string) {
-  await requireSession();
+  const { idOrganizacion } = await requireSession();
   const parsed = registrarToqueSchema.parse({
     idEmpresa,
     canal,
     resultado: "no_contesto",
     quePaso: cuerpo || undefined,
   });
-  registrarToque(parsed);
+  registrarToque(parsed, idOrganizacion);
   revalidatePath(`/llamada/${idEmpresa}`);
   redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
 }

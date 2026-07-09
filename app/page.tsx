@@ -20,8 +20,8 @@ export default async function Dashboard() {
   const ahora = new Date();
   const hoy = ahora.toISOString().slice(0, 10);
 
-  const resumen = resumenHome(owner, hoy);
-  const porEstado = contarPorEstado();
+  const resumen = resumenHome(owner, hoy, perfil.idOrganizacion);
+  const porEstado = contarPorEstado(undefined, perfil.idOrganizacion);
   const campanas: CampaignVM[] = listarCampanas()
     .filter((c) => c.estado === 'activa' || c.estado === 'pausada')
     .slice(0, 4)

@@ -29,9 +29,9 @@ export async function datosSidebar() {
 
   const hoy = new Date().toISOString().slice(0, 10);
 
-  const toquesHoy = colaDelDia(hoy, owner).length;
+  const toquesHoy = colaDelDia(hoy, owner, usuario.idOrganizacion).length;
   const campanasActivas = listarCampanas().filter((c) => c.estado === 'activa').length;
-  const porEstado = contarPorEstado();
+  const porEstado = contarPorEstado(undefined, usuario.idOrganizacion);
   const cuentasFunnel = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
   // Fase 9.1: inbox permanente de manuales pendientes, sin filtro de fecha (a
   // diferencia de toquesHoy) -- ver pasosManualesPendientes() en el repository.

@@ -27,10 +27,10 @@ export default async function Llamada({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ vista?: string }>;
 }) {
-  await requireSession();
+  const usuario = await requireSession();
   const { id } = await params;
   const sp = await searchParams;
-  const ctx = getContextoToque(id);
+  const ctx = getContextoToque(id, usuario.idOrganizacion);
 
   if (!ctx.emp) {
     return (
