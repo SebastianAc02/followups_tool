@@ -9,6 +9,7 @@ import { cn } from '../../ui/cn';
 import { useConfirm } from '../../ui/useConfirm';
 import { Seg, SegButton } from '../../ui/Seg';
 import type { ModoCampana } from '../../db/validation';
+import { CANALES_AUTOMATICOS } from '../../db/validation';
 
 export type PasoCadenciaUI = {
   idPaso: number;
@@ -101,14 +102,24 @@ export function CadenciaCockpit({
     });
   }
 
+  // Llamada/whatsapp no tienen proveedor automatico hoy (ver CANALES_AUTOMATICOS,
+  // app/db/validation.ts) -- eso es lo normal, no un caso raro: una llamada SIEMPRE
+  // la hace una persona. Cambiar a uno de esos canales fuerza esManual=true en el
+  // mismo click, para no mandar al usuario un error de "sin proveedor automatico"
+  // por algo que la UI ya sabia de antemano.
   function setCanalLocal(idPaso: number, canal: Canal) {
-    guardarCambio(idPaso, { canal });
+    const forzarManual = !CANALES_AUTOMATICOS.includes(canal);
+    guardarCambio(idPaso, forzarManual ? { canal, esManual: true } : { canal });
   }
 
   function toggleAprobacionLocal(idPaso: number) {
     const fila = filas.find((f) => f.idPaso === idPaso);
     if (!fila) return;
-    guardarCambio(idPaso, { esManual: !fila.esManual });
+    const nuevoEsManual = !fila.esManual;
+    // No se puede volver "Automático" un canal sin proveedor (llamada/whatsapp hoy):
+    // el toggle queda sin efecto en vez de mandar la action a fallar.
+    if (!nuevoEsManual && !CANALES_AUTOMATICOS.includes(fila.canal as Canal)) return;
+    guardarCambio(idPaso, { esManual: nuevoEsManual });
   }
 
   function setDiaLocal(idPaso: number, diaOffset: number) {
@@ -250,8 +261,14 @@ export function CadenciaCockpit({
                 <button
                   type="button"
                   onClick={() => toggleAprobacionLocal(f.idPaso)}
+                  disabled={!CANALES_AUTOMATICOS.includes(f.canal as Canal)}
+                  title={
+                    CANALES_AUTOMATICOS.includes(f.canal as Canal)
+                      ? undefined
+                      : `${CANAL_LABEL[f.canal as Canal] ?? f.canal} no tiene proveedor automático todavía: este toque siempre queda manual`
+                  }
                   className={cn(
-                    'inline-flex w-fit items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
+                    'inline-flex w-fit items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors disabled:cursor-default disabled:opacity-70',
                     f.esManual
                       ? 'border-accent/40 bg-accent-bg text-accent-ink'
                       : 'border-line text-muted hover:text-ink',
