@@ -21,6 +21,7 @@ const {
   muestraDestinatarioDeSegmento,
   excluirDeSegmento,
   incluirDeSegmento,
+  obtenerSegmento,
 } = await import('./repository.ts');
 
 function seed() {
@@ -300,6 +301,22 @@ test('guardarSegmento escribe el id_organizacion real, no el hardcode', () => {
   const fila = raw.prepare('SELECT id_organizacion FROM segmento WHERE id_segmento = ?').get(id) as any;
   raw.close();
   assert.equal(fila.id_organizacion, 2);
+});
+
+test('obtenerSegmento devuelve el segmento completo, y null si es de otra organizacion o no existe', () => {
+  const id = guardarSegmento(
+    { nombre: 'obtener-1', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] }, descripcionNatural: 'los en on-hold' },
+    1,
+  );
+
+  const propio = obtenerSegmento(id, 1);
+  assert.ok(propio);
+  assert.equal(propio!.nombre, 'obtener-1');
+  assert.equal(propio!.descripcionNatural, 'los en on-hold');
+  assert.deepEqual(propio!.definicion, { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] });
+
+  assert.equal(obtenerSegmento(id, 2), null, 'la organizacion 2 no debe poder leer el segmento de la 1');
+  assert.equal(obtenerSegmento(99999, 1), null);
 });
 
 test.after(() => {

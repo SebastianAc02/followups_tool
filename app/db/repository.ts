@@ -1234,11 +1234,11 @@ export function guardarSegmento(input: { nombre: string; definicion: DefinicionS
 // segmento guardado, para reabrir NuevoSegmento pre-cargado en vez de vacio. El
 // dropdown "Usar un segmento guardado..." salta directo a Cadencia con listarSegmentos
 // (solo metadata); esto es para el caso de VOLVER sobre el que ya se estaba armando.
-export function obtenerSegmento(idSegmento: number): { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } | null {
+export function obtenerSegmento(idSegmento: number, idOrganizacion: number): { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } | null {
   const fila = db
     .select({ nombre: segmento.nombre, definicion: segmento.definicion, descripcionNatural: segmento.descripcionNatural })
     .from(segmento)
-    .where(eq(segmento.idSegmento, idSegmento))
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
     .get();
   if (!fila) return null;
   return { id: idSegmento, nombre: fila.nombre, definicion: definicionSegmentoSchema.parse(JSON.parse(fila.definicion)), descripcionNatural: fila.descripcionNatural };
