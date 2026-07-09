@@ -2636,6 +2636,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       intentos: pasoInscripcion.intentos,
       canal: pasoInscripcion.canal,
       email: contacto.email,
+      telefono: contacto.telefono,
       nombre: contacto.nombre,
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
@@ -2668,7 +2669,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
   return filas.map((f) => ({
     idPasoInscripcion: f.idPasoInscripcion,
     proveedorCampanaId: f.proveedorCampanaId as string,
-    destinatario: { email: f.email ?? '', nombre: f.nombre },
+    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre },
     paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
     intentos: f.intentos,
   }));

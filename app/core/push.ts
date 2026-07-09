@@ -5,7 +5,7 @@
 // el motor de fechas, fuera de este archivo); solo avanza el estado de las que ya
 // existen, y el indice unico id_destinatario+id_paso (V5.1) es quien de verdad
 // garantiza que nunca hay dos filas para el mismo par.
-import type { EnvioAdapter, DestinatarioEnvio, PasoEnvio } from './ports/envio';
+import type { CanalEntrega, DestinatarioEnvio, PasoEnvio } from './ports/envio';
 
 export type FilaPasoInscripcion = {
   idPasoInscripcion: number;
@@ -40,7 +40,7 @@ export function calcularProximoIntentoPush(intentos: number, ahora: Date): Date 
   return new Date(ahora.getTime() + minutos * 60_000);
 }
 
-export async function pushPendientes(deps: PushDeps, envio: EnvioAdapter, ahora: Date = new Date()): Promise<void> {
+export async function pushPendientes(deps: PushDeps, envio: CanalEntrega, ahora: Date = new Date()): Promise<void> {
   for (const fila of deps.pendientes()) {
     try {
       deps.marcarEnviando(fila.idPasoInscripcion);

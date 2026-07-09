@@ -1,4 +1,4 @@
-import type { EnvioAdapter } from '../core/ports/envio';
+import type { EnvioAdapter, CanalEntrega } from '../core/ports/envio';
 import type { Canal } from '../db/validation';
 import { CANALES_AUTOMATICOS } from '../db/validation';
 import { crearApolloAdapter } from './apollo';
@@ -23,6 +23,21 @@ export function crearRegistroEnvio(): Record<Canal, EnvioAdapter | null> {
     llamada: null,
   };
 }
+
+// crearRegistroEntrega (checkpoint 2026-07-09, deadline explicito de Sebastian, misma
+// excepcion puntual al modo learning documentada en core/ports/envio.ts): angosta el
+// registro a CanalEntrega para el UNICO consumidor generico por canal (tareasPush en
+// worker/index.ts, que hoy loopea sobre los 3 canales sin saber que Apollo existe).
+// crearRegistroEnvio() (arriba) sigue igual y se queda como la via para quien necesita
+// el EnvioAdapter completo de correo (tareaTracking, campanas/[id]/actions.ts): esos dos
+// consumidores solo le preguntan por 'correo', nunca por whatsapp/llamada, asi que no
+// ganan nada angostando -- partir el registro en dos funciones es mas simple que un tipo
+// por-clave dentro de un mismo Record, y dice la verdad: "registro de entrega" (todo
+// canal, solo enviarPaso) y "adaptador de correo completo" son dos preguntas distintas.
+export function crearRegistroEntrega(): Record<Canal, CanalEntrega | null> {
+  return crearRegistroEnvio();
+}
+
 
 // Re-exportado por conveniencia (import { CANALES_AUTOMATICOS } from '.../registro-envio'
 // donde ya se esta importando crearRegistroEnvio); la fuente real vive en db/validation.ts,

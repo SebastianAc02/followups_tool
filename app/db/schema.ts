@@ -342,3 +342,25 @@ export const preferenciaUsuario = sqliteTable('preferencia_usuario', {
   telefono: text('telefono'),
   updatedAt: text('updated_at'),
 });
+
+// Fase 8 (WhatsApp adaptador): lineas WhatsApp activas (núcleo de identidad para
+// envios de lotes). Una linea por instancia Evolution API (u otro proveedor). techo_diario
+// es el limite local de esta linea; el motor de cadencias (V8.2) respeta el limite
+// global de la empresa + el de cada linea individual.
+//
+// idUsuario (sesion 2026-07-09, "cada quien su propio WhatsApp"): nullable a proposito
+// -- NULL es una linea de POOL (compartida, la administra el admin, sin dueño);
+// no-null es la linea PERSONAL de ESE usuario (cada quien conecta y aparea la suya,
+// misma idea que Granola pero para una fila de linea, no para un conector completo).
+// No se agrega antes de la primera aplicacion de la migracion (tabla nueva, sin datos
+// todavia) para no necesitar un ALTER TABLE despues.
+export const lineaWhatsapp = sqliteTable('linea_whatsapp', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  numero: text('numero').notNull(),
+  tipo: text('tipo').notNull(),
+  idUsuario: text('id_usuario'),
+  referenciaProveedor: text('referencia_proveedor'),
+  estado: text('estado').notNull().default('calentando'),
+  techoDiario: integer('techo_diario').notNull().default(25),
+  fechaCreacion: text('fecha_creacion'),
+});

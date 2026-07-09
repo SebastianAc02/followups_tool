@@ -1,6 +1,6 @@
 // Poll de tracking + reply detection (V5.5). Mismo estilo que outbox.ts/push.ts:
 // logica pura, deps inyectadas, una campana caida no bloquea el poll de las demas.
-import type { EnvioAdapter, EventoProveedor } from './ports/envio';
+import type { TrackingPoll, EventoProveedor } from './ports/envio';
 
 export type CampanaConSecuencia = { idCampana: number; proveedorCampanaId: string };
 export type DestinatarioResuelto = { idPasoInscripcion: number; idDestinatario: number; idInscripcion: number };
@@ -23,7 +23,7 @@ export type TrackingDeps = {
 // indice unico de evento_tracking dedupe de todas formas).
 const DIAS_VENTANA = 30;
 
-export async function pollTracking(deps: TrackingDeps, envio: EnvioAdapter, ahora: Date = new Date()): Promise<void> {
+export async function pollTracking(deps: TrackingDeps, envio: TrackingPoll, ahora: Date = new Date()): Promise<void> {
   const desde = new Date(ahora.getTime() - DIAS_VENTANA * 24 * 60 * 60 * 1000).toISOString();
 
   for (const camp of deps.campanasConSecuencia()) {

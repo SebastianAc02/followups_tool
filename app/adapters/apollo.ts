@@ -146,6 +146,10 @@ function buzonEnvioId(): string | undefined {
 // que ya existe (B6). Se reusa para "encontrar el contacto de este email" en
 // sacarDestinatario, ya que el plan no documenta un endpoint separado de busqueda.
 async function resolverContacto(apiKey: string, destinatario: DestinatarioEnvio): Promise<ContactoApollo> {
+  // email nullable (sesion 2026-07-09, DestinatarioEnvio.telefono para WhatsApp): Apollo
+  // es EXCLUSIVAMENTE el proveedor de canal=correo, siempre con email real -- si esto
+  // truena es un bug de quien llama (goteo enrutando mal), no un caso a manejar en silencio.
+  if (!destinatario.email) throw new Error('Apollo requiere email y el destinatario no trae uno');
   const bulk = await llamarApollo<BulkCreateRespuesta>('/contacts/bulk_create', apiKey, {
     method: 'POST',
     body: JSON.stringify({
@@ -317,7 +321,7 @@ export function crearApolloAdapter(): EnvioAdapter {
 
     async sacarDestinatario(proveedorCampanaId: string, email: string) {
       const apiKey = credencial();
-      const contacto = await resolverContacto(apiKey, { email, nombre: null });
+      const contacto = await resolverContacto(apiKey, { email, telefono: null, nombre: null });
 
       // Verificado en vivo (V5.3): el endpoint NO va anidado con el id en la URL
       // (esa forma da 404, a pesar de que asi lo tenia documentado

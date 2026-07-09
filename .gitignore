@@ -49,3 +49,6 @@ next-env.d.ts
 
 # worktrees aislados (superpowers:using-git-worktrees)
 /.worktrees/
+
+# bytecode cache de los scripts de migracion en Python
+__pycache__/

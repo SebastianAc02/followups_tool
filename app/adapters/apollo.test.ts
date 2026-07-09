@@ -70,7 +70,7 @@ test('enviarPaso hace bulk_create con dedupe y add_contact_ids con emailer_campa
   const adapter = crearApolloAdapter();
   const resultado = await adapter.enviarPaso(
     'seq-1',
-    { email: 'ana@empresa.com', nombre: 'Ana' },
+    { email: 'ana@empresa.com', telefono: null, nombre: 'Ana' },
     { asunto: 'Hola', cuerpo: 'cuerpo del correo', canal: 'correo' },
   );
 
@@ -99,7 +99,7 @@ test('enviarPaso truena si no hay buzon configurado (decision de negocio S2 pend
   // quedaria borrada y filtraria el fallo a los tests siguientes del archivo.
   try {
     await assert.rejects(
-      () => adapter.enviarPaso('seq-1', { email: 'ana@empresa.com', nombre: null }, { asunto: null, cuerpo: 'x', canal: 'correo' }),
+      () => adapter.enviarPaso('seq-1', { email: 'ana@empresa.com', telefono: null, nombre: null }, { asunto: null, cuerpo: 'x', canal: 'correo' }),
       /APOLLO_MAILBOX_ID/,
     );
   } finally {

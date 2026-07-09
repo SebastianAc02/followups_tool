@@ -54,8 +54,13 @@
 // las llamadas siguientes (enviar, sacar, archivar, leer eventos) la reciben ya
 // resuelta, nunca vuelven a crear la secuencia.
 
+// telefono (sesion 2026-07-09, WhatsApp): Apollo lee email, WhatsApp lee telefono --
+// cada adaptador proyecta el campo que le sirve de correlator. Es AMPLIAR este tipo
+// (email pasa a nullable), no un DestinatarioEnvio por canal: un canal futuro que
+// necesite otro campo lo agrega aca sin que push.ts tenga que ramificar por canal.
 export type DestinatarioEnvio = {
-  email: string;
+  email: string | null;
+  telefono: string | null;
   nombre: string | null;
 };
 
@@ -110,39 +115,52 @@ export type EventoProveedor = {
   detalle: unknown;
 };
 
-export interface EnvioAdapter {
-  // Crea la secuencia externa una sola vez por campana; devuelve el id a guardar
-  // en campana.proveedor_campana_id.
-  crearCampanaExterna(nombre: string): Promise<string>;
+// Segregacion (sesion 2026-07-09, canal WhatsApp -- ver planning/plan-whatsapp-adapter.md
+// D2): EnvioAdapter era en realidad TRES roles usados por tres consumidores distintos
+// (push.ts solo entrega, tracking.ts solo lee eventos, las acciones de campana solo
+// manejan el ciclo de vida de la secuencia externa). Partirlo en estas tres interfaces
+// es ADITIVO: EnvioAdapter pasa a ser su interseccion, asi que Apollo (que ya
+// implementaba las tres) lo sigue satisfaciendo sin cambiar una linea. WhatsApp
+// implementa SOLO CanalEntrega y entra al mismo registro/loop de push.ts sin no-ops.
 
-  // Envia UN paso a UN destinatario dentro de la campana externa ya creada.
-  // Internamente: search-first/bulk_create con dedupe (nunca duplica contacto),
-  // luego add_contact_ids con el buzon configurado. Idempotencia de "nunca dos
-  // envios del mismo par destinatario+paso" la garantiza el indice unico de
-  // paso_inscripcion (V5.1), no este metodo.
+export interface CanalEntrega {
+  // Envia UN paso a UN destinatario. Idempotencia de "nunca dos envios del mismo par
+  // destinatario+paso" la garantiza el indice unico de paso_inscripcion (V5.1), no
+  // este metodo.
   enviarPaso(
     proveedorCampanaId: string,
     destinatario: DestinatarioEnvio,
     paso: PasoEnvio,
   ): Promise<EnvioResultado>;
+}
 
-  // Sube/actualiza en Apollo TODOS los pasos de la cadencia de una campana (POST
-  // /emailer_steps + PUT /emailer_templates/{id}), sin tocar destinatarios. Create-si-
+export interface TrackingPoll {
+  // Saca al destinatario de la secuencia externa (remove_or_stop_contact_ids en
+  // Apollo). No borra el contacto: isps.db es la fuente de la verdad.
+  sacarDestinatario(proveedorCampanaId: string, email: string): Promise<void>;
+
+  // Lee eventos de tracking desde una fecha (ISO). El llamador decide que hacer con
+  // proveedorEventoId (insertar contra evento_tracking, el indice unico rechaza el
+  // duplicado si el poll trae uno que ya se vio).
+  leerEventosNuevos(proveedorCampanaId: string, desde: string): Promise<EventoProveedor[]>;
+}
+
+export interface MotorSecuencia {
+  // Crea la secuencia externa una sola vez por campana; devuelve el id a guardar en
+  // campana.proveedor_campana_id.
+  crearCampanaExterna(nombre: string): Promise<string>;
+
+  // Sube/actualiza en Apollo TODOS los pasos de la cadencia de una campana. Create-si-
   // falta / update-si-existe segun proveedorStepId/proveedorTemplateId de cada paso;
   // el llamador persiste los ids devueltos para que la proxima llamada actualice en
   // vez de duplicar.
   sincronizarCopy(proveedorCampanaId: string, pasos: PasoParaSincronizar[]): Promise<PasoSincronizado[]>;
 
-  // Saca al destinatario de la secuencia externa (remove_or_stop_contact_ids).
-  // No borra el contacto: Apollo no tiene DELETE por API y no hace falta, isps.db
-  // es la fuente de la verdad.
-  sacarDestinatario(proveedorCampanaId: string, email: string): Promise<void>;
-
   // Archiva la secuencia completa. Unica "limpieza" que expone la API de Apollo.
   archivarCampana(proveedorCampanaId: string): Promise<void>;
-
-  // Lee eventos de tracking desde una fecha (ISO). El llamador decide que hacer
-  // con proveedorEventoId (insertar contra evento_tracking, el indice unico
-  // rechaza el duplicado si el poll trae uno que ya se vio).
-  leerEventosNuevos(proveedorCampanaId: string, desde: string): Promise<EventoProveedor[]>;
 }
+
+// EnvioAdapter sigue existiendo para quien necesita los tres roles a la vez (hoy solo
+// Apollo): campanas/actions.ts y worker/index.ts (tareaTracking) lo siguen pidiendo
+// completo, sin cambio de firma.
+export interface EnvioAdapter extends CanalEntrega, TrackingPoll, MotorSecuencia {}

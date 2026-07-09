@@ -20,7 +20,7 @@ import { pushPendientes } from '../core/push';
 import { pollTracking } from '../core/tracking';
 import type { ConfigCalendario } from '../core/motor-cadencia';
 import { crearNotionAdapter } from '../adapters/notion';
-import { crearRegistroEnvio } from '../adapters/registro-envio';
+import { crearRegistroEnvio, crearRegistroEntrega } from '../adapters/registro-envio';
 import type { Canal } from '../db/validation';
 
 // Calendario de la agenda real (sesion 2026-07-08, materializador): sin fin de semana
@@ -66,7 +66,7 @@ async function tareaMaterializar(): Promise<void> {
 // esta funcion NO sabe que Apollo existe. push.ts tampoco. Recibe el canal y el
 // adaptador ya resueltos; agregar un proveedor nuevo (WhatsApp real, por ejemplo) es
 // sumarlo al registro y nada mas cambia aca.
-async function tareaPush(canal: Canal, envio: ReturnType<typeof crearRegistroEnvio>[Canal]): Promise<void> {
+async function tareaPush(canal: Canal, envio: ReturnType<typeof crearRegistroEntrega>[Canal]): Promise<void> {
   if (!envio) return; // canal sin proveedor automatico (llamada/whatsapp hoy): nada que empujar
   await pushPendientes(
     {
@@ -105,7 +105,7 @@ async function tareaTracking(envioCorreo: ReturnType<typeof crearRegistroEnvio>[
 // razonable por default, se puede afinar cuando ese proveedor exista de verdad.
 const HEARTBEAT_POR_CANAL: Partial<Record<Canal, string>> = { correo: 'apollo' };
 
-function tareasPush(registro: ReturnType<typeof crearRegistroEnvio>): Tarea[] {
+function tareasPush(registro: ReturnType<typeof crearRegistroEntrega>): Tarea[] {
   return (Object.keys(registro) as Canal[])
     .filter((canal) => registro[canal] !== null)
     .map((canal) => ({
@@ -116,12 +116,13 @@ function tareasPush(registro: ReturnType<typeof crearRegistroEnvio>): Tarea[] {
 }
 
 function construirTareas(): Tarea[] {
-  const registro = crearRegistroEnvio();
+  const registroCompleto = crearRegistroEnvio();
+  const registroEntrega = crearRegistroEntrega();
   return [
     { nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox },
     { nombre: 'materializar', proveedorHeartbeat: 'materializador', ejecutar: tareaMaterializar },
-    ...tareasPush(registro),
-    { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: () => tareaTracking(registro.correo) },
+    ...tareasPush(registroEntrega),
+    { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: () => tareaTracking(registroCompleto.correo) },
   ];
 }
 

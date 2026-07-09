@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pushPendientes, calcularProximoIntentoPush, MAX_INTENTOS, type FilaPasoInscripcion, type PushDeps } from './push.ts';
-import type { EnvioAdapter } from './ports/envio.ts';
+import type { CanalEntrega } from './ports/envio.ts';
 
 type FilaSimulada = FilaPasoInscripcion & {
   estado: 'pendiente' | 'enviando' | 'enviada' | 'fallo';
@@ -35,25 +35,14 @@ function depsFalsos(filasIniciales: FilaSimulada[]) {
   return { deps, filas, enviandoLlamado };
 }
 
-function envioFalso(comportamiento: (destinatario: { email: string }) => boolean): EnvioAdapter & { llamadas: string[] } {
+function envioFalso(comportamiento: (destinatario: { email: string | null }) => boolean): CanalEntrega & { llamadas: string[] } {
   const llamadas: string[] = [];
   return {
     llamadas,
-    async crearCampanaExterna() {
-      return 'seq-fake';
-    },
-    async sincronizarCopy() {
-      return [];
-    },
     async enviarPaso(_proveedorCampanaId, destinatario) {
-      llamadas.push(destinatario.email);
+      llamadas.push(destinatario.email ?? '');
       if (!comportamiento(destinatario)) throw new Error('fallo simulado de Apollo');
       return { proveedor: 'apollo', proveedorMensajeId: `msg-${destinatario.email}` };
-    },
-    async sacarDestinatario() {},
-    async archivarCampana() {},
-    async leerEventosNuevos() {
-      return [];
     },
   };
 }
@@ -61,7 +50,7 @@ function envioFalso(comportamiento: (destinatario: { email: string }) => boolean
 const filaBase = (id: number, email: string): FilaSimulada => ({
   idPasoInscripcion: id,
   proveedorCampanaId: 'seq-1',
-  destinatario: { email, nombre: null },
+  destinatario: { email, telefono: null, nombre: null },
   paso: { asunto: 'Hola', cuerpo: 'cuerpo', canal: 'correo' },
   intentos: 0,
   estado: 'pendiente',
@@ -94,20 +83,9 @@ test('un fallo a mitad de lote de 3 no bloquea a los demas, y la corrida siguien
 
 test('marcarEnviada recibe el proveedor real del EnvioResultado, no un valor fijo (sesion 2026-07-09)', async () => {
   const { deps, filas } = depsFalsos([filaBase(1, 'ana@empresa.com')]);
-  const envio: EnvioAdapter = {
-    async crearCampanaExterna() {
-      return 'x';
-    },
-    async sincronizarCopy() {
-      return [];
-    },
+  const envio: CanalEntrega = {
     async enviarPaso() {
       return { proveedor: 'un-proveedor-cualquiera', proveedorMensajeId: 'msg-1' };
-    },
-    async sacarDestinatario() {},
-    async archivarCampana() {},
-    async leerEventosNuevos() {
-      return [];
     },
   };
 
