@@ -43,6 +43,21 @@ async function main() {
         .prepare('UPDATE "user" SET "owner" = ?, "admin" = ? WHERE "email" = ?')
         .run(u.owner, u.admin, u.email);
       console.log(`  owner/admin seteados (${r.changes} fila)`);
+
+      // Multi-organizacion (Parte 1): reclamar la fila de organizacion_miembro que le
+      // corresponde a este owner_canonico, si todavia esta libre. Sin esto, un usuario
+      // recien onboardeado se autentica bien pero requireSession() revienta en cada
+      // pagina porque organizacionDeUsuario() no encuentra membresia. Idempotente: en
+      // una segunda corrida, id_user IS NULL ya no matchea y quedan 0 filas (esperado).
+      const filaUser = db.prepare('SELECT id FROM "user" WHERE email = ?').get(u.email) as
+        | { id: string }
+        | undefined;
+      if (filaUser) {
+        const rOrg = db
+          .prepare('UPDATE organizacion_miembro SET id_user = ? WHERE owner_canonico = ? AND id_user IS NULL')
+          .run(filaUser.id, u.owner);
+        console.log(`  organizacion_miembro reclamada (${rOrg.changes} fila)`);
+      }
     }
   } finally {
     db.close();

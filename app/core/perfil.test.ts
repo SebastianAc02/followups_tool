@@ -6,7 +6,7 @@ import { construirPerfil, PREFERENCIAS_DEFAULT } from './perfil.ts';
 import type { UsuarioSesion } from '../lib/session-user.ts';
 
 function identidad(overrides: Partial<UsuarioSesion> = {}): UsuarioSesion {
-  return { id: 'u1', email: 'a@onepay.co', owner: 'Sebastian Acosta Molina', admin: false, ...overrides };
+  return { id: 'u1', email: 'a@onepay.co', owner: 'Sebastian Acosta Molina', admin: false, idOrganizacion: 1, ...overrides };
 }
 
 test('iniciales de nombre con dos tokens toma la primera letra de cada uno', () => {
