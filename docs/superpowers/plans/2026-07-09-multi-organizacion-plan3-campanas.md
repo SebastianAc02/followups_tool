@@ -423,6 +423,11 @@ de firma): `materializarPasosDebidos` (:2531), `crearPasoInscripcionPendiente` (
 anteriores (llamadas a estas funciones que todavía no reciben `idOrganizacion` en algún
 archivo no cubierto explícitamente arriba).
 
+Callers conocidos pendientes desde ya (detectados durante la revisión de calidad del Task 1,
+no esperar a este task para descubrirlos de cero): `app/campanas/nueva/actions.ts:63`
+(`crearCampana`) y `scripts/demo_fase4.ts:58,67` (`crearCampana`, script de demo manual — no
+lo corre `npm test` pero sí lo marca `tsc --noEmit`).
+
 - [ ] **Step 1:** Correr `npx tsc --noEmit`, listar TODOS los errores restantes.
 - [ ] **Step 2:** Por cada error, es una llamada a una de las 39 funciones filtradas/con
   guard de este plan que todavía no pasa `idOrganizacion` — agregar `requireSession()` (si
