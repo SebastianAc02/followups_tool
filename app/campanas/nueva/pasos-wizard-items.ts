@@ -15,11 +15,22 @@ export type PasoWizardItem = {
 // visita despues de Cadencia (Destinatarios/Preview/Lanzar) y en /cadencias/[id]
 // cuando esa cadencia sigue en borrador -- mismo layout de "lista de pasos" que
 // durante la creacion, en vez de saltar a los tabs de CampanaSubNav a mitad de
-// camino. El paso activo no lleva href (no tiene sentido linkear a si mismo).
+// camino. El paso activo no lleva href (no tiene sentido linkear a si mismo) --
+// EXCEPTO cuando quien llama no esta realmente en la ruta de ese paso (ver
+// activoEsRutaActual abajo): ahi si debe quedar clickeable.
 // Segmento SI lleva href real (/campanas/[id]/segmento, ver ese page.tsx): antes no
 // tenia ruta fuera de la sesion en vivo de /campanas/nueva, y Sebastian reporto que
 // una vez pasaba de Cadencia a Destinatarios ya no podia volver a Segmento nunca mas.
-export function pasosWizardCampana(idCampana: number, idCadencia: number, activo: PasoWizardItem['label']): PasoWizardItem[] {
+export function pasosWizardCampana(
+  idCampana: number,
+  idCadencia: number,
+  activo: PasoWizardItem['label'],
+  // /campanas/[id]/reglas pasa activo="Destinatarios" para resaltarlo (es de ahi de
+  // donde se viene) SIN estar en esa ruta -- si se le quita el href igual que a un
+  // paso realmente activo, "Destinatarios" queda pintado como texto plano y sin
+  // click, dejando al owner sin forma de volver (bug reportado 2026-07-08).
+  activoEsRutaActual = true,
+): PasoWizardItem[] {
   const base: PasoWizardItem[] = [
     { label: 'Segmento', href: `/campanas/${idCampana}/segmento` },
     { label: 'Cadencia', href: `/cadencias/${idCadencia}` },
@@ -27,5 +38,6 @@ export function pasosWizardCampana(idCampana: number, idCadencia: number, activo
     { label: 'Preview', href: `/campanas/${idCampana}/preview` },
     { label: 'Lanzar', href: `/campanas/${idCampana}/lanzar` },
   ];
+  if (!activoEsRutaActual) return base;
   return base.map((p) => (p.label === activo ? { label: p.label } : p));
 }

@@ -20,6 +20,29 @@ const RITMO_LABEL: Record<RitmoIngreso, string> = {
   personalizado: 'Personalizado',
 };
 
+type DiaGoteoUI = { fecha: string; cuantos: number; esGap: boolean };
+
+// calcularGoteo (core/goteo.ts) solo devuelve los dias donde SI entra alguien --
+// en dia_si_dia_no los dias saltados ni aparecen en el arreglo. Eso hacia que la
+// barra mostrara los dias activos pegados uno tras otro (D1, D2, D3...) sin ningun
+// hueco visible, como si "dia si, dia no" no estuviera pasando nada. Este helper
+// rellena los huecos con entradas cuantos:0/esGap:true para que el patron se vea
+// en la barra -- es un ajuste de presentacion, no toca el calculo real de goteo.
+function conGapsDeCalendario(porDia: { fecha: string; cuantos: number }[]): DiaGoteoUI[] {
+  if (porDia.length === 0) return [];
+  const porFecha = new Map(porDia.map((d) => [d.fecha, d.cuantos]));
+  const cursor = new Date(`${porDia[0].fecha}T00:00:00`);
+  const fin = new Date(`${porDia[porDia.length - 1].fecha}T00:00:00`);
+  const dias: DiaGoteoUI[] = [];
+  while (cursor.getTime() <= fin.getTime()) {
+    const fecha = cursor.toISOString().slice(0, 10);
+    const cuantos = porFecha.get(fecha);
+    dias.push({ fecha, cuantos: cuantos ?? 0, esGap: cuantos == null });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dias;
+}
+
 // Fase 8 (V6 Lanzar): calca "Lanzar Cockpit html6/index.html" -- dos columnas, izquierda
 // controles (cuando + distribucion diaria), derecha resumen (barra D1..D9, carga global
 // informativa, prueba no-op, boton Lanzar). Todo el calculo de la barra es en el cliente
@@ -107,8 +130,8 @@ export function LanzarCockpit({
     });
   }
 
-  const primerosDias = (goteo?.porDia ?? []).slice(0, 9);
-  const maxCuantos = Math.max(1, ...primerosDias.map((d) => d.cuantos));
+  const diasConGaps = conGapsDeCalendario(goteo?.porDia ?? []);
+  const maxCuantos = Math.max(1, ...diasConGaps.map((d) => d.cuantos));
   const entranHoy = goteo?.porDia[0]?.cuantos ?? 0;
   const enCola = campanaInicial.totalElegibles - (goteo?.porDia.reduce((acc, d) => acc + d.cuantos, 0) ?? 0);
 
@@ -197,10 +220,13 @@ export function LanzarCockpit({
 
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-ink">Máximo de toques por día</p>
-                  <p className="mt-0.5 text-xs text-muted">El Copiloto espacia los envíos para no pasarse.</p>
+                  <p className="text-sm text-ink">Tope de toques por día (informativo)</p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    Lo que esta campaña suma a &quot;Carga total hoy&quot; (columna derecha) cuando se compara con las demás
+                    campañas activas. No pausa ni bloquea el envío de esta campaña.
+                  </p>
                 </div>
-                <Stepper value={topeToquesDia} min={1} onChange={setTopeToquesDia} ariaLabelPrefix="máximo de toques" />
+                <Stepper value={topeToquesDia} min={1} onChange={setTopeToquesDia} ariaLabelPrefix="tope de toques por día" />
               </div>
             </div>
 
@@ -210,24 +236,45 @@ export function LanzarCockpit({
           {/* Columna derecha: resumen */}
           <aside className="flex flex-col gap-5 rounded-[18px] border border-line bg-card px-5 py-5">
             <div>
-              <p className="mb-4 font-mono-tag text-xs uppercase tracking-widest text-muted">Así se distribuye</p>
-              <div className={cn('flex items-end gap-2 transition-opacity', pendienteCalculo && 'opacity-60')} style={{ height: 96 }}>
-                {primerosDias.length === 0 && (
-                  <p className="text-xs text-muted">Sin destinatarios elegibles todavía.</p>
+              <div className="mb-4 flex items-center justify-between">
+                <p className="font-mono-tag text-xs uppercase tracking-widest text-muted">Así se distribuye</p>
+                {ritmoIngreso === 'dia_si_dia_no' && (
+                  <span className="flex items-center gap-1.5 text-[10px] text-faint">
+                    <span className="inline-block h-2 w-3 rounded-sm border border-dashed border-line-strong" />
+                    día sin ingreso
+                  </span>
                 )}
-                {primerosDias.map((d, i) => (
-                  <div key={d.fecha} className="flex flex-1 flex-col items-center justify-end gap-1.5" style={{ height: '100%' }}>
-                    <span className="font-mono-tag text-[10px] text-accent-ink">{d.cuantos > 0 ? d.cuantos : ''}</span>
-                    <div
-                      className="w-full rounded-t-md rounded-b-sm"
-                      style={{
-                        height: `${Math.max(9, (d.cuantos / maxCuantos) * 100)}%`,
-                        background: d.cuantos > 0 ? 'linear-gradient(180deg, var(--color-accent), var(--color-accent))' : 'rgba(255,255,255,0.06)',
-                      }}
-                    />
-                    <span className="font-mono-tag text-[9px] text-faint">D{i + 1}</span>
-                  </div>
-                ))}
+              </div>
+              {/* overflow-x en vez de aplastar las barras: con muchos días, se scrollea en
+                  vez de comprimir cada barra hasta volverla ilegible. Cada barra tiene ancho
+                  fijo (w-8 shrink-0) a proposito, para que el contenedor sea el que crezca. */}
+              <div className="overflow-x-auto pb-1">
+                <div
+                  className={cn('flex items-end gap-2 transition-opacity', pendienteCalculo && 'opacity-60')}
+                  style={{ height: 96, minWidth: diasConGaps.length > 0 ? diasConGaps.length * 34 : undefined }}
+                >
+                  {diasConGaps.length === 0 && (
+                    <p className="text-xs text-muted">Sin destinatarios elegibles todavía.</p>
+                  )}
+                  {diasConGaps.map((d, i) => (
+                    <div key={d.fecha} className="flex h-full w-8 shrink-0 flex-col items-center justify-end gap-1.5">
+                      <span className="font-mono-tag text-[10px] text-accent-ink">{d.cuantos > 0 ? d.cuantos : ''}</span>
+                      <div
+                        className={cn('w-full rounded-t-md rounded-b-sm', d.esGap && 'border border-dashed border-line-strong')}
+                        title={d.esGap ? 'No entra nadie este día (día sí, día no)' : undefined}
+                        style={{
+                          height: d.esGap ? '9%' : `${Math.max(9, (d.cuantos / maxCuantos) * 100)}%`,
+                          background: d.esGap
+                            ? 'transparent'
+                            : d.cuantos > 0
+                              ? 'linear-gradient(180deg, var(--color-accent), var(--color-accent))'
+                              : 'rgba(255,255,255,0.06)',
+                        }}
+                      />
+                      <span className="font-mono-tag text-[9px] text-faint">D{i + 1}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 

@@ -63,6 +63,22 @@ export function DestinatariosCockpit({
 
   const destinatarios = filas.filter((f) => f.idContacto != null);
   const bloqueadas = filas.filter((f) => f.idContacto == null);
+  // Cuentas donde algun paso no salio por el canal que le tocaba (por eso el estado
+  // 'con_ajuste', ver core/preview-inscripcion.ts): la senal concreta de "falta
+  // llamada o WhatsApp" que antes solo se veia si contabas los chips tachados uno
+  // por uno. faltantesPorCanal cuenta, por canal ORIGINAL (el que faltaba), cuantas
+  // cuentas distintas se vieron afectadas -- una cuenta puede faltarle mas de un canal.
+  const conAjuste = destinatarios.filter((f) => f.estado === 'con_ajuste');
+  const faltantesPorCanal = conAjuste.reduce(
+    (acc, f) => {
+      const canales = new Set(f.pasosAjustados.filter((p) => p.omitido || p.canal !== p.canalOriginal).map((p) => p.canalOriginal));
+      canales.forEach((c) => {
+        acc[c] = (acc[c] ?? 0) + 1;
+      });
+      return acc;
+    },
+    {} as Partial<Record<Canal, number>>,
+  );
   const totalesPorCanal = destinatarios.reduce(
     (acc, f) => {
       for (const paso of f.pasosAjustados) {
@@ -98,24 +114,53 @@ export function DestinatariosCockpit({
         <InscritasTable inscritas={inscritasReales} mostrarCampana={false} />
       ) : (
         <>
-          <div className="flex items-center gap-3 rounded-[13px] border border-line bg-card px-5 py-4">
-            <span
-              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-bg"
-              style={{ background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent))' }}
-              aria-hidden="true"
-            >
-              ✦
-            </span>
-            <p className="text-sm text-muted">
-              Regla activa: cuando falta un canal, <span className="font-semibold text-ink">{ROTULO_REGLA[campana.reglaFaltante]}</span>.
-            </p>
-            <Link
-              href={`/campanas/${campana.idCampana}/reglas`}
-              className="ml-auto text-xs font-semibold text-accent-ink hover:underline"
-            >
-              Cambiar regla
-            </Link>
-          </div>
+          {conAjuste.length > 0 || bloqueadas.length > 0 ? (
+            // Alerta (no info neutra): esto es justo lo que Sebastián pidió hacer evidente
+            // (2026-07-08) -- cuando a cuentas reales les falta llamada/WhatsApp, aquí es
+            // donde hace sentido revisar la regla, no un dato de fondo que se puede pasar
+            // por alto. faltantesPorCanal nombra el canal que falta, no solo "un canal".
+            <div className="flex items-start gap-3 rounded-[13px] border border-overdue/30 bg-overdue-bg px-5 py-4">
+              <span className="mt-0.5 shrink-0 text-overdue" aria-hidden="true">⚠</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-ink">
+                  {(Object.entries(faltantesPorCanal) as [Canal, number][])
+                    .map(([canal, n]) => `${n} sin ${CANAL_LABEL[canal].toLowerCase()}`)
+                    .join(' · ') || 'Hay cuentas sin destinatario usable'}
+                  {bloqueadas.length > 0 && ` · ${bloqueadas.length} sin ningún canal`}
+                </p>
+                <p className="mt-1 text-[13px] text-ink-soft">
+                  Regla activa: cuando falta un canal, <span className="font-semibold text-ink">{ROTULO_REGLA[campana.reglaFaltante]}</span>.
+                  Así se ve reflejado en los toques tachados/reemplazados de la tabla de abajo.
+                </p>
+              </div>
+              <Link
+                href={`/campanas/${campana.idCampana}/reglas`}
+                className="ml-auto shrink-0 whitespace-nowrap text-xs font-semibold text-accent-ink hover:underline"
+              >
+                Revisar reglas
+              </Link>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-[13px] border border-line bg-card px-5 py-4">
+              <span
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-bg"
+                style={{ background: 'linear-gradient(135deg, var(--color-accent), var(--color-accent))' }}
+                aria-hidden="true"
+              >
+                ✦
+              </span>
+              <p className="text-sm text-muted">
+                Todas las cuentas tienen los canales que necesita su cadencia. Regla activa: cuando falta un canal,{' '}
+                <span className="font-semibold text-ink">{ROTULO_REGLA[campana.reglaFaltante]}</span>.
+              </p>
+              <Link
+                href={`/campanas/${campana.idCampana}/reglas`}
+                className="ml-auto text-xs font-semibold text-accent-ink hover:underline"
+              >
+                Cambiar regla
+              </Link>
+            </div>
+          )}
 
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
             <section className="min-w-0 flex-1 overflow-hidden rounded-[18px] border border-line" aria-labelledby="tabla-destinatarios">

@@ -28,7 +28,7 @@ export default async function ReglasCampana({ params }: { params: Promise<{ id: 
   return (
     <AppShell>
       {esBorrador ? (
-        <PasosWizard pasos={pasosWizardCampana(camp.idCampana, camp.idCadencia, 'Destinatarios')} activo="Destinatarios" />
+        <PasosWizard pasos={pasosWizardCampana(camp.idCampana, camp.idCadencia, 'Destinatarios', false)} activo="Destinatarios" />
       ) : (
         <CampanaSubNav items={subNavItemsCampana(camp.idCampana, camp.idCadencia)} />
       )}

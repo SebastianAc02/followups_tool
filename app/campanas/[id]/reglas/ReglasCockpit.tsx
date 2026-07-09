@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { recalcularConteosAction, guardarReglaFaltanteAction } from './actions';
 import type { ConteosReadiness } from '../../../db/repository';
 import type { ReglaFaltante } from '../../../core/canales-empresa';
 import { cn } from '../../../ui/cn';
+import { BackLink } from '../../../ui/BackLink';
 
 type Opcion = { regla: ReglaFaltante; titulo: string; explicacion: string };
 
@@ -40,6 +42,7 @@ export function ReglasCockpit({
   reglaGuardada: ReglaFaltante;
   conteosIniciales: ConteosReadiness;
 }) {
+  const router = useRouter();
   const [seleccion, setSeleccion] = useState<ReglaFaltante>(reglaGuardada);
   const [conteos, setConteos] = useState(conteosIniciales);
   const [guardada, setGuardada] = useState(reglaGuardada);
@@ -63,6 +66,10 @@ export function ReglasCockpit({
     });
   }
 
+  // Guardar y volver: quien llega aca viene de "Cambiar regla" en Destinatarios a
+  // resolver un ajuste puntual, no a quedarse -- bug reportado 2026-07-08: antes
+  // guardaba y dejaba al owner varado en /reglas sin ruta de vuelta (ver tambien el
+  // fix del href en pasosWizardCampana).
   function guardar() {
     setError('');
     startGuardar(async () => {
@@ -72,11 +79,13 @@ export function ReglasCockpit({
         return;
       }
       setGuardada(seleccion);
+      router.push(`/campanas/${idCampana}/destinatarios`);
     });
   }
 
   return (
     <div className="flex flex-col gap-8">
+      <BackLink href={`/campanas/${idCampana}/destinatarios`} label="Destinatarios" />
       <header className="flex flex-col gap-1">
         <p className="font-mono-tag text-xs uppercase tracking-widest text-muted">Campaña · Reglas</p>
         <h1 className="font-serif text-2xl text-ink">{nombre}</h1>
