@@ -67,7 +67,7 @@ const idCadencia = crearCadencia({
     { orden: 2, diaOffset: 3, canal: 'correo', asunto: 'Seguimiento', cuerpo: 'x' },
   ],
 });
-const idSegmento = guardarSegmento({ nombre: 'manual-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-1'] }] } });
+const idSegmento = guardarSegmento({ nombre: 'manual-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-1'] }] } }, 1);
 
 const idCampana = crearCampana({ nombre: 'Camp manual', idCadencia, idSegmento });
 fijarProveedorCampanaId(idCampana, 'seq-manual-1');
@@ -145,7 +145,7 @@ const idCadencia2 = crearCadencia({
   nombre: 'C manual con copy',
   pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola [nombre]', cuerpo: 'Cuerpo [nombre].', esManual: true }],
 });
-const idSegmento2 = guardarSegmento({ nombre: 'manual-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-2'] }] } });
+const idSegmento2 = guardarSegmento({ nombre: 'manual-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-2'] }] } }, 1);
 const idCampana2 = crearCampana({ nombre: 'Camp manual 2', idCadencia: idCadencia2, idSegmento: idSegmento2 });
 inscribirCampana(idCampana2);
 const idInscripcion2 = historialInscripciones('e-manual-2').find((i) => i.estado === 'activa')!.id;

@@ -79,7 +79,7 @@ test('guardar y correr el segmento guardado da el mismo resultado', () => {
     nombre: 'on-hold',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
     descripcionNatural: 'los que estan en on-hold',
-  });
+  }, 1);
   const empresas = empresasDeSegmentoGuardado(id, 1);
   assert.ok(empresas);
   assert.deepEqual(empresas!.map((e) => e.id).sort(), ['e1', 'e2', 'e3', 'e4']);
@@ -175,7 +175,7 @@ test('empresasParaRevision devuelve todas las del segmento con excluida=false', 
   const idSegmento = guardarSegmento({
     nombre: 'revision-1',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
   assert.deepEqual(
@@ -189,7 +189,7 @@ test('excluirDeSegmento marca una empresa como excluida en empresasParaRevision'
   const idSegmento = guardarSegmento({
     nombre: 'revision-2',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   excluirDeSegmento(idSegmento, 'e4');
   const revision = empresasParaRevision(idSegmento, 1);
   assert.ok(revision);
@@ -202,7 +202,7 @@ test('excluirDeSegmento es idempotente (excluir dos veces no truena ni duplica)'
   const idSegmento = guardarSegmento({
     nombre: 'revision-3',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   excluirDeSegmento(idSegmento, 'e2');
   excluirDeSegmento(idSegmento, 'e2');
   const revision = empresasParaRevision(idSegmento, 1);
@@ -214,7 +214,7 @@ test('incluirDeSegmento deshace una exclusion (toggle de vuelta)', () => {
   const idSegmento = guardarSegmento({
     nombre: 'revision-4',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   excluirDeSegmento(idSegmento, 'e3');
   incluirDeSegmento(idSegmento, 'e3');
   const revision = empresasParaRevision(idSegmento, 1);
@@ -226,11 +226,11 @@ test('las exclusiones de un segmento no afectan a otro segmento (aislamiento)', 
   const idA = guardarSegmento({
     nombre: 'revision-5a',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   const idB = guardarSegmento({
     nombre: 'revision-5b',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   excluirDeSegmento(idA, 'e1');
   const revision = empresasParaRevision(idB, 1);
   assert.ok(revision);
@@ -263,7 +263,7 @@ test('empresasDeSegmentoGuardado no corre el segmento de otra organizacion', () 
   const id = guardarSegmento({
     nombre: 'guardado-org1',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   assert.equal(empresasDeSegmentoGuardado(id, 2), null, 'la organizacion 2 no puede correr un segmento que no es suyo');
   assert.ok(empresasDeSegmentoGuardado(id, 1));
 });
@@ -272,7 +272,7 @@ test('empresasParaRevision devuelve null si el segmento es de otra organizacion'
   const id = guardarSegmento({
     nombre: 'revision-otra-org',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   assert.equal(empresasParaRevision(id, 2), null);
 });
 
@@ -286,12 +286,20 @@ test('muestraDestinatarioDeSegmento trae un contacto real del segmento, y null s
   const id = guardarSegmento({
     nombre: 'muestra-1',
     definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
-  });
+  }, 1);
   const muestra = muestraDestinatarioDeSegmento(id, 1);
   assert.ok(muestra);
   assert.ok(muestra.nombre.length > 0);
 
   assert.equal(muestraDestinatarioDeSegmento(id, 2), null, 'otra organizacion no debe ver el destinatario de muestra');
+});
+
+test('guardarSegmento escribe el id_organizacion real, no el hardcode', () => {
+  const id = guardarSegmento({ nombre: 'seg-org-2', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 2);
+  const raw = new Database(dbPath);
+  const fila = raw.prepare('SELECT id_organizacion FROM segmento WHERE id_segmento = ?').get(id) as any;
+  raw.close();
+  assert.equal(fila.id_organizacion, 2);
 });
 
 test.after(() => {

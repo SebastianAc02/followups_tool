@@ -63,7 +63,7 @@ function idsPasoYVersion(idCadencia: number) {
 seedEmpresa('e-track-1', 'track-cat-1', [{ email: 'ana@empresa.com', principal: true }]);
 
 const idCadencia = crearCadencia({ nombre: 'C track', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola', cuerpo: 'x' }] });
-const idSegmento = guardarSegmento({ nombre: 'track-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['track-cat-1'] }] } });
+const idSegmento = guardarSegmento({ nombre: 'track-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['track-cat-1'] }] } }, 1);
 const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
 
 const idCampana = crearCampana({ nombre: 'Camp track', idCadencia, idSegmento });

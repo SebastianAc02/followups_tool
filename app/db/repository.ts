@@ -1213,17 +1213,16 @@ export function contarSegmento(def: DefinicionSegmento, idOrganizacion: number):
 
 // V4.3: guarda el filtro compilado como JSON en segmento.definicion. descripcionNatural
 // es opcional (el lenguaje natural lo llena Fase 6, aca solo se persiste si viene).
-export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }): number {
+export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }, idOrganizacion: number): number {
   const val = definicionSegmentoSchema.parse(input.definicion);
   const ahora = new Date().toISOString();
   const ins = db
     .insert(segmento)
-    // Hardcodeado a Onepay (id 1) hasta que segmentos tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: input.nombre,
       definicion: JSON.stringify(val),
       descripcionNatural: input.descripcionNatural ?? null,
-      idOrganizacion: 1,
+      idOrganizacion,
       createdAt: ahora,
       updatedAt: ahora,
     })

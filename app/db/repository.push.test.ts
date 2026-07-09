@@ -63,8 +63,8 @@ seedEmpresa('e-push-1', 'ana@empresa.com', 'push-cat-1');
 seedEmpresa('e-push-2', 'sin-secuencia@empresa.com', 'push-cat-2');
 
 const idCadencia = crearCadencia({ nombre: 'C push', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola', cuerpo: 'cuerpo' }] });
-const idSegmento1 = guardarSegmento({ nombre: 'push-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['push-cat-1'] }] } });
-const idSegmento2 = guardarSegmento({ nombre: 'push-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['push-cat-2'] }] } });
+const idSegmento1 = guardarSegmento({ nombre: 'push-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['push-cat-1'] }] } }, 1);
+const idSegmento2 = guardarSegmento({ nombre: 'push-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['push-cat-2'] }] } }, 1);
 const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
 
 const idCampanaConSecuencia = crearCampana({ nombre: 'Camp con secuencia', idCadencia, idSegmento: idSegmento1 });
