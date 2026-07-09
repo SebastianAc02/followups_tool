@@ -13,24 +13,26 @@ export default async function PorRevisar() {
 
   return (
     <AppShell>
-      <div className="mb-6">
-        <h1 className="font-serif text-2xl font-medium text-ink">
-          {pendientes.length > 0
-            ? `${pendientes.length} toque${pendientes.length === 1 ? '' : 's'} esperan tu aprobación`
-            : 'Todo al día'}
-        </h1>
-        {pendientes.length === 0 && (
-          <p className="mt-1 text-[13.5px] text-muted">No hay toques manuales pendientes de revisión.</p>
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6">
+          <h1 className="font-serif text-2xl font-medium text-ink">
+            {pendientes.length > 0
+              ? `${pendientes.length} toque${pendientes.length === 1 ? '' : 's'} esperan tu aprobación`
+              : 'Todo al día'}
+          </h1>
+          {pendientes.length === 0 && (
+            <p className="mt-1 text-[13.5px] text-muted">No hay toques manuales pendientes de revisión.</p>
+          )}
+        </div>
+
+        {pendientes.length > 0 && (
+          <div className="overflow-hidden rounded-[18px] border border-line bg-card px-6 py-2">
+            {pendientes.map((p) => (
+              <ToqueRevisar key={p.idPasoInscripcion} item={p} />
+            ))}
+          </div>
         )}
       </div>
-
-      {pendientes.length > 0 && (
-        <div className="overflow-hidden rounded-[18px] border border-line bg-card px-6 py-2">
-          {pendientes.map((p) => (
-            <ToqueRevisar key={p.idPasoInscripcion} item={p} />
-          ))}
-        </div>
-      )}
     </AppShell>
   );
 }
