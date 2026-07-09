@@ -29,8 +29,11 @@ export default async function Dashboard() {
       id: c.id,
       nombre: c.nombre,
       estado: c.estado,
-      inscritas: c.inscritas ?? 0,
-      objetivo: (c.inscritas ?? 0) + (c.bloqueadas ?? 0),
+      toquesHechos: c.toquesHechos ?? 0,
+      // Techo estimado: cada inscrita activa tiene, como mucho, un toque por paso de
+      // la cadencia (algunas rinden menos si algun paso se omite por canal faltante,
+      // pero eso ya lo refleja toquesHechos contando 'omitida' como resuelto).
+      toquesEsperados: (c.inscritas ?? 0) * (c.pasos ?? 0),
     }));
 
   return (

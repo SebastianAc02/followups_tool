@@ -1,14 +1,14 @@
 'use client';
 
 import { cn } from '../../ui/cn';
-import { CanalDot } from '../../ui/CanalTag';
+import { CanalTag } from '../../ui/CanalTag';
 import { ReadinessBadge } from './ReadinessBadge';
 import type { PreviewConReadiness } from '../actions';
 
 type Filas = Extract<PreviewConReadiness, { ok: true }>['filas'];
 type Conteos = Extract<PreviewConReadiness, { ok: true }>['conteos'];
 
-const COLS = 'grid grid-cols-[22px_1.6fr_1fr_0.8fr_1.1fr_1.2fr] items-center gap-[10px]';
+const COLS = 'grid grid-cols-[22px_1.6fr_1fr_0.8fr_1.1fr_1.6fr] items-center gap-[10px]';
 
 export function TablaCuentas({ filas, conteos }: { filas: Filas; conteos: Conteos }) {
   return (
@@ -28,7 +28,7 @@ export function TablaCuentas({ filas, conteos }: { filas: Filas; conteos: Conteo
             <span>Ciudad</span>
             <span className="text-right">Usuarios</span>
             <span>Estado</span>
-            <span>Canales</span>
+            <span>Canales disponibles</span>
           </div>
 
           {filas.length === 0 ? (
@@ -58,9 +58,9 @@ export function TablaCuentas({ filas, conteos }: { filas: Filas; conteos: Conteo
                   {f.canales.length === 0 ? (
                     <span className="text-overdue">sin contacto</span>
                   ) : (
-                    <span className="flex items-center gap-1.5">
+                    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                       {f.canales.map((c) => (
-                        <CanalDot key={c} canal={c} className="h-[7px] w-[7px]" />
+                        <CanalTag key={c} canal={c} />
                       ))}
                     </span>
                   )}
