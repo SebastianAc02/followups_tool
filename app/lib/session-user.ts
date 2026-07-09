@@ -1,15 +1,19 @@
-// Mapeo puro del usuario de Better Auth a lo unico que la app necesita saber de la
-// identidad. El resto del codigo (paginas, actions) consume ESTE tipo, nunca el objeto
-// de better-auth: la frontera del adaptador queda aqui.
-export type UsuarioSesion = { id: string; email: string; owner: string; admin: boolean };
+// Mapeo puro del usuario de Better Auth (+ su organizacion, resuelta aparte por quien
+// llama) a lo unico que la app necesita saber de la identidad. El resto del codigo
+// (paginas, actions) consume ESTE tipo, nunca el objeto de better-auth: la frontera
+// del adaptador queda aqui.
+export type UsuarioSesion = { id: string; email: string; owner: string; admin: boolean; idOrganizacion: number };
 
-export function usuarioDeSesion(user: {
-  id: string;
-  email: string;
-  name: string;
-  owner?: string | null;
-  admin?: boolean | null;
-}): UsuarioSesion {
+export function usuarioDeSesion(
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    owner?: string | null;
+    admin?: boolean | null;
+  },
+  idOrganizacion: number,
+): UsuarioSesion {
   return {
     id: user.id,
     email: user.email,
@@ -17,5 +21,6 @@ export function usuarioDeSesion(user: {
     // Fallback al name para un usuario nuevo sin mapear: ve una cola vacia, no la de otro.
     owner: user.owner ?? user.name,
     admin: Boolean(user.admin),
+    idOrganizacion,
   };
 }
