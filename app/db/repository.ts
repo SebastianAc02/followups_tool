@@ -457,14 +457,18 @@ export function contadoresHoy(hoy: string, owner: string, idOrganizacion: number
   return { porCanal, porResultado, total: filas.length };
 }
 
-// Cuenta de empresas por estado_notion (rediseño home). Solo lectura. Los null (empresas
-// sin etapa en el funnel) NO se incluyen: no representan una etapa. Con owner filtra a ese
-// owner; sin owner cuenta toda la base. Acceso solo por el Repository (regla de arquitectura).
-export function contarPorEstado(owner?: string): Record<string, number> {
+// Cuenta de empresas por estado_notion (rediseño home), SIEMPRE dentro de una
+// organización (Parte 1, multi-org). Los null (empresas sin etapa en el funnel) NO se
+// incluyen: no representan una etapa. Con owner filtra ademas a ese owner; sin owner
+// cuenta toda la organización. Acceso solo por el Repository (regla de arquitectura).
+export function contarPorEstado(owner: string | undefined, idOrganizacion: number): Record<string, number> {
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion)];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
+
   const filas = db
     .select({ estado: empresa.estadoNotion, n: sql<number>`count(*)` })
     .from(empresa)
-    .where(owner ? eq(empresa.owner, owner) : undefined)
+    .where(and(...condiciones))
     .groupBy(empresa.estadoNotion)
     .all();
 
