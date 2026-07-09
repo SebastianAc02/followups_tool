@@ -37,6 +37,7 @@ export type Perfil = {
   iniciales: string;
   rol: string;
   admin: boolean;
+  idOrganizacion: number;
   colorAvatar: string;
   vistaInicio: string;
   cargo: string;
@@ -59,6 +60,7 @@ export function construirPerfil(identidad: UsuarioSesion, preferencias: Preferen
     iniciales: inic,
     rol: identidad.admin ? 'Administrador' : 'Vendedor',
     admin: identidad.admin,
+    idOrganizacion: identidad.idOrganizacion,
     colorAvatar: preferencias.colorAvatar,
     vistaInicio: preferencias.vistaInicio,
     cargo: preferencias.cargo,

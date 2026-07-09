@@ -15,14 +15,14 @@ process.env.ISPS_DB_PATH = dbPath;
 
 const { registrarToque } = await import('./repository.ts');
 
-function seedEmpresa(idEmpresa: string) {
+function seedEmpresa(idEmpresa: string, organizacionActivaId = 1) {
   const raw = new Database(dbPath);
   raw
     .prepare(
-      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial)
-       VALUES (?, 'nit', 'Empresa Test', 'empresa test', 'activo')`,
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, organizacion_activa_id)
+       VALUES (?, 'nit', 'Empresa Test', 'empresa test', 'activo', ?)`,
     )
-    .run(idEmpresa);
+    .run(idEmpresa, organizacionActivaId);
   raw.close();
 }
 
@@ -33,13 +33,16 @@ function leerRaw() {
 test('caso 1: contesto_no con razonPerdida Precio y kdm nuevo crea toque + contacto enlazado', () => {
   seedEmpresa('emp-1');
 
-  registrarToque({
-    idEmpresa: 'emp-1',
-    canal: 'llamada',
-    resultado: 'contesto_no',
-    razonPerdida: 'Precio',
-    kdm: { nombre: 'Juan Perez', telefono: '3001234567' },
-  });
+  registrarToque(
+    {
+      idEmpresa: 'emp-1',
+      canal: 'llamada',
+      resultado: 'contesto_no',
+      razonPerdida: 'Precio',
+      kdm: { nombre: 'Juan Perez', telefono: '3001234567' },
+    },
+    1,
+  );
 
   const raw = leerRaw();
   const toqueRow = raw.prepare('SELECT * FROM toque WHERE id_empresa = ?').get('emp-1') as any;
@@ -59,20 +62,26 @@ test('caso 1: contesto_no con razonPerdida Precio y kdm nuevo crea toque + conta
 test('caso 2: segundo registro con mismo idEmpresa + mismo telefono de kdm actualiza, no duplica', () => {
   seedEmpresa('emp-2');
 
-  registrarToque({
-    idEmpresa: 'emp-2',
-    canal: 'llamada',
-    resultado: 'contesto_no',
-    razonPerdida: 'Precio',
-    kdm: { nombre: 'Ana Gomez', telefono: '3009999999' },
-  });
+  registrarToque(
+    {
+      idEmpresa: 'emp-2',
+      canal: 'llamada',
+      resultado: 'contesto_no',
+      razonPerdida: 'Precio',
+      kdm: { nombre: 'Ana Gomez', telefono: '3009999999' },
+    },
+    1,
+  );
 
-  registrarToque({
-    idEmpresa: 'emp-2',
-    canal: 'whatsapp',
-    resultado: 'contesto_sigue_seguimiento',
-    kdm: { nombre: 'Ana Gomez Actualizada', telefono: '3009999999' },
-  });
+  registrarToque(
+    {
+      idEmpresa: 'emp-2',
+      canal: 'whatsapp',
+      resultado: 'contesto_sigue_seguimiento',
+      kdm: { nombre: 'Ana Gomez Actualizada', telefono: '3009999999' },
+    },
+    1,
+  );
 
   const raw = leerRaw();
   const contactos = raw.prepare('SELECT * FROM contacto WHERE id_empresa = ?').all('emp-2') as any[];
@@ -90,11 +99,14 @@ test('caso 3: contesto_no sin razonPerdida lanza error y no inserta nada', () =>
   seedEmpresa('emp-3');
 
   assert.throws(() => {
-    registrarToque({
-      idEmpresa: 'emp-3',
-      canal: 'llamada',
-      resultado: 'contesto_no',
-    } as any);
+    registrarToque(
+      {
+        idEmpresa: 'emp-3',
+        canal: 'llamada',
+        resultado: 'contesto_no',
+      } as any,
+      1,
+    );
   });
 
   const raw = leerRaw();
@@ -107,11 +119,14 @@ test('caso 4: resultado fuera de las 4 salidas lanza error y no inserta nada', (
   seedEmpresa('emp-4');
 
   assert.throws(() => {
-    registrarToque({
-      idEmpresa: 'emp-4',
-      canal: 'llamada',
-      resultado: 'invalido',
-    } as any);
+    registrarToque(
+      {
+        idEmpresa: 'emp-4',
+        canal: 'llamada',
+        resultado: 'invalido',
+      } as any,
+      1,
+    );
   });
 
   const raw = leerRaw();
@@ -123,12 +138,15 @@ test('caso 4: resultado fuera de las 4 salidas lanza error y no inserta nada', (
 test('caso 5: kdm con telefono="" se comporta igual que sin telefono (normaliza en el schema, no lanza)', () => {
   seedEmpresa('emp-5');
 
-  registrarToque({
-    idEmpresa: 'emp-5',
-    canal: 'llamada',
-    resultado: 'contesto_sigue_seguimiento',
-    kdm: { nombre: 'Alguien', telefono: '' },
-  } as any);
+  registrarToque(
+    {
+      idEmpresa: 'emp-5',
+      canal: 'llamada',
+      resultado: 'contesto_sigue_seguimiento',
+      kdm: { nombre: 'Alguien', telefono: '' },
+    } as any,
+    1,
+  );
 
   const raw = leerRaw();
   const toqueRow = raw.prepare('SELECT * FROM toque WHERE id_empresa = ?').get('emp-5') as any;
@@ -140,6 +158,22 @@ test('caso 5: kdm con telefono="" se comporta igual que sin telefono (normaliza 
   assert.equal(contactoRow.nombre, 'Alguien');
   assert.equal(contactoRow.telefono, null, 'sin telefono real, debe insertar sin buscar match');
   assert.equal(contactoRow.es_key_decision_maker, 1);
+  raw.close();
+});
+
+test('caso 6: registrarToque escribe id_organizacion en el toque y rechaza si el lead es de otra organizacion', () => {
+  seedEmpresa('emp-6', 2); // el lead esta activo en la organizacion 2
+
+  assert.throws(
+    () => registrarToque({ idEmpresa: 'emp-6', canal: 'llamada', resultado: 'no_contesto' }, 1),
+    /organizacion/i,
+    'registrar un toque desde la organizacion 1 sobre un lead activo en la 2 debe fallar',
+  );
+
+  registrarToque({ idEmpresa: 'emp-6', canal: 'llamada', resultado: 'no_contesto' }, 2);
+  const raw = leerRaw();
+  const toqueRow = raw.prepare('SELECT id_organizacion FROM toque WHERE id_empresa = ?').get('emp-6') as any;
+  assert.equal(toqueRow.id_organizacion, 2);
   raw.close();
 });
 

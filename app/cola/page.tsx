@@ -20,9 +20,9 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0].
   const owner = sp.owner ?? usuario.owner;
   const hoy = new Date().toISOString().slice(0, 10);
-  const cola = colaDelDia(hoy, owner);
+  const cola = colaDelDia(hoy, owner, usuario.idOrganizacion);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
-  const contadores = contadoresHoy(hoy, owner);
+  const contadores = contadoresHoy(hoy, owner, usuario.idOrganizacion);
   // V5.7: cadencias (automatico Apollo + manual Tier 1) no son por owner todavia
   // (campana.owner es la campana masiva, no un individuo -- ver memoria del proyecto);
   // se muestran a cualquier sesion, la cola unificada es informativa para todos.

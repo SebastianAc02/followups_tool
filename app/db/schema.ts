@@ -25,6 +25,11 @@ export const empresa = sqliteTable('empresa', {
   // enlace, V3.7) y de ahi en adelante el sync escribe por ID, nunca busca por nombre
   // (hay nombres normalizados duplicados reales en la base).
   notionPageId: text('notion_page_id'),
+  // Multi-organización (Parte 1, 2026-07-09): la organización que ACTUALMENTE trabaja
+  // este lead. Un lead compartido lo trabaja una organización a la vez (ver spec
+  // 2026-07-09-multi-organizacion-real-design.md) -- NO es aislamiento de catálogo,
+  // es de a quién pertenece la relación comercial ahora mismo.
+  organizacionActivaId: integer('organizacion_activa_id').notNull(),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });
@@ -66,6 +71,10 @@ export const toque = sqliteTable('toque', {
   razonPerdida: text('razon_perdida'),
   objecion: text('objecion'),
   fuente: text('fuente').notNull(),
+  // Multi-organización (Parte 1): de qué organización es este toque. A diferencia de
+  // empresa.organizacionActivaId (mutable, "quién tiene la relación ahora"), este campo
+  // es inmutable: el toque queda para siempre de la organización que lo registró.
+  idOrganizacion: integer('id_organizacion').notNull(),
   createdAt: text('created_at'),
 });
 
@@ -97,6 +106,10 @@ export const conector = sqliteTable('conector', {
   idConector: integer('id_conector').primaryKey({ autoIncrement: true }),
   proveedor: text('proveedor').notNull(),
   idUsuario: text('id_usuario'),
+  // Nullable = global (igual que idUsuario). Con valor = credencial propia de esa
+  // organización (ej. el Notion de una organización nueva, distinto al de Onepay).
+  // Sin UI todavía (Parte 2): el esquema queda listo, ver spec.
+  idOrganizacion: integer('id_organizacion'),
   credencialCiphertext: text('credencial_ciphertext'),
   estado: text('estado').notNull().default('sin_credencial'),
   ultimaCorrida: text('ultima_corrida'),
@@ -112,6 +125,7 @@ export const conector = sqliteTable('conector', {
 // (quitado por el admin) sin borrar sus credenciales, para poder re-agregar sin perder nada.
 export const conectorConfig = sqliteTable('conector_config', {
   proveedor: text('proveedor').primaryKey(),
+  idOrganizacion: integer('id_organizacion'),
   modo: text('modo').notNull(),
   habilitado: integer('habilitado').notNull().default(1),
   agregadoPor: text('agregado_por'),
@@ -201,6 +215,7 @@ export const segmento = sqliteTable('segmento', {
   // lenguaje natural (descripcion_natural) llega en Fase 6, aqui solo se guarda.
   definicion: text('definicion').notNull(),
   descripcionNatural: text('descripcion_natural'),
+  idOrganizacion: integer('id_organizacion').notNull(),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });
@@ -243,6 +258,7 @@ export const campana = sqliteTable('campana', {
   topeToquesDia: integer('tope_toques_dia'),
   fechaInicio: text('fecha_inicio'),
   owner: text('owner'),
+  idOrganizacion: integer('id_organizacion').notNull(),
   proveedorCampanaId: text('proveedor_campana_id'),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),

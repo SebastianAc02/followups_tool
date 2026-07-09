@@ -8,10 +8,10 @@ import { requireSession } from "./lib/session";
 
 export async function repartirAction(formData: FormData) {
   // El owner viene de la sesion (V2.2): nadie reparte los follow-ups de otro.
-  const { owner } = await requireSession();
+  const { owner, idOrganizacion } = await requireSession();
   const porDia = Math.max(1, Math.round(Number(formData.get("porDia") ?? 10)) || 10);
 
-  repartirFollowups(owner, porDia);
+  repartirFollowups(owner, porDia, idOrganizacion);
 
   revalidatePath("/");
   redirect("/");
@@ -22,7 +22,7 @@ export async function repartirAction(formData: FormData) {
 // valores del enum cerrado: no hay evidencia de respuesta todavía) y el próximo follow-up
 // se calcula como mañana, mismo patrón que CaptureForm.tsx (plus(days)).
 export async function registrarTapAction(formData: FormData) {
-  await requireSession();
+  const { idOrganizacion } = await requireSession();
   const idEmpresa = String(formData.get("idEmpresa") ?? "");
   const canal = String(formData.get("canal") ?? "");
   if (!idEmpresa) return;
@@ -32,7 +32,7 @@ export async function registrarTapAction(formData: FormData) {
 
   const proximoFollowUp = plusDias(1);
 
-  registrarToque({ idEmpresa, canal, resultado: "no_contesto", proximoFollowUp, objecion });
+  registrarToque({ idEmpresa, canal, resultado: "no_contesto", proximoFollowUp, objecion }, idOrganizacion);
 
   revalidatePath("/");
 }

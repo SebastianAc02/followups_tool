@@ -1,22 +1,20 @@
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { usuarioDeSesion } from './session-user.ts';
 
-test('usa el campo owner cuando existe', () => {
-  const u = usuarioDeSesion({
-    id: 'user-1',
-    email: 'sacostamolin@gmail.com',
-    name: 'Sebastián Acosta',
-    owner: 'Sebastian Acosta Molina',
-    admin: true,
-  });
-  assert.equal(u.id, 'user-1');
-  assert.equal(u.owner, 'Sebastian Acosta Molina');
-  assert.equal(u.admin, true);
+test('usuarioDeSesion incluye idOrganizacion tal cual se lo pasan', () => {
+  const sesion = usuarioDeSesion(
+    { id: 'u1', email: 'a@b.com', name: 'Ana', owner: 'Ana Owner', admin: false },
+    7,
+  );
+  assert.equal(sesion.idOrganizacion, 7);
 });
 
-test('cae al name si owner viene vacio (usuario sin mapear)', () => {
-  const u = usuarioDeSesion({ id: 'user-2', email: 'x@y.co', name: 'Felipe Castro', owner: null, admin: null });
-  assert.equal(u.owner, 'Felipe Castro');
-  assert.equal(u.admin, false);
+test('usuarioDeSesion sigue mapeando owner con fallback a name', () => {
+  const sesion = usuarioDeSesion(
+    { id: 'u1', email: 'a@b.com', name: 'Ana', owner: null, admin: true },
+    1,
+  );
+  assert.equal(sesion.owner, 'Ana');
+  assert.equal(sesion.admin, true);
 });

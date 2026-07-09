@@ -141,8 +141,10 @@ const calorDesc = sql`(CASE ${empresa.estadoNotion}
   WHEN 'on_hold' THEN 0
   ELSE 1 END) DESC`;
 
-// Cola del día de un owner: vencidos o para hoy, ordenados por calor y luego antigüedad.
-export function colaDelDia(hoy: string, owner: string) {
+// Cola del día de un owner DENTRO de una organización: vencidos o para hoy, ordenados
+// por calor y luego antigüedad. idOrganizacion viene de la sesión (Parte 1, multi-org):
+// un lead compartido solo aparece en la cola de quien lo tiene activo ahora mismo.
+export function colaDelDia(hoy: string, owner: string, idOrganizacion: number) {
   return db
     .select({
       id: empresa.idEmpresa,
@@ -164,6 +166,7 @@ export function colaDelDia(hoy: string, owner: string) {
     .where(
       and(
         eq(empresa.owner, owner),
+        eq(empresa.organizacionActivaId, idOrganizacion),
         isNotNull(empresa.proximoFollowUpFecha),
         lte(empresa.proximoFollowUpFecha, hoy),
       ),
@@ -188,7 +191,7 @@ export function buscarEmpresasPorNombre(query: string) {
     .all();
 }
 
-export function getCuenta(id: string) {
+export function getCuenta(id: string, idOrganizacion: number) {
   const emp = db
     .select({
       id: empresa.idEmpresa,
@@ -222,6 +225,7 @@ export function getCuenta(id: string) {
     .where(eq(contacto.idEmpresa, id))
     .all();
 
+  // Solo los toques de MI organizacion: el lead es compartido, el historial de contacto no.
   const toques = db
     .select({
       idToque: toque.idToque,
@@ -232,7 +236,7 @@ export function getCuenta(id: string) {
       transcriptId: toque.transcriptId,
     })
     .from(toque)
-    .where(eq(toque.idEmpresa, id))
+    .where(and(eq(toque.idEmpresa, id), eq(toque.idOrganizacion, idOrganizacion)))
     .orderBy(desc(toque.idToque))
     .limit(5)
     .all();
@@ -244,11 +248,26 @@ export function getCuenta(id: string) {
 // La regla de negocio (4 salidas cerradas, razonPerdida obligatoria si contesto_no) es de
 // DOMINIO y se enforza aquí con Zod, no en la UI: cualquier caller futuro (ingest worker,
 // EnvioAdapter) pasa por esta misma garantía. `.parse()` lanza si el input no cumple.
-export function registrarToque(input: RegistrarToqueInput) {
+export function registrarToque(input: RegistrarToqueInput, idOrganizacion: number) {
   const parsed = registrarToqueSchema.parse(input);
   const ahora = new Date().toISOString();
 
   db.transaction((tx) => {
+    // Guard de organizacion (Parte 1): un toque solo se registra sobre un lead cuya
+    // organizacion_activa_id coincide con la del que llama. Evita que dos organizaciones
+    // se pisen el estado de un lead compartido por error (ver spec 2026-07-09).
+    const emp = tx
+      .select({ organizacionActivaId: empresa.organizacionActivaId })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .get();
+    if (!emp) throw new Error(`Empresa ${parsed.idEmpresa} no existe`);
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      throw new Error(
+        `La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`,
+      );
+    }
+
     // KDM opcional: upsert en contacto ANTES del insert del toque, para poder enlazar
     // toque.idContacto. Matching: mismo idEmpresa + mismo telefono exacto si viene telefono;
     // si no hay telefono, no hay match posible (el nombre no es clave confiable) -> insertar.
@@ -307,6 +326,7 @@ export function registrarToque(input: RegistrarToqueInput) {
         razonPerdida: parsed.razonPerdida ?? null,
         objecion: parsed.objecion ?? null,
         fuente: 'cockpit',
+        idOrganizacion,
         createdAt: ahora,
       })
       .run();
@@ -371,8 +391,23 @@ const actualizarCampoCalificacionSchema = z.object({
 // dato que ya se sabe (click en el item "PREGUNTAR" -> cajon de texto -> guardar).
 // "recaudo" se queda afuera a proposito: no tiene columna en empresa todavia (ver
 // core/calificacion.ts).
-export function actualizarCampoCalificacion(idEmpresa: string, campo: CampoCalificacion, valorCrudo: string): void {
+export function actualizarCampoCalificacion(
+  idEmpresa: string,
+  campo: CampoCalificacion,
+  valorCrudo: string,
+  idOrganizacion: number,
+): void {
   const val = actualizarCampoCalificacionSchema.parse({ campo, valor: valorCrudo });
+
+  const emp = db
+    .select({ organizacionActivaId: empresa.organizacionActivaId })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!emp) throw new Error(`Empresa ${idEmpresa} no existe`);
+  if (emp.organizacionActivaId !== idOrganizacion) {
+    throw new Error(`La empresa ${idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+  }
 
   if (val.campo === 'usuarios') {
     const usuarios = Number(val.valor);
@@ -401,12 +436,18 @@ export type ContadoresHoy = {
 // Solo lectura. El toque no tiene owner directo, se filtra vía JOIN a empresa.owner (mismo
 // filtro que colaDelDia). `toque.fecha` es un datetime ISO completo, se compara solo la
 // parte de fecha con substr(fecha, 1, 10).
-export function contadoresHoy(hoy: string, owner: string): ContadoresHoy {
+export function contadoresHoy(hoy: string, owner: string, idOrganizacion: number): ContadoresHoy {
   const filas = db
     .select({ canal: toque.canal, resultado: toque.resultado })
     .from(toque)
     .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
-    .where(and(eq(empresa.owner, owner), sql`substr(${toque.fecha}, 1, 10) = ${hoy}`))
+    .where(
+      and(
+        eq(empresa.owner, owner),
+        eq(toque.idOrganizacion, idOrganizacion),
+        sql`substr(${toque.fecha}, 1, 10) = ${hoy}`,
+      ),
+    )
     .all();
 
   const porCanal = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
@@ -431,14 +472,18 @@ export function contadoresHoy(hoy: string, owner: string): ContadoresHoy {
   return { porCanal, porResultado, total: filas.length };
 }
 
-// Cuenta de empresas por estado_notion (rediseño home). Solo lectura. Los null (empresas
-// sin etapa en el funnel) NO se incluyen: no representan una etapa. Con owner filtra a ese
-// owner; sin owner cuenta toda la base. Acceso solo por el Repository (regla de arquitectura).
-export function contarPorEstado(owner?: string): Record<string, number> {
+// Cuenta de empresas por estado_notion (rediseño home), SIEMPRE dentro de una
+// organización (Parte 1, multi-org). Los null (empresas sin etapa en el funnel) NO se
+// incluyen: no representan una etapa. Con owner filtra ademas a ese owner; sin owner
+// cuenta toda la organización. Acceso solo por el Repository (regla de arquitectura).
+export function contarPorEstado(owner: string | undefined, idOrganizacion: number): Record<string, number> {
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion)];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
+
   const filas = db
     .select({ estado: empresa.estadoNotion, n: sql<number>`count(*)` })
     .from(empresa)
-    .where(owner ? eq(empresa.owner, owner) : undefined)
+    .where(and(...condiciones))
     .groupBy(empresa.estadoNotion)
     .all();
 
@@ -452,24 +497,31 @@ export function contarPorEstado(owner?: string): Record<string, number> {
 // Resumen del home (rediseño): las 4 métricas de las stat cards. Reusa colaDelDia (cola de
 // hoy = vencidos + para hoy) y contarPorEstado sobre toda la base para deals calientes y
 // cuentas activas. Solo lectura.
-export function resumenHome(owner: string, hoy: string) {
-  const cola = colaDelDia(hoy, owner);
+export function resumenHome(owner: string, hoy: string, idOrganizacion: number) {
+  const cola = colaDelDia(hoy, owner, idOrganizacion);
   const toquesHoy = cola.length;
   const vencidos = cola.filter((c) => (c.fecha ?? '') < hoy).length;
 
-  const porEstado = contarPorEstado();
+  const porEstado = contarPorEstado(undefined, idOrganizacion);
   const dealsCalientes = ESTADOS_CALIENTES.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
   const cuentasActivas = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
 
   return { toquesHoy, vencidos, dealsCalientes, cuentasActivas };
 }
 
-// Repartir el backlog de follow-ups de un owner: N por día hábil, lo más caliente primero.
-export function repartirFollowups(owner: string, porDia: number) {
+// Repartir el backlog de follow-ups de un owner DENTRO de su organización: N por día
+// hábil, lo más caliente primero.
+export function repartirFollowups(owner: string, porDia: number, idOrganizacion: number) {
   const rows = db
     .select({ id: empresa.idEmpresa })
     .from(empresa)
-    .where(and(eq(empresa.owner, owner), isNotNull(empresa.proximoFollowUpFecha)))
+    .where(
+      and(
+        eq(empresa.owner, owner),
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        isNotNull(empresa.proximoFollowUpFecha),
+      ),
+    )
     .orderBy(calorDesc, empresa.proximoFollowUpFecha)
     .all();
 
@@ -1166,10 +1218,12 @@ export function guardarSegmento(input: { nombre: string; definicion: DefinicionS
   const ahora = new Date().toISOString();
   const ins = db
     .insert(segmento)
+    // Hardcodeado a Onepay (id 1) hasta que segmentos tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: input.nombre,
       definicion: JSON.stringify(val),
       descripcionNatural: input.descripcionNatural ?? null,
+      idOrganizacion: 1,
       createdAt: ahora,
       updatedAt: ahora,
     })
@@ -1570,6 +1624,7 @@ export function crearCampana(input: CampanaInput): number {
   const ahora = new Date().toISOString();
   const ins = db
     .insert(campana)
+    // Hardcodeado a Onepay (id 1) hasta que campanas tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: val.nombre,
       idCadencia: val.idCadencia,
@@ -1582,6 +1637,7 @@ export function crearCampana(input: CampanaInput): number {
       topeToquesDia: val.topeToquesDia ?? null,
       fechaInicio: val.fechaInicio ?? null,
       owner: val.owner ?? null,
+      idOrganizacion: 1,
       createdAt: ahora,
       updatedAt: ahora,
     })
@@ -2789,6 +2845,9 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
       .run();
     if (res.changes === 0) return;
     tx.insert(toque)
+      // Hardcodeado a Onepay (id 1): este toque nace del motor de cadencias, que todavia
+      // no filtra por organizacion (plan futuro). registrarToque() (Task 8) SI usa la
+      // organizacion real de la sesion.
       .values({
         idEmpresa: fila.idEmpresa,
         idContacto: fila.idContacto,
@@ -2796,6 +2855,7 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
         canal: fila.canal,
         quePaso: cuerpoFinal ?? null,
         fuente: 'cadencia_manual',
+        idOrganizacion: 1,
         createdAt: fechaEnviada,
       })
       .run();
@@ -3051,8 +3111,8 @@ export type ContextoToque = {
   idPasoInscripcionActivo: number | null;
 };
 
-export function getContextoToque(id: string): ContextoToque {
-  const { emp, contactos, toques } = getCuenta(id);
+export function getContextoToque(id: string, idOrganizacion: number): ContextoToque {
+  const { emp, contactos, toques } = getCuenta(id, idOrganizacion);
 
   // Contacto principal: el marcado esPrincipal; si ninguno lo está (dato legado
   // sin migrar), el primero de la lista es mejor default que null -- la UI siempre

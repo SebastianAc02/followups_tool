@@ -25,6 +25,7 @@ export function miembrosLibres(idOrganizacion: number, db: DbInstancia = dbSingl
 export function organizacionDeUsuario(idUser: string, db: DbInstancia = dbSingleton) {
   return db
     .select({
+      idOrganizacion: organizacion.idOrganizacion,
       nombreOrganizacion: organizacion.nombre,
       nombreDisplay: organizacionMiembro.nombreDisplay,
       ownerCanonico: organizacionMiembro.ownerCanonico,

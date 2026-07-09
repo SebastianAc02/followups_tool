@@ -16,14 +16,15 @@ function seedEmpresa(
   id: string,
   estadoNotion: string | null,
   proximoFollowUp: string | null,
+  organizacionActivaId = 1,
 ) {
   const raw = new Database(dbPath);
   raw
     .prepare(
-      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, estado_notion, proximo_follow_up_fecha)
-       VALUES (?, 'nit', 'Empresa Test', 'empresa test', 'activo', ?, ?, ?)`,
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, estado_notion, proximo_follow_up_fecha, organizacion_activa_id)
+       VALUES (?, 'nit', 'Empresa Test', 'empresa test', 'activo', ?, ?, ?, ?)`,
     )
-    .run(id, OWNER, estadoNotion, proximoFollowUp);
+    .run(id, OWNER, estadoNotion, proximoFollowUp, organizacionActivaId);
   raw.close();
 }
 
@@ -40,13 +41,23 @@ test('resumenHome cuenta toques de hoy, vencidos, deals calientes y cuentas acti
   seedEmpresa('p1', 'on_hold', null);
   seedEmpresa('p2', null, null);
 
-  const r = resumenHome(OWNER, HOY);
+  const r = resumenHome(OWNER, HOY, 1);
 
   assert.equal(r.toquesHoy, 2); // c1 (hoy) + c2 (vencido) están en la cola de hoy
   assert.equal(r.vencidos, 1); // solo c2
   assert.equal(r.dealsCalientes, 2); // h1 + h2
   // Activas = estados del funnel: c1,c2,c3 (lead) + h1 + h2 = 5. on_hold y sin estado fuera.
   assert.equal(r.cuentasActivas, 5);
+});
+
+test('resumenHome no mezcla organizaciones', () => {
+  seedEmpresa('otra-org-1', 'reunion_agendada', null, 2);
+
+  const r = resumenHome(OWNER, HOY, 1);
+  assert.equal(r.dealsCalientes, 2, 'h1+h2 de la organizacion 1, otra-org-1 (organizacion 2) no debe sumar');
+
+  const r2 = resumenHome(OWNER, HOY, 2);
+  assert.equal(r2.dealsCalientes, 1, 'solo otra-org-1');
 });
 
 test.after(() => {
