@@ -8,6 +8,7 @@ import {
   reclamarMiembro,
   setOwnerDeUsuario,
   reclamarMiembroYSetOwner,
+  organizacionDeUsuario,
   dbDePrueba,
 } from './organizacion-repository.ts';
 
@@ -88,4 +89,11 @@ test('reclamarMiembroYSetOwner no toca la tabla user si el miembro ya estaba rec
   const otro = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('otro-user') as any;
   assert.equal(otro, undefined, 'el reclamo fallido no debe tocar la tabla user para el segundo usuario');
   raw.close();
+});
+
+test('organizacionDeUsuario incluye idOrganizacion, no solo el nombre', () => {
+  const db = dbDePrueba(dbPath);
+  const org = organizacionDeUsuario('user-sebastian', db);
+  assert.equal(org?.idOrganizacion, 1);
+  assert.equal(org?.nombreOrganizacion, 'Onepay');
 });
