@@ -494,12 +494,19 @@ export function resumenHome(owner: string, hoy: string, idOrganizacion: number) 
   return { toquesHoy, vencidos, dealsCalientes, cuentasActivas };
 }
 
-// Repartir el backlog de follow-ups de un owner: N por día hábil, lo más caliente primero.
-export function repartirFollowups(owner: string, porDia: number) {
+// Repartir el backlog de follow-ups de un owner DENTRO de su organización: N por día
+// hábil, lo más caliente primero.
+export function repartirFollowups(owner: string, porDia: number, idOrganizacion: number) {
   const rows = db
     .select({ id: empresa.idEmpresa })
     .from(empresa)
-    .where(and(eq(empresa.owner, owner), isNotNull(empresa.proximoFollowUpFecha)))
+    .where(
+      and(
+        eq(empresa.owner, owner),
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        isNotNull(empresa.proximoFollowUpFecha),
+      ),
+    )
     .orderBy(calorDesc, empresa.proximoFollowUpFecha)
     .all();
 
