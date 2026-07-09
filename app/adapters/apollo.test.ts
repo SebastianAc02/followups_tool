@@ -333,11 +333,77 @@ test('sincronizarCopy traduce [nombre], [empresa] y [cargo] a sus tags de Apollo
   ]);
 });
 
+test('sincronizarCopy sin APP_BASE_URL configurada sube el copy tal cual, sin pixel ni reescritura de links', async (t) => {
+  assert.equal(process.env.APP_BASE_URL, undefined, 'este test asume que ningun test anterior la dejo puesta');
+  const llamadas: { path: string; body: unknown }[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push({ path, body: init.body ? JSON.parse(init.body as string) : null });
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await adapter.sincronizarCopy('seq-1', [
+    {
+      idPaso: 1,
+      idVersion: 10,
+      orden: 1,
+      diaOffset: 0,
+      asunto: 'a',
+      cuerpo: '<a href="https://calendly.com/agenda">Agenda</a>',
+      proveedorStepId: 'step-1',
+      proveedorTemplateId: 'tpl-1',
+    },
+  ]);
+
+  assert.equal((llamadas[0].body as { body_html: string }).body_html, '<a href="https://calendly.com/agenda">Agenda</a>');
+});
+
+test('sincronizarCopy con APP_BASE_URL configurada reescribe los links de clic e inyecta el pixel de apertura', async (t) => {
+  process.env.APP_BASE_URL = 'https://app.onepay.example';
+  t.after(() => {
+    delete process.env.APP_BASE_URL;
+  });
+
+  const llamadas: { path: string; body: unknown }[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push({ path, body: init.body ? JSON.parse(init.body as string) : null });
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await adapter.sincronizarCopy('seq-42', [
+    {
+      idPaso: 1,
+      idVersion: 10,
+      orden: 1,
+      diaOffset: 0,
+      asunto: 'a',
+      cuerpo: '<a href="https://calendly.com/agenda">Agenda</a>',
+      proveedorStepId: 'step-1',
+      proveedorTemplateId: 'tpl-1',
+    },
+  ]);
+
+  const bodyHtml = (llamadas[0].body as { body_html: string }).body_html;
+  assert.match(bodyHtml, /href="https:\/\/app\.onepay\.example\/api\/track\/click\?c=seq-42&e=\{\{email\}\}&u=https%3A%2F%2Fcalendly\.com%2Fagenda"/);
+  assert.match(bodyHtml, /<img src="https:\/\/app\.onepay\.example\/api\/track\/open\?c=seq-42&e=\{\{email\}\}"/);
+});
+
 test('sincronizarCopy con un paso sin subir todavia CREA el step (POST /emailer_steps) y sube el template', async (t) => {
   const llamadas: { path: string; body: unknown }[] = [];
-  // Forma de la respuesta de POST /emailer_steps: NO verificada en vivo (ver comentario
-  // de EmailerStepRespuesta en apollo.ts) -- se prueba aca la forma mas plausible; si
-  // difiere contra la cuenta real, este es el unico test que hay que ajustar.
+  // Forma de la respuesta de POST /emailer_steps VERIFICADA EN VIVO (sesion 2026-07-09,
+  // cuenta real, paso orden=2): emailer_template es hermano de emailer_step a nivel
+  // raiz (no anidado en emailer_touches[] como se habia adivinado antes). Fixture
+  // recortada de la respuesta real (se omiten campos que el adaptador no usa: note,
+  // counts, ab_test_details, emailer_steps[], team).
   t.mock.method(
     globalThis,
     'fetch',
@@ -346,7 +412,11 @@ test('sincronizarCopy con un paso sin subir todavia CREA el step (POST /emailer_
       if (path === '/emailer_steps') {
         return {
           status: 200,
-          body: { emailer_step: { id: 'step-nuevo', emailer_touches: [{ id: 'touch-1', emailer_template: { id: 'tpl-nuevo' } }] } },
+          body: {
+            emailer_step: { id: 'step-nuevo', emailer_campaign_id: 'seq-1', position: 1 },
+            emailer_touch: { id: 'touch-1', emailer_step_id: 'step-nuevo', emailer_template_id: 'tpl-nuevo' },
+            emailer_template: { id: 'tpl-nuevo', subject: null, body_html: '' },
+          },
         };
       }
       return { status: 200, body: {} };
@@ -364,6 +434,32 @@ test('sincronizarCopy con un paso sin subir todavia CREA el step (POST /emailer_
   });
   assert.deepEqual(llamadas[1], { path: '/emailer_templates/tpl-nuevo', body: { subject: 'a', body_html: 'b' } });
   assert.deepEqual(resultado, [{ idPaso: 1, idVersion: 10, proveedorStepId: 'step-nuevo', proveedorTemplateId: 'tpl-nuevo' }]);
+});
+
+test('sincronizarCopy usa emailer_touch.emailer_template.id como respaldo si emailer_template no viene a nivel raiz', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path) => {
+      if (path === '/emailer_steps') {
+        return {
+          status: 200,
+          body: {
+            emailer_step: { id: 'step-nuevo' },
+            emailer_touch: { id: 'touch-1', emailer_template: { id: 'tpl-respaldo' } },
+          },
+        };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  const resultado = await adapter.sincronizarCopy('seq-1', [
+    { idPaso: 1, idVersion: 10, orden: 1, diaOffset: 0, asunto: 'a', cuerpo: 'b', proveedorStepId: null, proveedorTemplateId: null },
+  ]);
+
+  assert.deepEqual(resultado, [{ idPaso: 1, idVersion: 10, proveedorStepId: 'step-nuevo', proveedorTemplateId: 'tpl-respaldo' }]);
 });
 
 test('sincronizarCopy sin la forma esperada en la respuesta de emailer_steps tira error explicito (no adivina un id)', async (t) => {

@@ -9,6 +9,16 @@ import type {
 } from '../core/ports/envio';
 import { leerCredencialConector } from '../db/repository';
 import { calcularWaitApollo } from '../core/motor-cadencia';
+import { reescribirLinksClic, inyectarPixelApertura } from '../core/tracking-links';
+
+// URL publica de ESTA app (sesion 2026-07-09, tracking de opens/clicks): sin configurar,
+// sincronizarCopy sube el copy tal cual, sin pixel ni reescritura de links -- correo
+// sigue funcionando igual que antes, el tracking es un opt-in que se activa el dia que
+// exista un deploy publico y esta variable apunte a el (Gmail/Outlook no pueden tocar
+// localhost). Mismo patron que APOLLO_MAILBOX_ID: se lee en cada llamada, no congelada.
+function appBaseUrl(): string | undefined {
+  return process.env.APP_BASE_URL;
+}
 
 // Base y header verificados en vivo (planning/experimento-apollo.md, 2026-07-03):
 // la doc dice "Bearer" pero lo que de verdad autentica es X-Api-Key contra
@@ -68,17 +78,18 @@ async function llamarApollo<T>(path: string, apiKey: string, init: RequestInit =
 type ContactoApollo = { id: string; email: string };
 type BulkCreateRespuesta = { created_contacts?: ContactoApollo[]; existing_contacts?: ContactoApollo[] };
 type CampanaRespuesta = { emailer_campaign?: { id: string }; id?: string };
-// NO verificado en vivo todavia (mismo estado que tenia MensajeApollo antes de G1):
-// experimento-apollo.md confirma que POST /emailer_steps "auto-crea emailer_touch +
-// emailer_template", pero no quedo registrada la forma exacta de la respuesta (que
-// campo trae el id del template auto-creado). Se prueban las 3 formas mas plausibles
-// segun como Apollo devuelve anidado en otros endpoints de este mismo adaptador
-// (emailer_campaign.id en CampanaRespuesta); esto se ajusta la primera vez que corra
-// contra la cuenta real si difiere -- igual que se hizo con MensajeApollo en V5.3.
+// Verificado en vivo (sesion 2026-07-09, cuenta real, paso orden=2): la respuesta de
+// POST /emailer_steps NO anida emailer_touches (plural) dentro de emailer_step como se
+// habia adivinado -- trae emailer_touch (SINGULAR) y emailer_template como hermanos de
+// emailer_step, todos a nivel raiz del objeto (mas emailer_steps[], el listado completo
+// de la secuencia, y team{}, que no se usan aca). El id del step esta en
+// emailer_step.id; el id del template auto-creado esta en emailer_template.id a nivel
+// raiz (tambien disponible como emailer_touch.emailer_template.id / .emailer_template_id,
+// se usan como respaldo por si el raiz llegara a faltar).
 type EmailerStepRespuesta = {
-  emailer_step?: { id?: string; emailer_touches?: { id?: string; emailer_template?: { id?: string } }[] };
-  id?: string;
-  emailer_touches?: { id?: string; emailer_template?: { id?: string } }[];
+  emailer_step?: { id?: string };
+  emailer_template?: { id?: string };
+  emailer_touch?: { emailer_template_id?: string; emailer_template?: { id?: string } };
 };
 // Campos verificados en vivo contra la cuenta real (V5.3, gate G1, 2026-07-06) --
 // NO son los que se habian supuesto antes de probar. emailer_messages NO tiene
@@ -235,22 +246,41 @@ export function crearApolloAdapter(): EnvioAdapter {
               wait_time: wait.waitTime,
             }),
           });
-          const step = data.emailer_step ?? data;
-          const touches = data.emailer_step?.emailer_touches ?? data.emailer_touches ?? [];
-          stepId = step.id ?? null;
-          templateId = touches[0]?.emailer_template?.id ?? null;
+          stepId = data.emailer_step?.id ?? null;
+          templateId = data.emailer_template?.id ?? data.emailer_touch?.emailer_template_id ?? data.emailer_touch?.emailer_template?.id ?? null;
           if (!stepId || !templateId) {
+            // Se incluye la respuesta cruda EN EL MENSAJE (no solo en un log que se
+            // pierde): asi, si Apollo alguna vez cambia esta forma de nuevo, queda
+            // visible de una en la UI (ver avisoSecuenciaExterna en
+            // app/campanas/[id]/lanzar/actions.ts) sin tener que adivinar a ciegas.
             throw new Error(
-              `Apollo no devolvio step/template al crear el paso orden=${paso.orden} (forma de respuesta sin verificar en vivo, ver comentario de EmailerStepRespuesta)`,
+              `Apollo no devolvio step/template al crear el paso orden=${paso.orden} (forma de respuesta ya verificada en vivo, ver comentario de EmailerStepRespuesta -- esto significa que Apollo cambio la forma de nuevo). Respuesta cruda de Apollo: ${JSON.stringify(data)}`,
             );
           }
+        }
+
+        const base = appBaseUrl();
+        // {{email}} como correlator NO esta confirmado en vivo todavia (a diferencia de
+        // {{first_name}}) -- de hecho el mapa VARIABLES_A_TAGS_APOLLO de arriba deja
+        // "email" explicitamente afuera porque no hay tag nativo documentado para eso.
+        // Si Apollo no lo soporta, el primer pixel/click real llegaria con el texto
+        // literal "{{email}}" en el query param (se veria de inmediato, no un fallo
+        // silencioso) -- PRIMERA COSA que verificar en vivo antes de confiar en esto:
+        // mandarse un correo de prueba y mirar si el link/pixel trae el email real.
+        // sincronizarCopy solo recibe pasos de canal 'correo' (pasosParaSincronizarCopy
+        // ya filtra por eso, ver app/db/repository.ts) -- no hace falta re-chequear el
+        // canal aca, el pixel/reescritura de links solo tiene sentido para HTML de correo.
+        let bodyHtml = traducirVariablesApollo(paso.cuerpo);
+        if (base) {
+          const params = { baseUrl: base, proveedorCampanaId };
+          bodyHtml = inyectarPixelApertura(reescribirLinksClic(bodyHtml, params), params);
         }
 
         await llamarApollo(`/emailer_templates/${templateId}`, apiKey, {
           method: 'PUT',
           body: JSON.stringify({
             subject: traducirVariablesApollo(paso.asunto ?? ''),
-            body_html: traducirVariablesApollo(paso.cuerpo),
+            body_html: bodyHtml,
           }),
         });
 
