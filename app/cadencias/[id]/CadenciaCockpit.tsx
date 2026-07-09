@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { editarCopyPasoAction, actualizarPasoCadenciaAction, agregarPasoCadenciaAction, eliminarPasoCadenciaAction } from './actions';
 import { CanalTag, type Canal } from '../../ui/CanalTag';
+import { CANAL_LABEL } from '../../ui/canal-tag.variants.ts';
 import { cn } from '../../ui/cn';
 import { useConfirm } from '../../ui/useConfirm';
 
@@ -154,6 +155,12 @@ export function CadenciaCockpit({
     });
   }
 
+  // Correo y WhatsApp se envían tal cual el cuerpo que se escribe aquí -- sin copy no hay
+  // qué mandar. Llamada no cuenta: su "guion" es opcional (el owner improvisa en vivo).
+  // Gate de avance del wizard: si falta copy en alguno, "Continuar a Destinatarios" queda
+  // deshabilitado y se lista cuáles toques hay que completar o eliminar.
+  const pasosSinCopy = filas.filter((f) => (f.canal === 'correo' || f.canal === 'whatsapp') && !f.cuerpo?.trim());
+
   return (
     <div className="flex flex-col gap-8">
       <header className="flex flex-col gap-1">
@@ -264,29 +271,38 @@ export function CadenciaCockpit({
               editando={editando === paso.idPaso}
               onEditar={() => setEditando(paso.idPaso)}
               onCerrar={() => setEditando(null)}
-              onEliminado={() => setFilas((fs) => fs.filter((f) => f.idPaso !== paso.idPaso))}
               onActualizado={(cambios) => actualizarLocal(paso.idPaso, cambios)}
             />
           ))}
         </div>
-
-        <button
-          type="button"
-          onClick={agregarPaso}
-          disabled={addPending}
-          className="mt-2 w-full rounded-[11px] border border-dashed border-line px-3 py-3 text-[13px] text-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60"
-        >
-          {addPending ? 'Añadiendo…' : '+ Añadir paso'}
-        </button>
       </section>
 
       {idCampanaBorrador != null && (
-        <Link
-          href={`/campanas/${idCampanaBorrador}/destinatarios`}
-          className="self-start rounded-[9px] bg-accent px-5 py-[10px] text-[13px] font-semibold text-bg transition-colors hover:opacity-90"
-        >
-          Continuar a Destinatarios
-        </Link>
+        <div className="flex flex-col items-start gap-2">
+          {pasosSinCopy.length > 0 ? (
+            <>
+              <button
+                type="button"
+                disabled
+                title="Completa el copy de todos los toques para continuar"
+                className="cursor-not-allowed self-start rounded-[9px] bg-accent px-5 py-[10px] text-[13px] font-semibold text-bg opacity-40"
+              >
+                Continuar a Destinatarios
+              </button>
+              <p className="max-w-md text-xs text-overdue">
+                Falta copy en {pasosSinCopy.map((p) => `Toque ${p.orden} (${CANAL_LABEL[p.canal as Canal] ?? p.canal})`).join(', ')}.
+                Agrega el copy de cada toque o elimínalo desde &quot;Arma tu cadencia&quot; para poder continuar.
+              </p>
+            </>
+          ) : (
+            <Link
+              href={`/campanas/${idCampanaBorrador}/destinatarios`}
+              className="self-start rounded-[9px] bg-accent px-5 py-[10px] text-[13px] font-semibold text-bg transition-colors hover:opacity-90"
+            >
+              Continuar a Destinatarios
+            </Link>
+          )}
+        </div>
       )}
       {dialogoConfirmar}
     </div>
@@ -310,7 +326,6 @@ function PasoTimelineItem({
   editando,
   onEditar,
   onCerrar,
-  onEliminado,
   onActualizado,
 }: {
   paso: PasoCadenciaUI;
@@ -319,62 +334,41 @@ function PasoTimelineItem({
   editando: boolean;
   onEditar: () => void;
   onCerrar: () => void;
-  onEliminado: () => void;
   onActualizado: (cambios: Partial<PasoCadenciaUI>) => void;
 }) {
   const canalActual = (['correo', 'llamada', 'whatsapp'] as const).includes(paso.canal as Canal) ? (paso.canal as Canal) : null;
   const [asunto, setAsunto] = useState(paso.asunto ?? '');
   const [cuerpo, setCuerpo] = useState(paso.cuerpo ?? '');
   const [objetivo, setObjetivo] = useState(paso.objetivo ?? '');
-  // Dia/canal/aprobacion editables aca tambien: cuando el grid "Arma tu cadencia" esta
-  // oculto (creacion), esta es la UNICA forma de tocar estos campos, no solo el copy.
-  const [diaOffset, setDiaOffset] = useState(paso.diaOffset);
-  const [canalEdit, setCanalEdit] = useState<Canal>(canalActual ?? 'correo');
-  const [esManual, setEsManual] = useState(paso.esManual);
   const [error, setError] = useState('');
   const [pending, startTransition] = useTransition();
-  const [eliminando, startEliminarTransition] = useTransition();
-  const { confirmar, elemento: dialogoConfirmar } = useConfirm();
 
+  // Toque/día/canal/aprobación solo se editan desde "Arma tu cadencia" (arriba); aquí
+  // solo se toca el copy -- Sebastián pidió separar las dos cosas (2026-07-08) para que
+  // no haya dos lugares distintos donde cambiar el canal o el día de un mismo toque.
   function guardar() {
     setError('');
     startTransition(async () => {
-      const resMeta = await actualizarPasoCadenciaAction(
-        paso.idPaso,
-        { diaOffset, canal: canalEdit, esManual, objetivo: canalEdit === 'llamada' ? objetivo.trim() || null : undefined },
-        idCadencia,
-      );
-      if (!resMeta.ok) {
-        setError(resMeta.error);
-        return;
+      if (canalActual === 'llamada') {
+        const resMeta = await actualizarPasoCadenciaAction(paso.idPaso, { objetivo: objetivo.trim() || null }, idCadencia);
+        if (!resMeta.ok) {
+          setError(resMeta.error);
+          return;
+        }
       }
-      // asunto e objetivo son mutuamente exclusivos por canal: si el paso ya no es
+      // asunto e objetivo son mutuamente exclusivos por canal: si el paso no es
       // correo, no vale la pena seguir guardando un asunto viejo.
-      const resCopy = await editarCopyPasoAction(paso.idPaso, canalEdit === 'correo' ? asunto : '', cuerpo, idCadencia);
+      const resCopy = await editarCopyPasoAction(paso.idPaso, canalActual === 'correo' ? asunto : '', cuerpo, idCadencia);
       if (!resCopy.ok) {
         setError(resCopy.error);
         return;
       }
       onActualizado({
-        diaOffset,
-        canal: canalEdit,
-        esManual,
-        objetivo: canalEdit === 'llamada' ? objetivo.trim() || null : paso.objetivo,
-        asunto: canalEdit === 'correo' ? asunto || null : null,
+        objetivo: canalActual === 'llamada' ? objetivo.trim() || null : paso.objetivo,
+        asunto: canalActual === 'correo' ? asunto || null : null,
         cuerpo: cuerpo || null,
       });
       onCerrar();
-    });
-  }
-
-  async function eliminar() {
-    const ok = await confirmar({ titulo: `¿Eliminar el paso ${paso.orden}?`, mensaje: 'No se puede deshacer.' });
-    if (!ok) return;
-    setError('');
-    startEliminarTransition(async () => {
-      const res = await eliminarPasoCadenciaAction(paso.idPaso, idCadencia);
-      if (res.ok) onEliminado();
-      else setError(res.error);
     });
   }
 
@@ -383,9 +377,6 @@ function PasoTimelineItem({
   // cadencia" de arriba, o un guardado anterior -- hay que refrescarlos al abrir el
   // editor, si no el formulario arranca con datos viejos.
   function handleEditar() {
-    setDiaOffset(paso.diaOffset);
-    setCanalEdit(canalActual ?? 'correo');
-    setEsManual(paso.esManual);
     setAsunto(paso.asunto ?? '');
     setCuerpo(paso.cuerpo ?? '');
     setObjetivo(paso.objetivo ?? '');
@@ -405,62 +396,15 @@ function PasoTimelineItem({
           {canalActual ? <CanalTag canal={canalActual} /> : <span className="text-[11px] font-medium text-muted">{paso.canal}</span>}
           <span className="font-mono-tag text-xs text-faint">Paso {paso.orden}</span>
           {!editando && (
-            <div className="ml-auto flex items-center gap-3">
-              <button type="button" onClick={handleEditar} className="text-xs font-medium text-accent-soft hover:text-accent">
-                Editar
-              </button>
-              <button
-                type="button"
-                onClick={eliminar}
-                disabled={eliminando}
-                className="text-xs font-medium text-faint hover:text-overdue disabled:opacity-40"
-              >
-                {eliminando ? 'Eliminando…' : 'Eliminar'}
-              </button>
-            </div>
+            <button type="button" onClick={handleEditar} className="ml-auto text-xs font-medium text-accent-soft hover:text-accent">
+              Editar copy
+            </button>
           )}
         </div>
 
         {editando ? (
           <div className="flex flex-col gap-2.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-3 py-2 text-sm">
-                <span className="text-[11px] text-faint">Día</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={diaOffset}
-                  onChange={(e) => setDiaOffset(Number(e.target.value) || 0)}
-                  className="w-14 bg-transparent font-mono-tag text-ink outline-none"
-                />
-              </label>
-              <div className="flex gap-1.5">
-                {CANALES.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setCanalEdit(c)}
-                    className={cn(
-                      'rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors',
-                      canalEdit === c ? CANAL_CHIP_ON[c] : 'border-line text-muted hover:text-ink',
-                    )}
-                  >
-                    {c === 'correo' ? 'Correo' : c === 'llamada' ? 'Llamada' : 'WhatsApp'}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => setEsManual((v) => !v)}
-                className={cn(
-                  'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                  esManual ? 'border-accent/40 bg-accent-bg text-accent-ink' : 'border-line text-muted hover:text-ink',
-                )}
-              >
-                {esManual ? '✦ Revisar' : 'Automático'}
-              </button>
-            </div>
-            {canalEdit === 'correo' && (
+            {canalActual === 'correo' && (
               <input
                 value={asunto}
                 onChange={(e) => setAsunto(e.target.value)}
@@ -468,7 +412,7 @@ function PasoTimelineItem({
                 className="rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent"
               />
             )}
-            {canalEdit === 'llamada' && (
+            {canalActual === 'llamada' && (
               <input
                 value={objetivo}
                 onChange={(e) => setObjetivo(e.target.value)}
@@ -480,7 +424,7 @@ function PasoTimelineItem({
               value={cuerpo}
               onChange={(e) => setCuerpo(e.target.value)}
               rows={4}
-              placeholder={CUERPO_LABEL[canalEdit]}
+              placeholder={canalActual ? CUERPO_LABEL[canalActual] : 'Copy'}
               className="rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />
             {error && <p className="text-xs text-overdue">{error}</p>}
@@ -510,12 +454,15 @@ function PasoTimelineItem({
             {paso.cuerpo ? (
               <p className="text-[13px] leading-relaxed text-ink-soft">{conVariablesResaltadas(paso.cuerpo)}</p>
             ) : (
-              <p className="text-[13px] text-faint">(sin {canalActual === 'llamada' ? 'guion' : 'copy'})</p>
+              <p className="text-[13px] font-medium text-pending">
+                {canalActual === 'llamada'
+                  ? '(sin guion -- opcional)'
+                  : `Sin copy de ${canalActual ? CANAL_LABEL[canalActual] : paso.canal} -- falta antes de poder continuar`}
+              </p>
             )}
           </>
         )}
       </div>
-      {dialogoConfirmar}
     </div>
   );
 }
