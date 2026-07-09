@@ -39,6 +39,35 @@ funciones de campañas, llaman `empresasParaRevision`). Es normal y esperado que
 que los resuelve al threadear `idOrganizacion` por su propio código (mismo patrón que la Task 15
 de Parte 1, pero esos call sites puntuales quedan fuera de mi bandera de archivos tocables).
 
+**Corrección descubierta durante la ejecución de Task 1 (no estaba prevista al escribir el plan):**
+`node --experimental-strip-types` NO valida aridad en runtime — una función que ahora exige un
+segundo parámetro `idOrganizacion` sigue siendo invocable con un solo argumento desde un caller
+viejo; `idOrganizacion` llega como `undefined`, `eq(columna, undefined)` bindea `NULL`, y `NULL`
+nunca matchea nada en SQLite. El resultado NO es un error de tipos ignorable: es una fila vacía
+silenciosa. Esto significa que la cadena interna `empresasDeSegmento` → `empresasDeSegmentoGuardado`
+→ `empresasParaRevision` (→ `muestraDestinatarioDeSegmento`) rompe TESTS EN RUNTIME (no solo
+`tsc`) en cuanto se cambia la función más interna, mientras las de más afuera en la misma cadena
+sigan sin actualizar — y esas tres/cuatro funciones comparten `repository.segmento.test.ts`, así
+que el archivo queda en rojo hasta que TODA la cadena esté al día. Mismo problema, cadena
+separada, para `empresasConReadiness` → `conteosReadiness` (comparten `repository.readiness.test.ts`).
+
+Por eso el ORDEN DE EJECUCIÓN real no sigue el orden numérico del plan: se ejecutan
+**Task 1 → Task 10 → Task 13 → Task 8 → Task 9**, seguidas, antes de tocar cualquier otra tarea,
+para que cada cadena interna quede resuelta de punta a punta sin dejar su propio archivo de test
+en rojo más que unos minutos. Las tareas restantes (2, 3, 4, 5, 6, 7, 11, 12) no tienen esta
+dependencia de cadena entre sí (cada una toca una función hoja, sin otro caller interno en
+`repository.ts` dentro de mis 13) y se ejecutan después, en cualquier orden razonable. El texto
+de cada task más abajo NO se reescribe (sigue siendo válido función por función); esto solo
+documenta el orden real de despacho de subagentes.
+
+Los call sites de Parte 3 (`repository.ts:1737`/`:2008`, dentro de funciones de campaña) que
+llaman `empresasParaRevision` con la firma vieja (1 arg) van a sufrir EL MISMO problema (fila
+vacía silenciosa, no solo error de tipos) en cuanto Task 13 aterrice — y eso se propaga a
+CUALQUIER test de Parte 3 (`repository.materializar.test.ts`, `repository.push.test.ts`, etc.)
+que ejercite esas funciones de campaña de punta a punta. Es awaited/esperado igual que el error
+de tsc original, solo que ahora también se manifiesta como test rojo en archivos de Parte 3, no
+solo como error de compilación — sigue sin ser mío para arreglar (ver Task 14).
+
 **Tech Stack:** Next.js, Drizzle ORM sobre SQLite (`isps.db`), `node:test` + `better-sqlite3`.
 
 **Spec:** `docs/superpowers/specs/2026-07-09-multi-organizacion-real-design.md`
