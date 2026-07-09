@@ -100,7 +100,7 @@ test('guardarProveedorCampanaId persiste el id de la secuencia externa y se pued
   const idSegmento3 = guardarSegmento({ nombre: 'goteo-proveedor', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
   const idCampana = crearCampana({ nombre: 'Camp proveedor', idCadencia, idSegmento: idSegmento3, fechaInicio: MARTES }, 1);
 
-  guardarProveedorCampanaId(idCampana, 'apollo-seq-123');
+  guardarProveedorCampanaId(idCampana, 'apollo-seq-123', 1);
 
   const raw = new Database(dbPath);
   const fila = raw.prepare('SELECT proveedor_campana_id FROM campana WHERE id_campana = ?').get(idCampana) as { proveedor_campana_id: string };

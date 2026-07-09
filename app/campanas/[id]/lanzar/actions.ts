@@ -66,7 +66,7 @@ export type LanzarCampanaResultado =
   | { ok: false; error: string };
 
 export async function lanzarCampanaAction(idCampana: number, config: ConfigLanzamientoInput): Promise<LanzarCampanaResultado> {
-  await requireSession();
+  const { idOrganizacion } = await requireSession();
   try {
     actualizarConfigLanzamiento(idCampana, config);
     const resultado = inscribirCampana(idCampana);
@@ -86,7 +86,7 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
       const adapter = crearRegistroEnvio().correo;
       if (camp && adapter) {
         const proveedorCampanaId = await adapter.crearCampanaExterna(camp.nombre);
-        guardarProveedorCampanaId(idCampana, proveedorCampanaId);
+        guardarProveedorCampanaId(idCampana, proveedorCampanaId, idOrganizacion);
 
         // Sesion 2026-07-08: sin esto la secuencia queda creada pero VACIA -- subir el
         // copy aqui mismo es lo que hace que abrir la secuencia en Apollo ya muestre

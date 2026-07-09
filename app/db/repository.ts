@@ -1406,7 +1406,13 @@ export function campanaConReglas(idCampana: number): CampanaConReglas | null {
 // Fase 5 (vista Reglas): UPDATE simple del campo. La revision humana pasa antes de
 // llamar esto — la pantalla solo persiste cuando el usuario confirma "Guardar regla",
 // nunca al tocar las opciones (eso solo recalcula conteos en memoria).
-export function actualizarReglaFaltante(idCampana: number, regla: ReglaFaltante): void {
+export function actualizarReglaFaltante(idCampana: number, regla: ReglaFaltante, idOrganizacion: number): void {
+  const camp = db.select({ idOrganizacion: campana.idOrganizacion }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  if (!camp) throw new Error(`Campana ${idCampana} no existe`);
+  if (camp.idOrganizacion !== idOrganizacion) {
+    throw new Error(`La campana ${idCampana} es de otra organizacion, no de ${idOrganizacion}`);
+  }
+
   db.update(campana)
     .set({ reglaFaltante: regla, updatedAt: new Date().toISOString() })
     .where(eq(campana.idCampana, idCampana))
@@ -1417,7 +1423,13 @@ export function actualizarReglaFaltante(idCampana: number, regla: ReglaFaltante)
 // devuelve EnvioAdapter.crearCampanaExterna. UPDATE simple de un solo campo, mismo patron
 // que actualizarReglaFaltante -- se llama una sola vez, justo despues de crear la secuencia
 // en Apollo al lanzar la campana.
-export function guardarProveedorCampanaId(idCampana: number, proveedorCampanaId: string): void {
+export function guardarProveedorCampanaId(idCampana: number, proveedorCampanaId: string, idOrganizacion: number): void {
+  const camp = db.select({ idOrganizacion: campana.idOrganizacion }).from(campana).where(eq(campana.idCampana, idCampana)).get();
+  if (!camp) throw new Error(`Campana ${idCampana} no existe`);
+  if (camp.idOrganizacion !== idOrganizacion) {
+    throw new Error(`La campana ${idCampana} es de otra organizacion, no de ${idOrganizacion}`);
+  }
+
   db.update(campana)
     .set({ proveedorCampanaId, updatedAt: new Date().toISOString() })
     .where(eq(campana.idCampana, idCampana))

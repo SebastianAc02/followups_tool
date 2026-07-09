@@ -36,7 +36,7 @@ test('campanaParaSincronizarCopy es null si la campana todavia no tiene secuenci
 });
 
 test('campanaParaSincronizarCopy devuelve idCadencia + proveedorCampanaId una vez creada la secuencia', () => {
-  guardarProveedorCampanaId(idCampana, 'seq-copy-1');
+  guardarProveedorCampanaId(idCampana, 'seq-copy-1', 1);
 
   assert.deepEqual(campanaParaSincronizarCopy(idCampana), { idCadencia, proveedorCampanaId: 'seq-copy-1' });
 });

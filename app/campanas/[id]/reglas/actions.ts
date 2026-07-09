@@ -29,9 +29,9 @@ export async function recalcularConteosAction(idCampana: number, regla: ReglaFal
 export type GuardarReglaResultado = { ok: true } | { ok: false; error: string };
 
 export async function guardarReglaFaltanteAction(idCampana: number, regla: ReglaFaltante): Promise<GuardarReglaResultado> {
-  await requireSession();
+  const { idOrganizacion } = await requireSession();
   try {
-    actualizarReglaFaltante(idCampana, regla);
+    actualizarReglaFaltante(idCampana, regla, idOrganizacion);
     revalidatePath(`/campanas/${idCampana}/reglas`);
     revalidatePath('/campanas');
     return { ok: true };
