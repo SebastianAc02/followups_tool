@@ -37,7 +37,7 @@ const idCadencia = crearCadencia({
 const idSegmento = guardarSegmento({ nombre: 'on-hold', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
 
 test('agendaEnSeco muestra el primer paso de las inscripciones activas para hoy', () => {
-  const idCampana = crearCampana({ nombre: 'Camp', idCadencia, idSegmento });
+  const idCampana = crearCampana({ nombre: 'Camp', idCadencia, idSegmento }, 1);
   const res = inscribirCampana(idCampana);
   assert.equal(res.inscritas, 1); // e1
   assert.equal(res.bloqueadas, 1); // e2 sin email
@@ -59,7 +59,7 @@ test('agendaEnSeco vacia cuando ninguna activa tiene paso debido todavia', () =>
 // Fase 7 (pausar campana): sin este filtro, "pausar" solo cambiaria una etiqueta en
 // campana.estado pero la agenda seguiria generando pasos nuevos cada dia.
 test('agendaEnSeco no muestra pasos de una campana pausada', () => {
-  const idCampana2 = crearCampana({ nombre: 'Camp2', idCadencia, idSegmento });
+  const idCampana2 = crearCampana({ nombre: 'Camp2', idCadencia, idSegmento }, 1);
   inscribirCampana(idCampana2); // reemplaza la inscripcion de e1 en 'Camp' (test anterior)
 
   const antes = agendaEnSeco('2099-01-01', { diasBloqueados: [], corrimiento: 'siguiente' });

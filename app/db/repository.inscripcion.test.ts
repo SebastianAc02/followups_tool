@@ -67,7 +67,7 @@ function contactoEmail(idContacto: number): string | null {
 }
 
 test('inscribir cubre los 4 defaults: 3 activas (KDM/principal/primero) + 1 bloqueada', () => {
-  const idCampana = crearCampana({ nombre: 'Camp A', idCadencia, idSegmento });
+  const idCampana = crearCampana({ nombre: 'Camp A', idCadencia, idSegmento }, 1);
   const res = inscribirCampana(idCampana);
 
   assert.equal(res.inscritas, 3);
@@ -96,7 +96,7 @@ test('inscribir cubre los 4 defaults: 3 activas (KDM/principal/primero) + 1 bloq
 });
 
 test('re-correr la misma campana es idempotente: todo saltado, sin duplicar', () => {
-  const idCampana = crearCampana({ nombre: 'Camp A2', idCadencia, idSegmento });
+  const idCampana = crearCampana({ nombre: 'Camp A2', idCadencia, idSegmento }, 1);
   inscribirCampana(idCampana);
   const otra = inscribirCampana(idCampana);
   assert.equal(otra.saltadas, 4);
@@ -105,7 +105,7 @@ test('re-correr la misma campana es idempotente: todo saltado, sin duplicar', ()
 
 test('cambio de campana: la empresa sale de la anterior con motivo_fin y deja historial', () => {
   // e-kdm ya tiene una activa (Camp A). Nueva campana sobre el mismo segmento.
-  const idCampanaB = crearCampana({ nombre: 'Camp B', idCadencia, idSegmento });
+  const idCampanaB = crearCampana({ nombre: 'Camp B', idCadencia, idSegmento }, 1);
   const res = inscribirCampana(idCampanaB);
   assert.ok(res.reemplazos >= 1, 'al menos las activas previas se reemplazan');
 
@@ -153,7 +153,7 @@ test('resolver una bloqueada la promueve a activa con su destinatario', () => {
 // compartido de este archivo, no debe interferir con las aserciones de arriba.
 test('empresa excluida en la revision de leads no se inscribe en una campana nueva', () => {
   excluirDeSegmento(idSegmento, 'e-primero');
-  const idCampanaC = crearCampana({ nombre: 'Camp C', idCadencia, idSegmento });
+  const idCampanaC = crearCampana({ nombre: 'Camp C', idCadencia, idSegmento }, 1);
   const res = inscribirCampana(idCampanaC);
 
   const hPrimero = historialInscripciones('e-primero');
@@ -168,7 +168,7 @@ test('empresa excluida en la revision de leads no se inscribe en una campana nue
 // Parte 4 campanas: campana.estado pasa de 'borrador' a 'activa' al inscribir (antes
 // se quedaba en 'borrador' para siempre, un vacio real del estado de la campana).
 test('crearCampana nace borrador; inscribirCampana la pasa a activa', () => {
-  const idCampanaD = crearCampana({ nombre: 'Camp D', idCadencia, idSegmento });
+  const idCampanaD = crearCampana({ nombre: 'Camp D', idCadencia, idSegmento }, 1);
   assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'borrador');
   inscribirCampana(idCampanaD);
   assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'activa');
@@ -192,7 +192,7 @@ test('listarCampanas trae nombre de cadencia y segmento, mas conteo de inscritas
 
 // Parte 5 campanas: reglaFaltante e intakeDiario se persisten y se leen de vuelta.
 test('crearCampana persiste reglaFaltante e intakeDiario', () => {
-  const idCampanaE = crearCampana({ nombre: 'Camp E', idCadencia, idSegmento, reglaFaltante: 'saltar', intakeDiario: 50 });
+  const idCampanaE = crearCampana({ nombre: 'Camp E', idCadencia, idSegmento, reglaFaltante: 'saltar', intakeDiario: 50 }, 1);
   const raw = new Database(dbPath);
   const fila = raw.prepare('SELECT regla_faltante, intake_diario FROM campana WHERE id_campana = ?').get(idCampanaE) as any;
   raw.close();
@@ -204,7 +204,7 @@ test('crearCampana persiste reglaFaltante e intakeDiario', () => {
 // rastro -- se borra campana + su propia cadencia (nadie mas la usa).
 test('eliminarCampanaBorrador borra campana y cadencia si sigue en borrador', () => {
   const idCadenciaF = crearCadencia({ nombre: 'CF', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
-  const idCampanaF = crearCampana({ nombre: 'Camp F', idCadencia: idCadenciaF, idSegmento });
+  const idCampanaF = crearCampana({ nombre: 'Camp F', idCadencia: idCadenciaF, idSegmento }, 1);
   const res = eliminarCampanaBorrador(idCampanaF);
   assert.equal(res.ok, true);
   assert.equal(listarCampanas().find((f) => f.nombre === 'Camp F'), undefined);
@@ -219,7 +219,7 @@ test('eliminarCampanaBorrador borra campana y cadencia si sigue en borrador', ()
 // inscripciones en el mismo paso, asi que un solo test cubre las dos guardas.
 test('eliminarCampanaBorrador rechaza una campana que ya no esta en borrador', () => {
   const idCadenciaG = crearCadencia({ nombre: 'CG', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
-  const idCampanaG = crearCampana({ nombre: 'Camp G', idCadencia: idCadenciaG, idSegmento });
+  const idCampanaG = crearCampana({ nombre: 'Camp G', idCadencia: idCadenciaG, idSegmento }, 1);
   inscribirCampana(idCampanaG);
   const res = eliminarCampanaBorrador(idCampanaG);
   assert.equal(res.ok, false);
@@ -231,7 +231,7 @@ test('eliminarCampanaBorrador rechaza una campana que ya no esta en borrador', (
 // o una campana ya finalizada.
 test('pausarCampana/reanudarCampana solo se mueven entre activa y pausada', () => {
   const idCadenciaH = crearCadencia({ nombre: 'CH', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
-  const idCampanaH = crearCampana({ nombre: 'Camp H', idCadencia: idCadenciaH, idSegmento });
+  const idCampanaH = crearCampana({ nombre: 'Camp H', idCadencia: idCadenciaH, idSegmento }, 1);
 
   assert.equal(pausarCampana(idCampanaH).ok, false, 'no se puede pausar un borrador');
 
@@ -252,7 +252,7 @@ test('pausarCampana/reanudarCampana solo se mueven entre activa y pausada', () =
 // elimina (eliminarCampanaBorrador), no se cancela -- por eso lo rechaza.
 test('marcarCampanaFinalizada rechaza un borrador y una campana ya finalizada', () => {
   const idCadenciaI = crearCadencia({ nombre: 'CI', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
-  const idCampanaI = crearCampana({ nombre: 'Camp I', idCadencia: idCadenciaI, idSegmento });
+  const idCampanaI = crearCampana({ nombre: 'Camp I', idCadencia: idCadenciaI, idSegmento }, 1);
 
   assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'un borrador se elimina, no se cancela');
 
@@ -262,6 +262,19 @@ test('marcarCampanaFinalizada rechaza un borrador y una campana ya finalizada', 
   assert.equal(listarCampanas().find((f) => f.nombre === 'Camp I')!.estado, 'finalizada');
 
   assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'ya esta finalizada');
+});
+
+// Plan 3, Task 1: crearCampana recibia idOrganizacion hardcodeado a 1 (Onepay). Ahora
+// toma el valor real del caller -- una campana creada por otra organizacion debe quedar
+// con SU id, no con el de Onepay por defecto.
+test('crearCampana guarda el idOrganizacion real que recibe, no un hardcode', () => {
+  const idCampanaOrg2 = crearCampana({ nombre: 'Camp org 2', idCadencia, idSegmento }, 2);
+
+  const raw = new Database(dbPath);
+  const fila = raw.prepare('SELECT id_organizacion FROM campana WHERE id_campana = ?').get(idCampanaOrg2) as { id_organizacion: number };
+  raw.close();
+
+  assert.equal(fila.id_organizacion, 2);
 });
 
 test.after(() => {

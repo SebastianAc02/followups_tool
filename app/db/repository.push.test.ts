@@ -67,11 +67,11 @@ const idSegmento1 = guardarSegmento({ nombre: 'push-seg-1', definicion: { condic
 const idSegmento2 = guardarSegmento({ nombre: 'push-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['push-cat-2'] }] } });
 const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
 
-const idCampanaConSecuencia = crearCampana({ nombre: 'Camp con secuencia', idCadencia, idSegmento: idSegmento1 });
+const idCampanaConSecuencia = crearCampana({ nombre: 'Camp con secuencia', idCadencia, idSegmento: idSegmento1 }, 1);
 fijarProveedorCampanaId(idCampanaConSecuencia, 'seq-real-1');
 inscribirCampana(idCampanaConSecuencia);
 
-const idCampanaSinSecuencia = crearCampana({ nombre: 'Camp sin secuencia', idCadencia, idSegmento: idSegmento2 });
+const idCampanaSinSecuencia = crearCampana({ nombre: 'Camp sin secuencia', idCadencia, idSegmento: idSegmento2 }, 1);
 inscribirCampana(idCampanaSinSecuencia);
 
 function idDestinatarioDe(idEmpresa: string): number {

@@ -54,7 +54,7 @@ test('goteo programa fechaInscripcion por dia segun el orden del segmento, y la 
     intakeDiario: 2,
     ritmoIngreso: 'diario',
     fechaInicio: MARTES,
-  });
+  }, 1);
 
   const res = inscribirCampana(idCampana);
 
@@ -80,7 +80,7 @@ test('goteo programa fechaInscripcion por dia segun el orden del segmento, y la 
 
 test('sin intakeDiario, todas las elegibles entran el mismo dia (comportamiento previo preservado)', () => {
   const idSegmento2 = guardarSegmento({ nombre: 'goteo-sin-intake', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
-  const idCampana = crearCampana({ nombre: 'Camp sin intake', idCadencia, idSegmento: idSegmento2, fechaInicio: MARTES });
+  const idCampana = crearCampana({ nombre: 'Camp sin intake', idCadencia, idSegmento: idSegmento2, fechaInicio: MARTES }, 1);
 
   inscribirCampana(idCampana);
 
@@ -98,7 +98,7 @@ test('sin intakeDiario, todas las elegibles entran el mismo dia (comportamiento 
 // contra la cuenta real, no aca.
 test('guardarProveedorCampanaId persiste el id de la secuencia externa y se puede leer de vuelta', () => {
   const idSegmento3 = guardarSegmento({ nombre: 'goteo-proveedor', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
-  const idCampana = crearCampana({ nombre: 'Camp proveedor', idCadencia, idSegmento: idSegmento3, fechaInicio: MARTES });
+  const idCampana = crearCampana({ nombre: 'Camp proveedor', idCadencia, idSegmento: idSegmento3, fechaInicio: MARTES }, 1);
 
   guardarProveedorCampanaId(idCampana, 'apollo-seq-123');
 

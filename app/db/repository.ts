@@ -1619,12 +1619,11 @@ export function actualizarVersionPaso(idVersion: number, cambios: { peso?: numbe
 
 // V4.5: una campana = cadencia aplicada a un segmento. Nace en 'borrador'; inscribir la
 // pone a correr.
-export function crearCampana(input: CampanaInput): number {
+export function crearCampana(input: CampanaInput, idOrganizacion: number): number {
   const val = campanaInputSchema.parse(input);
   const ahora = new Date().toISOString();
   const ins = db
     .insert(campana)
-    // Hardcodeado a Onepay (id 1) hasta que campanas tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: val.nombre,
       idCadencia: val.idCadencia,
@@ -1637,7 +1636,7 @@ export function crearCampana(input: CampanaInput): number {
       topeToquesDia: val.topeToquesDia ?? null,
       fechaInicio: val.fechaInicio ?? null,
       owner: val.owner ?? null,
-      idOrganizacion: 1,
+      idOrganizacion,
       createdAt: ahora,
       updatedAt: ahora,
     })

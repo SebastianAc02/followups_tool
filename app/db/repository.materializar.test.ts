@@ -62,7 +62,7 @@ test('primera pasada materializa el paso del dia 0 como pendiente', () => {
     ],
   });
   const idSeg = guardarSegmento({ nombre: 'mat-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-1'] }] } });
-  const idCampana = crearCampana({ nombre: 'Camp mat 1', idCadencia, idSegmento: idSeg });
+  const idCampana = crearCampana({ nombre: 'Camp mat 1', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana);
   const insc = inscripcionActivaDe('e-mat-1');
   fijarAnchor(insc.id, '2026-07-01T00:00:00.000Z');
@@ -85,7 +85,7 @@ test('no avanza al paso 2 hasta que el paso 1 este ejecutado (enviada), y no dup
     ],
   });
   const idSeg = guardarSegmento({ nombre: 'mat-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-2'] }] } });
-  const idCampana = crearCampana({ nombre: 'Camp mat 2', idCadencia, idSegmento: idSeg });
+  const idCampana = crearCampana({ nombre: 'Camp mat 2', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana);
   const insc = inscripcionActivaDe('e-mat-2');
   fijarAnchor(insc.id, '2026-07-01T00:00:00.000Z');
@@ -118,7 +118,7 @@ test('sin telefono, el paso de llamada se omite (regla cola) y no bloquea el pas
     ],
   });
   const idSeg = guardarSegmento({ nombre: 'mat-seg-3', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-3'] }] } });
-  const idCampana = crearCampana({ nombre: 'Camp mat 3', idCadencia, idSegmento: idSeg, reglaFaltante: 'cola' });
+  const idCampana = crearCampana({ nombre: 'Camp mat 3', idCadencia, idSegmento: idSeg, reglaFaltante: 'cola' }, 1);
   inscribirCampana(idCampana);
   const insc = inscripcionActivaDe('e-mat-3');
   fijarAnchor(insc.id, '2026-07-01T00:00:00.000Z');
@@ -140,7 +140,7 @@ test('empresa bloqueada (sin destinatario, ningun contacto con email) no revient
   seedEmpresa('e-mat-4', 'mat-cat-4', {}); // sin email ni telefono
   const idCadencia = crearCadencia({ nombre: 'C mat 4', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' }] });
   const idSeg = guardarSegmento({ nombre: 'mat-seg-4', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-4'] }] } });
-  const idCampana = crearCampana({ nombre: 'Camp mat 4', idCadencia, idSegmento: idSeg });
+  const idCampana = crearCampana({ nombre: 'Camp mat 4', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana);
 
   assert.doesNotThrow(() => materializarPasosDebidos('2026-07-01', CONFIG));

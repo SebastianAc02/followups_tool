@@ -66,7 +66,7 @@ const idCadencia = crearCadencia({ nombre: 'C track', pasos: [{ orden: 1, diaOff
 const idSegmento = guardarSegmento({ nombre: 'track-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['track-cat-1'] }] } });
 const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
 
-const idCampana = crearCampana({ nombre: 'Camp track', idCadencia, idSegmento });
+const idCampana = crearCampana({ nombre: 'Camp track', idCadencia, idSegmento }, 1);
 fijarProveedorCampanaId(idCampana, 'seq-track-1');
 inscribirCampana(idCampana);
 
