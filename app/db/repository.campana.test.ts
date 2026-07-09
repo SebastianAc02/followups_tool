@@ -1,5 +1,8 @@
-// Pruebas de Repository para mutaciones directas sobre campana que todavia no validaban
-// organizacion (Plan 3, Task 2): actualizarReglaFaltante y guardarProveedorCampanaId.
+// Pruebas de Repository para mutaciones/lecturas directas sobre campana que todavia no
+// filtraban por organizacion: actualizarReglaFaltante y guardarProveedorCampanaId (Plan 3,
+// Task 2, con guard select+throw), campanaConReglas y campanaParaSincronizarCopy (Plan 3,
+// Task 3, lectura pura -- filtro directo en el WHERE, sin excepcion: si la campana es de
+// otra organizacion simplemente no aparece, como si no existiera).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
@@ -8,7 +11,7 @@ import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { actualizarReglaFaltante, guardarProveedorCampanaId } = await import('./repository.ts');
+const { actualizarReglaFaltante, guardarProveedorCampanaId, campanaConReglas, campanaParaSincronizarCopy } = await import('./repository.ts');
 
 // Sembrado directo por SQL crudo (no crearCampana): solo necesitamos una fila de campana
 // con id_organizacion fijo, sin cadencia/segmento reales detras (la DB de prueba no fuerza
@@ -23,6 +26,31 @@ function seedCampana(idOrganizacion: number): number {
     .run('Campana test guard', idOrganizacion);
   raw.close();
   return Number(info.lastInsertRowid);
+}
+
+// campanaConReglas hace join real contra segmento (y lee paso_cadencia de la cadencia),
+// a diferencia de seedCampana arriba que apunta a ids 1/1 sin fila detras (le alcanza a
+// actualizarReglaFaltante/guardarProveedorCampanaId porque esas nunca leen esas tablas).
+// Aqui si necesitamos segmento y cadencia reales o campanaConReglas devuelve null por el
+// `if (!seg) return null` antes de siquiera llegar al filtro de organizacion que probamos.
+function seedCampanaConReglas(idOrganizacion: number, proveedorCampanaId: string | null = null): number {
+  const raw = new Database(dbPath);
+  const idSegmento = Number(
+    raw
+      .prepare(`INSERT INTO segmento (nombre, definicion, id_organizacion) VALUES (?, ?, ?)`)
+      .run('Segmento test', JSON.stringify({ condiciones: [{ campo: 'categoria', op: 'es_null' }] }), idOrganizacion).lastInsertRowid,
+  );
+  const idCadencia = Number(raw.prepare(`INSERT INTO cadencia (nombre) VALUES (?)`).run('Cadencia test').lastInsertRowid);
+  const idCampana = Number(
+    raw
+      .prepare(
+        `INSERT INTO campana (nombre, id_cadencia, id_segmento, regla_faltante, id_organizacion, proveedor_campana_id)
+         VALUES (?, ?, ?, 'cola', ?, ?)`,
+      )
+      .run('Campana con reglas test', idCadencia, idSegmento, idOrganizacion, proveedorCampanaId).lastInsertRowid,
+  );
+  raw.close();
+  return idCampana;
 }
 
 function leerCampana(idCampana: number) {
@@ -66,6 +94,26 @@ test('guardarProveedorCampanaId actualiza cuando la organizacion coincide', () =
   guardarProveedorCampanaId(idCampana, 'apollo-seq-x', 2);
 
   assert.equal(leerCampana(idCampana).proveedor_campana_id, 'apollo-seq-x');
+});
+
+test('campanaConReglas no filtra por owner, filtra siempre por organizacion', () => {
+  const idCampana = seedCampanaConReglas(2);
+
+  assert.equal(campanaConReglas(idCampana, 1), null);
+
+  const resultado = campanaConReglas(idCampana, 2);
+  assert.ok(resultado);
+  assert.equal(resultado?.idCampana, idCampana);
+});
+
+test('campanaParaSincronizarCopy filtra por organizacion', () => {
+  const idCampana = seedCampanaConReglas(2, 'apollo-seq-y');
+
+  assert.equal(campanaParaSincronizarCopy(idCampana, 1), null);
+
+  const resultado = campanaParaSincronizarCopy(idCampana, 2);
+  assert.ok(resultado);
+  assert.equal(resultado?.proveedorCampanaId, 'apollo-seq-y');
 });
 
 test.after(() => {

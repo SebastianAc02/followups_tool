@@ -32,13 +32,13 @@ const idSegmento = guardarSegmento({ nombre: 'seg-copy-apollo', definicion: { co
 const idCampana = crearCampana({ nombre: 'Campana copy-apollo', idCadencia, idSegmento, fechaInicio: '2026-07-08' }, 1);
 
 test('campanaParaSincronizarCopy es null si la campana todavia no tiene secuencia externa', () => {
-  assert.equal(campanaParaSincronizarCopy(idCampana), null);
+  assert.equal(campanaParaSincronizarCopy(idCampana, 1), null);
 });
 
 test('campanaParaSincronizarCopy devuelve idCadencia + proveedorCampanaId una vez creada la secuencia', () => {
   guardarProveedorCampanaId(idCampana, 'seq-copy-1', 1);
 
-  assert.deepEqual(campanaParaSincronizarCopy(idCampana), { idCadencia, proveedorCampanaId: 'seq-copy-1' });
+  assert.deepEqual(campanaParaSincronizarCopy(idCampana, 1), { idCadencia, proveedorCampanaId: 'seq-copy-1' });
 });
 
 test('pasosParaSincronizarCopy trae los pasos en orden, con la version default y sin ids de Apollo todavia', () => {

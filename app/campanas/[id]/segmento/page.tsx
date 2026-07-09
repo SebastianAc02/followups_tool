@@ -17,12 +17,12 @@ import { SegmentoCockpit } from './SegmentoCockpit';
 // cambiaria en silencio el criterio de inscripcion sin que nadie lo note, y ya
 // inscribio gente con el criterio viejo.
 export default async function SegmentoCampana({ params }: { params: Promise<{ id: string }> }) {
-  await requireSession();
+  const { idOrganizacion } = await requireSession();
   const { id } = await params;
   const idCampana = Number(id);
   if (!Number.isInteger(idCampana) || idCampana <= 0) notFound();
 
-  const camp = campanaConReglas(idCampana);
+  const camp = campanaConReglas(idCampana, idOrganizacion);
   if (!camp) notFound();
   if (camp.estado !== 'borrador') notFound();
 

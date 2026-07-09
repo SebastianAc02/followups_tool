@@ -66,8 +66,8 @@ export async function cancelarCampanaAction(idCampana: number): Promise<CicloVid
 export type SincronizarCopyResultado = { ok: true; pasos: number } | { ok: false; error: string };
 
 export async function sincronizarCopyApolloAction(idCampana: number): Promise<SincronizarCopyResultado> {
-  await requireSession();
-  const camp = campanaParaSincronizarCopy(idCampana);
+  const { idOrganizacion } = await requireSession();
+  const camp = campanaParaSincronizarCopy(idCampana, idOrganizacion);
   if (!camp) {
     return { ok: false, error: 'Esta campaña todavía no tiene una secuencia creada en Apollo.' };
   }

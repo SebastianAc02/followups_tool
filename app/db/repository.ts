@@ -1366,7 +1366,7 @@ export type CampanaConReglas = {
   canalesRequeridos: Canal[];
 };
 
-export function campanaConReglas(idCampana: number): CampanaConReglas | null {
+export function campanaConReglas(idCampana: number, idOrganizacion: number): CampanaConReglas | null {
   const camp = db
     .select({
       idCampana: campana.idCampana,
@@ -1377,7 +1377,7 @@ export function campanaConReglas(idCampana: number): CampanaConReglas | null {
       estado: campana.estado,
     })
     .from(campana)
-    .where(eq(campana.idCampana, idCampana))
+    .where(and(eq(campana.idCampana, idCampana), eq(campana.idOrganizacion, idOrganizacion)))
     .get();
   if (!camp) return null;
 
@@ -1441,11 +1441,14 @@ export function guardarProveedorCampanaId(idCampana: number, proveedorCampanaId:
 // (proveedorCampanaId) y la cadencia (idCadencia) para traer sus pasos. null si la
 // campana no existe o todavia no tiene secuencia externa creada (crearCampanaExterna
 // no ha corrido, nada que sincronizar).
-export function campanaParaSincronizarCopy(idCampana: number): { idCadencia: number; proveedorCampanaId: string } | null {
+export function campanaParaSincronizarCopy(
+  idCampana: number,
+  idOrganizacion: number,
+): { idCadencia: number; proveedorCampanaId: string } | null {
   const camp = db
     .select({ idCadencia: campana.idCadencia, proveedorCampanaId: campana.proveedorCampanaId })
     .from(campana)
-    .where(eq(campana.idCampana, idCampana))
+    .where(and(eq(campana.idCampana, idCampana), eq(campana.idOrganizacion, idOrganizacion)))
     .get();
   if (!camp || !camp.proveedorCampanaId) return null;
   return { idCadencia: camp.idCadencia, proveedorCampanaId: camp.proveedorCampanaId };
