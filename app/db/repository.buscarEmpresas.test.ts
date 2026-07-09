@@ -42,11 +42,29 @@ test('buscarEmpresasPorNombre es case-insensitive', () => {
 
 test('el cliente buscado NO aparece en colaDelDia ni afecta contadoresHoy de nadie', () => {
   const hoy = new Date().toISOString().slice(0, 10);
-  const colaSebastian = colaDelDia(hoy, 'Sebastian Acosta Molina');
+  const colaSebastian = colaDelDia(hoy, 'Sebastian Acosta Molina', 1);
   assert.ok(!colaSebastian.some((c) => c.id === 'cli-1'));
 
   const contadores = contadoresHoy(hoy, 'Sebastian Acosta Molina');
   assert.strictEqual(contadores.total, 0);
+});
+
+test('colaDelDia no muestra un lead de otra organizacion aunque el owner coincida', () => {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const raw = new Database(dbPath);
+  raw
+    .prepare(
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, proximo_follow_up_fecha, organizacion_activa_id)
+       VALUES ('emp-otra-org', 'nit', 'De Otra Organizacion', 'de otra organizacion', 'lead', 'Sebastian Acosta Molina', ?, 2)`,
+    )
+    .run(hoy);
+  raw.close();
+
+  const colaOrg1 = colaDelDia(hoy, 'Sebastian Acosta Molina', 1);
+  assert.ok(!colaOrg1.some((c) => c.id === 'emp-otra-org'), 'un lead de organizacion 2 no debe aparecer en la cola de organizacion 1');
+
+  const colaOrg2 = colaDelDia(hoy, 'Sebastian Acosta Molina', 2);
+  assert.ok(colaOrg2.some((c) => c.id === 'emp-otra-org'), 'el mismo lead SI debe verse desde su propia organizacion');
 });
 
 test.after(() => borrarDbPrueba(dbPath));

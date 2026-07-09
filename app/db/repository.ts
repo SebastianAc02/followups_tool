@@ -141,8 +141,10 @@ const calorDesc = sql`(CASE ${empresa.estadoNotion}
   WHEN 'on_hold' THEN 0
   ELSE 1 END) DESC`;
 
-// Cola del día de un owner: vencidos o para hoy, ordenados por calor y luego antigüedad.
-export function colaDelDia(hoy: string, owner: string) {
+// Cola del día de un owner DENTRO de una organización: vencidos o para hoy, ordenados
+// por calor y luego antigüedad. idOrganizacion viene de la sesión (Parte 1, multi-org):
+// un lead compartido solo aparece en la cola de quien lo tiene activo ahora mismo.
+export function colaDelDia(hoy: string, owner: string, idOrganizacion: number) {
   return db
     .select({
       id: empresa.idEmpresa,
@@ -164,6 +166,7 @@ export function colaDelDia(hoy: string, owner: string) {
     .where(
       and(
         eq(empresa.owner, owner),
+        eq(empresa.organizacionActivaId, idOrganizacion),
         isNotNull(empresa.proximoFollowUpFecha),
         lte(empresa.proximoFollowUpFecha, hoy),
       ),
