@@ -1264,10 +1264,11 @@ export function actualizarSegmento(idSegmento: number, cambios: { nombre?: strin
     .run();
 }
 
-export function listarSegmentos() {
+export function listarSegmentos(idOrganizacion: number) {
   return db
     .select({ id: segmento.idSegmento, nombre: segmento.nombre, descripcionNatural: segmento.descripcionNatural })
     .from(segmento)
+    .where(eq(segmento.idOrganizacion, idOrganizacion))
     .orderBy(desc(segmento.idSegmento))
     .all();
 }

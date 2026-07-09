@@ -86,7 +86,7 @@ test('guardar y correr el segmento guardado da el mismo resultado', () => {
   assert.ok(empresas);
   assert.deepEqual(empresas!.map((e) => e.id).sort(), ['e1', 'e2', 'e3', 'e4']);
 
-  const listado = listarSegmentos();
+  const listado = listarSegmentos(1);
   assert.ok(listado.find((s) => s.nombre === 'on-hold'));
 });
 
@@ -328,6 +328,15 @@ test('actualizarSegmento aplica el cambio solo si el segmento es de mi organizac
 
   actualizarSegmento(id, { nombre: 'actualizar-1-renombrado' }, 1);
   assert.equal(obtenerSegmento(id, 1)!.nombre, 'actualizar-1-renombrado');
+});
+
+test('listarSegmentos solo lista los de mi organizacion', () => {
+  guardarSegmento({ nombre: 'listar-org1', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
+  guardarSegmento({ nombre: 'listar-org2', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 2);
+
+  const org1 = listarSegmentos(1);
+  assert.ok(org1.some((s) => s.nombre === 'listar-org1'));
+  assert.ok(!org1.some((s) => s.nombre === 'listar-org2'));
 });
 
 test.after(() => {
