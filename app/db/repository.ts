@@ -1322,8 +1322,8 @@ function _contactosDe(idsEmpresa: string[]): Map<string, { email: string | null;
 // Parte 5 campanas: trae las empresas del segmento con su readiness de canal segun la
 // cadencia (canalesRequeridos) y la regla de faltante. La query es solo lectura; el
 // calculo (canalesDisponibles/readinessEmpresa) vive en core, puro y testeado aparte.
-export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): FilaReadiness[] {
-  const empresas = empresasDeSegmento(def);
+export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante, idOrganizacion: number): FilaReadiness[] {
+  const empresas = empresasDeSegmento(def, idOrganizacion);
   const contactosPorEmpresa = _contactosDe(empresas.map((e) => e.id));
   return empresas.map((e) => {
     const contactos = contactosPorEmpresa.get(e.id) ?? [];
