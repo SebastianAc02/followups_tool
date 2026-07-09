@@ -77,13 +77,6 @@
   --color-chip-active-bg: #1c2530;
   --color-chip-active-border: #2d4066;
 
-  /* Tarjeta "Ahora" (BarraAhora): mas oscura que el surface normal -- calca la
-     tarjeta flotante del mockup (Sales Followup Cockpit / Arc). */
-  --color-card-now: #141416;
-  --color-line-card-now: #232327;
-  /* Banda de fondo de "Tu agenda de hoy": distinta del bg base, calca .bg-muted del mockup. */
-  --color-band: #0d0d0f;
-
   /* Rediseño home (2026-07-07): superficies del shell (sidebar/top bar/main oscuro). */
   --color-accent-bg: #1a1730;
   --color-accent-ink: #e7e3ff;
@@ -94,25 +87,27 @@
   --color-line-shell: #1b1d25;
   --color-line-card: #1f212b;
 
-  /* Acento ámbar del mockup Orquesta (--accent 43 96% 56%): item de nav activo.
-     El violeta (--color-accent) sigue siendo el acento de DATOS; el ámbar es orientación. */
-  --color-nav: #f2b738;
-  --color-nav-ink: #0b0c0f;
+  /* Fix 6 (2026-07-08): últimos 4 hexes crudos que quedaban en componentes, movidos
+     a tokens. --color-nav-inactive es el gris del ítem de sidebar sin seleccionar;
+     --color-accent-deep/--color-accent-bright son los extremos violeta oscuro/claro
+     de los gradientes de avatar (Sidebar, CopilotoPanel); --color-surface-deep es el
+     fondo casi negro del panel del Copiloto. */
+  --color-nav-inactive: #9ca0ab;
+  --color-accent-deep: #5d4bd6;
+  --color-accent-bright: #6e5cff;
+  --color-surface-deep: #0c0d10;
 
-  --font-sans: var(--ff-sans), system-ui, sans-serif;
-  --font-mono: var(--ff-mono), ui-monospace, monospace;
+  /* Sistema de diseño único (Fix 6, 2026-07-08): una sola serif de títulos
+     (Newsreader), una sola sans de cuerpo (IBM Plex Sans) y una sola mono
+     (IBM Plex Mono). Todo rol tipográfico de la app apunta a una de estas tres
+     variables de next/font -- punto único de cambio, ver docs/design-tokens.md. */
   --font-serif: var(--ff-serif), Georgia, serif;
-  --font-display: var(--ff-display), sans-serif;
   --font-mono-tag: var(--ff-mono-tag), monospace;
-  /* font-heading: SOLO home dashboard (Archivo Black). El cockpit de campañas y
-     /cola usan font-serif (Newsreader) para títulos -- ver docs/design-tokens.md. */
-  --font-heading: var(--ff-display), system-ui, sans-serif;
+  --font-mono: var(--ff-mono-tag), ui-monospace, monospace;
+  --font-heading: var(--ff-serif), Georgia, serif;
   --font-body: var(--ff-body), system-ui, sans-serif;
-
-  /* Roles tipográficos de las UIs de toque. Apuntan a --ff-* para que el punto único
-     de cambio sea la carga de next/font, no los componentes. */
-  --font-toque-heading: var(--ff-toque-heading), Georgia, serif;
-  --font-toque-mono: var(--ff-toque-mono), ui-monospace, monospace;
+  --font-toque-heading: var(--ff-serif), Georgia, serif;
+  --font-toque-mono: var(--ff-mono-tag), ui-monospace, monospace;
 }
 
 @utility mono {
@@ -180,9 +175,9 @@
     line-height: 1.5;
     letter-spacing: 0;
   }
-  /* Titulos en Archivo Black por defecto (mockup Orquesta); font-serif/font-* en un
+  /* Titulos en la serif única (Newsreader) por defecto; font-serif/font-* en un
      componente lo sobreescribe porque las utilities ganan sobre base. */
-  h1, h2, h3, h4, h5, h6 { font-family: var(--ff-display), system-ui, sans-serif; font-weight: 400; }
+  h1, h2, h3, h4, h5, h6 { font-family: var(--ff-serif), Georgia, serif; font-weight: 400; }
   a { color: inherit; text-decoration: none; }
 }
 
@@ -297,8 +292,6 @@
 .empty { color: var(--muted); padding: 80px 0; text-align: center; }
 
 /* Pantalla de llamada */
-.back { color: var(--muted); font-size: 13px; }
-.back:hover { color: var(--ink); }
 .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint); margin: 28px 0 8px; font-weight: 500; }
 
 /* V3.4: busqueda/confirmacion de grabacion de Granola, colgada del historial de toques */
@@ -380,7 +373,7 @@
 .chips { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .chip { padding: 8px 15px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--ink-soft); font-size: 12px; cursor: pointer; font-family: inherit; }
 .chip.on { border-color: var(--white); background: var(--white); color: #0a0a0b; }
-.chips input[type=date] { font-family: var(--ff-mono), monospace; font-size: 13px; border: 1px solid var(--line-strong); border-radius: 9px; padding: 8px 11px; color: var(--ink); background: var(--surface); }
+.chips input[type=date] { font-family: var(--ff-mono-tag), monospace; font-size: 13px; border: 1px solid var(--line-strong); border-radius: 9px; padding: 8px 11px; color: var(--ink); background: var(--surface); }
 
 .save {
   margin-top: 24px; width: 100%; padding: 16px; border: none; border-radius: 13px;
@@ -398,7 +391,7 @@
   font-family: inherit; font-size: 13px; color: var(--ink); background: var(--surface);
   border: 1px solid var(--line-strong); border-radius: 9px; padding: 10px 12px;
 }
-.cad-import textarea { font-family: var(--ff-mono), monospace; font-size: 13px; line-height: 1.5; }
+.cad-import textarea { font-family: var(--ff-mono-tag), monospace; font-size: 13px; line-height: 1.5; }
 .cad-import .save { margin-top: 14px; }
 
 .cad-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
@@ -607,7 +600,7 @@
   display: flex; align-items: center; justify-content: center;
 }
 .ac-brand-name {
-  font-family: var(--ff-display), sans-serif; font-size: 15px; font-weight: 600;
+  font-family: var(--ff-serif), Georgia, serif; font-size: 15px; font-weight: 600;
   color: #e7ecef; letter-spacing: -0.01em;
 }
 
@@ -619,7 +612,7 @@
 }
 
 .ac-h {
-  font-family: var(--ff-display), sans-serif; font-weight: 600; color: #e7ecef;
+  font-family: var(--ff-serif), Georgia, serif; font-weight: 600; color: #e7ecef;
   letter-spacing: -0.02em; margin: 0 0 6px;
 }
 .ac-h.big { font-size: 29px; margin-bottom: 8px; }
@@ -673,7 +666,7 @@
 
 .ac-btn {
   width: 100%; height: 50px; border: none; border-radius: 11px; background: #3ddc8b; color: #08120c;
-  font-family: var(--ff-display), sans-serif; font-size: 15px; font-weight: 600; cursor: pointer;
+  font-family: var(--ff-serif), Georgia, serif; font-size: 15px; font-weight: 600; cursor: pointer;
   transition: background 0.14s;
 }
 .ac-btn:hover { background: #4ee79a; }

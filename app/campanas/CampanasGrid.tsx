@@ -9,6 +9,10 @@ type FiltroEstado = 'todas' | 'activa' | 'pausada' | 'borrador';
 
 export function CampanasGrid({ campanas }: { campanas: CampanaCardVM[] }) {
   const [filtro, setFiltro] = useState<FiltroEstado>('todas');
+  // Modo edición estilo iPhone (Fix 5, 2026-07-08): normalmente no se ve nada; al
+  // entrar en modo edición aparece el afordante de remover en las tarjetas borrador.
+  const [editando, setEditando] = useState(false);
+  const hayBorradores = campanas.some((c) => c.estado === 'borrador');
 
   const conteos = {
     todas: campanas.length,
@@ -28,11 +32,22 @@ export function CampanasGrid({ campanas }: { campanas: CampanaCardVM[] }) {
 
   return (
     <div>
-      <Tabs value={filtro} onChange={(key) => setFiltro(key as FiltroEstado)} items={items} className="mb-6" />
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <Tabs value={filtro} onChange={(key) => setFiltro(key as FiltroEstado)} items={items} />
+        {hayBorradores && (
+          <button
+            type="button"
+            onClick={() => setEditando((v) => !v)}
+            className="text-xs font-semibold text-muted transition-colors hover:text-ink"
+          >
+            {editando ? 'Listo' : 'Editar'}
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3">
         {visibles.map((c) => (
-          <CampanaCard key={c.id} campana={c} />
+          <CampanaCard key={c.id} campana={c} editando={editando} />
         ))}
 
         <Link

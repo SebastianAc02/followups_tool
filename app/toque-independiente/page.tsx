@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buscarEmpresasPorNombre } from "../db/repository";
 import { requireSession } from "../lib/session";
+import { BackLink } from "../ui/BackLink";
 
 // V3.9: registrar un toque con alguien que NO es lead de la cola (cliente existente
 // u otra relacion). No hay lógica nueva de dominio: busca la empresa y manda a la
@@ -14,9 +15,7 @@ export default async function ToqueIndependiente({ searchParams }: { searchParam
 
   return (
     <div className="wrap">
-      <Link href="/" className="back">
-        ← Inicio
-      </Link>
+      <BackLink href="/" label="Inicio" />
       <div className="h-title" style={{ marginBottom: 24 }}>
         Agregar toque
       </div>

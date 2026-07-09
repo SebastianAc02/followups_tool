@@ -22,7 +22,7 @@ export function CredencialForm({ proveedor, tieneCredencial }: { proveedor: stri
           type="password"
           autoComplete="off"
           placeholder={tieneCredencial ? "Reemplazar credencial" : "Pega tu credencial"}
-          className="min-w-0 flex-1 rounded-lg border border-line bg-bg px-3 py-2.5 font-[family-name:var(--ff-mono)] text-sm text-ink outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-ring"
+          className="min-w-0 flex-1 rounded-lg border border-line bg-bg px-3 py-2.5 font-mono-tag text-sm text-ink outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-ring"
         />
         <Button type="submit" disabled={pendiente}>
           {tieneCredencial ? "Reemplazar" : "Conectar"}

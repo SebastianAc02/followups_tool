@@ -1,6 +1,8 @@
 // Tarjeta de métrica del home. Calca el "4-card metric strip" del mockup Orquesta:
-// número enorme en Archivo Black (font-heading), label en mayúscula, borde que se enciende
-// en hover. tone controla color del número + borde; subTone el color del sub.
+// número enorme en IBM Plex Sans bold tabular (font-body), label en mayúscula, borde que
+// se enciende en hover. Los datos se leen como datos (escaneo rápido), la serif se reserva
+// para títulos editoriales -- ver Fix 6, docs/design-tokens.md. tone controla color del
+// número + borde; subTone el color del sub.
 import { cx } from '../cx';
 
 type Tone = 'neutral' | 'overdue' | 'accent' | 'done';
@@ -49,7 +51,7 @@ export function StatCard({
   return (
     <div className={cx('group rounded-xl border bg-card p-5 transition-colors duration-150', CARD_TONE[tone])}>
       <div className={cx('mb-3 text-xs uppercase tracking-wide', LABEL_TONE[tone])}>{label}</div>
-      <div className={cx('mb-2 font-heading text-5xl leading-none tabular-nums md:text-6xl', NUM_TONE[tone])}>
+      <div className={cx('mb-2 font-body text-5xl font-bold leading-none tabular-nums md:text-6xl', NUM_TONE[tone])}>
         {valor}
       </div>
       <div className={cx('text-xs', SUB_TONE[subTone])}>{sub}</div>

@@ -1,9 +1,9 @@
 import { colaDelDia, contadoresHoy, agendaHoyCadencias, historialPasosDestinatario } from "../db/repository";
 import { registrarTapAction } from "../actions";
 import { requireSession } from "../lib/session";
-import { SidebarFrame } from "../ui/shell/SidebarFrame";
+import { AppShell } from "../ui/shell/AppShell";
+import { StatCard } from "../ui/home/StatCard";
 import CadenciasHoy from "./CadenciasHoy";
-import { DashboardHeader } from "./DashboardHeader";
 import { BarraAhora } from "./BarraAhora";
 import { AgendaHoy } from "./AgendaHoy";
 import { contarCerradas } from "./stats";
@@ -53,52 +53,56 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const actual = cola[0];
   const diasActual = actual ? diasVencido(actual.fecha!, hoy) : 0;
 
-  return (
-    <SidebarFrame>
-      <div className="min-h-screen bg-bg">
-        <DashboardHeader
-          nombre={usuario.owner.split(" ")[0]}
-          hoy={hoy}
-          owner={owner}
-          pendientes={cola.length}
-          vencidas={vencidos}
-          cerradas={contarCerradas(contadores)}
-        />
+  const cerradas = contarCerradas(contadores);
 
-        {actual && (
-          <div className="px-4 pt-6 md:px-8 lg:px-16">
-            <BarraAhora
-              id={actual.id}
-              empresa={actual.empresa}
-              ciudad={actual.ciudad}
-              contacto={actual.contacto}
-              cargo={actual.cargo}
-              canal={actual.canal}
-              estado={actual.estado}
-              sev={diasActual > 0 ? "overdue" : "today"}
-              severidadTexto={diasActual > 0 ? `vencido ${diasActual}d` : "hoy"}
-            />
+  return (
+    <AppShell>
+      <div className="mb-8">
+        <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">Toques de hoy</h2>
+        <p className="mt-1 text-sm text-muted">Tu cola de follow-ups pendientes.</p>
+      </div>
+
+      <div className="mb-8 grid grid-cols-3 gap-4">
+        <StatCard label="Pendientes" valor={cola.length} sub="en cola" />
+        <StatCard label="Cerradas" valor={cerradas} sub="hoy" tone="done" subTone="done" />
+        <StatCard
+          label="Vencidas"
+          valor={vencidos}
+          sub={vencidos > 0 ? "requieren acción" : "al día"}
+          tone="overdue"
+          subTone="overdue"
+        />
+      </div>
+
+      {actual && (
+        <BarraAhora
+          id={actual.id}
+          empresa={actual.empresa}
+          ciudad={actual.ciudad}
+          contacto={actual.contacto}
+          cargo={actual.cargo}
+          canal={actual.canal}
+          estado={actual.estado}
+          sev={diasActual > 0 ? "overdue" : "today"}
+          severidadTexto={diasActual > 0 ? `vencido ${diasActual}d` : "hoy"}
+        />
+      )}
+
+      <section id="today-agenda">
+        {filas.length === 0 ? (
+          <div className="rounded-xl border border-line-card bg-card py-8 text-center text-[13px] text-muted">
+            Sin follow-ups para hoy. Buen trabajo.
           </div>
+        ) : (
+          <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
         )}
 
-        <section id="today-agenda" className="bg-band px-4 py-6 md:px-8 lg:px-16">
-          <div className="mx-auto max-w-4xl">
-            {filas.length === 0 ? (
-              <div className="rounded-xl border border-line-card-now bg-surface py-8 text-center text-[13px] text-muted">
-                Sin follow-ups para hoy. Buen trabajo.
-              </div>
-            ) : (
-              <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
-            )}
-
-            {cadenciasHoy.length > 0 && (
-              <div className="mt-4 overflow-hidden rounded-xl border border-line-card-now bg-surface px-7 py-6">
-                <CadenciasHoy items={cadenciasHoy} hoy={hoy} />
-              </div>
-            )}
+        {cadenciasHoy.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-line-card bg-card px-7 py-6">
+            <CadenciasHoy items={cadenciasHoy} hoy={hoy} />
           </div>
-        </section>
-      </div>
-    </SidebarFrame>
+        )}
+      </section>
+    </AppShell>
   );
 }

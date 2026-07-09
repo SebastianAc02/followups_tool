@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getContextoToque, versionesDePaso } from "../../db/repository";
 import { Confirmacion, type CampoConfirmacion } from "./Confirmacion";
 import { LlamadaCard } from "./LlamadaCard";
@@ -9,6 +8,7 @@ import { calificar } from "../../core/calificacion";
 import { RESULTADO_LABELS } from "../../db/validation";
 import { requireSession } from "../../lib/session";
 import { SidebarFrame } from "../../ui/shell/SidebarFrame";
+import { BackLink } from "../../ui/BackLink";
 
 // Despachador: decide la vista (canal del paso activo de la secuencia, o ?vista=confirmacion
 // justo despues de guardar) y arma las props que cada vista necesita. Este archivo es el unico
@@ -36,7 +36,7 @@ export default async function Llamada({
     return (
       <SidebarFrame>
         <div className="wrap">
-          <Link href="/cola" className="back">← Cola</Link>
+          <BackLink href="/cola" label="Cola" />
           <p className="empty">Cuenta no encontrada.</p>
         </div>
       </SidebarFrame>
@@ -63,7 +63,7 @@ export default async function Llamada({
     return (
       <SidebarFrame>
         <div className="wrap">
-          <Link href="/cola" className="back">← Cola</Link>
+          <BackLink href="/cola" label="Cola" />
           <Confirmacion
             idEmpresa={emp.id}
             idToque={ultimo?.idToque ?? 0}
@@ -84,7 +84,7 @@ export default async function Llamada({
     return (
       <SidebarFrame>
         <div className="wrap">
-          <Link href="/cola" className="back">← Cola</Link>
+          <BackLink href="/cola" label="Cola" />
           <LlamadaCard
             ctx={ctx}
             urlNotion={urlNotionDe(ctx)}
@@ -111,7 +111,7 @@ export default async function Llamada({
     return (
       <SidebarFrame>
         <div className="wrap">
-          <Link href="/cola" className="back">← Cola</Link>
+          <BackLink href="/cola" label="Cola" />
           <EditorCorreo
             ctx={ctx}
             idEmpresa={ctx.emp.id}
@@ -128,7 +128,7 @@ export default async function Llamada({
   return (
     <SidebarFrame>
       <div className="wrap">
-        <Link href="/cola" className="back">← Cola</Link>
+        <BackLink href="/cola" label="Cola" />
         <EditorWhatsapp
           ctx={ctx}
           idEmpresa={ctx.emp.id}

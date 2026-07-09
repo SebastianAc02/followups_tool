@@ -1,5 +1,5 @@
-// Version liviana de AppShell: solo el sidebar (con su toggle), sin TopBar. Para rutas que
-// ya tienen su propio header (ej. /cola con DashboardHeader) y no deben duplicarlo.
+// Version liviana de AppShell: solo el sidebar (con su toggle), sin TopBar. Para rutas
+// como /llamada, que arman su propio encabezado por vista y no necesitan duplicarlo.
 import type { ReactNode } from 'react';
 import { datosSidebar } from './AppShell';
 import { Sidebar } from './Sidebar';

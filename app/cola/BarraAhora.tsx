@@ -18,9 +18,10 @@ const CTA_POR_CANAL: Record<Canal, string> = {
 // en vez de inventar un horario (decision explicita del 2026-07-07).
 const SEV_LABEL: Record<Severity, string> = { overdue: "VENC.", today: "HOY" };
 
-// Traduccion literal de la seccion #current-follow-up de Arc (Sales Followup
-// Cockpit / index.html): tarjeta bg #141416, columna izquierda + divisoria +
-// cuerpo + columna de acciones.
+// Fix 3 (2026-07-08): reestilizada al lenguaje de tarjetas del resto de la app
+// (bg-card, border-line-card, button.variants) y marcada explícitamente como
+// "Próximo paso" -- antes decía solo "Ahora" y no se leía sin duda como la
+// siguiente acción a tomar.
 export function BarraAhora({
   id,
   empresa,
@@ -48,32 +49,30 @@ export function BarraAhora({
   return (
     <section
       id="current-follow-up"
-      className="mx-auto mb-4 max-w-5xl rounded-xl border border-line-card-now bg-card-now px-7 py-6"
+      className="mb-6 rounded-2xl border border-line-card border-l-2 border-l-accent bg-card px-6 py-5"
     >
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="rounded-full bg-accent/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-accent-soft">
+          Próximo paso
+        </span>
+        <span className="text-xs font-semibold uppercase tracking-widest text-faint">{SEV_LABEL[sev]}</span>
+      </div>
+
       <div className="flex flex-col gap-6 md:flex-row md:items-center md:gap-7">
-        <div className="flex min-w-0 flex-1 items-center gap-6">
-          <div className="flex-shrink-0">
-            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-acento">Ahora</div>
-            <div className="font-serif text-[34px] leading-none text-ink">{SEV_LABEL[sev]}</div>
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 font-serif text-[26px] leading-[1.1] text-ink">{empresa}</div>
+          <div className="mb-3 text-[13.5px] text-muted">
+            {[ciudad, contacto ? `${contacto}${cargo ? ` · ${cargo}` : ""}` : null, severidadTexto]
+              .filter(Boolean)
+              .join(" · ")}
           </div>
-
-          <div className="hidden h-[60px] w-px flex-shrink-0 bg-line-card-now sm:block" />
-
-          <div className="min-w-0 flex-1">
-            <div className="mb-1.5 font-serif text-[26px] leading-[1.1] text-ink">{empresa}</div>
-            <div className="mb-3 text-[13.5px] text-muted">
-              {[ciudad, contacto ? `${contacto}${cargo ? ` · ${cargo}` : ""}` : null, severidadTexto]
-                .filter(Boolean)
-                .join(" · ")}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={canalPill({ canal: canalReal })}>{CANAL_LABEL[canalReal]}</span>
-              {pillEstado && (
-                <Pill tone={pillEstado.tone} dot>
-                  {pillEstado.label}
-                </Pill>
-              )}
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={canalPill({ canal: canalReal })}>{CANAL_LABEL[canalReal]}</span>
+            {pillEstado && (
+              <Pill tone={pillEstado.tone} dot>
+                {pillEstado.label}
+              </Pill>
+            )}
           </div>
         </div>
 

@@ -24,7 +24,7 @@ export default async function PerfilPage() {
   return (
     <AppShell>
       <div className="mb-8">
-        <h2 className="font-heading text-2xl tracking-tight text-ink md:text-3xl">Tu perfil</h2>
+        <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">Tu perfil</h2>
         <p className="mt-1 text-sm text-muted">Identidad, organización y conectores de tu cuenta.</p>
       </div>
 

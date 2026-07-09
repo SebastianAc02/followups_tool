@@ -37,7 +37,7 @@ export function ConectorRow({
           <span className={`text-lg font-semibold tracking-tight ${color}`}>{v.label}</span>
         </div>
         {estado.ultimaCorrida && (
-          <p className="pl-5 font-[family-name:var(--ff-mono)] text-xs text-muted">
+          <p className="pl-5 font-mono-tag text-xs text-muted">
             {estado.ultimaCorrida.slice(0, 16).replace("T", " ")}
           </p>
         )}
@@ -52,7 +52,7 @@ export function ConectorRow({
         <p className="mb-3 max-w-sm text-sm leading-relaxed text-muted">{cat.descripcion}</p>
 
         {hayError && (
-          <div className="mb-4 max-w-sm rounded-r-md border-l-2 border-overdue bg-overdue-bg px-3 py-2.5 font-[family-name:var(--ff-mono)] text-xs leading-relaxed text-overdue">
+          <div className="mb-4 max-w-sm rounded-r-md border-l-2 border-overdue bg-overdue-bg px-3 py-2.5 font-mono-tag text-xs leading-relaxed text-overdue">
             {estado.ultimoResultado}
           </div>
         )}

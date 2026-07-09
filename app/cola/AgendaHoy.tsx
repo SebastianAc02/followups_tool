@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { cn } from "../ui/cn";
 import { Chip } from "../ui/Chip";
@@ -10,8 +10,13 @@ import { pillParaEstado } from "../ui/pill.variants.ts";
 import { SeverityText } from "../ui/SeverityText";
 import { FILTROS_ORDEN, filtrarPorCanal, conteosPorCanal, type FilaAgenda, type FiltroCanal } from "./agenda.ts";
 
+const FOCO_STORAGE_KEY = "onepay:cola:foco";
+
 // Traduccion literal de la tarjeta interna de #today-agenda en Arc (Sales Followup
 // Cockpit / index.html): header con contador, chips de filtro, hairline, filas.
+// Fix 3 (2026-07-08): filas con afordancia de tarjeta propia (antes se fundian en
+// un flex-col sin separación), tap rápido pasa de form-en-hover a menú "···" por
+// fila, y se agrega el toggle de modo foco (arranca en Foco -- decidido 2026-07-08).
 export function AgendaHoy({
   filas,
   registrarTapAction,
@@ -20,16 +25,43 @@ export function AgendaHoy({
   registrarTapAction: (formData: FormData) => void | Promise<void>;
 }) {
   const [filtro, setFiltro] = useState<FiltroCanal>("todos");
+  const [foco, setFoco] = useState(true);
   const conteos = conteosPorCanal(filas);
   const visibles = filtrarPorCanal(filas, filtro);
 
+  useEffect(() => {
+    const guardado = window.localStorage.getItem(FOCO_STORAGE_KEY);
+    if (guardado === "0") setFoco(false);
+  }, []);
+
+  function alternarFoco() {
+    setFoco((actual) => {
+      const siguiente = !actual;
+      window.localStorage.setItem(FOCO_STORAGE_KEY, siguiente ? "1" : "0");
+      return siguiente;
+    });
+  }
+
   return (
-    <div className="overflow-hidden rounded-xl border border-line-card-now bg-surface">
-      <div className="flex items-baseline justify-between px-7 pt-6 pb-4">
+    <div className="overflow-hidden rounded-xl border border-line-card bg-card">
+      <div className="flex items-center justify-between gap-3 px-7 pt-6 pb-4">
         <span className="text-xs font-semibold uppercase tracking-widest text-faint">Tu agenda de hoy</span>
-        <span className="text-xs text-faint">
-          {visibles.length} de {filas.length} toques
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-faint">
+            {visibles.length} de {filas.length} toques
+          </span>
+          <button
+            type="button"
+            onClick={alternarFoco}
+            title={foco ? "Ver toda la agenda" : "Enfocar solo el próximo paso"}
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest transition-colors",
+              foco ? "border-accent/40 bg-accent/10 text-accent-soft" : "border-line-card text-faint hover:text-ink",
+            )}
+          >
+            {foco ? "Foco" : "Agenda completa"}
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 px-7 pb-4">
@@ -41,23 +73,28 @@ export function AgendaHoy({
         ))}
       </div>
 
-      <div className="mx-7 h-px bg-line-card-now" />
+      <div className="mx-7 h-px bg-line-card" />
 
       {visibles.length === 0 ? (
         <div className="py-6 text-center text-[13px] text-muted">Nada en este canal.</div>
       ) : (
-        <div className="flex flex-col px-4 py-3">
+        <div
+          className={cn(
+            "flex flex-col gap-2 px-4 py-4 transition-[filter,opacity] duration-200",
+            foco && "pointer-events-none opacity-40 blur-[2px]",
+          )}
+        >
           {visibles.map((fila, i) => {
             const pill = pillParaEstado(fila.estado);
             return (
-              <div key={fila.id} className="group">
-                <Link
-                  href={`/llamada/${fila.id}`}
-                  className={cn(
-                    "flex items-center gap-4 rounded-lg px-3 py-3.5 transition-colors duration-150 hover:bg-hover",
-                    fila.actual && "mb-1 rounded-xl border border-border-accent bg-surface-hi px-3 py-4 hover:bg-surface-hi",
-                  )}
-                >
+              <div
+                key={fila.id}
+                className={cn(
+                  "group relative flex items-center gap-1 rounded-xl border border-line-card bg-surface-2 transition-colors duration-150 hover:border-accent-soft hover:bg-card-hover",
+                  fila.actual && "border-border-accent bg-surface-hi hover:bg-surface-hi",
+                )}
+              >
+                <Link href={`/llamada/${fila.id}`} className="flex min-w-0 flex-1 items-center gap-4 px-3 py-3.5">
                   <div
                     className={cn(
                       "w-12 flex-shrink-0 text-sm tabular-nums",
@@ -85,23 +122,7 @@ export function AgendaHoy({
                     </SeverityText>
                   )}
                 </Link>
-                <form
-                  action={registrarTapAction}
-                  className="animate-fade-up mt-1.5 hidden items-center gap-2 pl-[76px] group-hover:flex"
-                >
-                  <input type="hidden" name="idEmpresa" value={fila.id} />
-                  <input
-                    name="objecion"
-                    placeholder="Objeción (opcional)"
-                    className="min-w-0 flex-1 border-b border-line bg-transparent text-[12.5px] text-ink-soft outline-none placeholder:text-faint focus:border-line-strong"
-                  />
-                  <button type="submit" name="canal" value="whatsapp" className="text-[12px] text-muted hover:text-ink">
-                    WhatsApp
-                  </button>
-                  <button type="submit" name="canal" value="correo" className="text-[12px] text-muted hover:text-ink">
-                    Correo
-                  </button>
-                </form>
+                <FilaAcciones idEmpresa={fila.id} registrarTapAction={registrarTapAction} />
               </div>
             );
           })}
@@ -109,6 +130,82 @@ export function AgendaHoy({
       )}
 
       <div className="pb-4" />
+    </div>
+  );
+}
+
+// Tap rápido rediseñado (Fix 3, decidido 2026-07-08): menú "···" explícito por fila
+// en vez de un form que aparecía solo, sin avisar, al pasar el mouse. Mismo
+// registrarTapAction real, solo cambia cómo se dispara.
+function FilaAcciones({
+  idEmpresa,
+  registrarTapAction,
+}: {
+  idEmpresa: string;
+  registrarTapAction: (formData: FormData) => void | Promise<void>;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    function cerrarSiClickAfuera(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setAbierto(false);
+    }
+    document.addEventListener("mousedown", cerrarSiClickAfuera);
+    return () => document.removeEventListener("mousedown", cerrarSiClickAfuera);
+  }, [abierto]);
+
+  return (
+    <div ref={ref} className="relative mr-2 flex-shrink-0">
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        title="Tap rápido"
+        className="flex h-7 w-7 items-center justify-center rounded-full text-faint opacity-0 transition-opacity hover:bg-hover hover:text-ink group-hover:opacity-100 data-[open=true]:opacity-100"
+        data-open={abierto}
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+          <circle cx="5" cy="12" r="1.8" />
+          <circle cx="12" cy="12" r="1.8" />
+          <circle cx="19" cy="12" r="1.8" />
+        </svg>
+      </button>
+
+      {abierto && (
+        <form
+          action={(fd) => {
+            registrarTapAction(fd);
+            setAbierto(false);
+          }}
+          className="animate-fade-up absolute right-0 top-[calc(100%+4px)] z-20 w-64 rounded-[11px] border border-line-card bg-card p-3 shadow-[0_12px_32px_rgba(0,0,0,0.35)]"
+        >
+          <input type="hidden" name="idEmpresa" value={idEmpresa} />
+          <input
+            name="objecion"
+            placeholder="Objeción (opcional)"
+            className="mb-2.5 w-full rounded-lg border border-line-card bg-surface-2 px-2.5 py-1.5 text-[12.5px] text-ink-soft outline-none placeholder:text-faint focus:border-line-strong"
+          />
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              name="canal"
+              value="whatsapp"
+              className="flex-1 rounded-md border border-line-card px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:border-canal-whatsapp/40 hover:text-canal-whatsapp"
+            >
+              WhatsApp
+            </button>
+            <button
+              type="submit"
+              name="canal"
+              value="correo"
+              className="flex-1 rounded-md border border-line-card px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:border-canal-correo/40 hover:text-canal-correo"
+            >
+              Correo
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

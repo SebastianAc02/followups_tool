@@ -36,7 +36,7 @@ export default async function Dashboard() {
   return (
     <AppShell>
       <div className="mb-8">
-        <h2 className="font-heading text-2xl tracking-tight text-ink md:text-3xl">{saludo(ahora, perfil.primerNombre)}</h2>
+        <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">{saludo(ahora, perfil.primerNombre)}</h2>
         <p className="mt-1 text-sm text-muted">Esto es lo que pide tu atención hoy.</p>
       </div>
 

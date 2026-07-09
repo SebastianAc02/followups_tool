@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useTransition } from 'react';
 import { editarCopyPasoAction, actualizarPasoCadenciaAction, agregarPasoCadenciaAction, eliminarPasoCadenciaAction } from './actions';
 import { CanalTag, type Canal } from '../../ui/CanalTag';
@@ -55,10 +56,14 @@ export function CadenciaCockpit({
   idCadencia,
   nombre,
   pasos,
+  idCampanaBorrador,
 }: {
   idCadencia: number;
   nombre: string;
   pasos: PasoCadenciaUI[];
+  // Presente solo cuando esta cadencia pertenece a una campaña en borrador (Fix 8):
+  // habilita el CTA de avance, igual que los otros pasos del wizard de creación.
+  idCampanaBorrador?: number;
 }) {
   const [filas, setFilas] = useState(pasos);
   const [editando, setEditando] = useState<number | null>(null);
@@ -274,6 +279,15 @@ export function CadenciaCockpit({
           {addPending ? 'Añadiendo…' : '+ Añadir paso'}
         </button>
       </section>
+
+      {idCampanaBorrador != null && (
+        <Link
+          href={`/campanas/${idCampanaBorrador}/destinatarios`}
+          className="self-start rounded-[9px] bg-accent px-5 py-[10px] text-[13px] font-semibold text-bg transition-colors hover:opacity-90"
+        >
+          Continuar a Destinatarios
+        </Link>
+      )}
       {dialogoConfirmar}
     </div>
   );

@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { estadoConector, listarConfigConectores } from "../db/repository";
 import { requireSession } from "../lib/session";
+import { AppShell } from "../ui/shell/AppShell";
 import { CATALOGO_CONECTORES, conectorDelCatalogo, type ModoConector } from "./catalogo.ts";
 import { vistaEstado, contarEstados } from "./estado-ui.ts";
 import { EstadoResumen } from "./EstadoResumen";
@@ -30,37 +30,35 @@ export default async function Conectores() {
   const disponibles = CATALOGO_CONECTORES.filter((c) => !agregados.has(c.id));
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-16 font-[family-name:var(--ff-inter)] md:px-8">
-      <Link href="/" className="text-sm text-muted hover:text-ink">
-        ← Inicio
-      </Link>
+    <AppShell>
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-8">
+          <p className="mb-4 text-xs uppercase tracking-widest text-muted">Operación</p>
+          <h1 className="mb-4 font-serif text-4xl font-semibold tracking-tight text-ink md:text-5xl">
+            Conectores
+          </h1>
+          <p className="max-w-prose text-base leading-relaxed text-muted">
+            Las integraciones que alimentan tus follow-ups. Un vistazo basta para saber qué está vivo y qué falta por
+            conectar.
+          </p>
+        </div>
 
-      <div className="mb-12 mt-6">
-        <p className="mb-4 text-xs uppercase tracking-widest text-muted">Operación</p>
-        <h1 className="mb-4 font-[family-name:var(--ff-grotesk)] text-4xl font-semibold tracking-tight text-ink md:text-5xl">
-          Conectores
-        </h1>
-        <p className="max-w-prose text-base leading-relaxed text-muted">
-          Las integraciones que alimentan tus follow-ups. Un vistazo basta para saber qué está vivo y qué falta por
-          conectar.
-        </p>
+        <EstadoResumen r={resumen} />
+
+        {activos.length === 0 ? (
+          <p className="py-9 text-sm text-muted">
+            {sesion.admin
+              ? "Todavía no hay conectores. Agrega el primero abajo."
+              : "Todavía no hay conectores configurados. Tu admin los agrega."}
+          </p>
+        ) : (
+          activos.map((a) => (
+            <ConectorRow key={a.cat.id} cat={a.cat} estado={a.estado} modo={a.modo} esAdmin={sesion.admin} />
+          ))
+        )}
+
+        {sesion.admin && <AgregarConector disponibles={disponibles} />}
       </div>
-
-      <EstadoResumen r={resumen} />
-
-      {activos.length === 0 ? (
-        <p className="py-9 text-sm text-muted">
-          {sesion.admin
-            ? "Todavía no hay conectores. Agrega el primero abajo."
-            : "Todavía no hay conectores configurados. Tu admin los agrega."}
-        </p>
-      ) : (
-        activos.map((a) => (
-          <ConectorRow key={a.cat.id} cat={a.cat} estado={a.estado} modo={a.modo} esAdmin={sesion.admin} />
-        ))
-      )}
-
-      {sesion.admin && <AgregarConector disponibles={disponibles} />}
-    </div>
+    </AppShell>
   );
 }

@@ -42,9 +42,9 @@ export function CopilotoPanel({ estadoActual, total, onResultado }: Props) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0c0d10]">
+    <div className="flex h-full min-h-0 flex-col bg-surface-deep">
       <div className="flex shrink-0 items-center gap-[9px] border-b border-line px-[18px] py-[15px]">
-        <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-gradient-to-br from-accent to-[#6e5cff] text-[13px] text-bg">
+        <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-gradient-to-br from-accent to-accent-bright text-[13px] text-bg">
           ✦
         </span>
         <span className="text-[14px] font-semibold text-ink">Copiloto</span>

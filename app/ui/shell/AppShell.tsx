@@ -45,7 +45,7 @@ export async function datosSidebar() {
 
   const items: NavItem[] = [
     { href: '/', label: 'Inicio', icon: <IconInicio /> },
-    { href: '/campanas', label: 'Campañas', icon: <IconCampanas />, badge: String(campanasActivas) },
+    { href: '/campanas', label: 'Campañas', icon: <IconCampanas />, badge: String(campanasActivas), exactMatch: true },
     { href: '/cola', label: 'Toques', icon: <IconToques />, badge: String(toquesHoy), badgeTone: toquesHoy > 0 ? 'done' : 'neutral' },
     { href: '/por-revisar', label: 'Por revisar', icon: <IconPorRevisar />, badge: String(porRevisar), badgeTone: porRevisar > 0 ? 'overdue' : 'neutral' },
     { href: '/panel', label: 'Pipeline', icon: <IconPipeline />, badge: String(cuentasFunnel) },

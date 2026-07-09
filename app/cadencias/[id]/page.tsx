@@ -41,7 +41,12 @@ export default async function CadenciaDetalle({ params }: { params: Promise<{ id
         ) : (
           <CampanaSubNav items={subNavItemsCampana(camp.idCampana, idCadencia)} />
         ))}
-      <CadenciaCockpit idCadencia={idCadencia} nombre={datos.cadencia.nombre} pasos={datos.pasos} />
+      <CadenciaCockpit
+        idCadencia={idCadencia}
+        nombre={datos.cadencia.nombre}
+        pasos={datos.pasos}
+        idCampanaBorrador={esBorrador ? camp.idCampana : undefined}
+      />
     </AppShell>
   );
 }

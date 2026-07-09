@@ -37,7 +37,10 @@ export type CampanaCardVM = {
 // un <a> es HTML invalido (contenido interactivo anidado) y ademas el click se
 // propagaria a la navegacion. Solo se muestra en 'borrador' -- eliminarCampanaBorrador
 // en el repository ya rechaza cualquier otro estado, esto es solo la UI para llegar ahi.
-export function CampanaCard({ campana }: { campana: CampanaCardVM }) {
+// Fix 5 (2026-07-08): patron "editar" estilo iPhone -- normalmente no se ve nada;
+// el afordante de remover (badge de menos, esquina superior izquierda) solo aparece
+// cuando el grid entra en modo edición, en vez de una ✕ fija siempre visible.
+export function CampanaCard({ campana, editando }: { campana: CampanaCardVM; editando: boolean }) {
   const [pendiente, startTransition] = useTransition();
   const [error, setError] = useState('');
   const { confirmar, elemento: dialogoConfirmar } = useConfirm();
@@ -83,15 +86,15 @@ export function CampanaCard({ campana }: { campana: CampanaCardVM }) {
           </div>
         </div>
       </Link>
-      {esBorrador && (
+      {esBorrador && editando && (
         <button
           type="button"
           onClick={eliminar}
           disabled={pendiente}
           title="Eliminar borrador"
-          className="absolute right-3 top-3 rounded-md border border-line-strong bg-card px-[7px] py-[3px] text-xs text-faint transition-colors hover:border-overdue/40 hover:text-overdue disabled:opacity-40"
+          className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-overdue bg-overdue text-[13px] font-bold leading-none text-white shadow-[0_1px_4px_rgba(0,0,0,0.35)] transition-transform duration-150 hover:scale-110 disabled:opacity-40"
         >
-          {pendiente ? '…' : '✕'}
+          {pendiente ? '…' : '−'}
         </button>
       )}
       {error && <p className="mt-1.5 text-xs text-overdue">{error}</p>}

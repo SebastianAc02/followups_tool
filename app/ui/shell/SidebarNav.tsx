@@ -13,6 +13,11 @@ export type NavItem = {
   icon: ReactNode;
   badge?: string;
   badgeTone?: 'neutral' | 'done' | 'overdue';
+  // Por defecto el ítem se marca activo con pathname.startsWith(href) (incluye sub-rutas).
+  // exactMatch fuerza pathname === href -- para ítems cuyo flujo cruza a otro árbol de
+  // ruta (ej. /campanas/nueva/**, /cadencias/[id]) y no debe quedar "encendido" fuera
+  // del hub. Ver Fix 9, docs/superpowers/specs/2026-07-08-ui-fixes-plan.md.
+  exactMatch?: boolean;
 };
 
 const BADGE_TONE: Record<NonNullable<NavItem['badgeTone']>, string> = {
@@ -27,7 +32,8 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
   return (
     <nav className="flex flex-col gap-0.5">
       {items.map((item) => {
-        const activo = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+        const activo =
+          item.href === '/' || item.exactMatch ? pathname === item.href : pathname.startsWith(item.href);
         return (
           <Link
             key={item.href}
@@ -35,8 +41,8 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
             className={cx(
               'relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
               activo
-                ? 'bg-nav font-semibold text-nav-ink'
-                : 'text-[#9ca0ab] hover:bg-card-hover hover:text-ink',
+                ? 'bg-accent/10 font-semibold text-ink'
+                : 'text-nav-inactive hover:bg-card-hover hover:text-ink',
             )}
           >
             {activo && (
