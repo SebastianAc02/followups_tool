@@ -88,6 +88,7 @@ export default async function Llamada({
           <LlamadaCard
             ctx={ctx}
             urlNotion={urlNotionDe(ctx)}
+            idPasoInscripcion={ctx.idPasoInscripcionActivo}
             calificacion={calificar({
               usuarios: ctx.emp.usuarios ?? null,
               crm: ctx.emp.crm ?? null,

@@ -9,6 +9,7 @@ import {
   leerToqueTranscript,
   escribirTranscriptCompleto,
   escribirTranscriptSoloPuntero,
+  marcarPasoInscripcionCompletadaManual,
 } from "../../db/repository";
 import { registrarToqueSchema } from "../../db/validation";
 import type { CampoCalificacion } from "../../core/calificacion";
@@ -64,7 +65,19 @@ export async function registrarToqueAction(formData: FormData) {
 
   registrarToque(parsed);
 
+  // Sesion 2026-07-09: si este toque cierra el paso activo de una cadencia (llamada
+  // con paso_inscripcion pendiente), el paso se marca 'enviada' aca -- el toque YA
+  // quedo guardado arriba con su resultado real, esto solo saca la fila de "Ir a
+  // llamar" y le da al motor la fecha real para re-anclar el siguiente paso. No
+  // aplica a un toque suelto (idPasoInscripcion viene vacio, no hay nada que cerrar).
+  const idPasoInscripcionRaw = String(formData.get("idPasoInscripcion") ?? "").trim();
+  if (idPasoInscripcionRaw) {
+    marcarPasoInscripcionCompletadaManual(Number(idPasoInscripcionRaw), new Date().toISOString());
+  }
+
   revalidatePath("/");
+  revalidatePath("/cola");
+  revalidatePath("/por-revisar");
   revalidatePath(`/llamada/${idEmpresa}`);
   redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
 }

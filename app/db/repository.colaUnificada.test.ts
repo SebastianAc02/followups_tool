@@ -169,7 +169,7 @@ const idCadenciaHist = crearCadencia({
   nombre: 'C historial',
   pasos: [
     { orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' },
-    { orden: 2, diaOffset: 3, canal: 'whatsapp', cuerpo: 'p2' },
+    { orden: 2, diaOffset: 3, canal: 'whatsapp', cuerpo: 'p2', esManual: true },
     { orden: 3, diaOffset: 7, canal: 'correo', cuerpo: 'p3', esManual: true },
   ],
 });

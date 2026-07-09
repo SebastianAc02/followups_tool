@@ -1,6 +1,7 @@
 import {
   and,
   eq,
+  ne,
   lte,
   gt,
   lt,
@@ -77,6 +78,7 @@ import {
   RITMOS_INGRESO,
   type RitmoIngresoInput,
   validarCanalAutomatico,
+  CANALES_AUTOMATICOS,
 } from './validation';
 
 // Único punto de acceso a datos. El resto de la app no toca SQL ni la DB directo.
@@ -770,6 +772,19 @@ export function crearCadencia(parseada: CadenciaParseada): number {
     const idCadencia = Number(insCad.lastInsertRowid);
 
     for (const paso of val.pasos) {
+      // Sesion 2026-07-09: ningun formato de import (CSV/Markdown/JSON, ver
+      // app/core/cadencia-parser.ts) trae una columna para marcar un paso manual, asi
+      // que el parser siempre entrega esManual=false por default de Zod. En vez de
+      // rechazar el import (validarCanalAutomatico tiraria aca para whatsapp/llamada),
+      // se autocorrige: un paso en un canal SIN proveedor automatico hoy
+      // (CANALES_AUTOMATICOS) queda manual sin pedirselo al importador. Es la misma
+      // regla de validarCanalAutomatico pero aplicada como default en vez de rechazo --
+      // valido especificamente aca (import bulk) porque hoy no hay forma de que el
+      // importador declare la intencion explicitamente. agregarPasoCadencia y
+      // actualizarPasoCadencia (edicion manual en el cockpit) siguen rechazando en vez
+      // de autocorregir: ahi el usuario SI tiene un control explicito para elegir, y
+      // corregir en silencio seria sorpresivo.
+      const esManualFinal = paso.esManual || !CANALES_AUTOMATICOS.includes(paso.canal);
       const insPaso = tx
         .insert(pasoCadencia)
         .values({
@@ -778,7 +793,7 @@ export function crearCadencia(parseada: CadenciaParseada): number {
           diaOffset: paso.diaOffset,
           canal: paso.canal,
           objetivo: paso.objetivo ?? null,
-          esManual: paso.esManual ? 1 : 0,
+          esManual: esManualFinal ? 1 : 0,
           createdAt: ahora,
         })
         .run();
@@ -2521,6 +2536,19 @@ export function marcarPasoInscripcionEnviada(idPasoInscripcion: number, proveedo
     .run();
 }
 
+// Sesion 2026-07-09: cierra un paso_inscripcion de LLAMADA cuando el owner ya
+// registro el toque real (con resultado) via CapturaLlamada/registrarToqueAction --
+// a diferencia de aprobarPasoManual (Tier 1 correo/whatsapp), esta funcion NO inserta
+// un toque: registrarToque ya lo hizo, con el resultado real de la conversacion. Solo
+// le falta marcar el paso_inscripcion 'enviada' para que salga de "Ir a llamar" y el
+// motor re-ancle el siguiente paso desde esta fecha real.
+export function marcarPasoInscripcionCompletadaManual(idPasoInscripcion: number, fechaEnviada: string) {
+  db.update(pasoInscripcion)
+    .set({ estado: 'enviada', proveedor: 'manual', fechaEnviada })
+    .where(and(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion), eq(pasoInscripcion.estado, 'pendiente')))
+    .run();
+}
+
 export function marcarPasoInscripcionFallo(idPasoInscripcion: number, intentos: number, proximoIntento: string | null) {
   db.update(pasoInscripcion)
     .set({ estado: 'fallo', intentos, proximoIntento })
@@ -2560,6 +2588,14 @@ export function pasosManualesPendientes() {
         // Fase 7 (pausar campana): un manual pendiente de una campana pausada no
         // deberia seguir apareciendo en "Por revisar" como si urgiera aprobarlo.
         eq(campana.estado, 'activa'),
+        // Sesion 2026-07-09: "Por revisar" es "hay un texto compuesto que alguien
+        // tiene que revisar/mandar" (correo, whatsapp) -- una llamada no tiene texto
+        // que aprobar, tiene una conversacion real con un resultado que capturar
+        // (una de las 4 salidas cerradas). Aprobar aca solo dejaria un toque sin
+        // resultado (aprobarPasoManual no lo pide). Los pasos de llamada quedan
+        // pendientes igual, pero se resuelven desde /llamada (el cockpit real de
+        // Toques), no desde este inbox -- ver CadenciasHoy.tsx.
+        ne(pasoCadencia.canal, 'llamada'),
       ),
     )
     .all();

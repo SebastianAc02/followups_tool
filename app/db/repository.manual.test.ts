@@ -23,6 +23,8 @@ const {
   pasoInscripcionesPendientes,
   pasosManualesPendientes,
   aprobarPasoManual,
+  marcarPasoInscripcionCompletadaManual,
+  registrarToque,
 } = await import('./repository.ts');
 
 function raw() {
@@ -83,19 +85,20 @@ test('un paso manual NUNCA aparece en pasoInscripcionesPendientes (push automati
   assert.ok(!pendientesPush.some((f) => f.idPasoInscripcion === idPasoInscripcion1), 'el push automatico jamas lo toca');
 });
 
-test('un paso manual SI aparece en la cola de revision (pasosManualesPendientes)', () => {
-  const manuales = pasosManualesPendientes();
-  const fila = manuales.find((f) => f.idPasoInscripcion === idPasoInscripcion1);
-  assert.ok(fila);
-  assert.strictEqual(fila!.email, 'ana@empresa.com');
-  assert.strictEqual(fila!.canal, 'llamada');
-});
-
-test('aprobar el manual con la fecha REAL lo saca de la cola de revision', () => {
-  aprobarPasoManual(idPasoInscripcion1, '2026-07-09T15:00:00.000Z'); // aprobado 3 dias tarde de lo programado
-
+// Sesion 2026-07-09: llamada ya NO pasa por "Por revisar" -- una llamada no tiene un
+// texto que aprobar, tiene un resultado real (una de las 4 salidas cerradas) que solo
+// se captura en el cockpit de /llamada. aprobarPasoManual (usado por correo/whatsapp)
+// dejaria un toque SIN resultado, asi que llamada se cierra distinto: ver
+// marcarPasoInscripcionCompletadaManual, llamada desde registrarToqueAction despues
+// de que registrarToque ya guardo el toque completo.
+test('un paso manual de llamada NO aparece en pasosManualesPendientes (no es Tier 1 de texto)', () => {
   const manuales = pasosManualesPendientes();
   assert.ok(!manuales.some((f) => f.idPasoInscripcion === idPasoInscripcion1));
+});
+
+test('registrar el toque real + marcarPasoInscripcionCompletadaManual cierra el paso de llamada con su resultado', () => {
+  registrarToque({ idEmpresa: 'e-manual-1', canal: 'llamada', resultado: 'contesto_sigue_seguimiento', quePaso: 'Hablamos de precio' });
+  marcarPasoInscripcionCompletadaManual(idPasoInscripcion1, '2026-07-09T15:00:00.000Z');
 
   const db = raw();
   const fila = db.prepare('SELECT estado, proveedor, fecha_enviada FROM paso_inscripcion WHERE id_paso_inscripcion = ?').get(idPasoInscripcion1) as any;
@@ -103,14 +106,13 @@ test('aprobar el manual con la fecha REAL lo saca de la cola de revision', () =>
   assert.strictEqual(fila.proveedor, 'manual');
   assert.strictEqual(fila.fecha_enviada, '2026-07-09T15:00:00.000Z');
 
-  // sin cuerpoFinal (firma vieja, compatibilidad): el toque queda con que_paso null,
-  // no truena por no recibir el 3er argumento.
-  const toques = db.prepare('SELECT canal, que_paso, fecha FROM toque WHERE id_empresa = ?').all('e-manual-1') as any[];
+  // a diferencia de aprobarPasoManual, el toque SI trae resultado (registrarToque lo exige).
+  const toques = db.prepare('SELECT canal, resultado, que_paso FROM toque WHERE id_empresa = ?').all('e-manual-1') as any[];
   db.close();
   assert.equal(toques.length, 1);
   assert.equal(toques[0].canal, 'llamada');
-  assert.equal(toques[0].que_paso, null);
-  assert.equal(toques[0].fecha, '2026-07-09T15:00:00.000Z');
+  assert.equal(toques[0].resultado, 'contesto_sigue_seguimiento');
+  assert.equal(toques[0].que_paso, 'Hablamos de precio');
 });
 
 test('el motor re-ancla el paso 2 desde la fecha REAL de aprobacion, no desde la programada original', () => {

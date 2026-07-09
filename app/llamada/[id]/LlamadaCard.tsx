@@ -43,10 +43,15 @@ function fechaCorta(fecha: string | null): string {
 export function LlamadaCard({
   ctx,
   urlNotion,
+  idPasoInscripcion,
   calificacion,
 }: {
   ctx: ContextoToque;
   urlNotion: string | null;
+  // paso_inscripcion pendiente de HOY si esta llamada viene de una cadencia (Tarea 12,
+  // mismo patron que EditorCorreo/EditorWhatsapp) -- lo necesita CapturaLlamada para
+  // cerrar el paso cuando el owner guarda el toque real. null en un toque suelto.
+  idPasoInscripcion: number | null;
   calificacion: Calificacion;
 }) {
   const { emp, principal, secuencia, objetivo, toques } = ctx;
@@ -133,7 +138,7 @@ export function LlamadaCard({
                 <span>·</span>
                 <span>Confirmar</span>
               </div>
-              <RegistrarToqueToggle idEmpresa={emp?.id ?? ""} calificacion={calificacion} />
+              <RegistrarToqueToggle idEmpresa={emp?.id ?? ""} idPasoInscripcion={idPasoInscripcion} calificacion={calificacion} />
             </div>
           </div>
         </PreguntarProvider>

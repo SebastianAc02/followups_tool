@@ -20,9 +20,15 @@ const inputClase =
 // clases legacy (.capture/.oc2/.reveal), para no desentonar con el resto de la tarjeta.
 export default function CapturaLlamada({
   idEmpresa,
+  idPasoInscripcion,
   calificacion,
 }: {
   idEmpresa: string;
+  // Sesion 2026-07-09: paso_inscripcion pendiente de HOY si esta llamada viene de una
+  // cadencia (mismo patron que EditorCorreo/EditorWhatsapp) -- registrarToqueAction lo
+  // usa para cerrar el paso con la fecha REAL una vez que el toque ya quedo guardado
+  // con su resultado. null en un toque suelto (sin cadencia activa).
+  idPasoInscripcion: number | null;
   // Con qué de usuarios/CRM/pasarela ya cuenta la cuenta (2026-07-08): el form solo
   // pide lo que el checklist de arriba marca "preguntar" -- antes repetía los tres
   // campos siempre, aunque ya estuvieran guardados. Sin esto, no rompe: simplemente
@@ -71,6 +77,7 @@ export default function CapturaLlamada({
       <input type="hidden" name="resultado" value={outcome} />
       <input type="hidden" name="toqueCanal" value="llamada" />
       <input type="hidden" name="canal" value="llamada" />
+      {idPasoInscripcion != null && <input type="hidden" name="idPasoInscripcion" value={idPasoInscripcion} />}
 
       {/* Resumen + estructurar: no tiene sentido dictar un resumen de una llamada que no
           se contestó -- nunca hubo conversación que resumir. */}

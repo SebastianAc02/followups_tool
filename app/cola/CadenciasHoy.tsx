@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { aprobarPasoManualAction, aprobarLoteManualAction } from '../actions';
 import { cn } from '../ui/cn';
 import { Pill } from '../ui/Pill';
@@ -171,6 +172,37 @@ function GrupoBatch({ items }: { items: ItemCadenciaHoy[] }) {
   );
 }
 
+// Sesion 2026-07-09: una llamada de cadencia no es "aprobar un texto que ya se
+// mando" (Tier 1, correo/whatsapp) -- es un toque real que todavia no paso, con un
+// resultado de las 4 salidas cerradas que solo se captura en el cockpit de /llamada.
+// "Aprobar (ya lo hice)" dejaria un toque sin resultado (aprobarPasoManual no lo
+// pide), asi que en vez de ese boton se linkea directo al cockpit real de Toques.
+function FilaLlamada({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: boolean }) {
+  return (
+    <div className="border-b border-line py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="truncate font-medium text-ink">{item.empresaNombre}</span>
+          <CanalTag canal={canalNormalizado(item.canal)} />
+          {item.nombre && <span className="text-[13px] text-muted">{item.nombre}</span>}
+        </div>
+        <SeverityText variant={atrasado ? 'overdue' : 'today'} className="shrink-0">
+          {atrasado ? 'atrasado' : 'hoy'}
+        </SeverityText>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-muted">
+        <span>
+          contacto <b className="text-ink-soft">{item.email ?? '—'}</b>
+        </span>
+        <span className="mono text-faint">{diaLabel(item)}</span>
+      </div>
+      <Link href={`/llamada/${item.idEmpresa}`} className={cn(button({ variant: 'pill' }), 'mt-2 inline-block text-[12.5px]')}>
+        Ir a llamar
+      </Link>
+    </div>
+  );
+}
+
 function FilaAutomatica({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: boolean }) {
   return (
     <div className="border-b border-line py-3">
@@ -208,7 +240,11 @@ export default function CadenciasHoy({ items, hoy }: { items: ItemCadenciaHoy[];
   });
 
   const automaticos = ordenadas.filter((t) => t.esManual === 0);
-  const manuales = ordenadas.filter((t) => t.esManual === 1);
+  // llamada nunca es "aprobar un texto" (Tier 1): tiene su propia fila (FilaLlamada,
+  // linkea a /llamada) sin importar el modo prioritaria/batch de la campana -- un
+  // "lote" de llamadas no es real, cada una necesita su propia conversacion.
+  const porLlamar = ordenadas.filter((t) => t.esManual === 1 && t.canal === 'llamada');
+  const manuales = ordenadas.filter((t) => t.esManual === 1 && t.canal !== 'llamada');
   const prioritarios = manuales.filter((t) => t.modo !== 'batch');
   const enLote = manuales.filter((t) => t.modo === 'batch');
 
@@ -223,6 +259,10 @@ export default function CadenciasHoy({ items, hoy }: { items: ItemCadenciaHoy[];
   return (
     <div className="mb-8">
       <div className="mb-2.5 font-serif text-[15px] font-medium text-ink">Cadencias de hoy</div>
+
+      {porLlamar.map((t) => (
+        <FilaLlamada key={t.idPasoInscripcion} item={t} atrasado={(t.fechaProgramada ?? '').slice(0, 10) < hoy} />
+      ))}
 
       {prioritarios.map((t) => (
         <FilaPrioritaria key={t.idPasoInscripcion} item={t} atrasado={(t.fechaProgramada ?? '').slice(0, 10) < hoy} />

@@ -8,11 +8,19 @@ import type { Calificacion } from "../../core/calificacion";
 // abierto/campoEnfocado vive en PreguntarContext (2026-07-08), compartido con
 // CalificacionChecklist -- antes este componente tenia su propio useState aislado, por
 // eso un click en un item "PREGUNTAR" del checklist no podia abrir el formulario.
-export function RegistrarToqueToggle({ idEmpresa, calificacion }: { idEmpresa: string; calificacion: Calificacion }) {
+export function RegistrarToqueToggle({
+  idEmpresa,
+  idPasoInscripcion,
+  calificacion,
+}: {
+  idEmpresa: string;
+  idPasoInscripcion: number | null;
+  calificacion: Calificacion;
+}) {
   const { abierto, abrir } = usePreguntar();
 
   if (abierto) {
-    return <CapturaLlamada idEmpresa={idEmpresa} calificacion={calificacion} />;
+    return <CapturaLlamada idEmpresa={idEmpresa} idPasoInscripcion={idPasoInscripcion} calificacion={calificacion} />;
   }
 
   return (

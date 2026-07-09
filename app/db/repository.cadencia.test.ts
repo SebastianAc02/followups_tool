@@ -17,7 +17,7 @@ test('crearCadencia inserta cadencia + pasos + una version default por paso', ()
     descripcion: 'la cadencia real',
     pasos: [
       { orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Me presento', cuerpo: 'Hola' },
-      { orden: 2, diaOffset: 3, canal: 'whatsapp', cuerpo: 'Segui por aca' },
+      { orden: 2, diaOffset: 3, canal: 'whatsapp', cuerpo: 'Segui por aca', esManual: true },
     ],
   });
 
@@ -47,7 +47,7 @@ test('crearCadencia inserta cadencia + pasos + una version default por paso', ()
 test('getCadencia devuelve el template consultable: cabecera + pasos con su copy default', () => {
   const id = crearCadencia({
     nombre: 'Reactivacion',
-    pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada', objetivo: 'reenganchar', cuerpo: 'guion' }],
+    pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada', objetivo: 'reenganchar', cuerpo: 'guion', esManual: true }],
   });
 
   const t = getCadencia(id);
@@ -75,6 +75,47 @@ test('crearCadencia rechaza una cadencia sin pasos', () => {
   assert.throws(() => crearCadencia({ nombre: 'Vacia', pasos: [] }), /al menos un paso/);
 });
 
+// Sesion 2026-07-09: mismo caso que se encontro real en la DB (cadencia id=34) -- un
+// paso de whatsapp sin esManual explicito, porque ningun formato de import (CSV/
+// Markdown/JSON) trae hoy una columna para declararlo, asi que el parser siempre
+// entrega esManual=false. Ningun formato tiene forma de pedir explicitamente un paso
+// AUTOMATICO en un canal sin proveedor (whatsapp/llamada hoy): no hay ambiguedad que
+// preguntarle al importador, asi que crearCadencia autocorrige en vez de rechazar.
+test('crearCadencia autocorrige a manual un paso en un canal sin proveedor automatico (import silencioso)', () => {
+  const id = crearCadencia({ nombre: 'Con whatsapp sin declarar', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp' }] });
+  const t = getCadencia(id);
+  assert.equal(t!.pasos[0].esManual, true);
+});
+
+test('crearCadencia respeta esManual explicito true (parser/caller ya lo declaro)', () => {
+  const id = crearCadencia({
+    nombre: 'Con whatsapp manual explicito',
+    pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', esManual: true }],
+  });
+  const t = getCadencia(id);
+  assert.equal(t!.pasos[0].esManual, true);
+});
+
+test('crearCadencia deja un paso de correo automatico (esManual=false) porque correo si tiene proveedor', () => {
+  const id = crearCadencia({ nombre: 'Correo automatico', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo' }] });
+  const t = getCadencia(id);
+  assert.equal(t!.pasos[0].esManual, false);
+});
+
+test('crearCadencia no deja pasos insertados si el paso viola una regla de estructura (Zod, atomico)', () => {
+  const antes = listarCadencias().length;
+  assert.throws(() =>
+    crearCadencia({
+      nombre: 'Parcial',
+      pasos: [
+        { orden: 1, diaOffset: 0, canal: 'correo' },
+        { orden: 2, diaOffset: 1, canal: 'telegram' as any },
+      ],
+    }),
+  );
+  assert.equal(listarCadencias().length, antes);
+});
+
 // Parte 3 campanas: firmaApollo y variables (del parser) se persisten en la version
 // default y getCadencia los expone listos para la pantalla del toque.
 test('crearCadencia persiste firmaApollo y variables; getCadencia los expone', () => {
@@ -100,7 +141,7 @@ test('crearCadencia persiste firmaApollo y variables; getCadencia los expone', (
 });
 
 test('crearCadencia sin variables/firmaApollo (paso armado a mano) defaultea vacio/false', () => {
-  const id = crearCadencia({ nombre: 'Sin copy extra', pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada' }] });
+  const id = crearCadencia({ nombre: 'Sin copy extra', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo' }] });
   const t = getCadencia(id);
   assert.ok(t);
   assert.deepEqual(t!.pasos[0].variables, []);
