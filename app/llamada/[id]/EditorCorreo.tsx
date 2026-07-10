@@ -151,7 +151,7 @@ export function EditorCorreo({
             value={cuerpo}
             onChange={(e) => setCuerpo(e.target.value)}
             placeholder="Cuerpo del correo..."
-            className="mb-4 w-full rounded-lg border border-line bg-hover px-3 py-2.5 text-[13px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
+            className="mb-4 min-h-[140px] w-full resize-y rounded-lg border border-line bg-hover px-3 py-2.5 text-[13px] leading-relaxed text-ink outline-none placeholder:text-faint focus:border-line-strong"
           />
 
           {error && <p className="mb-2 text-[12.5px] text-overdue">{error}</p>}
