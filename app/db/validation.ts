@@ -14,7 +14,7 @@ export type Canal = (typeof CANALES)[number];
 // un adaptador concreto (romperia la direccion de dependencia: adaptadores dependen del
 // Repository, nunca al reves). registro-envio.ts la reusa como fuente unica de verdad;
 // un test cruzado (registro-envio.test.ts) verifica que las dos listas no se desincronicen.
-export const CANALES_AUTOMATICOS: readonly Canal[] = ['correo'];
+export const CANALES_AUTOMATICOS: readonly Canal[] = ['correo', 'whatsapp'];
 
 // Regla de dominio (sesion 2026-07-09): un paso solo puede ser automatico (es_manual=
 // false) si su canal tiene proveedor registrado. Sin esto, un paso de whatsapp/llamada

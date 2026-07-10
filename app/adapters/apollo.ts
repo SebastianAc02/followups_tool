@@ -153,7 +153,14 @@ async function resolverContacto(apiKey: string, destinatario: DestinatarioEnvio)
   const bulk = await llamarApollo<BulkCreateRespuesta>('/contacts/bulk_create', apiKey, {
     method: 'POST',
     body: JSON.stringify({
-      contacts: [{ email: destinatario.email, first_name: destinatario.nombre ?? undefined }],
+      contacts: [
+        {
+          email: destinatario.email,
+          first_name: destinatario.nombre ?? undefined,
+          organization_name: destinatario.empresa ?? undefined,
+          title: destinatario.cargo ?? undefined,
+        },
+      ],
       run_dedupe: true,
     }),
   });
@@ -321,7 +328,7 @@ export function crearApolloAdapter(): EnvioAdapter {
 
     async sacarDestinatario(proveedorCampanaId: string, email: string) {
       const apiKey = credencial();
-      const contacto = await resolverContacto(apiKey, { email, telefono: null, nombre: null });
+      const contacto = await resolverContacto(apiKey, { email, telefono: null, nombre: null, empresa: null, cargo: null });
 
       // Verificado en vivo (V5.3): el endpoint NO va anidado con el id en la URL
       // (esa forma da 404, a pesar de que asi lo tenia documentado

@@ -23,7 +23,7 @@ import { DestinatariosCockpit } from './DestinatariosCockpit';
 // CampanaSubNav a mitad de la creacion es justo lo que Sebastian reporto como
 // confuso ("me saca de un layout a meterme a otro de manera random").
 export default async function DestinatariosCampana({ params }: { params: Promise<{ id: string }> }) {
-  await requireSession();
+  const sesion = await requireSession();
   const { id } = await params;
   const idCampana = Number(id);
   if (!Number.isInteger(idCampana) || idCampana <= 0) notFound();
@@ -31,7 +31,7 @@ export default async function DestinatariosCampana({ params }: { params: Promise
   const camp = campanaParaPreview(idCampana);
   if (!camp) notFound();
 
-  const filas = previsualizarInscripcionCampana(idCampana) ?? [];
+  const filas = previsualizarInscripcionCampana(idCampana, sesion.idOrganizacion) ?? [];
   const esBorrador = camp.estado === 'borrador';
   const inscritasReales = esBorrador ? null : listarInscritasHub(idCampana);
 

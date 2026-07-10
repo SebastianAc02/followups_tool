@@ -17,16 +17,16 @@ import { PreviewCockpit } from './PreviewCockpit';
 // Header: sigue la secuencia del wizard mientras la campana este en 'borrador', no
 // los tabs de una campana ya lanzada -- ver nota igual en destinatarios/page.tsx.
 export default async function PreviewCampana({ params }: { params: Promise<{ id: string }> }) {
-  const { idOrganizacion } = await requireSession();
+  const sesion = await requireSession();
   const { id } = await params;
   const idCampana = Number(id);
   if (!Number.isInteger(idCampana) || idCampana <= 0) notFound();
 
-  const camp = campanaConReglas(idCampana, idOrganizacion);
+  const camp = campanaConReglas(idCampana, sesion.idOrganizacion);
   if (!camp) notFound();
 
   const datosCadencia = getCadencia(camp.idCadencia);
-  const muestra = muestraDestinatarioDeSegmento(camp.idSegmento);
+  const muestra = muestraDestinatarioDeSegmento(camp.idSegmento, sesion.idOrganizacion);
   const esBorrador = camp.estado === 'borrador';
 
   return (

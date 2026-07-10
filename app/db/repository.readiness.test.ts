@@ -35,7 +35,7 @@ seed();
 const def = { condiciones: [{ campo: 'categoria' as const, op: 'en' as const, valores: ['isp'] }] };
 
 test('empresasConReadiness clasifica lista/parcial/sin_canal', () => {
-  const filas = empresasConReadiness(def, ['correo', 'llamada'], 'saltar');
+  const filas = empresasConReadiness(def, ['correo', 'llamada'], 'saltar', 1);
   const byId = Object.fromEntries(filas.map((f) => [f.id, f.readiness.estado]));
   assert.equal(byId['A'], 'lista');
   assert.equal(byId['B'], 'parcial');
@@ -43,8 +43,22 @@ test('empresasConReadiness clasifica lista/parcial/sin_canal', () => {
 });
 
 test('conteosReadiness agrega total/listas/parciales/sinCanal/sinContacto', () => {
-  const c = conteosReadiness(def, ['correo', 'llamada'], 'saltar');
+  const c = conteosReadiness(def, ['correo', 'llamada'], 'saltar', 1);
   assert.deepEqual(c, { total: 3, listas: 1, parciales: 1, sinCanal: 1, sinContacto: 1 });
+});
+
+test('empresasConReadiness no ve empresas de otra organizacion', () => {
+  const raw = new Database(dbPath);
+  raw
+    .prepare(
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, categoria, organizacion_activa_id)
+       VALUES ('D', 'nit', 'Empresa D', 'empresa-d', 'activo', 'isp', 2)`,
+    )
+    .run();
+  raw.close();
+
+  const filas = empresasConReadiness(def, ['correo', 'llamada'], 'saltar', 1);
+  assert.ok(!filas.some((f) => f.id === 'D'));
 });
 
 test.after(() => {

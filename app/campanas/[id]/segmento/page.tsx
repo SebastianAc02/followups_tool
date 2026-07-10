@@ -17,26 +17,26 @@ import { SegmentoCockpit } from './SegmentoCockpit';
 // cambiaria en silencio el criterio de inscripcion sin que nadie lo note, y ya
 // inscribio gente con el criterio viejo.
 export default async function SegmentoCampana({ params }: { params: Promise<{ id: string }> }) {
-  const { idOrganizacion } = await requireSession();
+  const sesion = await requireSession();
   const { id } = await params;
   const idCampana = Number(id);
   if (!Number.isInteger(idCampana) || idCampana <= 0) notFound();
 
-  const camp = campanaConReglas(idCampana, idOrganizacion);
+  const camp = campanaConReglas(idCampana, sesion.idOrganizacion);
   if (!camp) notFound();
   if (camp.estado !== 'borrador') notFound();
 
-  const segmento = obtenerSegmento(camp.idSegmento);
+  const segmento = obtenerSegmento(camp.idSegmento, sesion.idOrganizacion);
   if (!segmento) notFound();
 
   const opciones = {
-    estado: valoresDistintosCampo('estado'),
-    categoria: valoresDistintosCampo('categoria'),
-    estado_comercial: valoresDistintosCampo('estado_comercial'),
-    ciudad: valoresDistintosCampo('ciudad'),
-    departamento: valoresDistintosCampo('departamento'),
-    owner: valoresDistintosCampo('owner'),
-    rol: valoresDistintosCampo('rol'),
+    estado: valoresDistintosCampo('estado', sesion.idOrganizacion),
+    categoria: valoresDistintosCampo('categoria', sesion.idOrganizacion),
+    estado_comercial: valoresDistintosCampo('estado_comercial', sesion.idOrganizacion),
+    ciudad: valoresDistintosCampo('ciudad', sesion.idOrganizacion),
+    departamento: valoresDistintosCampo('departamento', sesion.idOrganizacion),
+    owner: valoresDistintosCampo('owner', sesion.idOrganizacion),
+    rol: valoresDistintosCampo('rol', sesion.idOrganizacion),
   };
 
   return (

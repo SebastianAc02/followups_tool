@@ -70,7 +70,7 @@ test('enviarPaso hace bulk_create con dedupe y add_contact_ids con emailer_campa
   const adapter = crearApolloAdapter();
   const resultado = await adapter.enviarPaso(
     'seq-1',
-    { email: 'ana@empresa.com', telefono: null, nombre: 'Ana' },
+    { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: null, cargo: null },
     { asunto: 'Hola', cuerpo: 'cuerpo del correo', canal: 'correo' },
   );
 
@@ -91,6 +91,42 @@ test('enviarPaso hace bulk_create con dedupe y add_contact_ids con emailer_campa
   });
 });
 
+test('enviarPaso manda empresa/cargo como organization_name/title para personalizacion', async (t) => {
+  const llamadas: { path: string; body: unknown }[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      const body = init.body ? JSON.parse(init.body as string) : null;
+      llamadas.push({ path, body });
+      if (path === '/contacts/bulk_create') {
+        return { status: 200, body: { created_contacts: [{ id: 'contacto-2', email: 'ana@empresa.com' }] } };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await adapter.enviarPaso(
+    'seq-1',
+    { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: 'Viajes Andinos', cargo: 'Gerente Comercial' },
+    { asunto: 'Hola', cuerpo: 'cuerpo del correo', canal: 'correo' },
+  );
+
+  assert.strictEqual(llamadas[0].path, '/contacts/bulk_create');
+  assert.deepEqual(llamadas[0].body, {
+    contacts: [
+      {
+        email: 'ana@empresa.com',
+        first_name: 'Ana',
+        organization_name: 'Viajes Andinos',
+        title: 'Gerente Comercial',
+      },
+    ],
+    run_dedupe: true,
+  });
+});
+
 test('enviarPaso truena si no hay buzon configurado (decision de negocio S2 pendiente)', async () => {
   delete process.env.APOLLO_MAILBOX_ID;
   const adapter = crearApolloAdapter();
@@ -99,7 +135,12 @@ test('enviarPaso truena si no hay buzon configurado (decision de negocio S2 pend
   // quedaria borrada y filtraria el fallo a los tests siguientes del archivo.
   try {
     await assert.rejects(
-      () => adapter.enviarPaso('seq-1', { email: 'ana@empresa.com', telefono: null, nombre: null }, { asunto: null, cuerpo: 'x', canal: 'correo' }),
+      () =>
+        adapter.enviarPaso(
+          'seq-1',
+          { email: 'ana@empresa.com', telefono: null, nombre: null, empresa: null, cargo: null },
+          { asunto: null, cuerpo: 'x', canal: 'correo' },
+        ),
       /APOLLO_MAILBOX_ID/,
     );
   } finally {

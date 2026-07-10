@@ -62,6 +62,11 @@ export type DestinatarioEnvio = {
   email: string | null;
   telefono: string | null;
   nombre: string | null;
+  // Personalizacion firmografica (sesion 2026-07-09, prueba multicanal): Apollo los
+  // proyecta a {{company_name}}/{{title}}. Nullable: un canal que no los use
+  // (WhatsApp) simplemente los ignora (mismo criterio D3 que telefono/email).
+  empresa: string | null;
+  cargo: string | null;
 };
 
 export type PasoEnvio = {

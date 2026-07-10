@@ -56,11 +56,11 @@ export async function crearBorradorDesdeCadenciaAction(input: {
   contenido: string;
   nombreCsv?: string;
 }): Promise<CrearBorradorResultado> {
-  await requireSession();
+  const sesion = await requireSession();
   try {
     const parseada = parsearCadenciaPorFormato(input.formato, input.contenido, { nombre: input.nombreCsv || 'Cadencia sin nombre' });
     const idCadencia = crearCadencia(parseada);
-    const idCampana = crearCampana({ nombre: parseada.nombre, idCadencia, idSegmento: input.idSegmento, modo: 'prioritaria' });
+    const idCampana = crearCampana({ nombre: parseada.nombre, idCadencia, idSegmento: input.idSegmento, modo: 'prioritaria' }, sesion.idOrganizacion);
     revalidatePath('/campanas');
     const datos = getCadencia(idCadencia);
     return { ok: true, idCampana, idCadencia, pasos: datos?.pasos ?? [] };

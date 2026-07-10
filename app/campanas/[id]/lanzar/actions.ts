@@ -28,9 +28,9 @@ export async function recalcularGoteoAction(
   idCampana: number,
   config: { intakeDiario: number; ritmoIngreso: 'diario' | 'dia_si_dia_no' | 'personalizado'; fechaInicio: string },
 ): Promise<RecalcularGoteoResultado> {
-  await requireSession();
+  const sesion = await requireSession();
   try {
-    const camp = campanaParaLanzar(idCampana);
+    const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
     if (!camp) return { ok: false, error: 'La campaña no existe' };
     const goteo = calcularGoteo(camp.totalElegibles, config.intakeDiario, config.ritmoIngreso, config.fechaInicio);
     return { ok: true, goteo, totalElegibles: camp.totalElegibles };
@@ -47,10 +47,10 @@ export async function recalcularGoteoAction(
 export type GuardarConfigResultado = { ok: true; campana: CampanaParaLanzar } | { ok: false; error: string };
 
 export async function guardarConfigLanzamientoAction(idCampana: number, config: ConfigLanzamientoInput): Promise<GuardarConfigResultado> {
-  await requireSession();
+  const sesion = await requireSession();
   try {
     actualizarConfigLanzamiento(idCampana, config);
-    const camp = campanaParaLanzar(idCampana);
+    const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
     if (!camp) return { ok: false, error: 'La campaña no existe' };
     revalidatePath(`/campanas/${idCampana}/lanzar`);
     return { ok: true, campana: camp };
@@ -66,10 +66,10 @@ export type LanzarCampanaResultado =
   | { ok: false; error: string };
 
 export async function lanzarCampanaAction(idCampana: number, config: ConfigLanzamientoInput): Promise<LanzarCampanaResultado> {
-  const { idOrganizacion } = await requireSession();
+  const sesion = await requireSession();
   try {
     actualizarConfigLanzamiento(idCampana, config);
-    const resultado = inscribirCampana(idCampana);
+    const resultado = inscribirCampana(idCampana, sesion.idOrganizacion);
 
     // La campana YA quedo inscrita en la DB local en este punto (fuente de la verdad).
     // Crear la secuencia en Apollo es un paso adicional: si falla (sin credencial,
@@ -77,7 +77,7 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
     // en el resultado para que la UI lo muestre, nada mas.
     let avisoSecuenciaExterna: string | undefined;
     try {
-      const camp = campanaParaLanzar(idCampana);
+      const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
       // Sesion 2026-07-09: la secuencia externa es, por definicion, el track de
       // correo de la cadencia -- se resuelve por el registro (registro-envio.ts), no
       // por Apollo directo. Si "correo" no tiene proveedor registrado (no deberia
@@ -86,7 +86,7 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
       const adapter = crearRegistroEnvio().correo;
       if (camp && adapter) {
         const proveedorCampanaId = await adapter.crearCampanaExterna(camp.nombre);
-        guardarProveedorCampanaId(idCampana, proveedorCampanaId, idOrganizacion);
+        guardarProveedorCampanaId(idCampana, proveedorCampanaId, sesion.idOrganizacion);
 
         // Sesion 2026-07-08: sin esto la secuencia queda creada pero VACIA -- subir el
         // copy aqui mismo es lo que hace que abrir la secuencia en Apollo ya muestre

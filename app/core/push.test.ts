@@ -50,7 +50,7 @@ function envioFalso(comportamiento: (destinatario: { email: string | null }) => 
 const filaBase = (id: number, email: string): FilaSimulada => ({
   idPasoInscripcion: id,
   proveedorCampanaId: 'seq-1',
-  destinatario: { email, telefono: null, nombre: null },
+  destinatario: { email, telefono: null, nombre: null, empresa: null, cargo: null },
   paso: { asunto: 'Hola', cuerpo: 'cuerpo', canal: 'correo' },
   intentos: 0,
   estado: 'pendiente',

@@ -2,24 +2,30 @@ import type { EnvioAdapter, CanalEntrega } from '../core/ports/envio';
 import type { Canal } from '../db/validation';
 import { CANALES_AUTOMATICOS } from '../db/validation';
 import { crearApolloAdapter } from './apollo';
+import { crearEvolutionAdapter } from './evolution';
 
 // Registro canal -> proveedor real (sesion 2026-07-09, pedido explicito de Sebastian:
 // SOLID, cada canal cambia de proveedor sin tocar el core). Este es el UNICO lugar del
 // proyecto que decide "que proveedor manda este canal" -- push.ts y tracking.ts nunca
-// conocen Apollo por nombre, reciben el EnvioAdapter ya resuelto.
+// conocen Apollo ni Evolution por nombre, reciben el adaptador ya resuelto.
 //
-// correo -> Apollo (el unico proveedor automatico que existe hoy).
+// correo -> Apollo, unico proveedor con los TRES roles (EnvioAdapter completo: envia,
+//   trackea, administra la secuencia externa) -- por eso .correo es el unico que
+//   cancelarCampanaAction/sincronizarCopyApolloAction/tareaTracking pueden usar.
 // llamada -> null A PROPOSITO: no es una limitacion temporal, es la decision de
 //   Sebastian de que el sea el "proveedor" de llamada. Un paso de canal=llamada
 //   nunca deberia ser automatico (ver CANALES_AUTOMATICOS en db/validation.ts) --
 //   siempre espera revision humana en /cola (aprobarPasoManual), que ya es esa via.
-// whatsapp -> null hasta que se conecte un proveedor real. Prender whatsapp automatico
-//   el dia de manana es agregar una linea aca (crearWhatsAppAdapter()) + sumar
-//   'whatsapp' a CANALES_AUTOMATICOS en db/validation.ts, nada mas.
-export function crearRegistroEnvio(): Record<Canal, EnvioAdapter | null> {
+// whatsapp -> Evolution (sesion 2026-07-09, tarea B2 prueba multicanal). Evolution
+//   solo implementa CanalEntrega (no tiene secuencia externa ni tracking propio por
+//   API -- las respuestas entran por webhook, ver core/llego-respuesta.ts), asi que
+//   el tipo de retorno deja de ser un Record uniforme: cada canal declara el rol que
+//   de verdad cumple, y TypeScript avisa si algun caller intenta pedirle a whatsapp
+//   un metodo de MotorSecuencia/TrackingPoll que no tiene.
+export function crearRegistroEnvio(): { correo: EnvioAdapter; whatsapp: CanalEntrega; llamada: null } {
   return {
     correo: crearApolloAdapter(),
-    whatsapp: null,
+    whatsapp: crearEvolutionAdapter(),
     llamada: null,
   };
 }

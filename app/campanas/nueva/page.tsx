@@ -9,16 +9,16 @@ import { NuevaCampanaFlujo } from './NuevaCampanaFlujo';
 // Fase C (cockpit de campañas): ademas precarga las opciones del wall (mismo patron
 // que /campanas/segmentos) para poder armar un segmento nuevo sin salir de esta pantalla.
 export default async function NuevaCampana() {
-  await requireSession();
-  const segmentos = listarSegmentos();
+  const sesion = await requireSession();
+  const segmentos = listarSegmentos(sesion.idOrganizacion);
   const opciones = {
-    estado: valoresDistintosCampo('estado'),
-    categoria: valoresDistintosCampo('categoria'),
-    estado_comercial: valoresDistintosCampo('estado_comercial'),
-    ciudad: valoresDistintosCampo('ciudad'),
-    departamento: valoresDistintosCampo('departamento'),
-    owner: valoresDistintosCampo('owner'),
-    rol: valoresDistintosCampo('rol'),
+    estado: valoresDistintosCampo('estado', sesion.idOrganizacion),
+    categoria: valoresDistintosCampo('categoria', sesion.idOrganizacion),
+    estado_comercial: valoresDistintosCampo('estado_comercial', sesion.idOrganizacion),
+    ciudad: valoresDistintosCampo('ciudad', sesion.idOrganizacion),
+    departamento: valoresDistintosCampo('departamento', sesion.idOrganizacion),
+    owner: valoresDistintosCampo('owner', sesion.idOrganizacion),
+    rol: valoresDistintosCampo('rol', sesion.idOrganizacion),
   };
 
   return (

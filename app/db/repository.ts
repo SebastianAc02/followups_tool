@@ -40,6 +40,8 @@ import {
   destinatario,
   pasoInscripcion,
   eventoTracking,
+  mensajeWhatsapp,
+  lineaWhatsapp,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -49,6 +51,7 @@ import { calcularGoteo, type RitmoIngreso } from '../core/goteo';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
+import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/llego-respuesta';
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
@@ -1170,7 +1173,7 @@ function columnaOrden(campo: CampoSegmentoNumerico): SQLiteColumn | SQL<number> 
 }
 
 // es gratis (join sobre PK) y necesario para el campo 'usuarios' del segmento.
-export function empresasDeSegmento(def: DefinicionSegmento) {
+export function empresasDeSegmento(def: DefinicionSegmento, idOrganizacion: number) {
   const val = definicionSegmentoSchema.parse(def);
   let q = db
     .select({
@@ -1183,7 +1186,7 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(compilarSegmento(val))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .$dynamic();
 
   if (val.orden) {
@@ -1200,30 +1203,29 @@ export function empresasDeSegmento(def: DefinicionSegmento) {
   return q.all();
 }
 
-export function contarSegmento(def: DefinicionSegmento): number {
+export function contarSegmento(def: DefinicionSegmento, idOrganizacion: number): number {
   const val = definicionSegmentoSchema.parse(def);
   const fila = db
     .select({ n: sql<number>`count(*)` })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(compilarSegmento(val))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .get();
   return fila?.n ?? 0;
 }
 
 // V4.3: guarda el filtro compilado como JSON en segmento.definicion. descripcionNatural
 // es opcional (el lenguaje natural lo llena Fase 6, aca solo se persiste si viene).
-export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }): number {
+export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }, idOrganizacion: number): number {
   const val = definicionSegmentoSchema.parse(input.definicion);
   const ahora = new Date().toISOString();
   const ins = db
     .insert(segmento)
-    // Hardcodeado a Onepay (id 1) hasta que segmentos tenga filtrado real por organizacion (plan futuro).
     .values({
       nombre: input.nombre,
       definicion: JSON.stringify(val),
       descripcionNatural: input.descripcionNatural ?? null,
-      idOrganizacion: 1,
+      idOrganizacion,
       createdAt: ahora,
       updatedAt: ahora,
     })
@@ -1235,11 +1237,11 @@ export function guardarSegmento(input: { nombre: string; definicion: DefinicionS
 // segmento guardado, para reabrir NuevoSegmento pre-cargado en vez de vacio. El
 // dropdown "Usar un segmento guardado..." salta directo a Cadencia con listarSegmentos
 // (solo metadata); esto es para el caso de VOLVER sobre el que ya se estaba armando.
-export function obtenerSegmento(idSegmento: number): { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } | null {
+export function obtenerSegmento(idSegmento: number, idOrganizacion: number): { id: number; nombre: string; definicion: DefinicionSegmento; descripcionNatural: string | null } | null {
   const fila = db
     .select({ nombre: segmento.nombre, definicion: segmento.definicion, descripcionNatural: segmento.descripcionNatural })
     .from(segmento)
-    .where(eq(segmento.idSegmento, idSegmento))
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
     .get();
   if (!fila) return null;
   return { id: idSegmento, nombre: fila.nombre, definicion: definicionSegmentoSchema.parse(JSON.parse(fila.definicion)), descripcionNatural: fila.descripcionNatural };
@@ -1249,20 +1251,27 @@ export function obtenerSegmento(idSegmento: number): { id: number; nombre: strin
 // silencioso de NuevoSegmento) en vez de crear uno nuevo por cada ajuste de filtro --
 // si no, cada tecla dejaria un segmento huerfano distinto en "Usar un segmento
 // guardado...".
-export function actualizarSegmento(idSegmento: number, cambios: { nombre?: string; definicion?: DefinicionSegmento; descripcionNatural?: string }): void {
+export function actualizarSegmento(idSegmento: number, cambios: { nombre?: string; definicion?: DefinicionSegmento; descripcionNatural?: string }, idOrganizacion: number): void {
   const sets: Record<string, unknown> = {};
   if (cambios.nombre !== undefined) sets.nombre = cambios.nombre;
   if (cambios.definicion !== undefined) sets.definicion = JSON.stringify(definicionSegmentoSchema.parse(cambios.definicion));
   if (cambios.descripcionNatural !== undefined) sets.descripcionNatural = cambios.descripcionNatural;
   if (Object.keys(sets).length === 0) return;
   sets.updatedAt = new Date().toISOString();
-  db.update(segmento).set(sets).where(eq(segmento.idSegmento, idSegmento)).run();
+  // Multi-organizacion (Parte 2): el UPDATE solo pega si el segmento es de idOrganizacion.
+  // Silencioso a proposito (no throw) -- ver nota de diseno al inicio del plan: coherente
+  // con que obtenerSegmento ya trata "es de otra organizacion" igual que "no existe".
+  db.update(segmento)
+    .set(sets)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .run();
 }
 
-export function listarSegmentos() {
+export function listarSegmentos(idOrganizacion: number) {
   return db
     .select({ id: segmento.idSegmento, nombre: segmento.nombre, descripcionNatural: segmento.descripcionNatural })
     .from(segmento)
+    .where(eq(segmento.idOrganizacion, idOrganizacion))
     .orderBy(desc(segmento.idSegmento))
     .all();
 }
@@ -1270,14 +1279,15 @@ export function listarSegmentos() {
 // Parte 1 campanas: valores unicos de un campo de texto para poblar el dropdown del
 // builder (estilo Apollo). Solo campos de texto: los numericos se filtran por rango,
 // no por lista, y ademas usuarios vive en otra tabla.
-export function valoresDistintosCampo(campo: CampoSegmento): string[] {
+export function valoresDistintosCampo(campo: CampoSegmento, idOrganizacion: number): string[] {
   // rol vive en contacto, no en empresa (mismo motivo que en compilarSegmento):
   // el dropdown de roles sale de cargo_categoria, no de COLUMNA_SEGMENTO.
   if (campo === 'rol') {
     const filas = db
       .selectDistinct({ v: contacto.cargoCategoria })
       .from(contacto)
-      .where(isNotNull(contacto.cargoCategoria))
+      .innerJoin(empresa, eq(empresa.idEmpresa, contacto.idEmpresa))
+      .where(and(isNotNull(contacto.cargoCategoria), eq(empresa.organizacionActivaId, idOrganizacion)))
       .orderBy(contacto.cargoCategoria)
       .all();
     return filas.map((f) => String(f.v));
@@ -1286,7 +1296,12 @@ export function valoresDistintosCampo(campo: CampoSegmento): string[] {
   if (numerico) {
     throw new Error(`el campo '${campo}' es numerico: se filtra por rango, no por lista de valores`);
   }
-  const filas = db.selectDistinct({ v: col }).from(empresa).where(isNotNull(col)).orderBy(col).all();
+  const filas = db
+    .selectDistinct({ v: col })
+    .from(empresa)
+    .where(and(isNotNull(col), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .orderBy(col)
+    .all();
   return filas.map((f) => String(f.v));
 }
 
@@ -1322,8 +1337,8 @@ function _contactosDe(idsEmpresa: string[]): Map<string, { email: string | null;
 // Parte 5 campanas: trae las empresas del segmento con su readiness de canal segun la
 // cadencia (canalesRequeridos) y la regla de faltante. La query es solo lectura; el
 // calculo (canalesDisponibles/readinessEmpresa) vive en core, puro y testeado aparte.
-export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): FilaReadiness[] {
-  const empresas = empresasDeSegmento(def);
+export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante, idOrganizacion: number): FilaReadiness[] {
+  const empresas = empresasDeSegmento(def, idOrganizacion);
   const contactosPorEmpresa = _contactosDe(empresas.map((e) => e.id));
   return empresas.map((e) => {
     const contactos = contactosPorEmpresa.get(e.id) ?? [];
@@ -1340,8 +1355,8 @@ export function empresasConReadiness(def: DefinicionSegmento, canalesRequeridos:
   });
 }
 
-export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante): ConteosReadiness {
-  const filas = empresasConReadiness(def, canalesRequeridos, regla);
+export function conteosReadiness(def: DefinicionSegmento, canalesRequeridos: Canal[], regla: ReglaFaltante, idOrganizacion: number): ConteosReadiness {
+  const filas = empresasConReadiness(def, canalesRequeridos, regla, idOrganizacion);
   return {
     total: filas.length,
     listas: filas.filter((f) => f.readiness.estado === 'lista').length,
@@ -1532,34 +1547,72 @@ export function actualizarCampanaBasico(idCampana: number, cambios: { nombre?: s
 
 // V4.3: corre un segmento YA guardado (lee su definicion de la DB y la ejecuta). Es el
 // puente que V4.5 usa para inscribir "todas las empresas de este segmento".
-export function empresasDeSegmentoGuardado(idSegmento: number) {
-  const fila = db.select({ definicion: segmento.definicion }).from(segmento).where(eq(segmento.idSegmento, idSegmento)).get();
+export function empresasDeSegmentoGuardado(idSegmento: number, idOrganizacion: number) {
+  const fila = db
+    .select({ definicion: segmento.definicion })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
   if (!fila) return null;
   const def = definicionSegmentoSchema.parse(JSON.parse(fila.definicion));
-  return empresasDeSegmento(def);
+  return empresasDeSegmento(def, idOrganizacion);
 }
 
 // Parte 2 campanas: excluir/incluir es un toggle idempotente sobre la fila unica
 // (id_segmento, id_empresa). Excluir dos veces no duplica (ON CONFLICT DO NOTHING);
 // incluir de vuelta borra la fila si existe (no truena si ya estaba incluida).
-export function excluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+export function excluirDeSegmento(idSegmento: number, idEmpresa: string, idOrganizacion: number): void {
+  // Multi-organizacion (Parte 2): guard silencioso, misma logica que actualizarSegmento --
+  // segmento_exclusion no tiene columna propia de organizacion (hereda por join a segmento),
+  // asi que se valida la propiedad del segmento antes de escribir.
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return;
   db.insert(segmentoExclusion)
     .values({ idSegmento, idEmpresa, createdAt: new Date().toISOString() })
     .onConflictDoNothing()
     .run();
 }
 
-export function incluirDeSegmento(idSegmento: number, idEmpresa: string): void {
+export function incluirDeSegmento(idSegmento: number, idEmpresa: string, idOrganizacion: number): void {
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return;
   db.delete(segmentoExclusion)
     .where(and(eq(segmentoExclusion.idSegmento, idSegmento), eq(segmentoExclusion.idEmpresa, idEmpresa)))
     .run();
 }
 
+// Parte 2 campanas: solo los ids ya excluidos de un segmento, sin re-correr la query
+// del segmento entero (empresasParaRevision hace eso). La tabla del wizard ya tiene
+// las filas del preview; solo necesita saber cuales pintar destildadas. Mismo guard
+// silencioso por organizacion: si el segmento no es tuyo, set vacio.
+export function idsExcluidosDeSegmento(idSegmento: number, idOrganizacion: number): string[] {
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return [];
+  return db
+    .select({ idEmpresa: segmentoExclusion.idEmpresa })
+    .from(segmentoExclusion)
+    .where(eq(segmentoExclusion.idSegmento, idSegmento))
+    .all()
+    .map((f) => f.idEmpresa);
+}
+
 // Parte 2 campanas: la pantalla de revision necesita TODAS las empresas del segmento,
 // cada una marcada si ya esta excluida (para pintar el toggle en su estado real). No
 // filtra las excluidas: las deja ver para poder des-excluirlas antes de "continuar".
-export function empresasParaRevision(idSegmento: number) {
-  const empresas = empresasDeSegmentoGuardado(idSegmento);
+export function empresasParaRevision(idSegmento: number, idOrganizacion: number) {
+  const empresas = empresasDeSegmentoGuardado(idSegmento, idOrganizacion);
   if (!empresas) return null;
   const excluidas = new Set(
     db
@@ -1731,7 +1784,7 @@ export type ResultadoInscripcion = {
 //   - elige destinatario default (B1.b); sin email la inscripcion nace bloqueada
 // Todo en UNA transaccion: cerrar la anterior y abrir la nueva ocurren juntos, asi el
 // indice unico parcial nunca ve dos activas de la misma empresa a la vez.
-export function inscribirCampana(idCampana: number): ResultadoInscripcion {
+export function inscribirCampana(idCampana: number, idOrganizacion: number): ResultadoInscripcion {
   const camp = db
     .select({
       idSegmento: campana.idSegmento,
@@ -1748,7 +1801,7 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
   // Parte 3 campanas: el set curado en la revision (Parte 2) es la fuente real de
   // a quien inscribir, no el segmento crudo. empresasParaRevision ya trae el flag
   // excluida por empresa; ese "esta no va" nunca llega a inscripcion.
-  const paraRevision = empresasParaRevision(camp.idSegmento);
+  const paraRevision = empresasParaRevision(camp.idSegmento, idOrganizacion);
   if (!paraRevision) throw new Error(`segmento ${camp.idSegmento} de la campana no existe`);
   const empresas = paraRevision.filter((e) => !e.excluida);
 
@@ -2011,7 +2064,7 @@ export type FilaPreviewInscripcion = {
 // que inscribirCampana usaria (segmento menos exclusiones de Parte 2) pero SIN
 // escribir nada. inscribirCampana vuelve a llamar previsualizarInscripcion antes de
 // persistir (checkpoint 6.1) -- esta funcion es solo para mostrar en pantalla.
-export function previsualizarInscripcionCampana(idCampana: number): FilaPreviewInscripcion[] | null {
+export function previsualizarInscripcionCampana(idCampana: number, idOrganizacion: number): FilaPreviewInscripcion[] | null {
   const camp = db
     .select({ idSegmento: campana.idSegmento, idCadencia: campana.idCadencia, reglaFaltante: campana.reglaFaltante })
     .from(campana)
@@ -2019,7 +2072,7 @@ export function previsualizarInscripcionCampana(idCampana: number): FilaPreviewI
     .get();
   if (!camp) return null;
 
-  const paraRevision = empresasParaRevision(camp.idSegmento);
+  const paraRevision = empresasParaRevision(camp.idSegmento, idOrganizacion);
   if (!paraRevision) return null;
   const empresas = paraRevision.filter((e) => !e.excluida);
   if (empresas.length === 0) return [];
@@ -2117,8 +2170,8 @@ export type DestinatarioMuestra = {
   email: string | null;
 };
 
-export function muestraDestinatarioDeSegmento(idSegmento: number): DestinatarioMuestra | null {
-  const empresas = empresasParaRevision(idSegmento);
+export function muestraDestinatarioDeSegmento(idSegmento: number, idOrganizacion: number): DestinatarioMuestra | null {
+  const empresas = empresasParaRevision(idSegmento, idOrganizacion);
   if (!empresas) return null;
   const activas = empresas.filter((e) => !e.excluida);
   if (activas.length === 0) return null;
@@ -2302,7 +2355,7 @@ export type CampanaParaLanzar = {
   totalBloqueadas: number;
 };
 
-export function campanaParaLanzar(idCampana: number): CampanaParaLanzar | null {
+export function campanaParaLanzar(idCampana: number, idOrganizacion: number): CampanaParaLanzar | null {
   const camp = db
     .select({
       idCampana: campana.idCampana,
@@ -2319,7 +2372,7 @@ export function campanaParaLanzar(idCampana: number): CampanaParaLanzar | null {
     .get();
   if (!camp) return null;
 
-  const filas = previsualizarInscripcionCampana(idCampana) ?? [];
+  const filas = previsualizarInscripcionCampana(idCampana, idOrganizacion) ?? [];
   const totalElegibles = filas.filter((f) => f.idContacto != null).length;
   const totalBloqueadas = filas.filter((f) => f.idContacto == null).length;
 
@@ -2689,17 +2742,60 @@ export function crearPasoInscripcionPendiente(input: {
   return Number(resultado.lastInsertRowid);
 }
 
+// Tarea B2 (plan-prueba-real-multicanal.md): whatsapp no tiene concepto de "secuencia
+// externa por campana" como Apollo -- Evolution manda por LINEA (una instalacion,
+// compartida entre campanas). Primera fila con estado='activa'; null si ninguna linea
+// esta lista para mandar (el push de whatsapp se salta entero, ver pasoInscripcionesPendientes).
+export function lineaWhatsappActiva(): { referenciaProveedor: string } | null {
+  const fila = db
+    .select({ referenciaProveedor: lineaWhatsapp.referenciaProveedor })
+    .from(lineaWhatsapp)
+    .where(eq(lineaWhatsapp.estado, 'activa'))
+    .get();
+  if (!fila || !fila.referenciaProveedor) return null;
+  return { referenciaProveedor: fila.referenciaProveedor };
+}
+
 // Filas listas para push: pendiente o fallo (con backoff cumplido), por debajo de
-// MAX_INTENTOS, y solo de campanas que ya tienen secuencia externa creada (una
-// campana sin proveedor_campana_id no tiene a donde empujar; se salta en vez de
+// MAX_INTENTOS. Para correo, solo de campanas que ya tienen secuencia externa creada
+// (una campana sin proveedor_campana_id no tiene a donde empujar; se salta en vez de
 // gastar un intento fallido en ella).
 //
 // Sesion 2026-07-09 (registro de proveedor por canal, app/adapters/registro-envio.ts):
 // gana el parametro `canal` -- el worker la llama UNA VEZ POR CADA canal que si tiene
-// proveedor automatico registrado (hoy solo 'correo'), nunca para todos los canales
-// mezclados. Asi push.ts sigue sin saber que existe "canal" como concepto de ruteo: solo
-// procesa la lista que le dan contra el adaptador que le dan, una vez por canal.
+// proveedor automatico registrado, nunca para todos los canales mezclados. Asi push.ts
+// sigue sin saber que existe "canal" como concepto de ruteo: solo procesa la lista que
+// le dan contra el adaptador que le dan, una vez por canal.
+//
+// Tarea B2 (whatsapp automatico): el campo `proveedorCampanaId` de FilaPasoInscripcion
+// es el primer argumento posicional que push.ts le pasa a CanalEntrega.enviarPaso, sin
+// importar el canal -- ahi es donde Evolution espera el NOMBRE DE INSTANCIA, no un id
+// de secuencia de Apollo (ver evolution.ts:79-92, mismo parametro reusado a proposito).
+// Por eso, para whatsapp, se resuelve UNA vez por corrida contra lineaWhatsappActiva()
+// y se reusa para todas las filas -- nunca contra campana.proveedorCampanaId (que
+// whatsapp ni siquiera necesita: no crea secuencia externa por campana). Sin linea
+// activa, no hay a donde mandar: la corrida entera de whatsapp se salta (lista vacia),
+// en vez de dejar que cada fila intente y falle una por una gastando un reintento.
 export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
+  const lineaActiva = canal === 'whatsapp' ? lineaWhatsappActiva() : null;
+  if (canal === 'whatsapp' && !lineaActiva) return [];
+
+  const condiciones = [
+    eq(pasoInscripcion.canal, canal),
+    inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
+    // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
+    // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
+    eq(pasoCadencia.esManual, 0),
+    // Fase 7 (pausar campana): defensa en profundidad -- si un paso ya quedo
+    // pendiente ANTES de pausar, esto evita que igual se empuje al proveedor.
+    eq(campana.estado, 'activa'),
+    sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
+    sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
+  ];
+  // correo: sin secuencia externa (proveedor_campana_id) no hay a donde mandar. whatsapp
+  // no usa esta columna -- el gate de "hay a donde mandar" ya lo resolvio lineaActiva arriba.
+  if (canal !== 'whatsapp') condiciones.push(isNotNull(campana.proveedorCampanaId));
+
   const filas = db
     .select({
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
@@ -2708,6 +2804,8 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       email: contacto.email,
       telefono: contacto.telefono,
       nombre: contacto.nombre,
+      cargo: contacto.cargo,
+      empresaNombre: empresa.nombreOficial,
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
       proveedorCampanaId: campana.proveedorCampanaId,
@@ -2717,29 +2815,16 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
     .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
     .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
-    .where(
-      and(
-        eq(pasoInscripcion.canal, canal),
-        inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
-        isNotNull(campana.proveedorCampanaId),
-        // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
-        // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
-        eq(pasoCadencia.esManual, 0),
-        // Fase 7 (pausar campana): defensa en profundidad -- si un paso ya quedo
-        // pendiente ANTES de pausar, esto evita que igual se empuje al proveedor.
-        eq(campana.estado, 'activa'),
-        sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
-        sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
-      ),
-    )
+    .where(and(...condiciones))
     .all();
 
   return filas.map((f) => ({
     idPasoInscripcion: f.idPasoInscripcion,
-    proveedorCampanaId: f.proveedorCampanaId as string,
-    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre },
+    proveedorCampanaId: (lineaActiva ? lineaActiva.referenciaProveedor : f.proveedorCampanaId) as string,
+    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
     paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
     intentos: f.intentos,
   }));
@@ -3033,6 +3118,94 @@ export function quedanDestinatariosActivos(idInscripcion: number): boolean {
     .where(and(eq(destinatario.idInscripcion, idInscripcion), eq(destinatario.estado, 'activo')))
     .get();
   return (fila?.c ?? 0) > 0;
+}
+
+// ── WhatsApp entrante (tarea 6): primitivas que consume core/llego-respuesta.ts ──
+// No hay match global por telefono en la DB (el unico match previo, en registrarToque,
+// es exacto y scoped por empresa). Aca traemos TODOS los contactos con telefono + su
+// organizacion activa; el core hace el match por ultimos-10-digitos (decision A) sobre
+// esta lista. Es O(contactos) por mensaje entrante, aceptable para el volumen de
+// respuestas (bajo); si un dia molesta, se prefiltra por sufijo en SQL o se agrega una
+// columna telefono_normalizado indexada (decision C descartada por ahora).
+export function candidatosContactoConTelefono(): (ContactoMatch & { telefono: string | null })[] {
+  return db
+    .select({
+      idContacto: contacto.idContacto,
+      idEmpresa: contacto.idEmpresa,
+      idOrganizacion: empresa.organizacionActivaId,
+      telefono: contacto.telefono,
+    })
+    .from(contacto)
+    .innerJoin(empresa, eq(empresa.idEmpresa, contacto.idEmpresa))
+    .where(isNotNull(contacto.telefono))
+    .all();
+}
+
+// Idempotencia + auditoria del inbound. Search-first sobre mensaje_id (UNIQUE), mismo
+// idioma que guardarEventoTracking: 'duplicado' si el webhook reintenta el mismo mensaje.
+// idContacto es el match ya resuelto (null si el numero es desconocido, igual se guarda).
+export function guardarMensajeEntrante(mensaje: MensajeEntrante, idContacto: number | null): 'insertado' | 'duplicado' {
+  const existente = db
+    .select({ id: mensajeWhatsapp.id })
+    .from(mensajeWhatsapp)
+    .where(eq(mensajeWhatsapp.mensajeId, mensaje.mensajeId))
+    .get();
+  if (existente) return 'duplicado';
+
+  db.insert(mensajeWhatsapp)
+    .values({
+      mensajeId: mensaje.mensajeId,
+      referenciaProveedor: mensaje.referenciaProveedor,
+      telefono: mensaje.telefono,
+      texto: mensaje.texto,
+      idContacto,
+      fecha: mensaje.fecha,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
+  return 'insertado';
+}
+
+// Inscripciones activas de la empresa que hay que cortar cuando llega una respuesta.
+// Una fila por destinatario activo (proveedorCampanaId + email nullable): el core pausa
+// la inscripcion local y, si hay secuencia Apollo + email, la corta tambien alla.
+export function inscripcionesActivasDeEmpresa(idEmpresa: string): InscripcionActiva[] {
+  return db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      proveedorCampanaId: campana.proveedorCampanaId,
+      email: contacto.email,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(destinatario, eq(destinatario.idInscripcion, inscripcion.idInscripcion))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .where(
+      and(
+        eq(inscripcion.idEmpresa, idEmpresa),
+        eq(inscripcion.estado, 'activa'),
+        eq(destinatario.estado, 'activo'),
+      ),
+    )
+    .all();
+}
+
+// Deja el toque entrante en el historial de la empresa (decision C: un reply es un hecho,
+// se persiste directo). fuente 'whatsapp_entrante' lo distingue de un envio de cadencia
+// ('cadencia_manual') o del cockpit ('cockpit'); canal 'whatsapp'; el texto va en quePaso.
+export function registrarToqueEntrante(match: ContactoMatch, texto: string, fecha: string) {
+  db.insert(toque)
+    .values({
+      idEmpresa: match.idEmpresa,
+      idContacto: match.idContacto,
+      fecha,
+      canal: 'whatsapp',
+      quePaso: texto,
+      fuente: 'whatsapp_entrante',
+      idOrganizacion: match.idOrganizacion,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
 }
 
 // ---------------------------------------------------------------------------

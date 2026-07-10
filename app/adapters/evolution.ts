@@ -1,5 +1,6 @@
 import type { CanalEntrega, DestinatarioEnvio, PasoEnvio, EnvioResultado } from '../core/ports/envio';
 import type { ConexionLinea, InicioConexion, EstadoLinea } from '../core/ports/conexion';
+import type { MensajeEntrante } from '../core/llego-respuesta';
 import { leerCredencialConector } from '../db/repository';
 
 // Base local de Fase 0 (planning/plan-whatsapp-adapter.md, ../whatsapp-osserver/README.md):
@@ -148,4 +149,69 @@ export async function iniciarConexionPorQr(referenciaProveedor: string): Promise
   const data = await llamarEvolution<ConectarRespuesta>(`/instance/connect/${referenciaProveedor}`, apiKey);
   if (!data.base64) throw new Error(`Evolution no devolvio QR para ${referenciaProveedor}`);
   return { tipo: 'codigo', formato: 'qr', data: data.base64 };
+}
+
+// ── Entrada: parseo del webhook de Evolution (tarea 5/6, D5) ──────────────────────
+// El parseo vive DENTRO del adaptador (no en la ruta): el route solo autentica y delega,
+// el core recibe un MensajeEntrante ya limpio y no sabe nada de 'messages.upsert' ni de
+// remoteJid. Todo lo de abajo esta modelado contra el payload REAL capturado en vivo en
+// Fase 0 (2026-07-09, webhook.site), no inventado.
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : null;
+}
+function asString(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+
+// El texto segun messageType. 'conversation' CONFIRMADO en vivo (payload real Fase 0).
+// 'extendedTextMessage.text' (un reply citado o con link preview) es la forma documentada
+// de Baileys pero NO capturada en vivo todavia: se soporta para no perder replies reales,
+// dejando la marca de que no esta confirmada con dato propio.
+function extraerTexto(message: Record<string, unknown> | null): string | null {
+  if (!message) return null;
+  const conversation = asString(message.conversation);
+  if (conversation) return conversation;
+  const ext = asRecord(message.extendedTextMessage);
+  return ext ? asString(ext.text) : null;
+}
+
+// Traduce el body crudo del webhook de Evolution a un evento de dominio, o null si no es
+// una respuesta entrante que nos interese (otro evento, algo que mandamos nosotros, o
+// un mensaje sin texto). Nunca tira: entrada no confiable, se descarta en silencio.
+export function parsearMensajeEntrante(payload: unknown): MensajeEntrante | null {
+  const p = asRecord(payload);
+  if (!p) return null;
+  // Solo mensajes nuevos. El mismo webhook tambien empuja 'messages.update' (acuses
+  // DELIVERY_ACK) y 'connection.update' -- se descartan.
+  if (p.event !== 'messages.upsert') return null;
+
+  const data = asRecord(p.data);
+  const key = data ? asRecord(data.key) : null;
+  if (!data || !key) return null;
+  // fromMe:true = lo mande yo (incluido el self-chat) -- no es una respuesta entrante.
+  if (key.fromMe !== false) return null;
+
+  const mensajeId = asString(key.id);
+  const remoteJid = asString(key.remoteJid);
+  if (!mensajeId || !remoteJid) return null;
+
+  const texto = extraerTexto(asRecord(data.message));
+  if (!texto) return null; // v1: solo texto (audio/media/sticker se ignoran)
+
+  // remoteJid: '573022482292@s.whatsapp.net' -> solo digitos '573022482292'.
+  const telefono = remoteJid.split('@')[0].replace(/\D/g, '');
+  if (!telefono) return null;
+
+  // referenciaProveedor = nombre de instancia (p.instance = 'prueba'), lo mismo que
+  // guarda linea_whatsapp.referencia_proveedor y usa enviarPaso. instanceId (UUID) NO
+  // sirve aca porque no es como identificamos la linea del lado nuestro.
+  const referenciaProveedor = asString(p.instance) ?? '';
+
+  // messageTimestamp es unix EN SEGUNDOS (verificado en vivo: 1783648298). Fallback a
+  // date_time (ISO) si no viniera.
+  const ts = data.messageTimestamp;
+  const fecha =
+    typeof ts === 'number' ? new Date(ts * 1000).toISOString() : asString(p.date_time) ?? '';
+
+  return { referenciaProveedor, telefono, texto, mensajeId, fecha };
 }

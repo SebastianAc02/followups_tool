@@ -63,13 +63,13 @@ const idCadencia = crearCadencia({
     { orden: 2, diaOffset: 0, canal: 'llamada', objetivo: 'Tier 1', esManual: true },
   ],
 });
-const idSeg1 = guardarSegmento({ nombre: 'cola-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-1'] }] } });
-const idSeg2 = guardarSegmento({ nombre: 'cola-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-2'] }] } });
+const idSeg1 = guardarSegmento({ nombre: 'cola-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-1'] }] } }, 1);
+const idSeg2 = guardarSegmento({ nombre: 'cola-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-2'] }] } }, 1);
 
 const idCampanaAuto = crearCampana({ nombre: 'Camp auto', idCadencia, idSegmento: idSeg1 }, 1);
-inscribirCampana(idCampanaAuto);
+inscribirCampana(idCampanaAuto, 1);
 const idCampanaManual = crearCampana({ nombre: 'Camp manual', idCadencia, idSegmento: idSeg2 }, 1);
-inscribirCampana(idCampanaManual);
+inscribirCampana(idCampanaManual, 1);
 
 const idInscAuto = historialInscripciones('e-cola-1').find((i) => i.estado === 'activa')!.id;
 const idDestAuto = destinatariosDeInscripcion(idInscAuto)[0].id;
@@ -140,9 +140,9 @@ const idCadenciaCopy = crearCadencia({
     },
   ],
 });
-const idSegCopy = guardarSegmento({ nombre: 'cola-seg-copy', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-3'] }] } });
+const idSegCopy = guardarSegmento({ nombre: 'cola-seg-copy', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-3'] }] } }, 1);
 const idCampanaCopy = crearCampana({ nombre: 'Camp copy', idCadencia: idCadenciaCopy, idSegmento: idSegCopy, modo: 'batch' }, 1);
-inscribirCampana(idCampanaCopy);
+inscribirCampana(idCampanaCopy, 1);
 const idInscCopy = historialInscripciones('e-cola-3').find((i) => i.estado === 'activa')!.id;
 const idDestCopy = destinatariosDeInscripcion(idInscCopy)[0].id;
 const { idPaso: idPasoCopy, idVersion: idVersionCopy } = idsDePaso(idCadenciaCopy, 1);
@@ -173,9 +173,9 @@ const idCadenciaHist = crearCadencia({
     { orden: 3, diaOffset: 7, canal: 'correo', cuerpo: 'p3', esManual: true },
   ],
 });
-const idSegHist = guardarSegmento({ nombre: 'cola-seg-hist', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-4'] }] } });
+const idSegHist = guardarSegmento({ nombre: 'cola-seg-hist', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-4'] }] } }, 1);
 const idCampanaHist = crearCampana({ nombre: 'Camp hist', idCadencia: idCadenciaHist, idSegmento: idSegHist }, 1);
-inscribirCampana(idCampanaHist);
+inscribirCampana(idCampanaHist, 1);
 const idInscHist = historialInscripciones('e-cola-4').find((i) => i.estado === 'activa')!.id;
 const idDestHist = destinatariosDeInscripcion(idInscHist)[0].id;
 const p1 = idsDePaso(idCadenciaHist, 1);

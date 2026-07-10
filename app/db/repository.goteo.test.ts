@@ -43,7 +43,7 @@ function seed() {
 seed();
 
 const idCadencia = crearCadencia({ nombre: 'C', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
-const idSegmento = guardarSegmento({ nombre: 'goteo', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
+const idSegmento = guardarSegmento({ nombre: 'goteo', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
 
 test('goteo programa fechaInscripcion por dia segun el orden del segmento, y la bloqueada no consume cupo', () => {
   // intake 2/dia, ritmo diario, arranca el martes 2026-07-07.
@@ -56,7 +56,7 @@ test('goteo programa fechaInscripcion por dia segun el orden del segmento, y la 
     fechaInicio: MARTES,
   }, 1);
 
-  const res = inscribirCampana(idCampana);
+  const res = inscribirCampana(idCampana, 1);
 
   // e3 (sin canal) queda bloqueada; las otras 4 son elegibles.
   assert.equal(res.bloqueadas, 1);
@@ -79,10 +79,10 @@ test('goteo programa fechaInscripcion por dia segun el orden del segmento, y la 
 });
 
 test('sin intakeDiario, todas las elegibles entran el mismo dia (comportamiento previo preservado)', () => {
-  const idSegmento2 = guardarSegmento({ nombre: 'goteo-sin-intake', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
+  const idSegmento2 = guardarSegmento({ nombre: 'goteo-sin-intake', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp sin intake', idCadencia, idSegmento: idSegmento2, fechaInicio: MARTES }, 1);
 
-  inscribirCampana(idCampana);
+  inscribirCampana(idCampana, 1);
 
   const fecha = (idEmpresa: string) => historialInscripciones(idEmpresa).find((h) => h.idCampana === idCampana)?.fechaInscripcion?.slice(0, 10);
   assert.equal(fecha('e1'), '2026-07-07');
@@ -97,7 +97,7 @@ test('sin intakeDiario, todas las elegibles entran el mismo dia (comportamiento 
 // dependencias (crea crearApolloAdapter() directo) -- ese camino se prueba manualmente
 // contra la cuenta real, no aca.
 test('guardarProveedorCampanaId persiste el id de la secuencia externa y se puede leer de vuelta', () => {
-  const idSegmento3 = guardarSegmento({ nombre: 'goteo-proveedor', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } });
+  const idSegmento3 = guardarSegmento({ nombre: 'goteo-proveedor', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp proveedor', idCadencia, idSegmento: idSegmento3, fechaInicio: MARTES }, 1);
 
   guardarProveedorCampanaId(idCampana, 'apollo-seq-123', 1);
@@ -109,7 +109,7 @@ test('guardarProveedorCampanaId persiste el id de la secuencia externa y se pued
 
   // campanaParaLanzar no expone proveedorCampanaId hoy (no lo necesita la pantalla de
   // Lanzar); se verifica que la campana sigue siendo legible sin romperse tras el UPDATE.
-  const camp = campanaParaLanzar(idCampana);
+  const camp = campanaParaLanzar(idCampana, 1);
   assert.equal(camp?.nombre, 'Camp proveedor');
 });
 

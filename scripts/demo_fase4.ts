@@ -50,13 +50,13 @@ const idSegmento = guardarSegmento({
   nombre: 'on-hold',
   definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
   descripcionNatural: 'los que estan en on-hold',
-});
-const empresas = empresasDeSegmentoGuardado(idSegmento) ?? [];
+}, 1);
+const empresas = empresasDeSegmentoGuardado(idSegmento, 1) ?? [];
 console.log('segmento on-hold id=', idSegmento, '->', empresas.length, 'empresas');
 
 h('3. Crear la campana e inscribir el segmento');
-const idCampana = crearCampana({ nombre: 'On-hold reactivacion', idCadencia, idSegmento });
-const res = inscribirCampana(idCampana);
+const idCampana = crearCampana({ nombre: 'On-hold reactivacion', idCadencia, idSegmento }, 1);
+const res = inscribirCampana(idCampana, 1);
 console.log('inscritas (activas):', res.inscritas);
 console.log('bloqueadas (sin email, cola de revision):', res.bloqueadas);
 console.log('reemplazos:', res.reemplazos, '| saltadas:', res.saltadas);
@@ -64,8 +64,8 @@ console.log('reemplazos:', res.reemplazos, '| saltadas:', res.saltadas);
 h('4. Una activa por empresa: cambio de campana deja historial');
 const conActiva = empresas.find((e) => historialInscripciones(e.id).some((i) => i.estado === 'activa'));
 if (conActiva) {
-  const idCampana2 = crearCampana({ nombre: 'On-hold experimento B', idCadencia, idSegmento });
-  inscribirCampana(idCampana2);
+  const idCampana2 = crearCampana({ nombre: 'On-hold experimento B', idCadencia, idSegmento }, 1);
+  inscribirCampana(idCampana2, 1);
   const h2 = historialInscripciones(conActiva.id);
   console.log('empresa', conActiva.nombre);
   console.log('  activas ahora:', h2.filter((i) => i.estado === 'activa').length, '(debe ser 1)');
