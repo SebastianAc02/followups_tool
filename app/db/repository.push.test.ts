@@ -24,6 +24,8 @@ const {
   marcarPasoInscripcionFallo,
   agregarPasoCadencia,
   lineaWhatsappActiva,
+  datosEnvioPasoManual,
+  registrarPasoEnviadoConToque,
 } = await import('./repository.ts');
 
 function raw() {
@@ -222,6 +224,51 @@ test('pasoInscripcionesPendientes solo trae filas del canal pedido, y whatsapp r
     'instancia-activa',
     'whatsapp usa la referencia de la linea activa, no proveedor_campana_id de Apollo (que esta campana ni siquiera necesita)',
   );
+});
+
+// Sesion 2026-07-10 (revisar-y-mandar de verdad desde el cockpit): la server action
+// necesita, para UN paso, el canal + destinatario (con empresa/cargo para personalizar);
+// y, cuando el adaptador ya mando, marcar enviada con el proveedor REAL + dejar toque.
+// Empresa/cadencia dedicada (paso whatsapp) para no colisionar con el paso 'correo'
+// idempotente que los tests de arriba ya crearon para e-push-1.
+seedEmpresa('e-envio-wa', 'wa@empresa.com', 'envio-wa-cat', 'Gerente Comercial');
+const idCadWa = crearCadencia({ nombre: 'C wa', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', cuerpo: 'Hola [nombre]' }] });
+const idSegWa = guardarSegmento({ nombre: 'envio-wa-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['envio-wa-cat'] }] } }, 1);
+const idCampWa = crearCampana({ nombre: 'Camp wa', idCadencia: idCadWa, idSegmento: idSegWa }, 1);
+fijarProveedorCampanaId(idCampWa, 'seq-wa');
+inscribirCampana(idCampWa, 1);
+const { idPaso: idPasoWa, idVersion: idVersionWa } = idsPasoYVersion(idCadWa);
+
+test('datosEnvioPasoManual trae canal + destinatario completo de un solo paso (sin filtrar por esManual/estado)', () => {
+  const idDestinatario = idDestinatarioDe('e-envio-wa');
+  const id = crearPasoInscripcionPendiente({ idDestinatario, idPaso: idPasoWa, idVersion: idVersionWa, canal: 'whatsapp' });
+
+  const datos = datosEnvioPasoManual(id);
+  assert.ok(datos);
+  assert.strictEqual(datos!.canal, 'whatsapp');
+  assert.strictEqual(datos!.destinatario.email, 'wa@empresa.com');
+  assert.strictEqual(datos!.destinatario.empresa, 'e-envio-wa');
+  assert.strictEqual(datos!.destinatario.cargo, 'Gerente Comercial');
+  assert.strictEqual(datos!.idEmpresa, 'e-envio-wa');
+});
+
+test('registrarPasoEnviadoConToque marca enviada con el proveedor real y deja un toque en el historial', () => {
+  const idDestinatario = idDestinatarioDe('e-envio-wa');
+  const id = crearPasoInscripcionPendiente({ idDestinatario, idPaso: idPasoWa, idVersion: idVersionWa, canal: 'whatsapp' });
+
+  registrarPasoEnviadoConToque(id, 'evolution', 'wamid-real-1', '2026-07-10T15:00:00.000Z', 'Hola Ana, mensaje real');
+
+  const db = raw();
+  const paso = db.prepare('SELECT estado, proveedor, proveedor_mensaje_id FROM paso_inscripcion WHERE id_paso_inscripcion = ?').get(id) as any;
+  const toque = db.prepare("SELECT canal, que_paso, fuente FROM toque WHERE id_empresa = 'e-envio-wa' ORDER BY id_toque DESC").get() as any;
+  db.close();
+
+  assert.strictEqual(paso.estado, 'enviada');
+  assert.strictEqual(paso.proveedor, 'evolution');
+  assert.strictEqual(paso.proveedor_mensaje_id, 'wamid-real-1');
+  assert.strictEqual(toque.canal, 'whatsapp');
+  assert.strictEqual(toque.que_paso, 'Hola Ana, mensaje real');
+  assert.strictEqual(toque.fuente, 'cadencia_manual');
 });
 
 test.after(() => {

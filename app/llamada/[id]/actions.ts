@@ -10,7 +10,11 @@ import {
   escribirTranscriptCompleto,
   escribirTranscriptSoloPuntero,
   marcarPasoInscripcionCompletadaManual,
+  datosEnvioPasoManual,
+  registrarPasoEnviadoConToque,
+  lineaWhatsappActiva,
 } from "../../db/repository";
+import { crearRegistroEnvio } from "../../adapters/registro-envio";
 import { registrarToqueSchema } from "../../db/validation";
 import type { CampoCalificacion } from "../../core/calificacion";
 import { requireSession } from "../../lib/session";
@@ -144,18 +148,43 @@ export async function estructurarDictadoAction(dictado: string): Promise<ToqueEs
   return estructurarToque(dictado, ia);
 }
 
-// Tarea 12 (rediseño UI de toque): EditorCorreo/EditorWhatsapp llaman esto para mandar el
-// paso manual pendiente de HOY. Reusa aprobarDesdeInboxAction (app/por-revisar/actions.ts)
-// tal cual -- misma regla de negocio (idempotente por el WHERE estado='pendiente' en
-// aprobarPasoManual), sin duplicarla. La unica diferencia con el flujo de /por-revisar es
-// A DONDE se navega despues: /por-revisar se queda en su bandeja (revalidatePath), el
-// cockpit de toque redirige a la pantalla de Confirmacion de ESA empresa. Por eso esto no
-// es un simple re-export: envuelve el resultado y decide el redirect aqui.
+// EditorCorreo/EditorWhatsapp llaman esto al darle "Enviar" en el cockpit.
+//
+// Sesion 2026-07-10 (pedido de Sebastian: revisar NO es "yo lo mando a mano"): para
+// WhatsApp, la herramienta lo MANDA de verdad por Evolution con el copy revisado, y
+// marca el paso enviada con el proveedor real + deja el toque. Para correo se mantiene
+// el flujo manual (aprobar): Apollo es basado en PLANTILLAS de secuencia, no manda un
+// cuerpo arbitrario editado a mano -- ese caso se resuelve por la secuencia automatica,
+// no aca. La action wirea el adaptador (el repo/core no lo conoce -- regla de capas).
 export async function enviarToqueCanalAction(
   idEmpresa: string,
   idPasoInscripcion: number,
   cuerpo?: string,
 ): Promise<AprobarDesdeInboxResultado | void> {
+  await requireSession();
+
+  const datos = datosEnvioPasoManual(idPasoInscripcion);
+  if (datos?.canal === "whatsapp") {
+    const linea = lineaWhatsappActiva();
+    if (!linea) return { ok: false, error: "No hay una línea de WhatsApp activa para mandar" };
+    if (!datos.destinatario.telefono) return { ok: false, error: "El contacto no tiene teléfono para WhatsApp" };
+    const adapter = crearRegistroEnvio().whatsapp;
+    try {
+      const resultado = await adapter.enviarPaso(
+        linea.referenciaProveedor,
+        datos.destinatario,
+        { asunto: null, cuerpo: cuerpo ?? "", canal: "whatsapp" },
+      );
+      registrarPasoEnviadoConToque(idPasoInscripcion, resultado.proveedor, resultado.proveedorMensajeId, new Date().toISOString(), cuerpo ?? "");
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "No se pudo mandar el WhatsApp" };
+    }
+    revalidatePath(`/llamada/${idEmpresa}`);
+    redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
+  }
+
+  // Correo (y cualquier otro canal manual): flujo de aprobar (marca enviada + toque),
+  // idempotente por el WHERE estado='pendiente' en aprobarPasoManual.
   const resultado = await aprobarDesdeInboxAction(idPasoInscripcion, cuerpo);
   if (!resultado.ok) return resultado;
   revalidatePath(`/llamada/${idEmpresa}`);

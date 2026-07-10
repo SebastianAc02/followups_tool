@@ -2768,6 +2768,87 @@ export function lineaWhatsappActiva(): { referenciaProveedor: string } | null {
   return { referenciaProveedor: fila.referenciaProveedor };
 }
 
+// Sesion 2026-07-10 (pedido de Sebastian: revisar-y-mandar de verdad): datos de UN
+// paso para que la server action lo mande por su canal (la action wirea el adaptador,
+// el repo/core no lo conoce -- regla de capas). A diferencia de pasoInscripcionesPendientes,
+// NO filtra por esManual/estado: es un envio disparado a mano desde el cockpit, no el
+// barrido automatico del worker.
+export function datosEnvioPasoManual(idPasoInscripcion: number): {
+  canal: string;
+  idEmpresa: string;
+  idContacto: number;
+  destinatario: { email: string | null; telefono: string | null; nombre: string | null; empresa: string | null; cargo: string | null };
+} | null {
+  const f = db
+    .select({
+      canal: pasoInscripcion.canal,
+      email: contacto.email,
+      telefono: contacto.telefono,
+      nombre: contacto.nombre,
+      cargo: contacto.cargo,
+      empresaNombre: empresa.nombreOficial,
+      idEmpresa: empresa.idEmpresa,
+      idContacto: contacto.idContacto,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .get();
+  if (!f) return null;
+  return {
+    canal: f.canal,
+    idEmpresa: f.idEmpresa,
+    idContacto: f.idContacto,
+    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
+  };
+}
+
+// Igual que aprobarPasoManual (marca enviada + deja toque en el historial, idempotente),
+// pero con el proveedor REAL (evolution/apollo) y el id de mensaje que devolvio el
+// adaptador -- porque aca la herramienta SI lo mando de verdad, no fue "ya lo hice".
+export function registrarPasoEnviadoConToque(
+  idPasoInscripcion: number,
+  proveedor: string,
+  proveedorMensajeId: string,
+  fechaEnviada: string,
+  cuerpoFinal: string,
+) {
+  const fila = db
+    .select({ canal: pasoInscripcion.canal, idContacto: destinatario.idContacto, idEmpresa: inscripcion.idEmpresa })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .get();
+  if (!fila) throw new Error(`paso_inscripcion ${idPasoInscripcion} no existe`);
+
+  db.transaction((tx) => {
+    // Idempotente igual que aprobarPasoManual: solo si sigue pendiente/fallo (no re-marca
+    // ni duplica el toque si un doble-click lo dispara dos veces).
+    const res = tx
+      .update(pasoInscripcion)
+      .set({ estado: 'enviada', proveedor, proveedorMensajeId, fechaEnviada })
+      .where(and(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion), inArray(pasoInscripcion.estado, ['pendiente', 'fallo'])))
+      .run();
+    if (res.changes === 0) return;
+    tx.insert(toque)
+      .values({
+        idEmpresa: fila.idEmpresa,
+        idContacto: fila.idContacto,
+        fecha: fechaEnviada,
+        canal: fila.canal,
+        quePaso: cuerpoFinal,
+        fuente: 'cadencia_manual',
+        idOrganizacion: 1,
+        createdAt: fechaEnviada,
+      })
+      .run();
+  });
+}
+
 // Filas listas para push: pendiente o fallo (con backoff cumplido), por debajo de
 // MAX_INTENTOS. Para correo, solo de campanas que ya tienen secuencia externa creada
 // (una campana sin proveedor_campana_id no tiene a donde empujar; se salta en vez de
