@@ -16,6 +16,7 @@ import {
 import { requireSession } from '../../../lib/session';
 import { calcularGoteo, type ResultadoGoteo } from '../../../core/goteo';
 import { crearRegistroEnvio } from '../../../adapters/registro-envio';
+import { materializarYEmpujarAhora } from '../../../worker/index';
 
 // Fase 8 (Lanzar), Task 8.4: recalcula la barra "asi se distribuye" con los valores QUE
 // EL USUARIO TIENE EN PANTALLA, sin guardar nada todavia -- mismo patron que
@@ -110,6 +111,19 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
       }
     } catch (e) {
       avisoSecuenciaExterna = `la campaña se lanzó pero no se pudo crear/sincronizar la secuencia en Apollo: ${
+        e instanceof Error ? e.message : String(e)
+      }`;
+    }
+
+    // Sesion 2026-07-10: sin esto, el paso del dia 0 espera hasta 5 minutos (el
+    // intervalo del worker) para materializarse y llegarle de verdad a Apollo/
+    // Evolution -- confunde pensar "ya lance, deberia estar mandado" cuando nadie lo
+    // ha empujado todavia. Mismo aislamiento que el bloque de Apollo arriba: si falla,
+    // no revierte el lanzamiento (el proximo ciclo del worker lo reintenta solo).
+    try {
+      await materializarYEmpujarAhora();
+    } catch (e) {
+      avisoSecuenciaExterna = `${avisoSecuenciaExterna ? avisoSecuenciaExterna + ' ' : ''}no se pudo materializar/empujar el primer paso de una vez: ${
         e instanceof Error ? e.message : String(e)
       }`;
     }

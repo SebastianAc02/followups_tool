@@ -99,6 +99,21 @@ async function tareaTracking(envioCorreo: ReturnType<typeof crearRegistroEnvio>[
   );
 }
 
+// Sesion 2026-07-10 (prueba multicanal real): lanzar una campana no debia dejar al
+// que la lanza esperando hasta 5 minutos (el intervalo del worker) a que el paso del
+// dia 0 llegue de verdad a Apollo/Evolution -- confunde pensar "ya le di a lanzar,
+// deberia estar mandado" cuando en realidad nadie ha materializado/empujado nada
+// todavia. lanzarCampanaAction llama esto UNA vez, justo despues de inscribir,
+// reusando el mismo codigo que corre el ciclo periodico (materializar + push por
+// canal) en vez de duplicarlo -- disparado ahora, no en el proximo intervalo.
+export async function materializarYEmpujarAhora(): Promise<void> {
+  await tareaMaterializar();
+  const registro = crearRegistroEntrega();
+  for (const canal of Object.keys(registro) as Canal[]) {
+    await tareaPush(canal, registro[canal]);
+  }
+}
+
 // Heartbeat por canal: hoy solo 'correo' tiene proveedor real (Apollo, mismo id que
 // app/conectores/catalogo.ts para que la pantalla /conectores muestre el estado
 // correcto). Un canal nuevo sin entrada aca cae al nombre del canal como heartbeat --
@@ -126,8 +141,6 @@ function construirTareas(): Tarea[] {
   ];
 }
 
-const TAREAS: Tarea[] = construirTareas();
-
 // Aislado a proposito: si una tarea truena, se loguea en su propio heartbeat y el
 // ciclo sigue con las demas. Con una sola tarea hoy el efecto es chico, pero define
 // el patron para cuando cadencias/tracking (fases 4 y 5) se sumen al mismo `for`: un
@@ -145,9 +158,13 @@ export async function ejecutarCiclo(tareas: Tarea[]): Promise<void> {
 }
 
 async function main() {
-  await ejecutarCiclo(TAREAS);
+  // Sesion 2026-07-10: construir aca adentro (no a nivel de modulo) para que
+  // importar este archivo por materializarYEmpujarAhora (lanzarCampanaAction) no
+  // arme adaptadores reales de Apollo/Evolution como efecto secundario del import.
+  const tareas = construirTareas();
+  await ejecutarCiclo(tareas);
   const otra = () => {
-    ejecutarCiclo(TAREAS).finally(() => setTimeout(otra, INTERVALO_MS));
+    ejecutarCiclo(tareas).finally(() => setTimeout(otra, INTERVALO_MS));
   };
   setTimeout(otra, INTERVALO_MS);
 }
