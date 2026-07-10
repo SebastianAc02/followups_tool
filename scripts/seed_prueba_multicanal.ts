@@ -63,7 +63,7 @@ function main() {
         `INSERT INTO empresa (
            id_empresa, tipo_id, nombre_oficial, nombre_normalizado, ciudad_principal,
            estado_comercial, estado_notion, categoria, organizacion_activa_id, created_at, updated_at
-         ) VALUES (?, 'nit', ?, ?, ?, 'activo', 'on_hold', 'agencia_viajes', ?, ?, ?)`,
+         ) VALUES (?, 'nit', ?, ?, ?, 'lead', 'on_hold', 'agencia_viajes', ?, ?, ?)`,
       ).run(e.id, e.nombre, e.nombre.toLowerCase(), e.ciudad, ID_ORGANIZACION, ahora, ahora);
 
       db.prepare('INSERT INTO empresa_usuarios (id_empresa, usuarios_estimados) VALUES (?, ?)').run(e.id, e.usuarios);
