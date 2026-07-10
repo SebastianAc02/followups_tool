@@ -32,11 +32,17 @@ raw.exec(`
     ('e3','llamada','contesto_reunion','2026-01-14T16:00:00.000Z'),
     ('e3','llamada','no_contesto','June 25, 2026'),
     ('e4','llamada','no_contesto','2026-01-20T09:00:00.000Z');
-  INSERT INTO cadencia (id_cadencia, nombre) VALUES (1,'Outbound T1'), (2,'On-hold');
-  INSERT INTO campana (id_campana, nombre, id_cadencia, estado) VALUES (10,'T1 Q1',1,'borrador'), (20,'Reactivacion',2,'borrador');
+  INSERT INTO cadencia (id_cadencia, nombre) VALUES (1,'Outbound T1'), (2,'On-hold'), (3,'Cancelada');
+  INSERT INTO campana (id_campana, nombre, id_cadencia, estado) VALUES
+    (10,'T1 Q1',1,'activa'), (20,'Reactivacion',2,'activa'),
+    (30,'Campana cancelada',3,'finalizada');
   INSERT INTO inscripcion (id_campana, id_empresa, estado) VALUES
     (10,'e1','activa'), (10,'e2','activa'), (10,'e3','bloqueada'),
-    (20,'e4','activa'), (20,'e5','finalizada');
+    (20,'e4','activa'), (20,'e5','finalizada'),
+    -- Sesion 2026-07-10 (huerfano real, cancelarCampanaAction nunca cascadea a
+    -- inscripciones): e6 quedo 'activa' aunque su campana (30) ya esta 'finalizada'.
+    -- campanasActivas/inscripcionesActivas/empresasPorCadencia deben ignorarla.
+    (30,'e6','activa');
 `);
 raw.close();
 
@@ -73,19 +79,23 @@ test('toquesPorResultado agrupa por resultado dentro del rango', () => {
   assert.equal(m.no_contesto, 1);
 });
 
-test('campanasActivas cuenta campanas con al menos una inscripcion activa', () => {
-  // campana 10 (e1,e2 activas) y 20 (e4 activa) -> 2.
+test('campanasActivas cuenta campanas ACTIVAS con al menos una inscripcion activa (ignora huerfanos de campanas canceladas)', () => {
+  // campana 10 (e1,e2 activas) y 20 (e4 activa) -> 2. campana 30 esta 'finalizada':
+  // aunque e6 sigue 'activa' (huerfano real, cancelarCampanaAction no cascadea), no
+  // debe contar -- si contara, daria 3.
   assert.equal(repo.campanasActivas(), 2);
 });
 
-test('inscripcionesActivas cuenta solo estado activa', () => {
-  // activas: e1,e2 (camp10), e4 (camp20) = 3. bloqueada y finalizada no cuentan.
+test('inscripcionesActivas cuenta solo activas de campanas que SIGUEN activas', () => {
+  // activas: e1,e2 (camp10), e4 (camp20) = 3. bloqueada/finalizada no cuentan, y e6
+  // tampoco aunque su fila diga 'activa' -- su campana (30) esta finalizada.
   assert.equal(repo.inscripcionesActivas(), 3);
 });
 
-test('empresasPorCadencia agrupa inscripciones activas por nombre de cadencia', () => {
+test('empresasPorCadencia agrupa inscripciones activas por nombre de cadencia (ignora huerfanos de campanas canceladas)', () => {
   const filas = repo.empresasPorCadencia();
   const porNombre = Object.fromEntries(filas.map((f) => [f.cadencia, f.empresas]));
   assert.equal(porNombre['Outbound T1'], 2); // e1, e2 (e3 bloqueada no cuenta)
   assert.equal(porNombre['On-hold'], 1);      // e4 (e5 finalizada no cuenta)
+  assert.equal(porNombre['Cancelada'], undefined); // e6 es huerfano de una campana finalizada, no debe aparecer
 });

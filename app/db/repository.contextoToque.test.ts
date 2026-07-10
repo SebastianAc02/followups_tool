@@ -69,7 +69,7 @@ test('getContextoToque trae los pasos de la secuencia cuando hay inscripcion act
     .prepare(`INSERT INTO segmento (nombre, definicion) VALUES ('Seg', '{}')`)
     .run().lastInsertRowid as number;
   const idCampana = db
-    .prepare(`INSERT INTO campana (nombre, id_cadencia, id_segmento) VALUES ('Camp', ?, ?)`)
+    .prepare(`INSERT INTO campana (nombre, id_cadencia, id_segmento, estado) VALUES ('Camp', ?, ?, 'activa')`)
     .run(idCadencia, idSegmento).lastInsertRowid as number;
 
   const idInscripcion = db
@@ -97,6 +97,40 @@ test('getContextoToque trae los pasos de la secuencia cuando hay inscripcion act
   assert.equal(ctx.secuencia[2].estado, 'hecho');
   assert.equal(ctx.secuencia[3].estado, 'activo'); // el pendiente de hoy
   assert.equal(ctx.objetivo, 'Sacar reunion');
+});
+
+// Descubierto en vivo el 2026-07-10 (prueba multicanal real): cancelarCampanaAction
+// finaliza la campana pero NUNCA toca las inscripciones que quedaron 'activa' debajo
+// -- quedan huerfanas. getContextoToque confiaba solo en inscripcion.estado='activa'
+// sin confirmar que la campana siga viva, asi que /llamada/[id] le mostraria a quien
+// va a llamar la secuencia de una campana YA CANCELADA como si siguiera vigente.
+test('getContextoToque ignora una inscripcion activa huerfana de una campana ya finalizada (riel degradado, no datos viejos)', () => {
+  const db = raw();
+  db.prepare(
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial)
+     VALUES ('EMP_HUERFANA', 'nit', 'Huerfananet', 'huerfananet', 'activo')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO contacto (id_empresa, nombre, cargo, telefono, email, es_principal, fuente)
+     VALUES ('EMP_HUERFANA', 'Lucia', 'CEO', '3005554444', 'lucia@huerfananet.com', 1, 'seed')`,
+  ).run();
+
+  const idCadencia = db.prepare(`INSERT INTO cadencia (nombre, activa) VALUES ('Cadencia cancelada', 1)`).run().lastInsertRowid as number;
+  db.prepare(`INSERT INTO paso_cadencia (id_cadencia, orden, dia_offset, canal, objetivo) VALUES (?, 1, 0, 'correo', 'Presentacion')`).run(idCadencia);
+  const idSegmento = db.prepare(`INSERT INTO segmento (nombre, definicion) VALUES ('Seg huerfana', '{}')`).run().lastInsertRowid as number;
+  // La campana quedo 'finalizada' (cancelada) -- pero la inscripcion, por el bug real,
+  // se quedo en 'activa'.
+  const idCampana = db
+    .prepare(`INSERT INTO campana (nombre, id_cadencia, id_segmento, estado) VALUES ('Camp cancelada', ?, ?, 'finalizada')`)
+    .run(idCadencia, idSegmento).lastInsertRowid as number;
+  db.prepare(
+    `INSERT INTO inscripcion (id_campana, id_empresa, estado, fecha_inscripcion) VALUES (?, 'EMP_HUERFANA', 'activa', datetime('now'))`,
+  ).run(idCampana);
+  db.close();
+
+  const ctx = getContextoToque('EMP_HUERFANA', 1);
+  assert.deepEqual(ctx.secuencia, []); // riel degradado: no se inventa una secuencia de una campana muerta
+  assert.equal(ctx.objetivo, null);
 });
 
 test('getContextoToque solo trae toques de la organizacion que consulta, aunque el lead sea compartido', () => {

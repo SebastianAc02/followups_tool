@@ -3249,14 +3249,26 @@ export function toquesPorResultado(desde: string, hasta: string): Record<Resulta
   return out;
 }
 
+// Sesion 2026-07-10: cancelarCampanaAction finaliza la campana pero no cascadea a las
+// inscripciones que quedaron 'activa' debajo (huerfano real, encontrado en vivo con
+// la prueba multicanal). Las 3 funciones de abajo confiaban solo en
+// inscripcion.estado -- ahora exigen tambien que la campana siga 'activa', si no un
+// huerfano de una campana cancelada infla estos conteos/reportes.
 export function campanasActivas(): number {
   const r = db.select({ n: sql<number>`count(distinct ${inscripcion.idCampana})` })
-    .from(inscripcion).where(eq(inscripcion.estado, 'activa')).get();
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(inscripcion.estado, 'activa'), eq(campana.estado, 'activa')))
+    .get();
   return r?.n ?? 0;
 }
 
 export function inscripcionesActivas(): number {
-  const r = db.select({ n: sql<number>`count(*)` }).from(inscripcion).where(eq(inscripcion.estado, 'activa')).get();
+  const r = db.select({ n: sql<number>`count(*)` })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(inscripcion.estado, 'activa'), eq(campana.estado, 'activa')))
+    .get();
   return r?.n ?? 0;
 }
 
@@ -3265,7 +3277,7 @@ export function empresasPorCadencia(): { cadencia: string; empresas: number }[] 
     .from(inscripcion)
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
     .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
-    .where(eq(inscripcion.estado, 'activa'))
+    .where(and(eq(inscripcion.estado, 'activa'), eq(campana.estado, 'activa')))
     .groupBy(cadencia.nombre)
     .all();
 }
@@ -3313,7 +3325,11 @@ export function getContextoToque(id: string, idOrganizacion: number): ContextoTo
     .select({ idInscripcion: inscripcion.idInscripcion, idCadencia: campana.idCadencia })
     .from(inscripcion)
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
-    .where(and(eq(inscripcion.idEmpresa, id), eq(inscripcion.estado, 'activa')))
+    // Sesion 2026-07-10: cancelarCampanaAction finaliza la campana pero no cascadea a
+    // las inscripciones que quedaron 'activa' debajo (huerfano real, encontrado en
+    // vivo). Sin el filtro de campana.estado, /llamada/[id] mostraria la secuencia de
+    // una campana YA CANCELADA como si siguiera vigente.
+    .where(and(eq(inscripcion.idEmpresa, id), eq(inscripcion.estado, 'activa'), eq(campana.estado, 'activa')))
     .get();
 
   if (!inscripcionActiva) {
