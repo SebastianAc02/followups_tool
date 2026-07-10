@@ -189,15 +189,31 @@ test('archivarCampana llama el endpoint de archive de la secuencia', async (t) =
   assert.strictEqual(pathLlamado, '/emailer_campaigns/seq-1/archive');
 });
 
-test('aprobarSecuencia llama el endpoint de approve de la secuencia (dispara el envio real)', async (t) => {
-  let pathLlamado = '';
-  let metodoLlamado = '';
+// Descubierto en vivo el 2026-07-10 (prueba multicanal, campana real "quedo en
+// Inactive"): aprobar la SECUENCIA (active:true) NO aprueba los TOUCHES (los
+// templates/pasos individuales) -- cada uno nace con status 'to_be_reviewed' y
+// Apollo no manda nada mientras siga asi, sin importar que la secuencia este
+// activa. Hace falta un POST /emailer_touches/{id}/approve POR CADA touch, aparte
+// del approve de la secuencia. Se descubre listando primero los steps de la
+// secuencia (GET /emailer_campaigns/{id}) y despues los touches de cada step
+// (GET /emailer_touches?emailer_step_id=...) -- ninguno de los dos anida los ids
+// que el otro necesita.
+test('aprobarSecuencia aprueba CADA touch de CADA step antes de aprobar la secuencia (si no, Apollo la deja en revision y no manda)', async (t) => {
+  const llamadas: { path: string; metodo: string }[] = [];
   t.mock.method(
     globalThis,
     'fetch',
     fetchFalso((path, opts) => {
-      pathLlamado = path;
-      metodoLlamado = opts?.method ?? '';
+      llamadas.push({ path, metodo: opts?.method ?? 'GET' });
+      if (path === '/emailer_campaigns/seq-1') {
+        return { status: 200, body: { emailer_campaign: { id: 'seq-1', emailer_steps: [{ id: 'step-1' }, { id: 'step-2' }] } } };
+      }
+      if (path === '/emailer_touches?emailer_step_id=step-1') {
+        return { status: 200, body: { emailer_touches: [{ id: 'touch-1a' }] } };
+      }
+      if (path === '/emailer_touches?emailer_step_id=step-2') {
+        return { status: 200, body: { emailer_touches: [{ id: 'touch-2a' }, { id: 'touch-2b' }] } };
+      }
       return { status: 200, body: {} };
     }),
   );
@@ -205,8 +221,15 @@ test('aprobarSecuencia llama el endpoint de approve de la secuencia (dispara el 
   const adapter = crearApolloAdapter();
   await adapter.aprobarSecuencia('seq-1');
 
-  assert.strictEqual(pathLlamado, '/emailer_campaigns/seq-1/approve');
-  assert.strictEqual(metodoLlamado, 'POST');
+  const aprobados = llamadas.filter((l) => l.metodo === 'POST').map((l) => l.path);
+  assert.deepEqual(new Set(aprobados), new Set(['/emailer_touches/touch-1a/approve', '/emailer_touches/touch-2a/approve', '/emailer_touches/touch-2b/approve', '/emailer_campaigns/seq-1/approve']));
+
+  // La secuencia se aprueba DESPUES de los touches (si Apollo la activa antes de que
+  // los touches esten listos, el orden no importaria para el resultado final, pero
+  // aprobar-touches-primero es el orden mas seguro si algun dia Apollo empieza a
+  // mandar apenas la secuencia queda activa).
+  const idxSecuencia = aprobados.indexOf('/emailer_campaigns/seq-1/approve');
+  assert.strictEqual(idxSecuencia, aprobados.length - 1);
 });
 
 test('leerEventosNuevos mapea emailer_messages a eventos con id compuesto mensaje:tipo (campos reales verificados en vivo)', async (t) => {

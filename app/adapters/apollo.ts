@@ -348,9 +348,32 @@ export function crearApolloAdapter(): EnvioAdapter {
 
     async aprobarSecuencia(proveedorCampanaId: string) {
       const apiKey = credencial();
-      // approve es lo que dispara el envio real (verificado contra la doc oficial de
-      // Apollo, ver scripts/apollo_probe_envio.py). Sin esto la secuencia queda creada
-      // e inscrita pero Apollo nunca manda el correo.
+      // Descubierto en vivo (2026-07-10, prueba multicanal real): aprobar la secuencia
+      // (active:true) NO aprueba los touches (cada paso/template nace 'to_be_reviewed'
+      // y Apollo no manda nada mientras siga asi). Hay que aprobar CADA touch de CADA
+      // step aparte -- ninguna llamada existente devuelve ambos ids juntos, toca
+      // listarlos: GET /emailer_campaigns/{id} trae los steps, GET /emailer_touches
+      // ?emailer_step_id=... trae los touches de cada uno.
+      const camp = await llamarApollo<{ emailer_campaign?: { emailer_steps?: { id?: string }[] } }>(
+        `/emailer_campaigns/${proveedorCampanaId}`,
+        apiKey,
+      );
+      const stepIds = (camp.emailer_campaign?.emailer_steps ?? []).map((s) => s.id).filter((id): id is string => !!id);
+
+      for (const stepId of stepIds) {
+        const data = await llamarApollo<{ emailer_touches?: { id?: string }[] }>(
+          `/emailer_touches?emailer_step_id=${stepId}`,
+          apiKey,
+        );
+        const touchIds = (data.emailer_touches ?? []).map((t) => t.id).filter((id): id is string => !!id);
+        for (const touchId of touchIds) {
+          await llamarApollo(`/emailer_touches/${touchId}/approve`, apiKey, { method: 'POST' });
+        }
+      }
+
+      // approve de la secuencia AL FINAL: es lo que dispara el envio real (verificado
+      // contra la doc oficial de Apollo, ver scripts/apollo_probe_envio.py). Sin esto
+      // la secuencia queda creada e inscrita pero Apollo nunca manda el correo.
       await llamarApollo(`/emailer_campaigns/${proveedorCampanaId}/approve`, apiKey, { method: 'POST' });
     },
 
