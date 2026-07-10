@@ -71,7 +71,7 @@ const idSegmento = guardarSegmento({ nombre: 'manual-seg', definicion: { condici
 
 const idCampana = crearCampana({ nombre: 'Camp manual', idCadencia, idSegmento });
 fijarProveedorCampanaId(idCampana, 'seq-manual-1');
-inscribirCampana(idCampana);
+inscribirCampana(idCampana, 1);
 
 const idInscripcion = historialInscripciones('e-manual-1').find((i) => i.estado === 'activa')!.id;
 const idDestinatario = destinatariosDeInscripcion(idInscripcion)[0].id;
@@ -147,7 +147,7 @@ const idCadencia2 = crearCadencia({
 });
 const idSegmento2 = guardarSegmento({ nombre: 'manual-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-2'] }] } }, 1);
 const idCampana2 = crearCampana({ nombre: 'Camp manual 2', idCadencia: idCadencia2, idSegmento: idSegmento2 });
-inscribirCampana(idCampana2);
+inscribirCampana(idCampana2, 1);
 const idInscripcion2 = historialInscripciones('e-manual-2').find((i) => i.estado === 'activa')!.id;
 const idDestinatario2 = destinatariosDeInscripcion(idInscripcion2)[0].id;
 const { idPaso: idPaso2b, idVersion: idVersion2b } = idsDePaso(idCadencia2, 1);

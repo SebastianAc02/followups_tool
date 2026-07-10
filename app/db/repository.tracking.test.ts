@@ -68,7 +68,7 @@ const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
 
 const idCampana = crearCampana({ nombre: 'Camp track', idCadencia, idSegmento });
 fijarProveedorCampanaId(idCampana, 'seq-track-1');
-inscribirCampana(idCampana);
+inscribirCampana(idCampana, 1);
 
 const hist = historialInscripciones('e-track-1').find((i) => i.estado === 'activa')!;
 const idInscripcion = hist.id;

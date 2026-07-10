@@ -12,11 +12,11 @@ import type { ReglaFaltante } from '../../../core/canales-empresa';
 export type RecalcularReglaResultado = { ok: true; conteos: ConteosReadiness } | { ok: false; error: string };
 
 export async function recalcularConteosAction(idCampana: number, regla: ReglaFaltante): Promise<RecalcularReglaResultado> {
-  await requireSession();
+  const sesion = await requireSession();
   try {
     const camp = campanaConReglas(idCampana);
     if (!camp) return { ok: false, error: 'La campaña no existe' };
-    const conteos = conteosReadiness(camp.definicionSegmento, camp.canalesRequeridos, regla);
+    const conteos = conteosReadiness(camp.definicionSegmento, camp.canalesRequeridos, regla, sesion.idOrganizacion);
     return { ok: true, conteos };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudieron recalcular los conteos' };

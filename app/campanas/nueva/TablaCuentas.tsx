@@ -1,22 +1,57 @@
 'use client';
 
+import { useEffect, useState, useTransition } from 'react';
 import { cn } from '../../ui/cn';
 import { CanalTag } from '../../ui/CanalTag';
 import { ReadinessBadge } from './ReadinessBadge';
-import type { PreviewConReadiness } from '../actions';
+import { exclusionesDeSegmentoAction, alternarExclusionAction, type PreviewConReadiness } from '../actions';
 
 type Filas = Extract<PreviewConReadiness, { ok: true }>['filas'];
 type Conteos = Extract<PreviewConReadiness, { ok: true }>['conteos'];
 
 const COLS = 'grid grid-cols-[22px_1.6fr_1fr_0.8fr_1.1fr_1.6fr] items-center gap-[10px]';
 
-export function TablaCuentas({ filas, conteos }: { filas: Filas; conteos: Conteos }) {
+// idSegmento null = el segmento todavia no se autoguardo (no hay fila real a la que
+// colgar la exclusion): el checkbox queda deshabilitado con el hint de "guarda primero",
+// igual que antes pero ahora es verdad temporal, no un stub permanente.
+export function TablaCuentas({ filas, conteos, idSegmento }: { filas: Filas; conteos: Conteos; idSegmento: number | null }) {
+  // El servidor es la fuente de verdad del set excluido; se relee cada vez que cambia el
+  // segmento activo. La interaccion es optimista: destildar pinta de una y persiste en
+  // background, revirtiendo solo si el action falla.
+  const [excluidas, setExcluidas] = useState<Set<string>>(new Set());
+  const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (idSegmento == null) {
+      setExcluidas(new Set());
+      return;
+    }
+    let vivo = true;
+    exclusionesDeSegmentoAction(idSegmento).then((ids) => {
+      if (vivo) setExcluidas(new Set(ids));
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [idSegmento]);
+
+  function alternar(idEmpresa: string) {
+    if (idSegmento == null) return;
+    const excluir = !excluidas.has(idEmpresa);
+    setExcluidas((prev) => toggle(prev, idEmpresa, excluir));
+    startTransition(async () => {
+      const res = await alternarExclusionAction(idSegmento, idEmpresa, excluir);
+      if (!res.ok) setExcluidas((prev) => toggle(prev, idEmpresa, !excluir)); // revertir
+    });
+  }
+
   return (
     <div className="flex min-h-0 min-w-0 flex-col border-r border-line">
       <div className="flex shrink-0 items-center gap-4 border-b border-line px-[22px] py-[15px]">
         <span className="serif text-[22px] text-ink">{conteos.total}</span>
         <span className="-ml-3 text-[13px] text-muted">cuentas</span>
         <span className="text-[13px] text-done">{conteos.listas} listas</span>
+        {excluidas.size > 0 && <span className="text-[13px] text-muted">{excluidas.size} excluidas</span>}
         {conteos.sinCanal > 0 && <span className="text-[13px] text-overdue">{conteos.sinCanal} sin canal</span>}
       </div>
 
@@ -35,15 +70,23 @@ export function TablaCuentas({ filas, conteos }: { filas: Filas; conteos: Conteo
             <p className="px-[22px] py-4 text-[13px] text-muted">Ninguna cuenta cumple los filtros todavía.</p>
           ) : (
             filas.map((f) => (
-              <div key={f.id} className={cn(COLS, 'border-t border-line px-[22px] py-[10px] text-[13px]')}>
+              <div
+                key={f.id}
+                className={cn(
+                  COLS,
+                  'border-t border-line px-[22px] py-[10px] text-[13px] transition-opacity',
+                  excluidas.has(f.id) && 'opacity-45',
+                )}
+              >
                 <input
                   type="checkbox"
-                  checked
-                  disabled
+                  checked={!excluidas.has(f.id)}
+                  disabled={idSegmento == null}
+                  onChange={() => alternar(f.id)}
                   style={{ accentColor: 'var(--color-accent)' }}
-                  title="guarda el segmento primero para incluir o excluir cuentas"
+                  title={idSegmento == null ? 'guarda el segmento primero para incluir o excluir cuentas' : 'quitar esta cuenta del segmento'}
                 />
-                <span className="flex items-center gap-2 font-medium text-ink">
+                <span className={cn('flex items-center gap-2 font-medium text-ink', excluidas.has(f.id) && 'line-through')}>
                   {f.nombre}
                   {f.relajada && (
                     <span className="rounded-full bg-accent-soft/20 px-[7px] py-[1px] text-[10px] font-medium text-accent">
@@ -73,4 +116,13 @@ export function TablaCuentas({ filas, conteos }: { filas: Filas; conteos: Conteo
       </div>
     </div>
   );
+}
+
+// Set inmutable: React solo re-renderiza si la referencia cambia, asi que devolvemos
+// una copia en vez de mutar el Set previo.
+function toggle(prev: Set<string>, id: string, presente: boolean): Set<string> {
+  const s = new Set(prev);
+  if (presente) s.add(id);
+  else s.delete(id);
+  return s;
 }

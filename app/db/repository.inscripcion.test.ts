@@ -68,7 +68,7 @@ function contactoEmail(idContacto: number): string | null {
 
 test('inscribir cubre los 4 defaults: 3 activas (KDM/principal/primero) + 1 bloqueada', () => {
   const idCampana = crearCampana({ nombre: 'Camp A', idCadencia, idSegmento });
-  const res = inscribirCampana(idCampana);
+  const res = inscribirCampana(idCampana, 1);
 
   assert.equal(res.inscritas, 3);
   assert.equal(res.bloqueadas, 1);
@@ -97,8 +97,8 @@ test('inscribir cubre los 4 defaults: 3 activas (KDM/principal/primero) + 1 bloq
 
 test('re-correr la misma campana es idempotente: todo saltado, sin duplicar', () => {
   const idCampana = crearCampana({ nombre: 'Camp A2', idCadencia, idSegmento });
-  inscribirCampana(idCampana);
-  const otra = inscribirCampana(idCampana);
+  inscribirCampana(idCampana, 1);
+  const otra = inscribirCampana(idCampana, 1);
   assert.equal(otra.saltadas, 4);
   assert.equal(otra.inscritas, 0);
 });
@@ -106,7 +106,7 @@ test('re-correr la misma campana es idempotente: todo saltado, sin duplicar', ()
 test('cambio de campana: la empresa sale de la anterior con motivo_fin y deja historial', () => {
   // e-kdm ya tiene una activa (Camp A). Nueva campana sobre el mismo segmento.
   const idCampanaB = crearCampana({ nombre: 'Camp B', idCadencia, idSegmento });
-  const res = inscribirCampana(idCampanaB);
+  const res = inscribirCampana(idCampanaB, 1);
   assert.ok(res.reemplazos >= 1, 'al menos las activas previas se reemplazan');
 
   const h = historialInscripciones('e-kdm');
@@ -154,7 +154,7 @@ test('resolver una bloqueada la promueve a activa con su destinatario', () => {
 test('empresa excluida en la revision de leads no se inscribe en una campana nueva', () => {
   excluirDeSegmento(idSegmento, 'e-primero', 1);
   const idCampanaC = crearCampana({ nombre: 'Camp C', idCadencia, idSegmento });
-  const res = inscribirCampana(idCampanaC);
+  const res = inscribirCampana(idCampanaC, 1);
 
   const hPrimero = historialInscripciones('e-primero');
   assert.ok(!hPrimero.some((i) => i.idCampana === idCampanaC), 'e-primero excluida no entra a Camp C');
@@ -170,7 +170,7 @@ test('empresa excluida en la revision de leads no se inscribe en una campana nue
 test('crearCampana nace borrador; inscribirCampana la pasa a activa', () => {
   const idCampanaD = crearCampana({ nombre: 'Camp D', idCadencia, idSegmento });
   assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'borrador');
-  inscribirCampana(idCampanaD);
+  inscribirCampana(idCampanaD, 1);
   assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'activa');
 });
 
@@ -220,7 +220,7 @@ test('eliminarCampanaBorrador borra campana y cadencia si sigue en borrador', ()
 test('eliminarCampanaBorrador rechaza una campana que ya no esta en borrador', () => {
   const idCadenciaG = crearCadencia({ nombre: 'CG', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
   const idCampanaG = crearCampana({ nombre: 'Camp G', idCadencia: idCadenciaG, idSegmento });
-  inscribirCampana(idCampanaG);
+  inscribirCampana(idCampanaG, 1);
   const res = eliminarCampanaBorrador(idCampanaG);
   assert.equal(res.ok, false);
   assert.ok(listarCampanas().find((f) => f.nombre === 'Camp G'));
@@ -235,7 +235,7 @@ test('pausarCampana/reanudarCampana solo se mueven entre activa y pausada', () =
 
   assert.equal(pausarCampana(idCampanaH).ok, false, 'no se puede pausar un borrador');
 
-  inscribirCampana(idCampanaH);
+  inscribirCampana(idCampanaH, 1);
   assert.equal(reanudarCampana(idCampanaH).ok, false, 'no se puede reanudar algo que no esta pausado');
 
   const p = pausarCampana(idCampanaH);
@@ -256,7 +256,7 @@ test('marcarCampanaFinalizada rechaza un borrador y una campana ya finalizada', 
 
   assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'un borrador se elimina, no se cancela');
 
-  inscribirCampana(idCampanaI);
+  inscribirCampana(idCampanaI, 1);
   const primera = marcarCampanaFinalizada(idCampanaI);
   assert.equal(primera.ok, true);
   assert.equal(listarCampanas().find((f) => f.nombre === 'Camp I')!.estado, 'finalizada');

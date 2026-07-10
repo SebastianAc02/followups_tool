@@ -11,9 +11,9 @@ import { requireSession } from '../../../lib/session';
 export type PreviewInscripcionResultado = { ok: true; filas: FilaPreviewInscripcion[] } | { ok: false; error: string };
 
 export async function previsualizarInscripcionAction(idCampana: number): Promise<PreviewInscripcionResultado> {
-  await requireSession();
+  const sesion = await requireSession();
   try {
-    const filas = previsualizarInscripcionCampana(idCampana);
+    const filas = previsualizarInscripcionCampana(idCampana, sesion.idOrganizacion);
     if (filas == null) return { ok: false, error: 'La campaña no existe' };
     return { ok: true, filas };
   } catch (e) {

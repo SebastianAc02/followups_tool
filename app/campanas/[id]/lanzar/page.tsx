@@ -17,12 +17,12 @@ import { LanzarCockpit } from './LanzarCockpit';
 // Header: sigue la secuencia del wizard mientras la campana este en 'borrador' (aun
 // no se lanzo), no los tabs -- ver nota igual en destinatarios/page.tsx.
 export default async function LanzarCampana({ params }: { params: Promise<{ id: string }> }) {
-  await requireSession();
+  const sesion = await requireSession();
   const { id } = await params;
   const idCampana = Number(id);
   if (!Number.isInteger(idCampana) || idCampana <= 0) notFound();
 
-  const camp = campanaParaLanzar(idCampana);
+  const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
   if (!camp) notFound();
 
   const cargaGlobal = toquesGlobalesHoy();

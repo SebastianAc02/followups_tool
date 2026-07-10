@@ -21,6 +21,7 @@ const {
   muestraDestinatarioDeSegmento,
   excluirDeSegmento,
   incluirDeSegmento,
+  idsExcluidosDeSegmento,
   obtenerSegmento,
   actualizarSegmento,
 } = await import('./repository.ts');
@@ -285,6 +286,26 @@ test('empresasDeSegmentoGuardado no corre el segmento de otra organizacion', () 
   }, 1);
   assert.equal(empresasDeSegmentoGuardado(id, 2), null, 'la organizacion 2 no puede correr un segmento que no es suyo');
   assert.ok(empresasDeSegmentoGuardado(id, 1));
+});
+
+test('idsExcluidosDeSegmento devuelve solo los ids excluidos, [] si no hay ninguno', () => {
+  const idSegmento = guardarSegmento({
+    nombre: 'excluidos-ids',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  }, 1);
+  assert.deepEqual(idsExcluidosDeSegmento(idSegmento, 1), []);
+  excluirDeSegmento(idSegmento, 'e4', 1);
+  excluirDeSegmento(idSegmento, 'e2', 1);
+  assert.deepEqual(idsExcluidosDeSegmento(idSegmento, 1).sort(), ['e2', 'e4']);
+});
+
+test('idsExcluidosDeSegmento no lee las exclusiones de un segmento de otra organizacion', () => {
+  const idSegmento = guardarSegmento({
+    nombre: 'excluidos-ids-otra-org',
+    definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] },
+  }, 1);
+  excluirDeSegmento(idSegmento, 'e1', 1);
+  assert.deepEqual(idsExcluidosDeSegmento(idSegmento, 2), [], 'la organizacion 2 no debe ver las exclusiones de un segmento ajeno');
 });
 
 test('empresasParaRevision devuelve null si el segmento es de otra organizacion', () => {

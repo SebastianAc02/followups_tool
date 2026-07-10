@@ -56,7 +56,7 @@ test('goteo programa fechaInscripcion por dia segun el orden del segmento, y la 
     fechaInicio: MARTES,
   });
 
-  const res = inscribirCampana(idCampana);
+  const res = inscribirCampana(idCampana, 1);
 
   // e3 (sin canal) queda bloqueada; las otras 4 son elegibles.
   assert.equal(res.bloqueadas, 1);
@@ -82,7 +82,7 @@ test('sin intakeDiario, todas las elegibles entran el mismo dia (comportamiento 
   const idSegmento2 = guardarSegmento({ nombre: 'goteo-sin-intake', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp sin intake', idCadencia, idSegmento: idSegmento2, fechaInicio: MARTES });
 
-  inscribirCampana(idCampana);
+  inscribirCampana(idCampana, 1);
 
   const fecha = (idEmpresa: string) => historialInscripciones(idEmpresa).find((h) => h.idCampana === idCampana)?.fechaInscripcion?.slice(0, 10);
   assert.equal(fecha('e1'), '2026-07-07');
@@ -109,7 +109,7 @@ test('guardarProveedorCampanaId persiste el id de la secuencia externa y se pued
 
   // campanaParaLanzar no expone proveedorCampanaId hoy (no lo necesita la pantalla de
   // Lanzar); se verifica que la campana sigue siendo legible sin romperse tras el UPDATE.
-  const camp = campanaParaLanzar(idCampana);
+  const camp = campanaParaLanzar(idCampana, 1);
   assert.equal(camp?.nombre, 'Camp proveedor');
 });
 

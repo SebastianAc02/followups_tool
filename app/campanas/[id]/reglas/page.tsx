@@ -14,7 +14,7 @@ import { ReglasCockpit } from './ReglasCockpit';
 // resaltando "Destinatarios" (es de ahi de donde se vino, Reglas es un ajuste
 // puntual, no una parada propia) en vez de saltar a los tabs de CampanaSubNav.
 export default async function ReglasCampana({ params }: { params: Promise<{ id: string }> }) {
-  await requireSession();
+  const sesion = await requireSession();
   const { id } = await params;
   const idCampana = Number(id);
   if (!Number.isInteger(idCampana) || idCampana <= 0) notFound();
@@ -22,7 +22,7 @@ export default async function ReglasCampana({ params }: { params: Promise<{ id: 
   const camp = campanaConReglas(idCampana);
   if (!camp) notFound();
 
-  const conteosIniciales = conteosReadiness(camp.definicionSegmento, camp.canalesRequeridos, camp.reglaFaltante);
+  const conteosIniciales = conteosReadiness(camp.definicionSegmento, camp.canalesRequeridos, camp.reglaFaltante, sesion.idOrganizacion);
   const esBorrador = camp.estado === 'borrador';
 
   return (

@@ -97,7 +97,7 @@ export function SegmentoCockpit({ idCadencia, segmento, opciones }: { idCadencia
         />
 
         {preview?.ok ? (
-          <TablaCuentas filas={preview.filas} conteos={preview.conteos} />
+          <TablaCuentas filas={preview.filas} conteos={preview.conteos} idSegmento={segmento.id} />
         ) : preview && !preview.ok ? (
           <div className="min-h-0 min-w-0 border-r border-line px-[22px] py-6">
             <p className="text-[13px] text-overdue">{preview.error}</p>

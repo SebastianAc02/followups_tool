@@ -38,7 +38,7 @@ const idSegmento = guardarSegmento({ nombre: 'on-hold', definicion: { condicione
 
 test('agendaEnSeco muestra el primer paso de las inscripciones activas para hoy', () => {
   const idCampana = crearCampana({ nombre: 'Camp', idCadencia, idSegmento });
-  const res = inscribirCampana(idCampana);
+  const res = inscribirCampana(idCampana, 1);
   assert.equal(res.inscritas, 1); // e1
   assert.equal(res.bloqueadas, 1); // e2 sin email
 
@@ -60,7 +60,7 @@ test('agendaEnSeco vacia cuando ninguna activa tiene paso debido todavia', () =>
 // campana.estado pero la agenda seguiria generando pasos nuevos cada dia.
 test('agendaEnSeco no muestra pasos de una campana pausada', () => {
   const idCampana2 = crearCampana({ nombre: 'Camp2', idCadencia, idSegmento });
-  inscribirCampana(idCampana2); // reemplaza la inscripcion de e1 en 'Camp' (test anterior)
+  inscribirCampana(idCampana2, 1); // reemplaza la inscripcion de e1 en 'Camp' (test anterior)
 
   const antes = agendaEnSeco('2099-01-01', { diasBloqueados: [], corrimiento: 'siguiente' });
   assert.equal(antes.length, 1, 'antes de pausar, e1 sigue debido en Camp2');
