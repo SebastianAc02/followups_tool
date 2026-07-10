@@ -3,6 +3,7 @@ import { Confirmacion, type CampoConfirmacion } from "./Confirmacion";
 import { LlamadaCard } from "./LlamadaCard";
 import { EditorCorreo } from "./EditorCorreo";
 import { EditorWhatsapp } from "./EditorWhatsapp";
+import { ToqueShell } from "./ToqueShell";
 import { decidirVista, urlNotionDe } from "./ToqueContexto";
 import { calificar } from "../../core/calificacion";
 import { RESULTADO_LABELS } from "../../db/validation";
@@ -113,14 +114,16 @@ export default async function Llamada({
       <SidebarFrame>
         <div className="wrap">
           <BackLink href="/cola" label="Cola" />
-          <EditorCorreo
-            ctx={ctx}
-            idEmpresa={ctx.emp.id}
-            dia={pasoActivo?.orden ?? null}
-            objetivo={ctx.objetivo}
-            versiones={versiones}
-            idPasoInscripcion={ctx.idPasoInscripcionActivo}
-          />
+          <ToqueShell ctx={ctx} urlNotion={urlNotionDe(ctx)} canal="correo">
+            <EditorCorreo
+              ctx={ctx}
+              idEmpresa={ctx.emp.id}
+              dia={pasoActivo?.orden ?? null}
+              objetivo={ctx.objetivo}
+              versiones={versiones}
+              idPasoInscripcion={ctx.idPasoInscripcionActivo}
+            />
+          </ToqueShell>
         </div>
       </SidebarFrame>
     );
@@ -130,13 +133,15 @@ export default async function Llamada({
     <SidebarFrame>
       <div className="wrap">
         <BackLink href="/cola" label="Cola" />
-        <EditorWhatsapp
-          ctx={ctx}
-          idEmpresa={ctx.emp.id}
-          dia={pasoActivo?.orden ?? null}
-          versiones={versiones}
-          idPasoInscripcion={ctx.idPasoInscripcionActivo}
-        />
+        <ToqueShell ctx={ctx} urlNotion={urlNotionDe(ctx)} canal="whatsapp">
+          <EditorWhatsapp
+            ctx={ctx}
+            idEmpresa={ctx.emp.id}
+            dia={pasoActivo?.orden ?? null}
+            versiones={versiones}
+            idPasoInscripcion={ctx.idPasoInscripcionActivo}
+          />
+        </ToqueShell>
       </div>
     </SidebarFrame>
   );
