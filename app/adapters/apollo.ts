@@ -145,28 +145,88 @@ function buzonEnvioId(): string | undefined {
 // Un solo INSERT por email: bulk_create con run_dedupe:true nunca duplica un contacto
 // que ya existe (B6). Se reusa para "encontrar el contacto de este email" en
 // sacarDestinatario, ya que el plan no documenta un endpoint separado de busqueda.
-async function resolverContacto(apiKey: string, destinatario: DestinatarioEnvio): Promise<ContactoApollo> {
+// actualizarSiDedup: solo el camino de ENVIO (enviarPaso) necesita que, si el contacto
+// ya existia, se sobreescriban sus datos de personalizacion con los nuestros. El camino
+// de SACAR (sacarDestinatario) solo necesita el id para removerlo de la secuencia -- no
+// va a mandar nada, actualizarle los datos ahi seria una llamada inutil.
+async function resolverContacto(
+  apiKey: string,
+  destinatario: DestinatarioEnvio,
+  actualizarSiDedup = false,
+): Promise<ContactoApollo> {
   // email nullable (sesion 2026-07-09, DestinatarioEnvio.telefono para WhatsApp): Apollo
   // es EXCLUSIVAMENTE el proveedor de canal=correo, siempre con email real -- si esto
   // truena es un bug de quien llama (goteo enrutando mal), no un caso a manejar en silencio.
   if (!destinatario.email) throw new Error('Apollo requiere email y el destinatario no trae uno');
+  // Los campos de personalizacion, en un solo lugar: se mandan al crear Y (si el
+  // contacto ya existia) al actualizar, para que digan lo mismo.
+  const datosPersonalizacion = {
+    first_name: destinatario.nombre ?? undefined,
+    organization_name: destinatario.empresa ?? undefined,
+    title: destinatario.cargo ?? undefined,
+  };
   const bulk = await llamarApollo<BulkCreateRespuesta>('/contacts/bulk_create', apiKey, {
     method: 'POST',
     body: JSON.stringify({
-      contacts: [
-        {
-          email: destinatario.email,
-          first_name: destinatario.nombre ?? undefined,
-          organization_name: destinatario.empresa ?? undefined,
-          title: destinatario.cargo ?? undefined,
-        },
-      ],
+      contacts: [{ email: destinatario.email, ...datosPersonalizacion }],
       run_dedupe: true,
     }),
   });
-  const contacto = bulk.created_contacts?.[0] ?? bulk.existing_contacts?.[0];
+  const creado = bulk.created_contacts?.[0];
+  const existente = bulk.existing_contacts?.[0];
+  const contacto = creado ?? existente;
   if (!contacto) throw new Error(`Apollo no devolvio contacto para ${destinatario.email}`);
+
+  // Descubierto en vivo (2026-07-10, prueba multicanal real): bulk_create con dedupe,
+  // cuando el contacto YA existe, lo reusa SIN aplicar los campos de arriba -- se
+  // queda con los datos viejos que Apollo tenia (nombre/empresa/cargo de una prueba
+  // anterior, o de la propia base de Apollo). Un correo salio con datos basura y otro
+  // fallo por company_name vacio. Solo el camino deduplicado necesita el PUT: un
+  // created_contacts ya nace con nuestros datos, no hace falta la llamada extra.
+  if (actualizarSiDedup && !creado && existente) {
+    await llamarApollo(`/contacts/${existente.id}`, apiKey, {
+      method: 'PUT',
+      body: JSON.stringify(datosPersonalizacion),
+    });
+  }
   return contacto;
+}
+
+// Inscribe un contacto en una secuencia. Devuelve la razon del skip (Apollo lo
+// reporta con HTTP 200 en skipped_contact_ids, nunca como error HTTP) o undefined si
+// quedo inscrito de verdad.
+async function inscribirContacto(apiKey: string, proveedorCampanaId: string, contactoId: string, buzon: string): Promise<string | undefined> {
+  const respuesta = await llamarApollo<{ skipped_contact_ids?: Record<string, string> }>(
+    `/emailer_campaigns/${proveedorCampanaId}/add_contact_ids`,
+    apiKey,
+    {
+      method: 'POST',
+      body: JSON.stringify({ emailer_campaign_id: proveedorCampanaId, contact_ids: [contactoId], send_email_from_email_account_id: buzon }),
+    },
+  );
+  return respuesta.skipped_contact_ids?.[contactoId];
+}
+
+// Auto-sanado (decision de Sebastian, 2026-07-10): saca al contacto SOLO de las
+// secuencias ARCHIVADAS donde esta atascado (una campana que cancelamos deja al
+// contacto 'finished' ahi, y Apollo bloquea re-inscribirlo en otra). Frontera de
+// seguridad: una secuencia ACTIVA no se toca -- ese "finished" es una proteccion real
+// contra doble-toque. Devuelve los ids de las que de verdad libero.
+async function liberarDeSecuenciasArchivadas(apiKey: string, contactoId: string): Promise<string[]> {
+  const c = await llamarApollo<{ contact?: { emailer_campaign_ids?: string[] } }>(`/contacts/${contactoId}`, apiKey);
+  const secuencias = c.contact?.emailer_campaign_ids ?? [];
+  const archivadas: string[] = [];
+  for (const seqId of secuencias) {
+    const camp = await llamarApollo<{ emailer_campaign?: { archived?: boolean } }>(`/emailer_campaigns/${seqId}`, apiKey);
+    if (camp.emailer_campaign?.archived) archivadas.push(seqId);
+  }
+  if (archivadas.length > 0) {
+    await llamarApollo('/emailer_campaigns/remove_or_stop_contact_ids', apiKey, {
+      method: 'POST',
+      body: JSON.stringify({ emailer_campaign_ids: archivadas, contact_ids: [contactoId], mode: 'remove' }),
+    });
+  }
+  return archivadas;
 }
 
 // Mapeo de campos de emailer_messages a nuestro vocabulario de evento_tracking.
@@ -310,28 +370,24 @@ export function crearApolloAdapter(): EnvioAdapter {
         throw new Error('APOLLO_MAILBOX_ID no configurado (decision de negocio S2 pendiente)');
       }
       const apiKey = credencial();
-      const contacto = await resolverContacto(apiKey, destinatario);
+      const contacto = await resolverContacto(apiKey, destinatario, true);
 
-      // emailer_campaign_id va EN EL CUERPO (no solo en la URL) -- verificado en
-      // vivo, es el error real que se cometio la primera vez (experimento-apollo.md).
-      const respuesta = await llamarApollo<{ skipped_contact_ids?: Record<string, string> }>(
-        `/emailer_campaigns/${proveedorCampanaId}/add_contact_ids`,
-        apiKey,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            emailer_campaign_id: proveedorCampanaId,
-            contact_ids: [contacto.id],
-            send_email_from_email_account_id: buzon,
-          }),
-        },
-      );
-      // Descubierto en vivo (2026-07-10, prueba multicanal real): un HTTP 200 aca NO
-      // garantiza que el contacto quedo inscrito -- Apollo puede saltarlo en silencio
-      // (ej: ya esta 'finished' en otra secuencia) y lo reporta en skipped_contact_ids,
-      // nunca como error HTTP. Sin este chequeo, el llamador (push.ts) marca la fila
-      // 'enviada' aunque Apollo jamas haya mandado nada.
-      const razonSalteado = respuesta.skipped_contact_ids?.[contacto.id];
+      // emailer_campaign_id va EN EL CUERPO (no solo en la URL) -- verificado en vivo.
+      // Un HTTP 200 aca NO garantiza que quedo inscrito: Apollo puede saltarlo en
+      // silencio (skipped_contact_ids), nunca como error HTTP.
+      let razonSalteado = await inscribirContacto(apiKey, proveedorCampanaId, contacto.id, buzon);
+
+      // Auto-sanado: si esta atascado 'finished' en secuencias ARCHIVADAS (típico de
+      // una campana que cancelamos y relanzamos), lo libera de esas y reintenta UNA vez.
+      // Si el skip es por otra razon (unsubscribed, bounced) o la secuencia que lo tiene
+      // sigue ACTIVA, no auto-sana -- se respeta esa proteccion y se propaga el error.
+      if (razonSalteado === 'contacts_finished_in_other_campaigns') {
+        const liberadas = await liberarDeSecuenciasArchivadas(apiKey, contacto.id);
+        if (liberadas.length > 0) {
+          razonSalteado = await inscribirContacto(apiKey, proveedorCampanaId, contacto.id, buzon);
+        }
+      }
+
       if (razonSalteado) {
         throw new Error(`Apollo salteo el contacto ${contacto.id} al inscribirlo (${razonSalteado})`);
       }

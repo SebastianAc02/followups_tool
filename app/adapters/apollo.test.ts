@@ -94,19 +94,73 @@ test('enviarPaso hace bulk_create con dedupe y add_contact_ids con emailer_campa
 // Descubierto en vivo el 2026-07-10 (prueba multicanal real): add_contact_ids puede
 // devolver HTTP 200 y SALTAR el contacto en silencio si Apollo lo tiene marcado
 // 'finished' en otra secuencia -- viene en skipped_contact_ids, un 200 exitoso NO
-// significa que el contacto de verdad haya quedado inscrito. Antes de este fix,
-// enviarPaso lo daba por enviado igual (el llamador lo marcaba 'enviada' en la DB
-// sin que Apollo mandara nada real).
-test('enviarPaso truena si Apollo saltea el contacto en skipped_contact_ids (200 exitoso no es garantia real)', async (t) => {
+// significa que el contacto de verdad haya quedado inscrito.
+//
+// Auto-sanado (decision de Sebastian, 2026-07-10): cuando la razon es
+// 'contacts_finished_in_other_campaigns' Y la(s) secuencia(s) donde esta atascado
+// estan ARCHIVADAS (muertas, ej: una campana que cancelamos), el adaptador lo saca de
+// esas y reintenta -- cancelar/relanzar deja de trabar al contacto para siempre. La
+// frontera de seguridad es "solo archivadas": un contacto finished en una secuencia
+// ACTIVA legitima NO se toca (esa es una proteccion real contra doble-toque).
+test('enviarPaso auto-sana: si el contacto esta finished en una secuencia ARCHIVADA, lo libera y reintenta', async (t) => {
+  const llamadas: { path: string; metodo: string; body: unknown }[] = [];
+  let yaLibero = false;
   t.mock.method(
     globalThis,
     'fetch',
-    fetchFalso((path) => {
+    fetchFalso((path, init) => {
+      llamadas.push({ path, metodo: init.method ?? 'GET', body: init.body ? JSON.parse(init.body as string) : null });
       if (path === '/contacts/bulk_create') {
-        return { status: 200, body: { created_contacts: [{ id: 'contacto-viejo', email: 'ana@empresa.com' }] } };
+        return { status: 200, body: { created_contacts: [{ id: 'c1', email: 'ana@empresa.com' }] } };
       }
       if (path === '/emailer_campaigns/seq-1/add_contact_ids') {
-        return { status: 200, body: { contacts: [], skipped_contact_ids: { 'contacto-viejo': 'contacts_finished_in_other_campaigns' } } };
+        // La primera vez saltea; despues de liberar, ya inscribe.
+        if (!yaLibero) return { status: 200, body: { contacts: [], skipped_contact_ids: { c1: 'contacts_finished_in_other_campaigns' } } };
+        return { status: 200, body: { contacts: [{ id: 'c1' }] } };
+      }
+      if (path === '/contacts/c1' && (init.method ?? 'GET') === 'GET') {
+        return { status: 200, body: { contact: { id: 'c1', emailer_campaign_ids: ['seq-vieja-archivada'] } } };
+      }
+      if (path === '/emailer_campaigns/seq-vieja-archivada') {
+        return { status: 200, body: { emailer_campaign: { id: 'seq-vieja-archivada', archived: true } } };
+      }
+      if (path === '/emailer_campaigns/remove_or_stop_contact_ids') {
+        yaLibero = true;
+        return { status: 200, body: {} };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  const resultado = await adapter.enviarPaso(
+    'seq-1',
+    { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: null, cargo: null },
+    { asunto: 'Hola', cuerpo: 'cuerpo', canal: 'correo' },
+  );
+
+  assert.strictEqual(resultado.proveedorMensajeId, 'c1', 'termina inscrito de verdad');
+  const remove = llamadas.find((l) => l.path === '/emailer_campaigns/remove_or_stop_contact_ids');
+  assert.ok(remove, 'lo saco de la secuencia vieja');
+  assert.deepEqual((remove!.body as { emailer_campaign_ids: string[] }).emailer_campaign_ids, ['seq-vieja-archivada']);
+});
+
+test('enviarPaso NO auto-sana si el contacto esta finished en una secuencia ACTIVA (respeta la proteccion de doble-toque)', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      if (path === '/contacts/bulk_create') {
+        return { status: 200, body: { created_contacts: [{ id: 'c1', email: 'ana@empresa.com' }] } };
+      }
+      if (path === '/emailer_campaigns/seq-1/add_contact_ids') {
+        return { status: 200, body: { contacts: [], skipped_contact_ids: { c1: 'contacts_finished_in_other_campaigns' } } };
+      }
+      if (path === '/contacts/c1' && (init.method ?? 'GET') === 'GET') {
+        return { status: 200, body: { contact: { id: 'c1', emailer_campaign_ids: ['seq-activa'] } } };
+      }
+      if (path === '/emailer_campaigns/seq-activa') {
+        return { status: 200, body: { emailer_campaign: { id: 'seq-activa', archived: false } } };
       }
       return { status: 200, body: {} };
     }),
@@ -118,10 +172,96 @@ test('enviarPaso truena si Apollo saltea el contacto en skipped_contact_ids (200
       adapter.enviarPaso(
         'seq-1',
         { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: null, cargo: null },
-        { asunto: 'Hola', cuerpo: 'cuerpo del correo', canal: 'correo' },
+        { asunto: 'Hola', cuerpo: 'cuerpo', canal: 'correo' },
       ),
     /contacts_finished_in_other_campaigns/,
   );
+});
+
+test('enviarPaso truena de una (sin auto-sanar) si la razon del skip NO es finished-in-other (ej: unsubscribed)', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path) => {
+      if (path === '/contacts/bulk_create') {
+        return { status: 200, body: { created_contacts: [{ id: 'c1', email: 'ana@empresa.com' }] } };
+      }
+      if (path === '/emailer_campaigns/seq-1/add_contact_ids') {
+        return { status: 200, body: { contacts: [], skipped_contact_ids: { c1: 'contact_unsubscribed' } } };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await assert.rejects(
+    () =>
+      adapter.enviarPaso(
+        'seq-1',
+        { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: null, cargo: null },
+        { asunto: 'Hola', cuerpo: 'cuerpo', canal: 'correo' },
+      ),
+    /contact_unsubscribed/,
+  );
+});
+
+// Descubierto en vivo el 2026-07-10 (prueba multicanal real): bulk_create con
+// run_dedupe:true, cuando el contacto YA existe (existing_contacts, no
+// created_contacts), lo reusa SIN actualizar first_name/organization_name/title --
+// se queda con los datos viejos que Apollo ya tenia. Resultado real: un correo salio
+// personalizado con datos basura de una prueba anterior ("Sebastian-Eafit" de
+// "Universidad EAFIT") y otro fallo por company_name vacio. En produccion pasa igual
+// con cualquier lead que Apollo ya conozca. Fix: si el contacto vino deduplicado,
+// PUT /contacts/{id} para que NUESTROS datos ganen.
+test('enviarPaso actualiza el contacto deduplicado (existing_contacts) con nuestros datos, no se queda con los viejos de Apollo', async (t) => {
+  const llamadas: { path: string; metodo: string; body: unknown }[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push({ path, metodo: init.method ?? 'GET', body: init.body ? JSON.parse(init.body as string) : null });
+      if (path === '/contacts/bulk_create') {
+        // existing_contacts (deduplicado), NO created_contacts: Apollo ya lo tenia.
+        return { status: 200, body: { existing_contacts: [{ id: 'contacto-existente', email: 'ana@empresa.com' }] } };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await adapter.enviarPaso(
+    'seq-1',
+    { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: 'Viajes Andinos', cargo: 'Gerente Comercial' },
+    { asunto: 'Hola', cuerpo: 'cuerpo', canal: 'correo' },
+  );
+
+  const put = llamadas.find((l) => l.path === '/contacts/contacto-existente' && l.metodo === 'PUT');
+  assert.ok(put, 'debe hacer PUT al contacto deduplicado para actualizar sus datos');
+  assert.deepEqual(put!.body, { first_name: 'Ana', organization_name: 'Viajes Andinos', title: 'Gerente Comercial' });
+});
+
+test('enviarPaso NO actualiza un contacto recien creado (created_contacts ya nace con nuestros datos)', async (t) => {
+  const llamadas: { path: string; metodo: string }[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push({ path, metodo: init.method ?? 'GET' });
+      if (path === '/contacts/bulk_create') {
+        return { status: 200, body: { created_contacts: [{ id: 'contacto-nuevo', email: 'ana@empresa.com' }] } };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await adapter.enviarPaso(
+    'seq-1',
+    { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: 'Viajes Andinos', cargo: 'Gerente Comercial' },
+    { asunto: 'Hola', cuerpo: 'cuerpo', canal: 'correo' },
+  );
+
+  assert.ok(!llamadas.some((l) => l.path.startsWith('/contacts/contacto-nuevo') && l.metodo === 'PUT'), 'un contacto recien creado no necesita PUT extra');
 });
 
 test('enviarPaso manda empresa/cargo como organization_name/title para personalizacion', async (t) => {
