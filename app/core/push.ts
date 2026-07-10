@@ -46,7 +46,12 @@ export async function pushPendientes(deps: PushDeps, envio: CanalEntrega, ahora:
       deps.marcarEnviando(fila.idPasoInscripcion);
       const resultado = await envio.enviarPaso(fila.proveedorCampanaId, fila.destinatario, fila.paso);
       deps.marcarEnviada(fila.idPasoInscripcion, resultado.proveedor, resultado.proveedorMensajeId, ahora.toISOString());
-    } catch {
+    } catch (e) {
+      // Sesion 2026-07-10: el catch se tragaba el error sin loguearlo -- una fila
+      // fallaba 3 veces en silencio (APOLLO_MAILBOX_ID sin cargar, credencial mala,
+      // Apollo caido) y lo unico visible era 'fallo' en la DB, sin pista de por que.
+      // console.error, no lanzar: un item roto no debe tumbar el ciclo del worker.
+      console.error(`push falló para paso_inscripcion ${fila.idPasoInscripcion}:`, e instanceof Error ? e.message : e);
       const intentos = fila.intentos + 1;
       const agotado = intentos >= MAX_INTENTOS;
       deps.marcarFallo(
