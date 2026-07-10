@@ -85,28 +85,24 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
       // pasar hoy, es el unico canal automatico), se avisa igual que cualquier otro
       // fallo en vez de asumir que Apollo siempre esta ahi.
       const adapter = crearRegistroEnvio().correo;
-      if (camp && adapter) {
+      // Sesion 2026-07-10 (bug real: 422 al lanzar una cadencia SIN correo): Apollo es
+      // el motor SOLO del track de correo. pasosParaSincronizarCopy filtra canal='correo',
+      // asi que una cadencia de puro whatsapp/llamada devuelve []. Antes se creaba igual
+      // una secuencia VACIA en Apollo y se intentaba aprobarla -> Apollo responde 422
+      // (no aprueba una secuencia sin pasos). Ahora Apollo solo se toca si de verdad hay
+      // correo que mandar; una cadencia sin correo ni siquiera crea secuencia externa.
+      const pasos = camp ? pasosParaSincronizarCopy(camp.idCadencia) : [];
+      if (camp && adapter && pasos.length > 0) {
         const proveedorCampanaId = await adapter.crearCampanaExterna(camp.nombre);
         guardarProveedorCampanaId(idCampana, proveedorCampanaId, sesion.idOrganizacion);
 
-        // Sesion 2026-07-08: sin esto la secuencia queda creada pero VACIA -- subir el
-        // copy aqui mismo es lo que hace que abrir la secuencia en Apollo ya muestre
-        // los pasos reales de la cadencia, no una secuencia en blanco. Mismo criterio
-        // que crearCampanaExterna arriba: si falla, no revierte el lanzamiento ni la
-        // secuencia ya creada, solo se avisa (y sincronizarCopyApolloAction en la
-        // ficha de la campana permite reintentar despues sin duplicar nada).
-        const pasos = pasosParaSincronizarCopy(camp.idCadencia);
-        if (pasos.length > 0) {
-          const sincronizados = await adapter.sincronizarCopy(proveedorCampanaId, pasos);
-          guardarSincronizacionCopy(sincronizados);
-        }
+        // Subir el copy aqui mismo es lo que hace que abrir la secuencia en Apollo ya
+        // muestre los pasos reales de la cadencia, no una secuencia en blanco.
+        const sincronizados = await adapter.sincronizarCopy(proveedorCampanaId, pasos);
+        guardarSincronizacionCopy(sincronizados);
 
-        // Tarea A3 (plan-prueba-real-multicanal.md): sin approve la secuencia queda
-        // creada y con copy pero Apollo NUNCA manda el correo real -- approve es lo
-        // que dispara el envio. Mismo criterio de aislamiento que crearCampanaExterna/
-        // sincronizarCopy: si falla, no revierte el lanzamiento, solo se avisa (y
-        // reintentar el lanzamiento de nuevo no duplica nada, approve es idempotente
-        // del lado de Apollo).
+        // Sin approve la secuencia queda creada y con copy pero Apollo NUNCA manda el
+        // correo real -- approve es lo que dispara el envio (idempotente del lado de Apollo).
         await adapter.aprobarSecuencia(proveedorCampanaId);
       }
     } catch (e) {
