@@ -116,11 +116,11 @@ export function EditorWhatsapp({
         </div>
         <div className="flex items-end gap-2.5">
           <textarea
-            rows={2}
+            rows={5}
             value={cuerpo}
             onChange={(e) => setCuerpo(e.target.value)}
             placeholder="Escribe tu mensaje..."
-            className="flex-1 rounded-lg border border-line bg-hover px-3 py-2 text-[13px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
+            className="min-h-[120px] flex-1 resize-y rounded-lg border border-line bg-hover px-3 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-faint focus:border-line-strong"
           />
           <button
             type="button"
