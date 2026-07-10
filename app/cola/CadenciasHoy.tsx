@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { aprobarPasoManualAction, aprobarLoteManualAction } from '../actions';
+import { aprobarLoteManualAction } from '../actions';
 import { cn } from '../ui/cn';
 import { Pill } from '../ui/Pill';
 import { CanalTag } from '../ui/CanalTag';
@@ -83,9 +83,14 @@ function CopyBox({
   );
 }
 
+// Sesion 2026-07-10 (pedido de Sebastian): un manual de whatsapp/correo ya NO se
+// aprueba desde una tarjetica inline con el copy crudo -- igual que la llamada, lleva
+// al cockpit (/llamada/[idEmpresa], que despacha por canal a EditorWhatsapp/
+// EditorCorreo) donde se ve el contexto completo del lead (info + toques previos en la
+// columna) y el copy YA con las variables resueltas, para revisarlo antes de mandar.
 function FilaPrioritaria({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: boolean }) {
-  const [cuerpo, setCuerpo] = useState(item.cuerpo ?? '');
-  const tieneCopy = item.canal !== 'llamada' && item.cuerpo != null;
+  const canal = canalNormalizado(item.canal);
+  const labelAccion = canal === 'whatsapp' ? 'Ir a mandar WhatsApp' : canal === 'correo' ? 'Ir a mandar correo' : 'Ir al toque';
 
   return (
     <div className="border-b border-line py-3">
@@ -93,7 +98,7 @@ function FilaPrioritaria({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: 
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="truncate font-medium text-ink">{item.empresaNombre}</span>
           <Pill tone="warm">manual · Tier 1</Pill>
-          <CanalTag canal={canalNormalizado(item.canal)} />
+          <CanalTag canal={canal} />
           {item.nombre && <span className="text-[13px] text-muted">{item.nombre}</span>}
         </div>
         <SeverityText variant={atrasado ? 'overdue' : 'today'} className="shrink-0">
@@ -111,24 +116,9 @@ function FilaPrioritaria({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: 
         )}
         <span className="mono text-faint">{diaLabel(item)}</span>
       </div>
-
-      {tieneCopy && (
-        <CopyBox
-          cuerpo={cuerpo}
-          onChange={setCuerpo}
-          firmaApollo={item.firmaApollo}
-          original={item.cuerpo!}
-          placeholder="Personaliza antes de mandarlo..."
-        />
-      )}
-
-      <form action={aprobarPasoManualAction} className="mt-2">
-        <input type="hidden" name="idPasoInscripcion" value={item.idPasoInscripcion} />
-        {tieneCopy && <input type="hidden" name="cuerpoFinal" value={cuerpo} />}
-        <button type="submit" className={cn(button({ variant: 'pill' }), "text-[12.5px]")}>
-          Aprobar (ya lo hice)
-        </button>
-      </form>
+      <Link href={`/llamada/${item.idEmpresa}`} className={cn(button({ variant: 'pill' }), 'mt-2 inline-block text-[12.5px]')}>
+        {labelAccion}
+      </Link>
     </div>
   );
 }
