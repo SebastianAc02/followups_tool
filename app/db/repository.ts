@@ -40,6 +40,8 @@ import {
   destinatario,
   pasoInscripcion,
   eventoTracking,
+  mensajeWhatsapp,
+  lineaWhatsapp,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -49,6 +51,7 @@ import { calcularGoteo, type RitmoIngreso } from '../core/goteo';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
+import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/llego-respuesta';
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
@@ -1571,6 +1574,25 @@ export function incluirDeSegmento(idSegmento: number, idEmpresa: string, idOrgan
     .run();
 }
 
+// Parte 2 campanas: solo los ids ya excluidos de un segmento, sin re-correr la query
+// del segmento entero (empresasParaRevision hace eso). La tabla del wizard ya tiene
+// las filas del preview; solo necesita saber cuales pintar destildadas. Mismo guard
+// silencioso por organizacion: si el segmento no es tuyo, set vacio.
+export function idsExcluidosDeSegmento(idSegmento: number, idOrganizacion: number): string[] {
+  const esDeMiOrganizacion = db
+    .select({ id: segmento.idSegmento })
+    .from(segmento)
+    .where(and(eq(segmento.idSegmento, idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!esDeMiOrganizacion) return [];
+  return db
+    .select({ idEmpresa: segmentoExclusion.idEmpresa })
+    .from(segmentoExclusion)
+    .where(eq(segmentoExclusion.idSegmento, idSegmento))
+    .all()
+    .map((f) => f.idEmpresa);
+}
+
 // Parte 2 campanas: la pantalla de revision necesita TODAS las empresas del segmento,
 // cada una marcada si ya esta excluida (para pintar el toggle en su estado real). No
 // filtra las excluidas: las deja ver para poder des-excluirlas antes de "continuar".
@@ -1748,7 +1770,7 @@ export type ResultadoInscripcion = {
 //   - elige destinatario default (B1.b); sin email la inscripcion nace bloqueada
 // Todo en UNA transaccion: cerrar la anterior y abrir la nueva ocurren juntos, asi el
 // indice unico parcial nunca ve dos activas de la misma empresa a la vez.
-export function inscribirCampana(idCampana: number): ResultadoInscripcion {
+export function inscribirCampana(idCampana: number, idOrganizacion: number): ResultadoInscripcion {
   const camp = db
     .select({
       idSegmento: campana.idSegmento,
@@ -1765,7 +1787,7 @@ export function inscribirCampana(idCampana: number): ResultadoInscripcion {
   // Parte 3 campanas: el set curado en la revision (Parte 2) es la fuente real de
   // a quien inscribir, no el segmento crudo. empresasParaRevision ya trae el flag
   // excluida por empresa; ese "esta no va" nunca llega a inscripcion.
-  const paraRevision = empresasParaRevision(camp.idSegmento);
+  const paraRevision = empresasParaRevision(camp.idSegmento, idOrganizacion);
   if (!paraRevision) throw new Error(`segmento ${camp.idSegmento} de la campana no existe`);
   const empresas = paraRevision.filter((e) => !e.excluida);
 
@@ -2028,7 +2050,7 @@ export type FilaPreviewInscripcion = {
 // que inscribirCampana usaria (segmento menos exclusiones de Parte 2) pero SIN
 // escribir nada. inscribirCampana vuelve a llamar previsualizarInscripcion antes de
 // persistir (checkpoint 6.1) -- esta funcion es solo para mostrar en pantalla.
-export function previsualizarInscripcionCampana(idCampana: number): FilaPreviewInscripcion[] | null {
+export function previsualizarInscripcionCampana(idCampana: number, idOrganizacion: number): FilaPreviewInscripcion[] | null {
   const camp = db
     .select({ idSegmento: campana.idSegmento, idCadencia: campana.idCadencia, reglaFaltante: campana.reglaFaltante })
     .from(campana)
@@ -2036,7 +2058,7 @@ export function previsualizarInscripcionCampana(idCampana: number): FilaPreviewI
     .get();
   if (!camp) return null;
 
-  const paraRevision = empresasParaRevision(camp.idSegmento);
+  const paraRevision = empresasParaRevision(camp.idSegmento, idOrganizacion);
   if (!paraRevision) return null;
   const empresas = paraRevision.filter((e) => !e.excluida);
   if (empresas.length === 0) return [];
@@ -2319,7 +2341,7 @@ export type CampanaParaLanzar = {
   totalBloqueadas: number;
 };
 
-export function campanaParaLanzar(idCampana: number): CampanaParaLanzar | null {
+export function campanaParaLanzar(idCampana: number, idOrganizacion: number): CampanaParaLanzar | null {
   const camp = db
     .select({
       idCampana: campana.idCampana,
@@ -2336,7 +2358,7 @@ export function campanaParaLanzar(idCampana: number): CampanaParaLanzar | null {
     .get();
   if (!camp) return null;
 
-  const filas = previsualizarInscripcionCampana(idCampana) ?? [];
+  const filas = previsualizarInscripcionCampana(idCampana, idOrganizacion) ?? [];
   const totalElegibles = filas.filter((f) => f.idContacto != null).length;
   const totalBloqueadas = filas.filter((f) => f.idContacto == null).length;
 
@@ -2706,17 +2728,60 @@ export function crearPasoInscripcionPendiente(input: {
   return Number(resultado.lastInsertRowid);
 }
 
+// Tarea B2 (plan-prueba-real-multicanal.md): whatsapp no tiene concepto de "secuencia
+// externa por campana" como Apollo -- Evolution manda por LINEA (una instalacion,
+// compartida entre campanas). Primera fila con estado='activa'; null si ninguna linea
+// esta lista para mandar (el push de whatsapp se salta entero, ver pasoInscripcionesPendientes).
+export function lineaWhatsappActiva(): { referenciaProveedor: string } | null {
+  const fila = db
+    .select({ referenciaProveedor: lineaWhatsapp.referenciaProveedor })
+    .from(lineaWhatsapp)
+    .where(eq(lineaWhatsapp.estado, 'activa'))
+    .get();
+  if (!fila || !fila.referenciaProveedor) return null;
+  return { referenciaProveedor: fila.referenciaProveedor };
+}
+
 // Filas listas para push: pendiente o fallo (con backoff cumplido), por debajo de
-// MAX_INTENTOS, y solo de campanas que ya tienen secuencia externa creada (una
-// campana sin proveedor_campana_id no tiene a donde empujar; se salta en vez de
+// MAX_INTENTOS. Para correo, solo de campanas que ya tienen secuencia externa creada
+// (una campana sin proveedor_campana_id no tiene a donde empujar; se salta en vez de
 // gastar un intento fallido en ella).
 //
 // Sesion 2026-07-09 (registro de proveedor por canal, app/adapters/registro-envio.ts):
 // gana el parametro `canal` -- el worker la llama UNA VEZ POR CADA canal que si tiene
-// proveedor automatico registrado (hoy solo 'correo'), nunca para todos los canales
-// mezclados. Asi push.ts sigue sin saber que existe "canal" como concepto de ruteo: solo
-// procesa la lista que le dan contra el adaptador que le dan, una vez por canal.
+// proveedor automatico registrado, nunca para todos los canales mezclados. Asi push.ts
+// sigue sin saber que existe "canal" como concepto de ruteo: solo procesa la lista que
+// le dan contra el adaptador que le dan, una vez por canal.
+//
+// Tarea B2 (whatsapp automatico): el campo `proveedorCampanaId` de FilaPasoInscripcion
+// es el primer argumento posicional que push.ts le pasa a CanalEntrega.enviarPaso, sin
+// importar el canal -- ahi es donde Evolution espera el NOMBRE DE INSTANCIA, no un id
+// de secuencia de Apollo (ver evolution.ts:79-92, mismo parametro reusado a proposito).
+// Por eso, para whatsapp, se resuelve UNA vez por corrida contra lineaWhatsappActiva()
+// y se reusa para todas las filas -- nunca contra campana.proveedorCampanaId (que
+// whatsapp ni siquiera necesita: no crea secuencia externa por campana). Sin linea
+// activa, no hay a donde mandar: la corrida entera de whatsapp se salta (lista vacia),
+// en vez de dejar que cada fila intente y falle una por una gastando un reintento.
 export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
+  const lineaActiva = canal === 'whatsapp' ? lineaWhatsappActiva() : null;
+  if (canal === 'whatsapp' && !lineaActiva) return [];
+
+  const condiciones = [
+    eq(pasoInscripcion.canal, canal),
+    inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
+    // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
+    // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
+    eq(pasoCadencia.esManual, 0),
+    // Fase 7 (pausar campana): defensa en profundidad -- si un paso ya quedo
+    // pendiente ANTES de pausar, esto evita que igual se empuje al proveedor.
+    eq(campana.estado, 'activa'),
+    sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
+    sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
+  ];
+  // correo: sin secuencia externa (proveedor_campana_id) no hay a donde mandar. whatsapp
+  // no usa esta columna -- el gate de "hay a donde mandar" ya lo resolvio lineaActiva arriba.
+  if (canal !== 'whatsapp') condiciones.push(isNotNull(campana.proveedorCampanaId));
+
   const filas = db
     .select({
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
@@ -2725,6 +2790,8 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       email: contacto.email,
       telefono: contacto.telefono,
       nombre: contacto.nombre,
+      cargo: contacto.cargo,
+      empresaNombre: empresa.nombreOficial,
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
       proveedorCampanaId: campana.proveedorCampanaId,
@@ -2734,29 +2801,16 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
     .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
     .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
-    .where(
-      and(
-        eq(pasoInscripcion.canal, canal),
-        inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
-        isNotNull(campana.proveedorCampanaId),
-        // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
-        // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
-        eq(pasoCadencia.esManual, 0),
-        // Fase 7 (pausar campana): defensa en profundidad -- si un paso ya quedo
-        // pendiente ANTES de pausar, esto evita que igual se empuje al proveedor.
-        eq(campana.estado, 'activa'),
-        sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
-        sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
-      ),
-    )
+    .where(and(...condiciones))
     .all();
 
   return filas.map((f) => ({
     idPasoInscripcion: f.idPasoInscripcion,
-    proveedorCampanaId: f.proveedorCampanaId as string,
-    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre },
+    proveedorCampanaId: (lineaActiva ? lineaActiva.referenciaProveedor : f.proveedorCampanaId) as string,
+    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
     paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
     intentos: f.intentos,
   }));
@@ -3050,6 +3104,94 @@ export function quedanDestinatariosActivos(idInscripcion: number): boolean {
     .where(and(eq(destinatario.idInscripcion, idInscripcion), eq(destinatario.estado, 'activo')))
     .get();
   return (fila?.c ?? 0) > 0;
+}
+
+// ── WhatsApp entrante (tarea 6): primitivas que consume core/llego-respuesta.ts ──
+// No hay match global por telefono en la DB (el unico match previo, en registrarToque,
+// es exacto y scoped por empresa). Aca traemos TODOS los contactos con telefono + su
+// organizacion activa; el core hace el match por ultimos-10-digitos (decision A) sobre
+// esta lista. Es O(contactos) por mensaje entrante, aceptable para el volumen de
+// respuestas (bajo); si un dia molesta, se prefiltra por sufijo en SQL o se agrega una
+// columna telefono_normalizado indexada (decision C descartada por ahora).
+export function candidatosContactoConTelefono(): (ContactoMatch & { telefono: string | null })[] {
+  return db
+    .select({
+      idContacto: contacto.idContacto,
+      idEmpresa: contacto.idEmpresa,
+      idOrganizacion: empresa.organizacionActivaId,
+      telefono: contacto.telefono,
+    })
+    .from(contacto)
+    .innerJoin(empresa, eq(empresa.idEmpresa, contacto.idEmpresa))
+    .where(isNotNull(contacto.telefono))
+    .all();
+}
+
+// Idempotencia + auditoria del inbound. Search-first sobre mensaje_id (UNIQUE), mismo
+// idioma que guardarEventoTracking: 'duplicado' si el webhook reintenta el mismo mensaje.
+// idContacto es el match ya resuelto (null si el numero es desconocido, igual se guarda).
+export function guardarMensajeEntrante(mensaje: MensajeEntrante, idContacto: number | null): 'insertado' | 'duplicado' {
+  const existente = db
+    .select({ id: mensajeWhatsapp.id })
+    .from(mensajeWhatsapp)
+    .where(eq(mensajeWhatsapp.mensajeId, mensaje.mensajeId))
+    .get();
+  if (existente) return 'duplicado';
+
+  db.insert(mensajeWhatsapp)
+    .values({
+      mensajeId: mensaje.mensajeId,
+      referenciaProveedor: mensaje.referenciaProveedor,
+      telefono: mensaje.telefono,
+      texto: mensaje.texto,
+      idContacto,
+      fecha: mensaje.fecha,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
+  return 'insertado';
+}
+
+// Inscripciones activas de la empresa que hay que cortar cuando llega una respuesta.
+// Una fila por destinatario activo (proveedorCampanaId + email nullable): el core pausa
+// la inscripcion local y, si hay secuencia Apollo + email, la corta tambien alla.
+export function inscripcionesActivasDeEmpresa(idEmpresa: string): InscripcionActiva[] {
+  return db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      proveedorCampanaId: campana.proveedorCampanaId,
+      email: contacto.email,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(destinatario, eq(destinatario.idInscripcion, inscripcion.idInscripcion))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .where(
+      and(
+        eq(inscripcion.idEmpresa, idEmpresa),
+        eq(inscripcion.estado, 'activa'),
+        eq(destinatario.estado, 'activo'),
+      ),
+    )
+    .all();
+}
+
+// Deja el toque entrante en el historial de la empresa (decision C: un reply es un hecho,
+// se persiste directo). fuente 'whatsapp_entrante' lo distingue de un envio de cadencia
+// ('cadencia_manual') o del cockpit ('cockpit'); canal 'whatsapp'; el texto va en quePaso.
+export function registrarToqueEntrante(match: ContactoMatch, texto: string, fecha: string) {
+  db.insert(toque)
+    .values({
+      idEmpresa: match.idEmpresa,
+      idContacto: match.idContacto,
+      fecha,
+      canal: 'whatsapp',
+      quePaso: texto,
+      fuente: 'whatsapp_entrante',
+      idOrganizacion: match.idOrganizacion,
+      createdAt: new Date().toISOString(),
+    })
+    .run();
 }
 
 // ---------------------------------------------------------------------------

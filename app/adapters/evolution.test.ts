@@ -36,7 +36,7 @@ test('enviarPaso sin telefono truena antes de llamar a Evolution', async () => {
   guardarCredencialConector('whatsapp', 'evolution_test_key');
   const adapter = crearEvolutionAdapter();
   await assert.rejects(
-    () => adapter.enviarPaso('prueba', { email: null, telefono: null, nombre: 'Ana' }, { asunto: null, cuerpo: 'hola', canal: 'whatsapp' }),
+    () => adapter.enviarPaso('prueba', { email: null, telefono: null, nombre: 'Ana', empresa: null, cargo: null }, { asunto: null, cuerpo: 'hola', canal: 'whatsapp' }),
     /requiere telefono/,
   );
 });
@@ -59,7 +59,7 @@ test('enviarPaso manda number/text/delay al instance correcto y devuelve el id r
   const adapter = crearEvolutionAdapter();
   const resultado = await adapter.enviarPaso(
     'linea-pool-1',
-    { email: null, telefono: '573001234567', nombre: 'Ana' },
+    { email: null, telefono: '573001234567', nombre: 'Ana', empresa: null, cargo: null },
     { asunto: null, cuerpo: 'Hola Ana', canal: 'whatsapp' },
   );
 
@@ -153,7 +153,7 @@ test('un 500 de Evolution (instancia sin conectar) truena con el status y el bod
 
   const adapter = crearEvolutionAdapter();
   await assert.rejects(
-    () => adapter.enviarPaso('prueba', { email: null, telefono: '570000000000', nombre: null }, { asunto: null, cuerpo: 'x', canal: 'whatsapp' }),
+    () => adapter.enviarPaso('prueba', { email: null, telefono: '570000000000', nombre: null, empresa: null, cargo: null }, { asunto: null, cuerpo: 'x', canal: 'whatsapp' }),
     /Evolution respondio 500/,
   );
 });

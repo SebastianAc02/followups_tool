@@ -76,24 +76,35 @@ test('crearCadencia rechaza una cadencia sin pasos', () => {
 });
 
 // Sesion 2026-07-09: mismo caso que se encontro real en la DB (cadencia id=34) -- un
-// paso de whatsapp sin esManual explicito, porque ningun formato de import (CSV/
-// Markdown/JSON) trae hoy una columna para declararlo, asi que el parser siempre
-// entrega esManual=false. Ningun formato tiene forma de pedir explicitamente un paso
-// AUTOMATICO en un canal sin proveedor (whatsapp/llamada hoy): no hay ambiguedad que
+// paso de un canal sin proveedor automatico, sin esManual explicito, porque ningun
+// formato de import (CSV/Markdown/JSON) trae hoy una columna para declararlo, asi que
+// el parser siempre entrega esManual=false. Ningun formato tiene forma de pedir
+// explicitamente un paso AUTOMATICO en un canal sin proveedor: no hay ambiguedad que
 // preguntarle al importador, asi que crearCadencia autocorrige en vez de rechazar.
+// 'llamada' (no 'whatsapp': la tarea B2 de plan-prueba-real-multicanal.md le sumo
+// Evolution como proveedor automatico, asi que un whatsapp sin esManual ya NO se
+// autocorrige mas -- se queda automatico de verdad, como correo).
 test('crearCadencia autocorrige a manual un paso en un canal sin proveedor automatico (import silencioso)', () => {
-  const id = crearCadencia({ nombre: 'Con whatsapp sin declarar', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp' }] });
+  const id = crearCadencia({ nombre: 'Con llamada sin declarar', pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada' }] });
   const t = getCadencia(id);
   assert.equal(t!.pasos[0].esManual, true);
 });
 
 test('crearCadencia respeta esManual explicito true (parser/caller ya lo declaro)', () => {
   const id = crearCadencia({
-    nombre: 'Con whatsapp manual explicito',
-    pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', esManual: true }],
+    nombre: 'Con llamada manual explicito',
+    pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada', esManual: true }],
   });
   const t = getCadencia(id);
   assert.equal(t!.pasos[0].esManual, true);
+});
+
+// Whatsapp ahora es automatico como correo (tarea B2): un paso sin esManual explicito
+// se queda automatico, no se autocorrige a manual.
+test('crearCadencia deja un paso de whatsapp automatico (esManual=false) porque whatsapp ya tiene proveedor', () => {
+  const id = crearCadencia({ nombre: 'Whatsapp automatico', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp' }] });
+  const t = getCadencia(id);
+  assert.equal(t!.pasos[0].esManual, false);
 });
 
 test('crearCadencia deja un paso de correo automatico (esManual=false) porque correo si tiene proveedor', () => {

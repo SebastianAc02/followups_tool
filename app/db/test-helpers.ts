@@ -301,6 +301,28 @@ export function crearDbPrueba() {
       telefono TEXT,
       updated_at TEXT
     );
+
+    CREATE TABLE mensaje_whatsapp (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mensaje_id TEXT NOT NULL UNIQUE,
+      referencia_proveedor TEXT,
+      telefono TEXT,
+      texto TEXT,
+      id_contacto INTEGER,
+      fecha TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE linea_whatsapp (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      numero TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      id_usuario TEXT,
+      referencia_proveedor TEXT,
+      estado TEXT NOT NULL DEFAULT 'calentando',
+      techo_diario INTEGER NOT NULL DEFAULT 25,
+      fecha_creacion TEXT
+    );
   `);
 
   sqlite.close();

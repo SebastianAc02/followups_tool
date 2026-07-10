@@ -380,3 +380,21 @@ export const lineaWhatsapp = sqliteTable('linea_whatsapp', {
   techoDiario: integer('techo_diario').notNull().default(25),
   fechaCreacion: text('fecha_creacion'),
 });
+
+// Respuestas entrantes de WhatsApp (tarea 6, plan-whatsapp-adapter.md). Dos usos en una
+// tabla: (1) idempotencia -- mensajeId es el key.id de Evolution, UNIQUE, para que un
+// reintento del webhook no procese dos veces el mismo mensaje (molde: evento_tracking); y
+// (2) auditoria del inbound crudo (telefono, texto, a que contacto matcheo). NO es el
+// historial completo de la conversacion: eso vive en el Postgres de Evolution (patron
+// Granola, resumen operativo aca). idContacto es nullable: un numero desconocido que
+// escribe igual se registra, aunque no matchee ningun contacto.
+export const mensajeWhatsapp = sqliteTable('mensaje_whatsapp', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  mensajeId: text('mensaje_id').notNull().unique(),
+  referenciaProveedor: text('referencia_proveedor'),
+  telefono: text('telefono'),
+  texto: text('texto'),
+  idContacto: integer('id_contacto'),
+  fecha: text('fecha'),
+  createdAt: text('created_at'),
+});

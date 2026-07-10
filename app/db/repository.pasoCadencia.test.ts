@@ -163,9 +163,11 @@ test('eliminarPasoCadencia rechaza un paso que ya tiene historia real de envio',
 
 // Sesion 2026-07-09 (registro de proveedor por canal): un paso automatico (esManual
 // false) solo es valido en un canal con proveedor real -- ver CANALES_AUTOMATICOS en
-// db/validation.ts y app/adapters/registro-envio.ts.
+// db/validation.ts y app/adapters/registro-envio.ts. 'llamada' (no 'whatsapp': tarea
+// B2 de plan-prueba-real-multicanal.md le sumo Evolution como proveedor automatico de
+// whatsapp) es hoy el unico canal que se queda sin proveedor real.
 test('agregarPasoCadencia rechaza un canal sin proveedor automatico si esManual queda en false', () => {
-  assert.throws(() => agregarPasoCadencia(idCadencia, { diaOffset: 40, canal: 'whatsapp' }), /proveedor automático/);
+  assert.throws(() => agregarPasoCadencia(idCadencia, { diaOffset: 40, canal: 'llamada' }), /proveedor automático/);
 });
 
 test('agregarPasoCadencia acepta whatsapp si esManual es true', () => {
@@ -178,9 +180,11 @@ test('agregarPasoCadencia acepta correo automatico (tiene proveedor)', () => {
   assert.ok(getCadencia(idCadencia)!.pasos.some((p) => p.idPaso === idPaso));
 });
 
-test('actualizarPasoCadencia rechaza pasar a whatsapp sin marcar esManual (deja el false que ya tenia)', () => {
+// 'llamada' (no 'whatsapp', ver comentario arriba): mismo motivo, whatsapp ya tiene
+// proveedor automatico (Evolution) desde la tarea B2.
+test('actualizarPasoCadencia rechaza pasar a llamada sin marcar esManual (deja el false que ya tenia)', () => {
   const idPaso = agregarPasoCadencia(idCadencia, { diaOffset: 43, canal: 'correo' });
-  assert.throws(() => actualizarPasoCadencia(idPaso, { canal: 'whatsapp' }), /proveedor automático/);
+  assert.throws(() => actualizarPasoCadencia(idPaso, { canal: 'llamada' }), /proveedor automático/);
 });
 
 test('actualizarPasoCadencia rechaza volver automatico (esManual: false) un paso de llamada', () => {
