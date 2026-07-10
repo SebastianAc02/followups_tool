@@ -196,6 +196,49 @@ test('historialPasosDestinatario trae solo los pasos YA enviados, ordenados por 
   assert.ok(!hist.some((h) => h.orden === 3), 'el pendiente (paso 3) no aparece en el historial');
 });
 
+// Descubierto en vivo el 2026-07-10 (prueba multicanal real): agendaHoyCadencias NO
+// filtraba por campana.estado ni inscripcion.estado -- los pasos manuales de una
+// campana CANCELADA seguian saliendo en /cola para siempre (20 llamadas fantasma de
+// una campana finalizada sepultaban las 2 reales). Mismo criterio que
+// pasosManualesPendientes y pasoInscripcionesPendientes, que ya filtran campana activa.
+function fijarEstadoCampanaCola(idCampana: number, estado: string) {
+  const db = raw();
+  db.prepare('UPDATE campana SET estado = ? WHERE id_campana = ?').run(estado, idCampana);
+  db.close();
+}
+function fijarEstadoInscripcionCola(idInscripcion: number, estado: string) {
+  const db = raw();
+  db.prepare('UPDATE inscripcion SET estado = ? WHERE id_inscripcion = ?').run(estado, idInscripcion);
+  db.close();
+}
+
+seedEmpresa('e-cola-cancel', 'cola-cat-cancel', 'cancel@empresa.com');
+const idCadCancel = crearCadencia({ nombre: 'C cancel', pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada', objetivo: 'Tier 1', esManual: true }] });
+const idSegCancel = guardarSegmento({ nombre: 'cola-seg-cancel', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-cancel'] }] } }, 1);
+const idCampCancel = crearCampana({ nombre: 'Camp cancel', idCadencia: idCadCancel, idSegmento: idSegCancel }, 1);
+inscribirCampana(idCampCancel, 1);
+const idInscCancel = historialInscripciones('e-cola-cancel').find((i) => i.estado === 'activa')!.id;
+const idDestCancel = destinatariosDeInscripcion(idInscCancel)[0].id;
+const pc = idsDePaso(idCadCancel, 1);
+const idPICancel = crearPasoInscripcionPendiente({ idDestinatario: idDestCancel, idPaso: pc.idPaso, idVersion: pc.idVersion, canal: 'llamada' });
+
+test('un paso manual de una campana FINALIZADA (cancelada) no aparece en la agenda', () => {
+  fijarFechaProgramada(idPICancel, '2026-07-06T09:00:00.000Z');
+  assert.ok(agendaHoyCadencias('2026-07-06').some((f) => f.idPasoInscripcion === idPICancel), 'aparece mientras la campana esta activa');
+
+  fijarEstadoCampanaCola(idCampCancel, 'finalizada');
+  assert.ok(!agendaHoyCadencias('2026-07-06').some((f) => f.idPasoInscripcion === idPICancel), 'ya no aparece cuando la campana quedo finalizada');
+});
+
+test('un paso manual de una inscripcion PAUSADA (respondio) no aparece en la agenda', () => {
+  fijarEstadoCampanaCola(idCampCancel, 'activa'); // reactivar la campana; el corte ahora es a nivel inscripcion
+  fijarFechaProgramada(idPICancel, '2026-07-06T09:00:00.000Z');
+  assert.ok(agendaHoyCadencias('2026-07-06').some((f) => f.idPasoInscripcion === idPICancel), 'aparece con inscripcion activa');
+
+  fijarEstadoInscripcionCola(idInscCancel, 'pausada');
+  assert.ok(!agendaHoyCadencias('2026-07-06').some((f) => f.idPasoInscripcion === idPICancel), 'ya no aparece cuando la inscripcion quedo pausada');
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

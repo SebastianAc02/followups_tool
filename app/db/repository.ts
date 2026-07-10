@@ -3016,6 +3016,12 @@ export function agendaHoyCadencias(hoy: string) {
       and(
         inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
         sql`date(${pasoInscripcion.fechaProgramada}) <= date(${hoy})`,
+        // Sesion 2026-07-10: sin estos dos filtros, los pasos manuales de una campana
+        // CANCELADA (o de una inscripcion pausada porque el lead respondio) seguian
+        // apareciendo en /cola para siempre -- 20 llamadas fantasma de una campana
+        // finalizada sepultaban las reales. Mismo criterio que pasosManualesPendientes.
+        eq(campana.estado, 'activa'),
+        eq(inscripcion.estado, 'activa'),
       ),
     )
     .orderBy(pasoInscripcion.fechaProgramada)
