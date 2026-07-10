@@ -1767,7 +1767,19 @@ export function marcarCampanaFinalizada(idCampana: number): { ok: true; proveedo
   if (!camp) return { ok: false, error: 'La campaña no existe' };
   if (camp.estado === 'finalizada') return { ok: false, error: 'Esta campaña ya está finalizada' };
   if (camp.estado === 'borrador') return { ok: false, error: 'Un borrador se elimina, no se cancela' };
-  db.update(campana).set({ estado: 'finalizada', updatedAt: new Date().toISOString() }).where(eq(campana.idCampana, idCampana)).run();
+  const ahora = new Date().toISOString();
+  db.transaction((tx) => {
+    tx.update(campana).set({ estado: 'finalizada', updatedAt: ahora }).where(eq(campana.idCampana, idCampana)).run();
+    // Sesion 2026-07-10 (huerfano real, encontrado 3 veces seguidas en la prueba
+    // multicanal): sin esto, las inscripciones que quedaron 'activa' bajo esta
+    // campana nunca se cerraban -- una campana finalizada con una inscripcion
+    // "activa" colgando debajo, que ademas bloqueaba re-inscribir esa empresa en
+    // otra campana hasta que alguien la limpiara a mano.
+    tx.update(inscripcion)
+      .set({ estado: 'finalizada', motivoFin: 'campana cancelada', fechaFin: ahora, updatedAt: ahora })
+      .where(and(eq(inscripcion.idCampana, idCampana), eq(inscripcion.estado, 'activa')))
+      .run();
+  });
   return { ok: true, proveedorCampanaId: camp.proveedorCampanaId };
 }
 

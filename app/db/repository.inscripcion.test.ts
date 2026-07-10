@@ -264,6 +264,27 @@ test('marcarCampanaFinalizada rechaza un borrador y una campana ya finalizada', 
   assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'ya esta finalizada');
 });
 
+// Descubierto en vivo el 2026-07-10 (prueba multicanal real, 3 veces seguidas): antes
+// de este fix, marcarCampanaFinalizada solo tocaba la fila de campana -- las
+// inscripciones que quedaron 'activa' debajo nunca se cerraban, quedaban huerfanas
+// (una campana finalizada con una inscripcion "activa" colgando). El fix de sesion
+// anterior (4 funciones de lectura exigen tambien campana.estado='activa') tapaba el
+// SINTOMA; este es el fix de raiz: cancelar debe cerrar las inscripciones tambien.
+test('marcarCampanaFinalizada cierra tambien las inscripciones que quedaron activas (no deja huerfanas)', () => {
+  const idCadenciaJ = crearCadencia({ nombre: 'CJ', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
+  const idCampanaJ = crearCampana({ nombre: 'Camp J', idCadencia: idCadenciaJ, idSegmento }, 1);
+  inscribirCampana(idCampanaJ, 1);
+
+  const activaAntes = historialInscripciones('e-kdm').find((i) => i.estado === 'activa' && i.idCampana === idCampanaJ);
+  assert.ok(activaAntes, 'la inscripcion queda activa antes de cancelar');
+
+  const resultado = marcarCampanaFinalizada(idCampanaJ);
+  assert.equal(resultado.ok, true);
+
+  const despues = historialInscripciones('e-kdm').find((i) => i.id === activaAntes!.id);
+  assert.equal(despues?.estado, 'finalizada', 'la inscripcion se cierra junto con la campana, no queda huerfana');
+});
+
 // Plan 3, Task 1: crearCampana recibia idOrganizacion hardcodeado a 1 (Onepay). Ahora
 // toma el valor real del caller -- una campana creada por otra organizacion debe quedar
 // con SU id, no con el de Onepay por defecto.
