@@ -68,6 +68,64 @@ test('enviarPaso manda number/text/delay al instance correcto y devuelve el id r
   assert.strictEqual(resultado.proveedorMensajeId, 'msg-real-1');
 });
 
+// Descubierto en vivo el 2026-07-10 (prueba multicanal real, WhatsApp de verdad
+// mandado): a diferencia de Apollo (traduce [nombre] a {{first_name}}, un merge-tag
+// que APOLLO resuelve del lado suyo), Evolution no tiene motor de plantillas -- el
+// texto que mandamos es EXACTAMENTE lo que llega a WhatsApp. Sin este fix, el
+// contacto real recibio "Hola [nombre], ... en [empresa] ..." literal, sin
+// sustituir. enviarPaso ahora sustituye el mismo trio de variables que Apollo
+// ([nombre]/[empresa]/[cargo]), con los valores REALES del destinatario (no un
+// merge-tag), directo antes de mandar.
+test('enviarPaso sustituye [nombre]/[empresa]/[cargo] con los valores reales del destinatario (Evolution no tiene merge-tags como Apollo)', async (t) => {
+  guardarCredencialConector('whatsapp', 'evolution_test_key');
+  let cuerpoEnviado: unknown = null;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      cuerpoEnviado = JSON.parse(init.body as string);
+      return { status: 200, body: { key: { id: 'msg-real-2' }, status: 'PENDING' } };
+    }),
+  );
+
+  const adapter = crearEvolutionAdapter();
+  await adapter.enviarPaso(
+    'linea-pool-1',
+    { email: null, telefono: '573001234567', nombre: 'Ana', empresa: 'Viajes Andinos', cargo: 'Gerente Comercial' },
+    { asunto: null, cuerpo: 'Hola [nombre], en [empresa] tu cargo es [cargo] y tu pasarela es [pasarela]', canal: 'whatsapp' },
+  );
+
+  assert.deepEqual(cuerpoEnviado, {
+    number: '573001234567',
+    // [pasarela] no es una de las 3 variables soportadas: queda intacta, igual que
+    // en Apollo (traducirVariablesApollo), en vez de reventar o vaciarla.
+    text: 'Hola Ana, en Viajes Andinos tu cargo es Gerente Comercial y tu pasarela es [pasarela]',
+    delay: 1200,
+  });
+});
+
+test('enviarPaso sin nombre/empresa/cargo deja la variable sin sustituir (no inventa un valor vacio)', async (t) => {
+  guardarCredencialConector('whatsapp', 'evolution_test_key');
+  let cuerpoEnviado: unknown = null;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      cuerpoEnviado = JSON.parse(init.body as string);
+      return { status: 200, body: { key: { id: 'msg-real-3' }, status: 'PENDING' } };
+    }),
+  );
+
+  const adapter = crearEvolutionAdapter();
+  await adapter.enviarPaso(
+    'linea-pool-1',
+    { email: null, telefono: '573001234567', nombre: null, empresa: null, cargo: null },
+    { asunto: null, cuerpo: 'Hola [nombre]', canal: 'whatsapp' },
+  );
+
+  assert.deepEqual(cuerpoEnviado, { number: '573001234567', text: 'Hola [nombre]', delay: 1200 });
+});
+
 test('iniciarConexion pide el numero por query y devuelve el pairing-code (metodo default, QR bloqueado)', async (t) => {
   guardarCredencialConector('whatsapp', 'evolution_test_key');
   t.mock.method(

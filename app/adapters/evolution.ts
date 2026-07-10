@@ -73,6 +73,25 @@ function mapearEstado(connectionStatus: string | undefined): EstadoLinea {
   return 'caida';
 }
 
+// Descubierto en vivo (2026-07-10, prueba multicanal real): a diferencia de Apollo
+// (traducirVariablesApollo en apollo.ts traduce [nombre] a {{first_name}}, un
+// merge-tag que APOLLO resuelve del lado suyo al mandar), Evolution NO tiene motor
+// de plantillas -- el texto que mandamos es EXACTAMENTE lo que le llega a WhatsApp.
+// Mismo trio de variables que Apollo, pero sustituidas aca con el valor REAL del
+// destinatario (no un merge-tag). Una variable sin dato (null) queda intacta, igual
+// que el criterio de Apollo con una variable sin mapear: nunca inventa un vacio.
+function sustituirVariablesWhatsapp(texto: string, destinatario: DestinatarioEnvio): string {
+  const valores: Record<string, string | null> = {
+    nombre: destinatario.nombre,
+    empresa: destinatario.empresa,
+    cargo: destinatario.cargo,
+  };
+  return texto.replace(/\[([^[\]]+)\]/g, (match, nombreVariable) => {
+    const valor = valores[nombreVariable.trim()];
+    return valor ?? match;
+  });
+}
+
 export function crearEvolutionAdapter(): CanalEntrega & ConexionLinea {
   return {
     async enviarPaso(
@@ -92,7 +111,7 @@ export function crearEvolutionAdapter(): CanalEntrega & ConexionLinea {
       // no tiene concepto de secuencia externa, la linea que manda ocupa ese lugar.
       const data = await llamarEvolution<EnviarTextoRespuesta>(`/message/sendText/${referenciaProveedor}`, apiKey, {
         method: 'POST',
-        body: JSON.stringify({ number: destinatario.telefono, text: paso.cuerpo, delay: 1200 }),
+        body: JSON.stringify({ number: destinatario.telefono, text: sustituirVariablesWhatsapp(paso.cuerpo, destinatario), delay: 1200 }),
       });
       const mensajeId = data.key?.id;
       if (!mensajeId) throw new Error(`Evolution no devolvio id de mensaje al enviar por ${referenciaProveedor}`);
