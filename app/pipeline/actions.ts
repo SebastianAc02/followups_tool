@@ -1,0 +1,29 @@
+"use server";
+
+import { requireSession } from "../lib/session";
+import { perfilPipelineEmpresa } from "../db/repository";
+import { canalNormalizado } from "../cola/agenda.ts";
+import type { DetallePanelData } from "../ui/pipeline/DetallePanel";
+
+// El modal de ficha completa (client component) no puede tocar el Repository directo --
+// pasa por este server action, scoped a la organizacion de quien pregunta (misma regla
+// que el resto del cockpit: nadie ve la ficha de otra organizacion). Mapea aca (no en el
+// cliente) para que solo cruce la frontera el shape que la UI pinta.
+export async function perfilPipelineEmpresaAction(idEmpresa: string): Promise<DetallePanelData | null> {
+  const usuario = await requireSession();
+  const perfil = perfilPipelineEmpresa(idEmpresa, usuario.idOrganizacion);
+  if (!perfil) return null;
+
+  return {
+    empresa: perfil.empresa,
+    ciudad: perfil.ciudad,
+    categoria: perfil.categoria,
+    campana: perfil.campana,
+    contactos: perfil.contactos,
+    toques: perfil.toques.map((t) => ({ ...t, canal: canalNormalizado(t.canal) })),
+    secuencia: perfil.secuencia.map((s) => ({ ...s, canal: canalNormalizado(s.canal) })),
+    proximoToque: perfil.proximoToque
+      ? { fecha: perfil.proximoToque.fecha, canal: canalNormalizado(perfil.proximoToque.canal), paso: perfil.proximoToque.paso }
+      : undefined,
+  };
+}

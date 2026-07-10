@@ -97,6 +97,26 @@
   --color-accent-bright: #6e5cff;
   --color-surface-deep: #0c0d10;
 
+  /* Pipeline UI (Fase 1): colores de etapas, tarjetas y visualización de canales.
+     Los colores base vienen del mockup; se mapean a primitivos existentes o nuevos
+     para mantener la independencia de esquema de color (si luego cambia la paleta,
+     solo toca estos tokens, no el HTML ni los componentes). */
+  --color-pipeline-card: #111218;
+  --color-pipeline-card-hover: #16171e;
+  --color-pipeline-card-today: rgba(242, 183, 56, 0.08);
+  --color-pipeline-etapa-lead: #2d2b52;
+  --color-pipeline-etapa-contacto: #3b3670;
+  --color-pipeline-etapa-reunion: #4d4795;
+  --color-pipeline-etapa-oportunidad: #635bbf;
+  --color-pipeline-etapa-contrato: #7a70e0;
+  --color-pipeline-etapa-cierre: #8b7cff;
+  --color-pipeline-etapa-firma: #a99cff;
+  --color-pipeline-ll: #5b9bff;
+  --color-pipeline-wa: #3fd08a;
+  --color-pipeline-co: #c79bff;
+  --color-pipeline-today-accent: #f2b738;
+  --color-pipeline-today-ring: rgba(242, 183, 56, 0.22);
+
   /* Sistema de diseño único (Fix 6, 2026-07-08): una sola serif de títulos
      (Newsreader), una sola sans de cuerpo (IBM Plex Sans) y una sola mono
      (IBM Plex Mono). Todo rol tipográfico de la app apunta a una de estas tres

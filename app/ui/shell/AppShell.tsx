@@ -8,7 +8,7 @@ import { cargarPerfil } from '../../lib/perfil';
 import { Sidebar, type ConectorEstado } from './Sidebar';
 import { TopBar } from './TopBar';
 import type { NavItem } from './SidebarNav';
-import { IconInicio, IconCampanas, IconToques, IconPipeline, IconConectores, IconPorRevisar } from './icons';
+import { IconInicio, IconCampanas, IconToques, IconPipeline, IconPanel, IconConectores, IconPorRevisar } from './icons';
 
 const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -46,9 +46,14 @@ export async function datosSidebar() {
   const items: NavItem[] = [
     { href: '/', label: 'Inicio', icon: <IconInicio /> },
     { href: '/campanas', label: 'Campañas', icon: <IconCampanas />, badge: String(campanasActivas), exactMatch: true },
+    // Pipeline: vista operativa del funnel (estado_notion). El badge cuenta las empresas
+    // dentro del funnel activo -- ese conteo es del pipeline, no del panel admin.
+    { href: '/pipeline', label: 'Pipeline', icon: <IconPipeline />, badge: String(cuentasFunnel) },
     { href: '/cola', label: 'Toques', icon: <IconToques />, badge: String(toquesHoy), badgeTone: toquesHoy > 0 ? 'done' : 'neutral' },
     { href: '/por-revisar', label: 'Por revisar', icon: <IconPorRevisar />, badge: String(porRevisar), badgeTone: porRevisar > 0 ? 'overdue' : 'neutral' },
-    { href: '/panel', label: 'Pipeline', icon: <IconPipeline />, badge: String(cuentasFunnel) },
+    // Panel: dashboard de metricas, admin-only (la ruta redirige a / si no es admin), asi
+    // que el item solo aparece para admins -- antes se rotulaba "Pipeline" y apuntaba aca.
+    ...(usuario.admin ? [{ href: '/panel', label: 'Panel', icon: <IconPanel /> }] : []),
     { href: '/conectores', label: 'Conectores', icon: <IconConectores />, badge: `${conectadosReales + 1}/3`, badgeTone: conectadosReales < 2 ? 'overdue' : 'neutral' },
   ];
 

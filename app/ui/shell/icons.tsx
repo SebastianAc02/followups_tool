@@ -49,6 +49,15 @@ export function IconPipeline({ className }: IconProps) {
   );
 }
 
+export function IconPanel({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <path d="M3 3v18h18" />
+      <path d="M7 15v3M12 10v8M17 6v12" />
+    </svg>
+  );
+}
+
 export function IconConectores({ className }: IconProps) {
   return (
     <svg {...base(className)}>

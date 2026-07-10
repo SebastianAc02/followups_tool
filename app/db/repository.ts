@@ -2538,6 +2538,283 @@ export function destinatariosDeInscripcion(idInscripcion: number) {
     .all();
 }
 
+// ---------------------------------------------------------------------------
+// Pipeline global (rediseño /pipeline, ver planning/plan-pipeline-ui-redesign.md).
+// `inscripcion` no tiene columna de organizacion propia -- el limite multi-org de
+// TODA esta seccion vive en `campana.idOrganizacion`, por eso cada query se une a
+// campana aunque no necesite ninguna otra columna suya.
+
+export type KpisPipeline = {
+  enSecuencia: number;
+  entrandoHoy: number;
+  toquesHoy: number;
+  onHold: number;
+  cerradasOptOut: number;
+};
+
+// Cada numero cuenta algo distinto (no son la misma tabla con 5 filtros):
+// enSecuencia/entrandoHoy son inscripciones (nivel EMPRESA); onHold tambien, porque
+// pausarInscripcion pausa la empresa entera. cerradasOptOut, en cambio, sigue el
+// mapeo del plan a destinatario.estado='salio' (nivel CONTACTO) -- no inscripcion
+// 'finalizada', que tambien se usa para "cambio de campana" o "campana cancelada" y
+// contaria bookkeeping interno como si fuera un opt-out real.
+export function kpisPipeline(idOrganizacion: number, hoy: string): KpisPipeline {
+  const orgActiva = and(eq(campana.idOrganizacion, idOrganizacion), eq(campana.estado, 'activa'));
+
+  const enSecuencia = db
+    .select({ n: sql<number>`count(*)` })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(orgActiva, eq(inscripcion.estado, 'activa')))
+    .get()?.n ?? 0;
+
+  const entrandoHoy = db
+    .select({ n: sql<number>`count(*)` })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(orgActiva, eq(inscripcion.estado, 'activa'), sql`substr(${inscripcion.fechaInscripcion}, 1, 10) = ${hoy}`))
+    .get()?.n ?? 0;
+
+  const toquesHoy = db
+    .select({ n: sql<number>`count(*)` })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(
+      and(
+        eq(campana.idOrganizacion, idOrganizacion),
+        eq(pasoInscripcion.estado, 'pendiente'),
+        sql`substr(${pasoInscripcion.fechaProgramada}, 1, 10) = ${hoy}`,
+      ),
+    )
+    .get()?.n ?? 0;
+
+  const onHold = db
+    .select({ n: sql<number>`count(*)` })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(campana.idOrganizacion, idOrganizacion), eq(inscripcion.estado, 'pausada')))
+    .get()?.n ?? 0;
+
+  const cerradasOptOut = db
+    .select({ n: sql<number>`count(*)` })
+    .from(destinatario)
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(campana.idOrganizacion, idOrganizacion), eq(destinatario.estado, 'salio')))
+    .get()?.n ?? 0;
+
+  return { enSecuencia, entrandoHoy, toquesHoy, onHold, cerradasOptOut };
+}
+
+export type FilaPipelineGlobal = {
+  idInscripcion: number;
+  idEmpresa: string;
+  empresa: string;
+  campana: string;
+  contacto: string | null;
+  cargo: string | null;
+  pasoActual: number | null;
+  totalPasos: number;
+  diaSecuencia: number | null;
+  canal: string | null;
+  etapa: string; // D1: COALESCE(estado_notion, 'lead') -- ver FUNNEL_ETAPAS en db/funnel.ts
+  esHoy: boolean;
+};
+
+// D1 (2026-07-10) decia que las etapas del pipeline eran las de FUNNEL_ETAPAS. Sebastian
+// corrigio en el checkpoint visual (2026-07-10, mismo dia): mezclar "dia de secuencia" con
+// una etiqueta de etapa (ej. mostrar "Reunión" en el grupo del dia 3) es enganoso -- el
+// numero de dia NO implica que haya una reunion agendada, solo que le tocan N dias desde
+// que arranco. `etapa` se deja en la fila (dato real, por si sirve como badge por fila mas
+// adelante) pero el AGRUPADOR del overview pasa a ser `diaSecuencia`, sin FUNNEL_ETAPAS.
+export function pipelineGlobal(idOrganizacion: number, hoy: string, idCampana?: number): FilaPipelineGlobal[] {
+  const condiciones = [eq(campana.idOrganizacion, idOrganizacion), eq(inscripcion.estado, 'activa')];
+  if (idCampana != null) condiciones.push(eq(inscripcion.idCampana, idCampana));
+
+  // `inscripcion.paso_actual` NUNCA se actualiza despues del insert (queda en 0 para
+  // siempre, ver inscribirCampana) -- no es el progreso real. El progreso real es el mismo
+  // que calcula getContextoToque en TS: cuenta cuantos pasos ya quedaron 'enviada' para
+  // los destinatarios de esta inscripcion; el "activo" es el siguiente orden (1-indexed).
+  const ordenActivoSql = sql`(
+    1 + (
+      SELECT count(*) FROM paso_inscripcion
+      INNER JOIN destinatario ON destinatario.id_destinatario = paso_inscripcion.id_destinatario
+      WHERE destinatario.id_inscripcion = inscripcion.id_inscripcion AND paso_inscripcion.estado = 'enviada'
+    )
+  )`;
+
+  const filas = db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      campana: campana.nombre,
+      pasoActual: sql<number>`${ordenActivoSql}`,
+      etapa: sql<string>`COALESCE(${empresa.estadoNotion}, 'lead')`,
+      totalPasos: sql<number>`(SELECT count(*) FROM paso_cadencia WHERE paso_cadencia.id_cadencia = campana.id_cadencia)`,
+      // "Dia de secuencia" = el dia_offset relativo del playbook (mismo concepto que
+      // usa el motor de envio, V4.6) del paso ACTIVO real, no dias de calendario desde
+      // la inscripcion -- eso ultimo se corre con pausas/backoff.
+      diaSecuencia: sql<number | null>`(
+        SELECT paso_cadencia.dia_offset FROM paso_cadencia
+        WHERE paso_cadencia.id_cadencia = campana.id_cadencia AND paso_cadencia.orden = ${ordenActivoSql}
+      )`,
+      canal: sql<string | null>`(
+        SELECT paso_cadencia.canal FROM paso_cadencia
+        WHERE paso_cadencia.id_cadencia = campana.id_cadencia AND paso_cadencia.orden = ${ordenActivoSql}
+      )`,
+      contacto: sql<string | null>`(
+        SELECT contacto.nombre || COALESCE(' ' || contacto.apellido, '')
+        FROM destinatario INNER JOIN contacto ON contacto.id_contacto = destinatario.id_contacto
+        WHERE destinatario.id_inscripcion = inscripcion.id_inscripcion AND destinatario.estado = 'activo'
+        LIMIT 1
+      )`,
+      cargo: sql<string | null>`(
+        SELECT contacto.cargo
+        FROM destinatario INNER JOIN contacto ON contacto.id_contacto = destinatario.id_contacto
+        WHERE destinatario.id_inscripcion = inscripcion.id_inscripcion AND destinatario.estado = 'activo'
+        LIMIT 1
+      )`,
+      esHoyRaw: sql<number>`(
+        SELECT count(*) FROM paso_inscripcion INNER JOIN destinatario ON destinatario.id_destinatario = paso_inscripcion.id_destinatario
+        WHERE destinatario.id_inscripcion = inscripcion.id_inscripcion
+          AND paso_inscripcion.estado = 'pendiente'
+          AND substr(paso_inscripcion.fecha_programada, 1, 10) = ${hoy}
+      )`,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(and(...condiciones))
+    .orderBy(desc(inscripcion.idInscripcion))
+    .all();
+
+  return filas.map(({ esHoyRaw, ...f }) => ({ ...f, esHoy: esHoyRaw > 0 }));
+}
+
+export type DetalleInscrita = {
+  empresa: string;
+  contacto: string | null;
+  cargo: string | null;
+  historial: ReturnType<typeof historialPasosDestinatario>;
+  proximoToque: { fecha: string | null; canal: string; paso: string } | null;
+};
+
+// Compone historialPasosDestinatario (ya existe) + el paso pendiente de esta
+// inscripcion para "proximo toque". NO incluye "ventanas de contacto" (franjas
+// horarias del mockup): no existe ese dato en el dominio hoy y CLAUDE.md prohibe
+// inventarlo -- queda anotado como hueco, igual que la serie de tasaHold en Reportes.
+export function detalleInscrita(idInscripcion: number, idOrganizacion: number): DetalleInscrita | null {
+  const base = db
+    .select({
+      empresa: empresa.nombreOficial,
+      idCadencia: campana.idCadencia,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(and(eq(inscripcion.idInscripcion, idInscripcion), eq(campana.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!base) return null;
+
+  const destinatarioActivo = db
+    .select({
+      idDestinatario: destinatario.idDestinatario,
+      contacto: sql<string | null>`${contacto.nombre} || COALESCE(' ' || ${contacto.apellido}, '')`,
+      cargo: contacto.cargo,
+    })
+    .from(destinatario)
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .where(and(eq(destinatario.idInscripcion, idInscripcion), eq(destinatario.estado, 'activo')))
+    .get();
+
+  const historial = destinatarioActivo ? historialPasosDestinatario(destinatarioActivo.idDestinatario) : [];
+
+  const pendiente = destinatarioActivo
+    ? db
+        .select({
+          fechaProgramada: pasoInscripcion.fechaProgramada,
+          canal: pasoInscripcion.canal,
+          orden: pasoCadencia.orden,
+          objetivo: pasoCadencia.objetivo,
+        })
+        .from(pasoInscripcion)
+        .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+        .where(and(eq(pasoInscripcion.idDestinatario, destinatarioActivo.idDestinatario), eq(pasoInscripcion.estado, 'pendiente')))
+        .orderBy(pasoCadencia.orden)
+        .limit(1)
+        .get()
+    : undefined;
+
+  const totalPasos = db
+    .select({ n: sql<number>`count(*)` })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, base.idCadencia))
+    .get()?.n ?? 0;
+
+  return {
+    empresa: base.empresa,
+    contacto: destinatarioActivo?.contacto ?? null,
+    cargo: destinatarioActivo?.cargo ?? null,
+    historial,
+    proximoToque: pendiente
+      ? { fecha: pendiente.fechaProgramada, canal: pendiente.canal, paso: `${pendiente.objetivo ?? 'Siguiente paso'} (Paso ${pendiente.orden}/${totalPasos})` }
+      : null,
+  };
+}
+
+export type PerfilPipelineEmpresa = {
+  empresa: string;
+  ciudad: string | null;
+  categoria: string | null;
+  campana: string | null;
+  contactos: { nombre: string | null; cargo: string | null; telefono: string | null; email: string | null; esPrincipal: boolean }[];
+  toques: { idToque: number; fecha: string | null; canal: string | null; resultado: string | null; quePaso: string | null }[];
+  secuencia: PasoSecuencia[];
+  proximoToque: { fecha: string | null; canal: string; paso: string } | null;
+};
+
+// Ficha completa de una empresa desde el Pipeline: "todos los contactos, todo el
+// historial de toques, todo" (pedido de Sebastian, 2026-07-10) -- a diferencia de
+// getCuenta (que usa /llamada/[id] y limita a 5 toques recientes porque ahi solo
+// importa el ultimo para decidir el siguiente paso), aca no hay limite: es una
+// vista de lectura, no el cockpit de ejecutar el toque de hoy.
+export function perfilPipelineEmpresa(idEmpresa: string, idOrganizacion: number): PerfilPipelineEmpresa | null {
+  const { emp, contactos } = getCuenta(idEmpresa, idOrganizacion);
+  if (!emp) return null;
+
+  const toques = db
+    .select({ idToque: toque.idToque, fecha: toque.fecha, canal: toque.canal, resultado: toque.resultado, quePaso: toque.quePaso })
+    .from(toque)
+    .where(and(eq(toque.idEmpresa, idEmpresa), eq(toque.idOrganizacion, idOrganizacion)))
+    .orderBy(desc(toque.idToque))
+    .all();
+
+  const ctx = getContextoToque(idEmpresa, idOrganizacion);
+
+  const inscripcionActiva = db
+    .select({ idInscripcion: inscripcion.idInscripcion, campana: campana.nombre })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(inscripcion.idEmpresa, idEmpresa), eq(inscripcion.estado, 'activa'), eq(campana.idOrganizacion, idOrganizacion)))
+    .get();
+
+  const detalle = inscripcionActiva ? detalleInscrita(inscripcionActiva.idInscripcion, idOrganizacion) : null;
+
+  return {
+    empresa: emp.nombre ?? idEmpresa,
+    ciudad: emp.ciudad,
+    categoria: emp.categoria,
+    campana: inscripcionActiva?.campana ?? null,
+    contactos: contactos.map((c) => ({ ...c, esPrincipal: c.esPrincipal === 1 })),
+    toques,
+    secuencia: ctx.secuencia,
+    proximoToque: detalle?.proximoToque ?? null,
+  };
+}
+
 // V4.8: agenda EN SECO. Para cada inscripcion activa, calcula que paso toca a la fecha
 // `hoy` con el motor (V4.6), SIN materializar ni enviar nada (Fase 5 hace eso). En Fase 4
 // no existe historial de ejecuciones (paso_inscripcion se puebla en Fase 5), asi que se
