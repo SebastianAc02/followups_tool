@@ -91,6 +91,39 @@ test('enviarPaso hace bulk_create con dedupe y add_contact_ids con emailer_campa
   });
 });
 
+// Descubierto en vivo el 2026-07-10 (prueba multicanal real): add_contact_ids puede
+// devolver HTTP 200 y SALTAR el contacto en silencio si Apollo lo tiene marcado
+// 'finished' en otra secuencia -- viene en skipped_contact_ids, un 200 exitoso NO
+// significa que el contacto de verdad haya quedado inscrito. Antes de este fix,
+// enviarPaso lo daba por enviado igual (el llamador lo marcaba 'enviada' en la DB
+// sin que Apollo mandara nada real).
+test('enviarPaso truena si Apollo saltea el contacto en skipped_contact_ids (200 exitoso no es garantia real)', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path) => {
+      if (path === '/contacts/bulk_create') {
+        return { status: 200, body: { created_contacts: [{ id: 'contacto-viejo', email: 'ana@empresa.com' }] } };
+      }
+      if (path === '/emailer_campaigns/seq-1/add_contact_ids') {
+        return { status: 200, body: { contacts: [], skipped_contact_ids: { 'contacto-viejo': 'contacts_finished_in_other_campaigns' } } };
+      }
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await assert.rejects(
+    () =>
+      adapter.enviarPaso(
+        'seq-1',
+        { email: 'ana@empresa.com', telefono: null, nombre: 'Ana', empresa: null, cargo: null },
+        { asunto: 'Hola', cuerpo: 'cuerpo del correo', canal: 'correo' },
+      ),
+    /contacts_finished_in_other_campaigns/,
+  );
+});
+
 test('enviarPaso manda empresa/cargo como organization_name/title para personalizacion', async (t) => {
   const llamadas: { path: string; body: unknown }[] = [];
   t.mock.method(

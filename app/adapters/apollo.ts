@@ -314,14 +314,27 @@ export function crearApolloAdapter(): EnvioAdapter {
 
       // emailer_campaign_id va EN EL CUERPO (no solo en la URL) -- verificado en
       // vivo, es el error real que se cometio la primera vez (experimento-apollo.md).
-      await llamarApollo(`/emailer_campaigns/${proveedorCampanaId}/add_contact_ids`, apiKey, {
-        method: 'POST',
-        body: JSON.stringify({
-          emailer_campaign_id: proveedorCampanaId,
-          contact_ids: [contacto.id],
-          send_email_from_email_account_id: buzon,
-        }),
-      });
+      const respuesta = await llamarApollo<{ skipped_contact_ids?: Record<string, string> }>(
+        `/emailer_campaigns/${proveedorCampanaId}/add_contact_ids`,
+        apiKey,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            emailer_campaign_id: proveedorCampanaId,
+            contact_ids: [contacto.id],
+            send_email_from_email_account_id: buzon,
+          }),
+        },
+      );
+      // Descubierto en vivo (2026-07-10, prueba multicanal real): un HTTP 200 aca NO
+      // garantiza que el contacto quedo inscrito -- Apollo puede saltarlo en silencio
+      // (ej: ya esta 'finished' en otra secuencia) y lo reporta en skipped_contact_ids,
+      // nunca como error HTTP. Sin este chequeo, el llamador (push.ts) marca la fila
+      // 'enviada' aunque Apollo jamas haya mandado nada.
+      const razonSalteado = respuesta.skipped_contact_ids?.[contacto.id];
+      if (razonSalteado) {
+        throw new Error(`Apollo salteo el contacto ${contacto.id} al inscribirlo (${razonSalteado})`);
+      }
 
       return { proveedor: 'apollo', proveedorMensajeId: contacto.id };
     },
