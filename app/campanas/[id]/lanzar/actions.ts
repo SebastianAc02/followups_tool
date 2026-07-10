@@ -99,6 +99,14 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
           const sincronizados = await adapter.sincronizarCopy(proveedorCampanaId, pasos);
           guardarSincronizacionCopy(sincronizados);
         }
+
+        // Tarea A3 (plan-prueba-real-multicanal.md): sin approve la secuencia queda
+        // creada y con copy pero Apollo NUNCA manda el correo real -- approve es lo
+        // que dispara el envio. Mismo criterio de aislamiento que crearCampanaExterna/
+        // sincronizarCopy: si falla, no revierte el lanzamiento, solo se avisa (y
+        // reintentar el lanzamiento de nuevo no duplica nada, approve es idempotente
+        // del lado de Apollo).
+        await adapter.aprobarSecuencia(proveedorCampanaId);
       }
     } catch (e) {
       avisoSecuenciaExterna = `la campaña se lanzó pero no se pudo crear/sincronizar la secuencia en Apollo: ${

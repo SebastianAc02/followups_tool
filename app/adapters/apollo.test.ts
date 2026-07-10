@@ -189,6 +189,26 @@ test('archivarCampana llama el endpoint de archive de la secuencia', async (t) =
   assert.strictEqual(pathLlamado, '/emailer_campaigns/seq-1/archive');
 });
 
+test('aprobarSecuencia llama el endpoint de approve de la secuencia (dispara el envio real)', async (t) => {
+  let pathLlamado = '';
+  let metodoLlamado = '';
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, opts) => {
+      pathLlamado = path;
+      metodoLlamado = opts?.method ?? '';
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearApolloAdapter();
+  await adapter.aprobarSecuencia('seq-1');
+
+  assert.strictEqual(pathLlamado, '/emailer_campaigns/seq-1/approve');
+  assert.strictEqual(metodoLlamado, 'POST');
+});
+
 test('leerEventosNuevos mapea emailer_messages a eventos con id compuesto mensaje:tipo (campos reales verificados en vivo)', async (t) => {
   t.mock.method(
     globalThis,

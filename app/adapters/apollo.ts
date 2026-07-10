@@ -346,6 +346,14 @@ export function crearApolloAdapter(): EnvioAdapter {
       });
     },
 
+    async aprobarSecuencia(proveedorCampanaId: string) {
+      const apiKey = credencial();
+      // approve es lo que dispara el envio real (verificado contra la doc oficial de
+      // Apollo, ver scripts/apollo_probe_envio.py). Sin esto la secuencia queda creada
+      // e inscrita pero Apollo nunca manda el correo.
+      await llamarApollo(`/emailer_campaigns/${proveedorCampanaId}/approve`, apiKey, { method: 'POST' });
+    },
+
     async archivarCampana(proveedorCampanaId: string) {
       const apiKey = credencial();
       // Unica limpieza que expone la API (no hay DELETE de secuencias, verificado en vivo).

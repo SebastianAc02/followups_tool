@@ -15,6 +15,7 @@ function envioFalso(eventosPorCampana: Record<string, EventoProveedor[]>): Envio
       throw new Error('no usado en estas pruebas');
     },
     async sacarDestinatario() {},
+    async aprobarSecuencia() {},
     async archivarCampana() {},
     async leerEventosNuevos(proveedorCampanaId) {
       return eventosPorCampana[proveedorCampanaId] ?? [];
@@ -129,6 +130,7 @@ test('una campana cuyo leerEventosNuevos truena no bloquea el poll de las demas'
       throw new Error('no usado');
     },
     async sacarDestinatario() {},
+    async aprobarSecuencia() {},
     async archivarCampana() {},
     async leerEventosNuevos(proveedorCampanaId) {
       if (proveedorCampanaId === 'seq-rota') throw new Error('Apollo 404');

@@ -161,6 +161,13 @@ export interface MotorSecuencia {
   // vez de duplicar.
   sincronizarCopy(proveedorCampanaId: string, pasos: PasoParaSincronizar[]): Promise<PasoSincronizado[]>;
 
+  // Aprueba la secuencia (POST /emailer_campaigns/{id}/approve, verificado contra la
+  // doc oficial de Apollo -- ver scripts/apollo_probe_envio.py). Sin este paso la
+  // secuencia queda creada e inscrita pero Apollo NUNCA manda el correo real: approve
+  // es lo que dispara el envio. Se llama UNA vez por campana, despues de
+  // sincronizarCopy (tarea A3, plan-prueba-real-multicanal.md).
+  aprobarSecuencia(proveedorCampanaId: string): Promise<void>;
+
   // Archiva la secuencia completa. Unica "limpieza" que expone la API de Apollo.
   archivarCampana(proveedorCampanaId: string): Promise<void>;
 }
