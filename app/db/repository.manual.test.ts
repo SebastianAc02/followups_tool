@@ -21,7 +21,6 @@ const {
   historialInscripciones,
   crearPasoInscripcionPendiente,
   pasoInscripcionesPendientes,
-  pasosManualesPendientes,
   aprobarPasoManual,
   marcarPasoInscripcionCompletadaManual,
   registrarToque,
@@ -83,17 +82,6 @@ const idPasoInscripcion1 = crearPasoInscripcionPendiente({ idDestinatario, idPas
 test('un paso manual NUNCA aparece en pasoInscripcionesPendientes (push automatico), sin importar la fecha', () => {
   const pendientesPush = pasoInscripcionesPendientes('llamada', '2099-01-01T00:00:00.000Z'); // muy en el futuro: "3 dias despues" y mas
   assert.ok(!pendientesPush.some((f) => f.idPasoInscripcion === idPasoInscripcion1), 'el push automatico jamas lo toca');
-});
-
-// Sesion 2026-07-09: llamada ya NO pasa por "Por revisar" -- una llamada no tiene un
-// texto que aprobar, tiene un resultado real (una de las 4 salidas cerradas) que solo
-// se captura en el cockpit de /llamada. aprobarPasoManual (usado por correo/whatsapp)
-// dejaria un toque SIN resultado, asi que llamada se cierra distinto: ver
-// marcarPasoInscripcionCompletadaManual, llamada desde registrarToqueAction despues
-// de que registrarToque ya guardo el toque completo.
-test('un paso manual de llamada NO aparece en pasosManualesPendientes (no es Tier 1 de texto)', () => {
-  const manuales = pasosManualesPendientes();
-  assert.ok(!manuales.some((f) => f.idPasoInscripcion === idPasoInscripcion1));
 });
 
 test('registrar el toque real + marcarPasoInscripcionCompletadaManual cierra el paso de llamada con su resultado', () => {

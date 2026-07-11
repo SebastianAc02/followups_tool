@@ -4,10 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Tabs, type TabItem } from '../ui/Tabs';
 import { CampanaCard, type CampanaCardVM } from './CampanaCard';
+import { SegmentoSueltoCard, type SegmentoSueltoVM } from './SegmentoSueltoCard';
 
-type FiltroEstado = 'todas' | 'activa' | 'pausada' | 'borrador';
+type FiltroEstado = 'todas' | 'activa' | 'pausada' | 'borrador' | 'archivada';
 
-export function CampanasGrid({ campanas }: { campanas: CampanaCardVM[] }) {
+export function CampanasGrid({ campanas, segmentosSueltos }: { campanas: CampanaCardVM[]; segmentosSueltos: SegmentoSueltoVM[] }) {
   const [filtro, setFiltro] = useState<FiltroEstado>('todas');
   // Modo edición estilo iPhone (Fix 5, 2026-07-08): normalmente no se ve nada; al
   // entrar en modo edición aparece el afordante de remover en las tarjetas borrador.
@@ -15,10 +16,14 @@ export function CampanasGrid({ campanas }: { campanas: CampanaCardVM[] }) {
   const hayBorradores = campanas.some((c) => c.estado === 'borrador');
 
   const conteos = {
-    todas: campanas.length,
+    todas: campanas.length + segmentosSueltos.length,
     activa: campanas.filter((c) => c.estado === 'activa').length,
     pausada: campanas.filter((c) => c.estado === 'pausada').length,
-    borrador: campanas.filter((c) => c.estado === 'borrador').length,
+    // Un segmento sin campana todavia (autosave del wizard, se fue antes de pegar
+    // cadencia) es igual de "borrador" que una campana en estado 'borrador' -- solo
+    // que un paso mas atras, ver segmentosSinCampana en el repository.
+    borrador: campanas.filter((c) => c.estado === 'borrador').length + segmentosSueltos.length,
+    archivada: campanas.filter((c) => c.estado === 'archivada').length,
   };
 
   const items: TabItem[] = [
@@ -26,9 +31,11 @@ export function CampanasGrid({ campanas }: { campanas: CampanaCardVM[] }) {
     { key: 'activa', label: 'Activas', count: conteos.activa, tone: 'done' },
     { key: 'pausada', label: 'Pausada', count: conteos.pausada, tone: 'today' },
     { key: 'borrador', label: 'Borrador', count: conteos.borrador, tone: 'faint' },
+    { key: 'archivada', label: 'Archivadas', count: conteos.archivada, tone: 'faint' },
   ];
 
   const visibles = filtro === 'todas' ? campanas : campanas.filter((c) => c.estado === filtro);
+  const segmentosVisibles = filtro === 'todas' || filtro === 'borrador' ? segmentosSueltos : [];
 
   return (
     <div>
@@ -48,6 +55,9 @@ export function CampanasGrid({ campanas }: { campanas: CampanaCardVM[] }) {
       <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2 lg:grid-cols-3">
         {visibles.map((c) => (
           <CampanaCard key={c.id} campana={c} editando={editando} />
+        ))}
+        {segmentosVisibles.map((s) => (
+          <SegmentoSueltoCard key={`seg-${s.id}`} segmento={s} />
         ))}
 
         <Link

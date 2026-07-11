@@ -13,14 +13,14 @@ const ESTADO_TONE = {
   activa: 'hot',
   pausada: 'warm',
   borrador: 'cold',
-  finalizada: 'cold',
+  archivada: 'cold',
 } as const;
 
 const ESTADO_LABEL: Record<string, string> = {
   activa: 'Activa',
   pausada: 'Pausada',
   borrador: 'Borrador',
-  finalizada: 'Finalizada',
+  archivada: 'Archivada',
 };
 
 // Task 10.1 (Fase 10): Resumen del panel de control de una campana. Estado, metricas

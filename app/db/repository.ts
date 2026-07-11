@@ -1276,6 +1276,29 @@ export function listarSegmentos(idOrganizacion: number) {
     .all();
 }
 
+// Hub /campanas (sesion 2026-07-10, pedido de Sebastian): campana.id_cadencia es
+// NOT NULL -- no existe una fila 'borrador' hasta que el wizard llega al paso
+// Cadencia y esa cadencia parsea (ver crearBorradorDesdeCadenciaAction). Si alguien
+// termina el paso Segmento y se va antes de pegar la cadencia, el segmento SI quedo
+// guardado (autosave de NuevoSegmento) pero no hay ninguna campana que mostrar en el
+// hub -- por diseno, no por bug. Esta funcion es lo que hace visible ese trabajo:
+// cualquier segmento de la organizacion que ninguna campana (de NINGUN estado,
+// incluida archivada) referencia todavia. Una vez un segmento aparece en una
+// campana, sale de esta lista para siempre, aunque esa campana se cancele despues.
+export function segmentosSinCampana(idOrganizacion: number): { id: number; nombre: string; descripcionNatural: string | null; createdAt: string | null }[] {
+  return db
+    .select({ id: segmento.idSegmento, nombre: segmento.nombre, descripcionNatural: segmento.descripcionNatural, createdAt: segmento.createdAt })
+    .from(segmento)
+    .where(
+      and(
+        eq(segmento.idOrganizacion, idOrganizacion),
+        notExists(db.select({ x: sql`1` }).from(campana).where(eq(campana.idSegmento, segmento.idSegmento))),
+      ),
+    )
+    .orderBy(desc(segmento.idSegmento))
+    .all();
+}
+
 // Parte 1 campanas: valores unicos de un campo de texto para poblar el dropdown del
 // builder (estilo Apollo). Solo campos de texto: los numericos se filtran por rango,
 // no por lista, y ademas usuarios vive en otra tabla.
@@ -1509,6 +1532,63 @@ export function pasosParaSincronizarCopy(idCadencia: number): PasoParaSincroniza
   }));
 }
 
+// Canales que de verdad tiene esta cadencia (distinct de paso_cadencia.canal), en el
+// orden en que aparecen (orden de paso_cadencia.orden) -- para "Enviar una prueba"
+// (LanzarCockpit): el selector de canal solo debe ofrecer los que existen, nunca los
+// tres fijos (una cadencia sin whatsapp no debe poder "probar" whatsapp).
+export function canalesDeCadencia(idCadencia: number): Canal[] {
+  const filas = db
+    .selectDistinct({ canal: pasoCadencia.canal, orden: pasoCadencia.orden })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+  const vistos = new Set<Canal>();
+  const resultado: Canal[] = [];
+  for (const f of filas) {
+    const canal = f.canal as Canal;
+    if (!vistos.has(canal)) {
+      vistos.add(canal);
+      resultado.push(canal);
+    }
+  }
+  return resultado;
+}
+
+// El primer paso (orden mas bajo) de un canal dado, en la forma que pide
+// EnvioAdapter.sincronizarCopy/enviarPaso -- para "Enviar una prueba": la prueba manda
+// SOLO este paso, nunca la cadencia completa (decision de Sebastian, 2026-07-10: ver
+// una prueba de una vez es mas util que esperar dias de goteo por el resto).
+export function primerPasoDeCadencia(idCadencia: number, canal: Canal): PasoParaSincronizar | null {
+  const fila = db
+    .select({
+      idPaso: pasoCadencia.idPaso,
+      orden: pasoCadencia.orden,
+      diaOffset: pasoCadencia.diaOffset,
+      proveedorStepId: pasoCadencia.proveedorStepId,
+      idVersion: versionPaso.idVersion,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      proveedorTemplateId: versionPaso.proveedorTemplateId,
+    })
+    .from(pasoCadencia)
+    .innerJoin(versionPaso, and(eq(versionPaso.idPaso, pasoCadencia.idPaso), eq(versionPaso.esDefault, 1)))
+    .where(and(eq(pasoCadencia.idCadencia, idCadencia), eq(pasoCadencia.canal, canal)))
+    .orderBy(pasoCadencia.orden)
+    .get();
+  if (!fila) return null;
+  return {
+    idPaso: fila.idPaso,
+    idVersion: fila.idVersion,
+    orden: fila.orden,
+    diaOffset: fila.diaOffset,
+    asunto: fila.asunto,
+    cuerpo: fila.cuerpo ?? '',
+    proveedorStepId: fila.proveedorStepId,
+    proveedorTemplateId: fila.proveedorTemplateId,
+  };
+}
+
 // Persiste lo que devolvio sincronizarCopy: proveedorStepId vive en paso_cadencia
 // (uno por paso), proveedorTemplateId en version_paso (uno por version). Dos UPDATEs
 // por fila porque son dos tablas distintas -- mismo motivo que separan pasoCadencia de
@@ -1713,7 +1793,7 @@ export function crearCampana(input: CampanaInput, idOrganizacion: number): numbe
 }
 
 // Un borrador que nunca corrio inscribirCampana no tiene inscripciones -- se puede
-// borrar limpio. Nunca toca 'activa'/'pausada'/'finalizada': esas ya tienen historia
+// borrar limpio. Nunca toca 'activa'/'pausada'/'archivada': esas ya tienen historia
 // real (inscripciones, toques) que no es seguro eliminar desde aca. paso_cadencia y
 // version_paso no tienen ON DELETE CASCADE en este schema, asi que el borrado es
 // manual y en orden: versiones -> pasos -> campana -> cadencia.
@@ -1760,16 +1840,23 @@ export function reanudarCampana(idCampana: number): { ok: true } | { ok: false; 
 
 // Cancelar SI toca Apollo (archivarCampana), y el repository no conoce adaptadores
 // externos (regla de capas de CLAUDE.md: el core/DB no importa Apollo). Por eso esta
-// funcion solo marca 'finalizada' y devuelve el proveedorCampanaId -- quien orquesta
+// funcion solo marca 'archivada' y devuelve el proveedorCampanaId -- quien orquesta
 // (la server action) es quien de verdad archiva la secuencia. Ver cancelarCampanaAction.
+//
+// Sesion 2026-07-10 (pedido de Sebastian): unificado con el auto-archivo por cadencia
+// agotada (campanasParaArchivar/archivarCampanasCompletadas, mas abajo) -- las dos vias
+// para terminar una campana (cancelar a mano, o que se agote sola) llegan al MISMO
+// estado 'archivada'. Antes cancelar dejaba 'finalizada', un estado terminal aparte que
+// no aparecia en el tab "Archivadas" de /campanas. El guard de abajo tambien cubre "ya
+// esta archivada por el otro camino": no tiene sentido cancelar algo que ya termino.
 export function marcarCampanaFinalizada(idCampana: number): { ok: true; proveedorCampanaId: string | null } | { ok: false; error: string } {
   const camp = db.select({ estado: campana.estado, proveedorCampanaId: campana.proveedorCampanaId }).from(campana).where(eq(campana.idCampana, idCampana)).get();
   if (!camp) return { ok: false, error: 'La campaña no existe' };
-  if (camp.estado === 'finalizada') return { ok: false, error: 'Esta campaña ya está finalizada' };
+  if (camp.estado === 'archivada') return { ok: false, error: 'Esta campaña ya está archivada' };
   if (camp.estado === 'borrador') return { ok: false, error: 'Un borrador se elimina, no se cancela' };
   const ahora = new Date().toISOString();
   db.transaction((tx) => {
-    tx.update(campana).set({ estado: 'finalizada', updatedAt: ahora }).where(eq(campana.idCampana, idCampana)).run();
+    tx.update(campana).set({ estado: 'archivada', updatedAt: ahora }).where(eq(campana.idCampana, idCampana)).run();
     // Sesion 2026-07-10 (huerfano real, encontrado 3 veces seguidas en la prueba
     // multicanal): sin esto, las inscripciones que quedaron 'activa' bajo esta
     // campana nunca se cerraban -- una campana finalizada con una inscripcion
@@ -1781,6 +1868,70 @@ export function marcarCampanaFinalizada(idCampana: number): { ok: true; proveedo
       .run();
   });
   return { ok: true, proveedorCampanaId: camp.proveedorCampanaId };
+}
+
+// Auto-archivo (worker, tareaArchivarCampanas): distinto de marcarCampanaFinalizada
+// (esa es "Cancelar", a mano, antes de tiempo). Aca la campana llego al final SOLA --
+// ya no queda nada por materializar ni empujar. Las 'bloqueada' (sin canal, cola de
+// revision) se ignoran a proposito: una cuenta atascada no debe dejar la campana
+// activa para siempre (decision de Sebastian, sesion 2026-07-10).
+export function campanasParaArchivar(): { idCampana: number; proveedorCampanaId: string | null }[] {
+  const activas = db
+    .select({ idCampana: campana.idCampana, proveedorCampanaId: campana.proveedorCampanaId, idCadencia: campana.idCadencia })
+    .from(campana)
+    .where(eq(campana.estado, 'activa'))
+    .all();
+  return activas.filter((c) => campanaEstaAgotada(c.idCampana, c.idCadencia));
+}
+
+function campanaEstaAgotada(idCampana: number, idCadencia: number): boolean {
+  const totalInscripciones = db.select({ id: inscripcion.idInscripcion }).from(inscripcion).where(eq(inscripcion.idCampana, idCampana)).all().length;
+  if (totalInscripciones === 0) return false; // recien lanzada, sin nadie inscrito: no archivar todavia
+
+  const activas = db
+    .select({ idInscripcion: inscripcion.idInscripcion })
+    .from(inscripcion)
+    .where(and(eq(inscripcion.idCampana, idCampana), eq(inscripcion.estado, 'activa')))
+    .all();
+
+  return activas.every((insc) => inscripcionEstaAgotada(insc.idInscripcion, idCadencia));
+}
+
+// Una inscripcion 'activa' esta "agotada" cuando ya no le queda ningun paso de la
+// cadencia por materializar ni por empujar -- cada paso_cadencia de idCadencia ya
+// tiene un paso_inscripcion terminal ('enviada' u 'omitida') para el destinatario
+// activo de esta inscripcion. Conteo por filas (mismo estilo que el resto del
+// archivo, dos queries chicas): a la escala de hoy (decenas de campanas) es simple y
+// suficiente; si algun dia pesa, se cambia por un COUNT(*) en SQL crudo sin tocar la
+// firma de la funcion.
+function inscripcionEstaAgotada(idInscripcion: number, idCadencia: number): boolean {
+  const dest = db
+    .select({ id: destinatario.idDestinatario })
+    .from(destinatario)
+    .where(and(eq(destinatario.idInscripcion, idInscripcion), eq(destinatario.estado, 'activo')))
+    .get();
+  if (!dest) return false; // sin destinatario activo: caso raro, no el camino feliz
+
+  const totalPasos = db.select({ id: pasoCadencia.idPaso }).from(pasoCadencia).where(eq(pasoCadencia.idCadencia, idCadencia)).all().length;
+  const terminados = db
+    .select({ id: pasoInscripcion.idPasoInscripcion })
+    .from(pasoInscripcion)
+    .where(and(eq(pasoInscripcion.idDestinatario, dest.id), inArray(pasoInscripcion.estado, ['enviada', 'omitida'])))
+    .all().length;
+
+  return totalPasos > 0 && terminados >= totalPasos;
+}
+
+export function archivarCampanasCompletadas(): { idCampana: number; proveedorCampanaId: string | null }[] {
+  const listas = campanasParaArchivar();
+  if (listas.length === 0) return [];
+  const ahora = new Date().toISOString();
+  db.transaction((tx) => {
+    for (const c of listas) {
+      tx.update(campana).set({ estado: 'archivada', updatedAt: ahora }).where(eq(campana.idCampana, c.idCampana)).run();
+    }
+  });
+  return listas;
 }
 
 export type ResultadoInscripcion = {
@@ -2511,6 +2662,68 @@ export function resolverInscripcionBloqueada(idInscripcion: number, idContacto: 
   });
 }
 
+export type ContactoDeBloqueada = { idContacto: number; nombre: string | null; email: string | null; telefono: string | null };
+export type InscripcionBloqueadaConContactos = ReturnType<typeof inscripcionesBloqueadas>[number] & { contactos: ContactoDeBloqueada[] };
+
+// Sesion 2026-07-10: la vista de "Por revisar" necesita, por cada bloqueada, los
+// contactos YA existentes de la empresa (para editar el que le falta el correo, en vez
+// de crear uno nuevo a ciegas) -- 2 queries en vez de un join (inscripcionesBloqueadas
+// + contactos por empresa) para no duplicar la fila de la inscripcion por cada contacto.
+export function inscripcionesBloqueadasConContactos(): InscripcionBloqueadaConContactos[] {
+  const bloqueadas = inscripcionesBloqueadas();
+  if (bloqueadas.length === 0) return [];
+
+  const filasContacto = db
+    .select({ idEmpresa: contacto.idEmpresa, idContacto: contacto.idContacto, nombre: contacto.nombre, email: contacto.email, telefono: contacto.telefono })
+    .from(contacto)
+    .where(inArray(contacto.idEmpresa, bloqueadas.map((b) => b.idEmpresa)))
+    .orderBy(contacto.idContacto)
+    .all();
+  const contactosPorEmpresa = new Map<string, ContactoDeBloqueada[]>();
+  for (const f of filasContacto) {
+    const lista = contactosPorEmpresa.get(f.idEmpresa) ?? [];
+    lista.push({ idContacto: f.idContacto, nombre: f.nombre, email: f.email, telefono: f.telefono });
+    contactosPorEmpresa.set(f.idEmpresa, lista);
+  }
+
+  return bloqueadas.map((b) => ({ ...b, contactos: contactosPorEmpresa.get(b.idEmpresa) ?? [] }));
+}
+
+// Sesion 2026-07-10: completa el dato que le faltaba a un contacto YA existente
+// (correo y/o telefono) y resuelve la bloqueada con ese mismo contacto. No valida que
+// el resultado tenga correo -- resolverInscripcionBloqueada ya confia en la eleccion
+// humana explicita (mismo criterio que el resto de la cola de revision manual).
+export function completarContactoYResolver(idInscripcion: number, idContacto: number, datos: { email?: string; telefono?: string }): void {
+  const sets: { email?: string | null; telefono?: string | null } = {};
+  if (datos.email !== undefined) sets.email = datos.email.trim() || null;
+  if (datos.telefono !== undefined) sets.telefono = datos.telefono.trim() || null;
+  if (Object.keys(sets).length > 0) {
+    db.update(contacto).set(sets).where(eq(contacto.idContacto, idContacto)).run();
+  }
+  resolverInscripcionBloqueada(idInscripcion, idContacto);
+}
+
+// Sesion 2026-07-10: caso "la empresa no tiene NINGUN contacto" (bloqueadas.length ===
+// 0 en inscripcionesBloqueadasConContactos) -- crea el contacto de cero y resuelve con
+// el. fuente 'manual' marca que nacio aca, no de un import/seed.
+export function agregarContactoYResolver(
+  idInscripcion: number,
+  idEmpresa: string,
+  datos: { nombre?: string; email?: string; telefono?: string },
+): void {
+  const ins = db
+    .insert(contacto)
+    .values({
+      idEmpresa,
+      nombre: datos.nombre?.trim() || null,
+      email: datos.email?.trim() || null,
+      telefono: datos.telefono?.trim() || null,
+      fuente: 'manual',
+    })
+    .run();
+  resolverInscripcionBloqueada(idInscripcion, Number(ins.lastInsertRowid));
+}
+
 // V4.5: historial completo de inscripciones de una empresa (activas, bloqueadas y
 // finalizadas), en orden. Prueba el invariante "el cambio de campana deja historial".
 export function historialInscripciones(idEmpresa: string) {
@@ -2619,6 +2832,7 @@ export type FilaPipelineGlobal = {
   totalPasos: number;
   diaSecuencia: number | null;
   canal: string | null;
+  objetivo: string | null;
   etapa: string; // D1: COALESCE(estado_notion, 'lead') -- ver FUNNEL_ETAPAS en db/funnel.ts
   esHoy: boolean;
 };
@@ -2663,6 +2877,10 @@ export function pipelineGlobal(idOrganizacion: number, hoy: string, idCampana?: 
       )`,
       canal: sql<string | null>`(
         SELECT paso_cadencia.canal FROM paso_cadencia
+        WHERE paso_cadencia.id_cadencia = campana.id_cadencia AND paso_cadencia.orden = ${ordenActivoSql}
+      )`,
+      objetivo: sql<string | null>`(
+        SELECT paso_cadencia.objetivo FROM paso_cadencia
         WHERE paso_cadencia.id_cadencia = campana.id_cadencia AND paso_cadencia.orden = ${ordenActivoSql}
       )`,
       contacto: sql<string | null>`(
@@ -3237,50 +3455,11 @@ export function marcarPasoInscripcionFallo(idPasoInscripcion: number, intentos: 
     .run();
 }
 
-// V5.6: cola de revision de pasos manuales (Tier 1). A diferencia de
-// pasoInscripcionesPendientes, NO filtra por backoff ni por MAX_INTENTOS -- un
-// manual sin revisar simplemente ESPERA, "aparece atrasado" (se calcula comparando
-// fechaProgramada contra hoy en el llamador), nunca se descarta por reintentos.
-export function pasosManualesPendientes() {
-  return db
-    .select({
-      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
-      fechaProgramada: pasoInscripcion.fechaProgramada,
-      email: contacto.email,
-      nombre: contacto.nombre,
-      asunto: versionPaso.asunto,
-      cuerpo: versionPaso.cuerpo,
-      canal: pasoInscripcion.canal,
-      idEmpresa: empresa.idEmpresa,
-      empresaNombre: empresa.nombreOficial,
-    })
-    .from(pasoInscripcion)
-    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
-    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
-    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
-    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
-    .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
-    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
-    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
-    .where(
-      and(
-        eq(pasoInscripcion.estado, 'pendiente'),
-        eq(pasoCadencia.esManual, 1),
-        // Fase 7 (pausar campana): un manual pendiente de una campana pausada no
-        // deberia seguir apareciendo en "Por revisar" como si urgiera aprobarlo.
-        eq(campana.estado, 'activa'),
-        // Sesion 2026-07-09: "Por revisar" es "hay un texto compuesto que alguien
-        // tiene que revisar/mandar" (correo, whatsapp) -- una llamada no tiene texto
-        // que aprobar, tiene una conversacion real con un resultado que capturar
-        // (una de las 4 salidas cerradas). Aprobar aca solo dejaria un toque sin
-        // resultado (aprobarPasoManual no lo pide). Los pasos de llamada quedan
-        // pendientes igual, pero se resuelven desde /llamada (el cockpit real de
-        // Toques), no desde este inbox -- ver CadenciasHoy.tsx.
-        ne(pasoCadencia.canal, 'llamada'),
-      ),
-    )
-    .all();
-}
+// Sesion 2026-07-10 (pedido de Sebastian): "Por revisar" NO es una cola de
+// personalizar copy -- eso ya vive en /cola -> /llamada (ver CadenciasHoy.tsx, misma
+// sesion). "Por revisar" es la cola de inscripciones que nacieron 'bloqueada' (V4.5,
+// ver preview-inscripcion.ts): la empresa no tiene NINGUN contacto con correo, asi
+// que el motor no supo a quien mandarle nada. Sebastian completa el dato aca mismo.
 
 // Aprobar un paso manual: fechaEnviada es la fecha REAL en que Sebastian lo mando
 // (no necesariamente hoy si aprueba con retraso), y es esa fecha real la que el

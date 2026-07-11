@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { campanaParaLanzar, toquesGlobalesHoy } from '../../../db/repository';
+import { campanaParaLanzar, toquesGlobalesHoy, canalesDeCadencia } from '../../../db/repository';
 import { requireSession } from '../../../lib/session';
 import { AppShell } from '../../../ui/shell/AppShell';
 import { CampanaSubNav } from '../CampanaSubNav';
@@ -27,6 +27,9 @@ export default async function LanzarCampana({ params }: { params: Promise<{ id: 
 
   const cargaGlobal = toquesGlobalesHoy();
   const esBorrador = camp.estado === 'borrador';
+  const canalesPrueba = canalesDeCadencia(camp.idCadencia).filter(
+    (c): c is 'correo' | 'whatsapp' => c === 'correo' || c === 'whatsapp',
+  );
 
   return (
     <AppShell>
@@ -35,7 +38,7 @@ export default async function LanzarCampana({ params }: { params: Promise<{ id: 
       ) : (
         <CampanaSubNav items={subNavItemsCampana(camp.idCampana, camp.idCadencia)} />
       )}
-      <LanzarCockpit campanaInicial={camp} cargaGlobalInicial={cargaGlobal} />
+      <LanzarCockpit campanaInicial={camp} cargaGlobalInicial={cargaGlobal} canalesPrueba={canalesPrueba} />
     </AppShell>
   );
 }

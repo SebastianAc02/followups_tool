@@ -52,6 +52,9 @@ export function CicloVidaControles({ idCampana, estado }: { idCampana: number; e
 
   return (
     <div className="flex flex-col items-end gap-1.5">
+      <p className="max-w-[240px] text-right text-[11px] leading-snug text-faint">
+        Cancelar deja la campaña <span className="font-semibold text-muted">archivada</span> (no se puede deshacer).
+      </p>
       <div className="flex items-center gap-2">
         {estado === 'activa' && (
           <button

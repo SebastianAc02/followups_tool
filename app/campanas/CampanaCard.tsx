@@ -12,12 +12,14 @@ const ESTADO_TONE = {
   activa: 'hot',
   pausada: 'warm',
   borrador: 'cold',
+  archivada: 'cold',
 } as const;
 
 const ESTADO_LABEL: Record<string, string> = {
   activa: 'Activa',
   pausada: 'Pausada',
   borrador: 'Borrador',
+  archivada: 'Archivada',
 };
 
 export type CampanaCardVM = {

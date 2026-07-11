@@ -1,11 +1,11 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, notInArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import { db as dbSingleton } from './index';
 import * as schema from './schema';
 import * as authSchema from './auth-schema';
 
-const { organizacionMiembro, organizacion } = schema;
+const { organizacionMiembro, organizacion, empresa } = schema;
 const { user } = authSchema;
 
 type DbInstancia = typeof dbSingleton;
@@ -81,6 +81,63 @@ export function reclamarMiembroYSetOwner(
     if (res.changes !== 1) return false;
 
     tx.update(user).set({ owner }).where(eq(user.id, idUsuario)).run();
+    return true;
+  });
+}
+
+// Registro libre (sin cupos pre-sembrados a mano): el select del formulario se llena con
+// owners REALES de empresa.owner (nunca texto libre), asi que el match exacto que exige
+// el filtro de la cola (repository.ts, eq(empresa.owner, owner)) queda garantizado por
+// construccion. Devuelve solo los owners que ya tienen empresas asignadas en esta
+// organizacion y que ningun usuario reclamo todavia.
+export function ownersDisponibles(idOrganizacion: number, db: DbInstancia = dbSingleton): string[] {
+  const yaReclamados = db
+    .select({ owner: organizacionMiembro.ownerCanonico })
+    .from(organizacionMiembro)
+    .where(and(eq(organizacionMiembro.idOrganizacion, idOrganizacion), isNotNull(organizacionMiembro.idUser)))
+    .all()
+    .map((r) => r.owner);
+
+  const filas = db
+    .selectDistinct({ owner: empresa.owner })
+    .from(empresa)
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        isNotNull(empresa.owner),
+        yaReclamados.length > 0 ? notInArray(empresa.owner, yaReclamados) : undefined,
+      ),
+    )
+    .all();
+
+  return filas.map((r) => r.owner).filter((o): o is string => o !== null).sort();
+}
+
+// Crea el miembro YA reclamado (idUser puesto desde el INSERT) y setea owner, atomico.
+// El chequeo de "nadie mas lo tomo todavia" va DENTRO de la misma transaccion sincrona
+// (better-sqlite3 corre transacciones sync) en vez de confiar en que ownersDisponibles
+// siga vigente entre el render del select y el submit: si dos personas eligen el mismo
+// owner casi al tiempo, la segunda transaccion ve el insert de la primera y aborta.
+// Devuelve false si el owner ya fue reclamado (no toca la tabla user en ese caso).
+export function crearMiembroYSetOwner(
+  idOrganizacion: number,
+  ownerCanonico: string,
+  nombreDisplay: string,
+  idUsuario: string,
+  db: DbInstancia = dbSingleton,
+): boolean {
+  return db.transaction((tx) => {
+    const yaTomado = tx
+      .select({ id: organizacionMiembro.idMiembro })
+      .from(organizacionMiembro)
+      .where(and(eq(organizacionMiembro.idOrganizacion, idOrganizacion), eq(organizacionMiembro.ownerCanonico, ownerCanonico)))
+      .get();
+    if (yaTomado) return false;
+
+    tx.insert(organizacionMiembro)
+      .values({ idOrganizacion, ownerCanonico, nombreDisplay, idUser: idUsuario, createdAt: new Date().toISOString() })
+      .run();
+    tx.update(user).set({ owner: ownerCanonico }).where(eq(user.id, idUsuario)).run();
     return true;
   });
 }

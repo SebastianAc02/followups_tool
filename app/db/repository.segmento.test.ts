@@ -24,6 +24,9 @@ const {
   idsExcluidosDeSegmento,
   obtenerSegmento,
   actualizarSegmento,
+  segmentosSinCampana,
+  crearCadencia,
+  crearCampana,
 } = await import('./repository.ts');
 
 function seed() {
@@ -389,6 +392,38 @@ test('valoresDistintosCampo no mezcla valores de otra organizacion', () => {
 
   assert.ok(!valoresDistintosCampo('estado', 1).includes('solo_en_org_3'));
   assert.deepEqual(valoresDistintosCampo('estado', 3), ['solo_en_org_3']);
+});
+
+// Hub /campanas (sesion 2026-07-10): la tarjeta "Sin cadencia" -- segmentosSinCampana
+// solo debe traer los que NUNCA llegaron a tener una campana encima, sin importar el
+// estado de esa campana (ni siquiera 'archivada' lo devuelve a la lista).
+test('segmentosSinCampana solo trae segmentos sin ninguna campana, y deja de traerlos apenas una los referencia', () => {
+  const idSuelto = guardarSegmento({ nombre: 'suelto-1', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
+  const idConCampana = guardarSegmento({ nombre: 'con-campana-1', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 1);
+
+  let sueltos = segmentosSinCampana(1);
+  assert.ok(sueltos.some((s) => s.id === idSuelto));
+  assert.ok(sueltos.some((s) => s.id === idConCampana));
+
+  const idCadencia = crearCadencia({ nombre: 'C suelto', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
+  const idCampana = crearCampana({ nombre: 'Camp suelto', idCadencia, idSegmento: idConCampana }, 1);
+
+  sueltos = segmentosSinCampana(1);
+  assert.ok(sueltos.some((s) => s.id === idSuelto), 'el que sigue sin campana debe seguir apareciendo');
+  assert.ok(!sueltos.some((s) => s.id === idConCampana), 'el que ya tiene campana sale de la lista');
+
+  // Aunque esa campana termine archivada, el segmento no vuelve a "sin campana":
+  // ya tiene historia real, no es un intento abandonado.
+  const raw = new Database(dbPath);
+  raw.prepare("UPDATE campana SET estado = 'archivada' WHERE id_campana = ?").run(idCampana);
+  raw.close();
+  assert.ok(!segmentosSinCampana(1).some((s) => s.id === idConCampana));
+});
+
+test('segmentosSinCampana no mezcla segmentos de otra organizacion', () => {
+  const idOrg2 = guardarSegmento({ nombre: 'suelto-org2', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 2);
+  assert.ok(!segmentosSinCampana(1).some((s) => s.id === idOrg2));
+  assert.ok(segmentosSinCampana(2).some((s) => s.id === idOrg2));
 });
 
 test.after(() => {

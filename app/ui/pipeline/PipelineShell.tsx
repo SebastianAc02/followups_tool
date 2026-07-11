@@ -41,7 +41,7 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
       <div className="mb-8 space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="font-serif text-2xl md:text-3xl tracking-tight text-ink font-bold">Pipeline global</h2>
+            <h2 className="font-serif text-2xl md:text-3xl tracking-tight text-ink font-bold">Seguimiento global</h2>
             <p className="mt-1 text-sm text-muted">Operaciones comerciales unificadas.</p>
           </div>
 
@@ -58,7 +58,7 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
                   tab === t ? 'bg-accent text-shell' : 'text-muted hover:text-ink hover:bg-white/5'
                 )}
               >
-                {t === 'overview' && 'Pipeline'}
+                {t === 'overview' && 'Seguimiento'}
                 {t === 'reportes' && 'Reportes'}
                 {t === 'ajustes' && 'Ajustes'}
               </a>

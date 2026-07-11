@@ -14,6 +14,7 @@ import {
   marcarDestinatarioSalio,
   quedanDestinatariosActivos,
   materializarPasosDebidos,
+  archivarCampanasCompletadas,
 } from '../db/repository';
 import { drenarOutbox } from '../core/outbox';
 import { pushPendientes } from '../core/push';
@@ -56,6 +57,28 @@ async function tareaOutbox(): Promise<void> {
 async function tareaMaterializar(): Promise<void> {
   const hoy = new Date().toISOString().slice(0, 10);
   materializarPasosDebidos(hoy, CONFIG_CALENDARIO_DEFAULT);
+}
+
+// Auto-archivo (sesion 2026-07-10): distinto de "Cancelar" (cancelarCampanaAction,
+// a mano, antes de tiempo). Corre despues de tareaMaterializar en el mismo ciclo --
+// si materializar hoy todavia genero un paso nuevo para una inscripcion, esa
+// inscripcion ya no cuenta como agotada y campanasParaArchivar() no la va a marcar.
+// La base (campana.estado='archivada') es la fuente de la verdad, igual que en
+// cancelarCampanaAction: si Apollo falla al archivar la secuencia, la campana ya
+// quedo archivada aca, y solo logueamos el fallo por campana (heartbeat propio de la
+// tarea, ejecutarCiclo aisla si esto revienta del resto del ciclo) -- no hay usuario
+// esperando la respuesta como si la hay en la accion manual.
+async function tareaArchivarCampanas(envioCorreo: ReturnType<typeof crearRegistroEnvio>['correo']): Promise<void> {
+  const archivadas = archivarCampanasCompletadas();
+  for (const c of archivadas) {
+    if (!c.proveedorCampanaId || !envioCorreo) continue;
+    try {
+      await envioCorreo.archivarCampana(c.proveedorCampanaId);
+    } catch (e) {
+      const mensaje = e instanceof Error ? e.message : String(e);
+      console.error(`[archivar-campanas] campana ${c.idCampana}: Apollo no confirmo el archivado (${mensaje})`);
+    }
+  }
 }
 
 // V5.4: push reanudable de cadencias, un proveedor real por canal. Aislada de outbox
@@ -138,6 +161,7 @@ function construirTareas(): Tarea[] {
     { nombre: 'materializar', proveedorHeartbeat: 'materializador', ejecutar: tareaMaterializar },
     ...tareasPush(registroEntrega),
     { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: () => tareaTracking(registroCompleto.correo) },
+    { nombre: 'archivar-campanas', proveedorHeartbeat: 'archivador', ejecutar: () => tareaArchivarCampanas(registroCompleto.correo) },
   ];
 }
 

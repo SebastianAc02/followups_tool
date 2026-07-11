@@ -249,8 +249,10 @@ test('pausarCampana/reanudarCampana solo se mueven entre activa y pausada', () =
 
 // marcarCampanaFinalizada es lo unico que "Cancelar" toca en la base (el archivado
 // real en Apollo lo hace la server action, fuera del repository). Un borrador se
-// elimina (eliminarCampanaBorrador), no se cancela -- por eso lo rechaza.
-test('marcarCampanaFinalizada rechaza un borrador y una campana ya finalizada', () => {
+// elimina (eliminarCampanaBorrador), no se cancela -- por eso lo rechaza. Sesion
+// 2026-07-10: unificado con el auto-archivo (campanasParaArchivar) -- cancelar deja
+// 'archivada', el mismo estado terminal que llega solo cuando la cadencia se agota.
+test('marcarCampanaFinalizada rechaza un borrador y una campana ya archivada', () => {
   const idCadenciaI = crearCadencia({ nombre: 'CI', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'x' }] });
   const idCampanaI = crearCampana({ nombre: 'Camp I', idCadencia: idCadenciaI, idSegmento }, 1);
 
@@ -259,9 +261,9 @@ test('marcarCampanaFinalizada rechaza un borrador y una campana ya finalizada', 
   inscribirCampana(idCampanaI, 1);
   const primera = marcarCampanaFinalizada(idCampanaI);
   assert.equal(primera.ok, true);
-  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp I')!.estado, 'finalizada');
+  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp I')!.estado, 'archivada');
 
-  assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'ya esta finalizada');
+  assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'ya esta archivada');
 });
 
 // Descubierto en vivo el 2026-07-10 (prueba multicanal real, 3 veces seguidas): antes

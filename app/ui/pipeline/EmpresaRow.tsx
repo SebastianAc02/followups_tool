@@ -11,6 +11,8 @@ export interface EmpresaRowData {
   cargo: string;
   pasoActual: string;
   diaSecuencia: number;
+  cadencia: string;
+  objetivo: string | null;
   canal: Canal;
   esHoy?: boolean;
 }
@@ -41,6 +43,8 @@ export function EmpresaRow({
       </div>
       <div className="text-xs text-ink-soft truncate">{data.contacto}</div>
       <div className="text-xs text-muted truncate">{data.cargo}</div>
+      <div className="text-xs font-medium text-accent-ink truncate">{data.cadencia}</div>
+      {data.objetivo && <div className="text-xs text-muted truncate italic">{data.objetivo}</div>}
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 text-xs text-muted">
           <span className="w-1.5 h-1.5 rounded-sm bg-blue-400" aria-hidden="true" />

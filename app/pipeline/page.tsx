@@ -65,26 +65,27 @@ async function PipelineContent({ tab }: { tab?: string }) {
 
   const filas = pipelineGlobal(usuario.idOrganizacion, hoy);
 
-  // Corregido con Sebastián (2026-07-10, checkpoint visual): el overview agrupa por
-  // DIA DE SECUENCIA, no por etapa del funnel (D1 sigue valiendo para el Home, no
-  // aca). Un dia de cadencia no implica una etapa comercial -- "día 3" no es
-  // "Reunión", solo dice cuantas empresas llevan 3 dias de playbook y por que canal
-  // les toca. diaSecuencia null (paso fuera de la cadencia, ej. ya se agotaron los
-  // pasos) cae en un grupo aparte en vez de perderse.
-  const dias = [...new Set(filas.map((f) => f.diaSecuencia))].sort((a, b) => {
+  // Pedido de Sebastián (2026-07-10): el overview agrupa por NUMERO DE TOQUE (el
+  // paso 1-indexed de la cadencia), no por día de calendario ni por etapa del funnel
+  // (D1 sigue valiendo para el Home, no aca). "Toque uno" es mas claro para el equipo
+  // que "día 0" -- un toque no implica una etapa comercial, solo dice cuantos
+  // contactos lleva la empresa en el playbook y por que canal le toca el siguiente.
+  // pasoActual null (inscripcion sin paso activo, ej. ya se agotaron los pasos) cae
+  // en un grupo aparte en vez de perderse.
+  const pasos = [...new Set(filas.map((f) => f.pasoActual))].sort((a, b) => {
     if (a === null) return 1;
     if (b === null) return -1;
     return a - b;
   });
 
-  const grupos = dias
-    .map((dia) => {
-      const empresasDia = filas.filter((f) => f.diaSecuencia === dia);
-      if (empresasDia.length === 0) return null;
+  const grupos = pasos
+    .map((paso) => {
+      const empresasPaso = filas.filter((f) => f.pasoActual === paso);
+      if (empresasPaso.length === 0) return null;
 
       const mezclaCanales = { ll: 0, wa: 0, co: 0 };
       let toquesHoy = 0;
-      const empresas: EmpresaRowData[] = empresasDia.map((f) => {
+      const empresas: EmpresaRowData[] = empresasPaso.map((f) => {
         const canal = canalNormalizado(f.canal);
         if (canal === 'llamada') mezclaCanales.ll += 1;
         else if (canal === 'whatsapp') mezclaCanales.wa += 1;
@@ -98,16 +99,18 @@ async function PipelineContent({ tab }: { tab?: string }) {
           cargo: f.cargo ?? '',
           pasoActual: `Paso ${f.pasoActual}/${f.totalPasos}`,
           diaSecuencia: f.diaSecuencia ?? 0,
+          cadencia: f.campana,
+          objetivo: f.objetivo,
           canal,
           esHoy: f.esHoy,
         };
       });
 
       const data: EtapaGroupData = {
-        estado: dia === null ? 'sin-dia' : `dia-${dia}`,
-        dia: dia ?? undefined,
-        label: dia === null ? 'Fuera de secuencia (pasos agotados)' : undefined,
-        total: empresasDia.length,
+        estado: paso === null ? 'sin-toque' : `toque-${paso}`,
+        toque: paso ?? undefined,
+        label: paso === null ? 'Fuera de secuencia (pasos agotados)' : undefined,
+        total: empresasPaso.length,
         mezclaCanales,
         toquesHoy,
       };

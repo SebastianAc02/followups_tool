@@ -1,7 +1,7 @@
 // Segmenta un copy con placeholders [variable] para que la UI decida el resaltado,
 // sin JSX en core. Promovido de conVariablesResaltadas (duplicado hoy en
-// app/por-revisar/ToqueRevisar.tsx y app/cola/CadenciasHoy.tsx) -- misma regex que
-// renderizarCopy (render-copy.ts) para consistencia de deteccion de variables.
+// app/cola/CadenciasHoy.tsx) -- misma regex que renderizarCopy (render-copy.ts) para
+// consistencia de deteccion de variables.
 export type SegmentoCopy = {
   texto: string;
   esVariable: boolean;

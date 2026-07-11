@@ -9,6 +9,9 @@ import {
   pasosParaSincronizarCopy,
   guardarSincronizacionCopy,
   toquesGlobalesHoy,
+  canalesDeCadencia,
+  primerPasoDeCadencia,
+  lineaWhatsappActiva,
   type CampanaParaLanzar,
   type ConfigLanzamientoInput,
   type ResultadoInscripcion,
@@ -144,5 +147,62 @@ export async function cargaGlobalHoyAction(): Promise<CargaGlobalResultado> {
     return { ok: true, totalHoy, campanasActivas };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo calcular la carga global' };
+  }
+}
+
+// Botón "Enviar una prueba": manda SOLO el primer paso del canal elegido a un
+// destino que escribe el usuario, sin tocar la inscripción real de la campaña.
+//
+// correo -> Apollo no tiene "enviar un correo suelto" (ver
+// docs/superpowers/specs/2026-07-09-prueba-correos-apollo-design.md): el unico camino
+// validado es una secuencia desechable de 1 paso, 1 contacto, aprobar. Se archiva sola
+// al terminar (decision de Sebastian, 2026-07-10) para no dejar basura en el panel de
+// Apollo.
+// whatsapp -> Evolution ya es un envio directo (CanalEntrega.enviarPaso sin secuencia),
+// se reusa tal cual contra la unica linea conectada (lineaWhatsappActiva).
+export type EnviarPruebaResultado = { ok: true } | { ok: false; error: string };
+
+export async function enviarPruebaAction(
+  idCampana: number,
+  canal: 'correo' | 'whatsapp',
+  destino: string,
+): Promise<EnviarPruebaResultado> {
+  const sesion = await requireSession();
+  try {
+    const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
+    if (!camp) return { ok: false, error: 'La campaña no existe' };
+
+    const paso = primerPasoDeCadencia(camp.idCadencia, canal);
+    if (!paso) return { ok: false, error: `Esta cadencia no tiene ningún paso de ${canal}` };
+
+    if (canal === 'whatsapp') {
+      const linea = lineaWhatsappActiva();
+      if (!linea) return { ok: false, error: 'No hay ninguna línea de WhatsApp conectada' };
+      const adapter = crearRegistroEnvio().whatsapp;
+      await adapter.enviarPaso(
+        linea.referenciaProveedor,
+        { email: null, telefono: destino, nombre: 'Prueba', empresa: null, cargo: null },
+        { asunto: paso.asunto, cuerpo: paso.cuerpo, canal: 'whatsapp' },
+      );
+      return { ok: true };
+    }
+
+    // correo: secuencia desechable, un solo paso, un solo contacto de prueba.
+    const adapter = crearRegistroEnvio().correo;
+    const proveedorCampanaId = await adapter.crearCampanaExterna(`${camp.nombre} (prueba)`);
+    // No se llama guardarSincronizacionCopy aca a proposito: los stepId/templateId que
+    // devuelve son de la secuencia DESECHABLE, no de la real -- persistirlos pisaria
+    // el proveedorStepId de la cadencia de verdad.
+    await adapter.sincronizarCopy(proveedorCampanaId, [{ ...paso, proveedorStepId: null, proveedorTemplateId: null }]);
+    await adapter.enviarPaso(
+      proveedorCampanaId,
+      { email: destino, telefono: null, nombre: 'Prueba', empresa: null, cargo: null },
+      { asunto: paso.asunto, cuerpo: paso.cuerpo, canal: 'correo' },
+    );
+    await adapter.aprobarSecuencia(proveedorCampanaId);
+    await adapter.archivarCampana(proveedorCampanaId);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'No se pudo enviar la prueba' };
   }
 }

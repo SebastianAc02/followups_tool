@@ -5,11 +5,18 @@ import { useState } from 'react';
 import { cn } from '../cn';
 import { EmpresaRow, type EmpresaRowData } from './EmpresaRow';
 
+// Palabra del numero de toque (1-indexed: no existe "toque cero", el primer
+// contacto de la secuencia YA es un toque). Mas alla de 'diez' cae a digito.
+const TOQUE_PALABRA = ['', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez'];
+export function toquePalabra(n: number): string {
+  return TOQUE_PALABRA[n] ?? String(n);
+}
+
 export interface EtapaGroupData {
-  estado: string; // clave del grupo (ej. 'dia-3')
-  label?: string; // subtitulo opcional -- el overview de pipeline agrupa por dia de
-  // secuencia y NO le pega una etapa del funnel al grupo (dia 3 no implica "Reunión")
-  dia?: number; // Día 0, Día 1, etc. (para agrupar por secuencia)
+  estado: string; // clave del grupo (ej. 'toque-3')
+  label?: string; // subtitulo opcional -- el overview de pipeline agrupa por paso de
+  // la secuencia y NO le pega una etapa del funnel al grupo (toque 3 no implica "Reunión")
+  toque?: number; // Toque uno, Toque dos, etc. (numero de paso de la cadencia, 1-indexed)
   colorClass?: string; // clase Tailwind del fondo (de FUNNEL_ETAPAS)
   total: number; // total de empresas en esta etapa
   mezclaCanales?: {
@@ -47,11 +54,11 @@ export function EtapaGroup({
         className="stage-head w-full flex items-center gap-4 px-4 py-3 hover:bg-white/3 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         aria-expanded={expanded}
       >
-        {/* Día y etapa */}
+        {/* Toque y etapa */}
         <div className="w-28 flex-shrink-0 flex flex-col gap-0.5 text-left">
-          {data.dia !== undefined && (
-            <span className="font-body text-lg font-semibold text-ink tabular-nums leading-none">
-              Día {data.dia}
+          {data.toque !== undefined && (
+            <span className="font-body text-lg font-semibold text-ink leading-none">
+              Toque {toquePalabra(data.toque)}
             </span>
           )}
           {data.label && <span className="text-xs font-semibold text-blue-400">{data.label}</span>}

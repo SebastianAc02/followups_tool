@@ -49,6 +49,20 @@ export function ImportarCadencia({ onResuelto, onLimpiar, ocultarPasosResueltos 
   const [preview, setPreview] = useState<PreviewCadencia | null>(null);
   const [cargando, setCargando] = useState(false);
   const [arrastrando, setArrastrando] = useState(false);
+  const [textoPegado, setTextoPegado] = useState('');
+  const [formatoPegado, setFormatoPegado] = useState<FormatoCadencia>('md');
+
+  // Mismo camino que un archivo/plantilla (previsualizarCadenciaAction + onResuelto):
+  // el resto del flujo no distingue si el texto vino de un file, una plantilla o
+  // pegado a mano aca.
+  async function cargarTexto() {
+    if (!textoPegado.trim()) return;
+    setCargando(true);
+    const resultado = await previsualizarCadenciaAction(formatoPegado, textoPegado, 'Cadencia pegada');
+    setPreview(resultado);
+    setCargando(false);
+    if (resultado.ok) onResuelto?.({ formato: formatoPegado, contenido: textoPegado, nombreCsv: 'Cadencia pegada', preview: resultado });
+  }
 
   async function cargarArchivo(file: File) {
     const formato = formatoDeArchivo(file.name);
@@ -111,6 +125,38 @@ export function ImportarCadencia({ onResuelto, onLimpiar, ocultarPasosResueltos 
               );
             })}
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-center justify-between">
+            <p className="font-mono-tag text-xs uppercase tracking-widest text-muted">Pegar cadencia</p>
+            <select
+              value={formatoPegado}
+              onChange={(e) => setFormatoPegado(e.target.value as FormatoCadencia)}
+              disabled={cargando}
+              className="rounded-[8px] border border-line bg-card px-2.5 py-1 text-xs text-ink-soft outline-none"
+            >
+              <option value="md">Markdown</option>
+              <option value="csv">CSV</option>
+              <option value="json">JSON</option>
+            </select>
+          </div>
+          <textarea
+            value={textoPegado}
+            onChange={(e) => setTextoPegado(e.target.value)}
+            disabled={cargando}
+            rows={6}
+            placeholder={'# Nombre de la cadencia\n\n## Día 0 · correo · Asunto\nCuerpo del correo...'}
+            className="w-full resize-y rounded-xl border border-line bg-card px-4 py-3 font-mono text-[13px] text-ink outline-none placeholder:text-faint focus:border-accent/40"
+          />
+          <button
+            type="button"
+            onClick={() => void cargarTexto()}
+            disabled={cargando || !textoPegado.trim()}
+            className="self-start rounded-[9px] bg-accent px-4 py-1.5 text-[13px] font-semibold text-bg transition-colors hover:opacity-90 disabled:opacity-40"
+          >
+            Previsualizar
+          </button>
         </div>
 
         <div

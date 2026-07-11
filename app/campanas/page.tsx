@@ -1,4 +1,4 @@
-import { listarCampanas, metricasHub } from '../db/repository';
+import { listarCampanas, metricasHub, segmentosSinCampana } from '../db/repository';
 import { requireSession } from '../lib/session';
 import { AppShell } from '../ui/shell/AppShell';
 import { HubHeader } from './HubHeader';
@@ -9,14 +9,15 @@ import { CampanasGrid } from './CampanasGrid';
 // en /campanas/[id]/destinatarios (listarInscritasHub(idCampana)), que es donde
 // tiene contexto -- ver esa pagina y DestinatariosCockpit.
 export default async function Campanas() {
-  await requireSession();
+  const sesion = await requireSession();
   const campanas = listarCampanas();
   const metricas = metricasHub();
+  const segmentosSueltos = segmentosSinCampana(sesion.idOrganizacion);
 
   return (
     <AppShell>
       <HubHeader metricas={metricas} />
-      <CampanasGrid campanas={campanas} />
+      <CampanasGrid campanas={campanas} segmentosSueltos={segmentosSueltos} />
     </AppShell>
   );
 }

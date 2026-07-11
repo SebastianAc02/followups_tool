@@ -9,6 +9,8 @@ import {
   setOwnerDeUsuario,
   reclamarMiembroYSetOwner,
   organizacionDeUsuario,
+  ownersDisponibles,
+  crearMiembroYSetOwner,
   dbDePrueba,
 } from './organizacion-repository.ts';
 
@@ -25,6 +27,14 @@ test.beforeEach(() => {
     INSERT INTO organizacion_miembro (id_organizacion, owner_canonico, nombre_display, id_user)
       VALUES (1, 'Sebastian Acosta Molina', 'Sebastián Acosta', 'user-sebastian');
     INSERT INTO user (id, name, email) VALUES ('user-nuevo', 'Thomas Schumacher', 'thomas@test.com');
+    INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, organizacion_activa_id)
+      VALUES ('e1', 'nit', 'Empresa Uno', 'empresa uno', 'activo', 'Sebastian Acosta Molina', 1);
+    INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, organizacion_activa_id)
+      VALUES ('e2', 'nit', 'Empresa Dos', 'empresa dos', 'activo', 'Ana Gomez', 1);
+    INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, organizacion_activa_id)
+      VALUES ('e3', 'nit', 'Empresa Tres', 'empresa tres', 'activo', 'Ana Gomez', 1);
+    INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, owner, organizacion_activa_id)
+      VALUES ('e4', 'nit', 'Empresa Cuatro', 'empresa cuatro', 'activo', NULL, 1);
   `);
   raw.close();
 });
@@ -96,4 +106,42 @@ test('organizacionDeUsuario incluye idOrganizacion, no solo el nombre', () => {
   const org = organizacionDeUsuario('user-sebastian', db);
   assert.equal(org?.idOrganizacion, 1);
   assert.equal(org?.nombreOrganizacion, 'Onepay');
+});
+
+test('ownersDisponibles devuelve owners de empresa sin duplicados, sin nulls y sin los ya reclamados', () => {
+  const db = dbDePrueba(dbPath);
+  const disponibles = ownersDisponibles(1, db);
+  // 'Sebastian Acosta Molina' ya esta reclamado por organizacion_miembro (id_user seteado
+  // en el beforeEach); 'Ana Gomez' aparece dos veces en empresa pero debe salir una sola vez.
+  assert.deepEqual(disponibles, ['Ana Gomez']);
+});
+
+test('crearMiembroYSetOwner crea el miembro ya reclamado y setea el owner, atomico', () => {
+  const db = dbDePrueba(dbPath);
+  const ok = crearMiembroYSetOwner(1, 'Ana Gomez', 'Ana Gomez', 'user-nuevo', db);
+  assert.equal(ok, true);
+
+  const raw = new Database(dbPath);
+  const miembro = raw.prepare(`SELECT id_user FROM organizacion_miembro WHERE owner_canonico = ?`).get('Ana Gomez') as any;
+  assert.equal(miembro.id_user, 'user-nuevo');
+  const usuario = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('user-nuevo') as any;
+  assert.equal(usuario.owner, 'Ana Gomez');
+  raw.close();
+
+  // Ya reclamado: ahora ownersDisponibles no debe volver a ofrecerlo.
+  assert.deepEqual(ownersDisponibles(1, db), []);
+});
+
+test('crearMiembroYSetOwner falla si otro usuario ya reclamo ese owner (carrera)', () => {
+  const db = dbDePrueba(dbPath);
+  const primero = crearMiembroYSetOwner(1, 'Ana Gomez', 'Ana Gomez', 'user-nuevo', db);
+  assert.equal(primero, true);
+
+  const segundo = crearMiembroYSetOwner(1, 'Ana Gomez', 'Ana Gomez', 'otro-user', db);
+  assert.equal(segundo, false, 'un owner ya reclamado no se puede volver a reclamar');
+
+  const raw = new Database(dbPath);
+  const otro = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('otro-user') as any;
+  assert.equal(otro, undefined, 'el reclamo fallido no debe tocar la tabla user para el segundo usuario');
+  raw.close();
 });

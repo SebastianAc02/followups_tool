@@ -8,7 +8,7 @@ import { NuevaCampanaFlujo } from './NuevaCampanaFlujo';
 // esta pagina solo precarga la lista de segmentos para el selector.
 // Fase C (cockpit de campañas): ademas precarga las opciones del wall (mismo patron
 // que /campanas/segmentos) para poder armar un segmento nuevo sin salir de esta pantalla.
-export default async function NuevaCampana() {
+export default async function NuevaCampana({ searchParams }: { searchParams: Promise<{ segmento?: string }> }) {
   const sesion = await requireSession();
   const segmentos = listarSegmentos(sesion.idOrganizacion);
   const opciones = {
@@ -21,9 +21,17 @@ export default async function NuevaCampana() {
     rol: valoresDistintosCampo('rol', sesion.idOrganizacion),
   };
 
+  // Tarjeta "Sin cadencia" del hub (/campanas, SegmentoSueltoCard) trae de vuelta un
+  // segmento que ya se guardo pero nunca llego a Cadencia -- ?segmento=<id> retoma
+  // exactamente el mismo camino que "volver" desde Cadencia (reanudarDesde en
+  // NuevaCampanaFlujo/NuevoSegmento), sin logica nueva ahi.
+  const { segmento: segmentoParam } = await searchParams;
+  const idSegmentoInicial = segmentoParam ? Number(segmentoParam) : NaN;
+  const segmentoInicial = Number.isInteger(idSegmentoInicial) ? (segmentos.find((s) => s.id === idSegmentoInicial) ?? null) : null;
+
   return (
     <AppShell>
-      <NuevaCampanaFlujo segmentosIniciales={segmentos} opciones={opciones} />
+      <NuevaCampanaFlujo segmentosIniciales={segmentos} opciones={opciones} segmentoInicial={segmentoInicial} />
     </AppShell>
   );
 }

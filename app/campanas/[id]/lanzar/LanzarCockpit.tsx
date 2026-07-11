@@ -7,6 +7,7 @@ import {
   guardarConfigLanzamientoAction,
   lanzarCampanaAction,
   cargaGlobalHoyAction,
+  enviarPruebaAction,
 } from './actions';
 import type { CampanaParaLanzar } from '../../../db/repository';
 import type { ResultadoGoteo, RitmoIngreso } from '../../../core/goteo';
@@ -51,9 +52,11 @@ function conGapsDeCalendario(porDia: { fecha: string; cuantos: number }[]): DiaG
 export function LanzarCockpit({
   campanaInicial,
   cargaGlobalInicial,
+  canalesPrueba,
 }: {
   campanaInicial: CampanaParaLanzar;
   cargaGlobalInicial: { totalHoy: number; campanasActivas: number };
+  canalesPrueba: ('correo' | 'whatsapp')[];
 }) {
   const router = useRouter();
   const hoy = fechaLocalISO(new Date());
@@ -71,6 +74,24 @@ export function LanzarCockpit({
   const [avisoSecuenciaExterna, setAvisoSecuenciaExterna] = useState('');
   const [pendienteCalculo, startCalculo] = useTransition();
   const [pendienteLanzar, startLanzar] = useTransition();
+
+  const [canalPrueba, setCanalPrueba] = useState<'correo' | 'whatsapp' | null>(canalesPrueba[0] ?? null);
+  const [destinoPrueba, setDestinoPrueba] = useState('');
+  const [estadoPrueba, setEstadoPrueba] = useState<{ tipo: 'ok' | 'error'; mensaje: string } | null>(null);
+  const [pendientePrueba, startPrueba] = useTransition();
+
+  function enviarPrueba() {
+    if (!canalPrueba || !destinoPrueba.trim()) return;
+    setEstadoPrueba(null);
+    startPrueba(async () => {
+      const res = await enviarPruebaAction(campanaInicial.idCampana, canalPrueba, destinoPrueba.trim());
+      setEstadoPrueba(
+        res.ok
+          ? { tipo: 'ok', mensaje: canalPrueba === 'whatsapp' ? 'WhatsApp de prueba enviado.' : 'Correo de prueba enviado.' }
+          : { tipo: 'error', mensaje: res.error },
+      );
+    });
+  }
 
   const fechaEfectiva = programar ? fechaInicio : hoy;
 
@@ -291,22 +312,56 @@ export function LanzarCockpit({
               lanzamiento.
             </div>
 
-            <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3">
-              <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-lg bg-canal-correo/15 text-canal-correo" aria-hidden="true">
-                ✈
-              </span>
-              <div className="flex-1">
-                <p className="text-[13px] font-semibold text-ink">Envía una prueba</p>
-                <p className="text-xs text-muted">Recibe la secuencia antes de lanzar.</p>
+            <div className="flex flex-col gap-3 rounded-xl border border-line bg-surface px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-lg bg-canal-correo/15 text-canal-correo" aria-hidden="true">
+                  ✈
+                </span>
+                <div className="flex-1">
+                  <p className="text-[13px] font-semibold text-ink">Envía una prueba</p>
+                  <p className="text-xs text-muted">
+                    {canalesPrueba.length > 0
+                      ? 'Manda solo el primer paso a un destino tuyo, sin inscribir a nadie.'
+                      : 'Esta cadencia no tiene pasos de correo ni WhatsApp para probar.'}
+                  </p>
+                </div>
               </div>
-              <button
-                type="button"
-                disabled
-                title="Todavía no hay backend de envío de prueba"
-                className="whitespace-nowrap rounded-lg border border-line px-3 py-1.5 text-xs text-muted opacity-50"
-              >
-                Probar
-              </button>
+
+              {canalesPrueba.length > 0 && (
+                <>
+                  <div className="flex gap-2">
+                    {canalesPrueba.length > 1 && (
+                      <Seg>
+                        {canalesPrueba.map((c) => (
+                          <SegButton key={c} on={canalPrueba === c} onClick={() => setCanalPrueba(c)}>
+                            {c === 'correo' ? 'Correo' : 'WhatsApp'}
+                          </SegButton>
+                        ))}
+                      </Seg>
+                    )}
+                    <input
+                      type={canalPrueba === 'whatsapp' ? 'tel' : 'email'}
+                      value={destinoPrueba}
+                      onChange={(e) => setDestinoPrueba(e.target.value)}
+                      placeholder={canalPrueba === 'whatsapp' ? 'Tu número con indicativo' : 'Tu correo'}
+                      className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-ink"
+                    />
+                    <button
+                      type="button"
+                      onClick={enviarPrueba}
+                      disabled={pendientePrueba || !destinoPrueba.trim()}
+                      className="whitespace-nowrap rounded-lg border border-line px-3 py-1.5 text-xs text-ink disabled:opacity-50"
+                    >
+                      {pendientePrueba ? 'Enviando…' : 'Probar'}
+                    </button>
+                  </div>
+                  {estadoPrueba && (
+                    <p className={cn('text-xs', estadoPrueba.tipo === 'ok' ? 'text-accent-ink' : 'text-overdue')}>
+                      {estadoPrueba.mensaje}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="mt-auto">

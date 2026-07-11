@@ -5,15 +5,13 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { registrarUsuarioAction } from './actions';
 
-type Miembro = { id: number; nombreDisplay: string };
-
-export default function RegisterForm({ miembros }: { miembros: Miembro[] }) {
+export default function RegisterForm({ owners }: { owners: string[] }) {
   const router = useRouter();
   const [paso, setPaso] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmar, setConfirmar] = useState('');
-  const [idMiembro, setIdMiembro] = useState('');
+  const [ownerElegido, setOwnerElegido] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
@@ -36,7 +34,7 @@ export default function RegisterForm({ miembros }: { miembros: Miembro[] }) {
     setError(null);
     setEnviando(true);
     try {
-      const resultado = await registrarUsuarioAction({ idMiembro, email, password });
+      const resultado = await registrarUsuarioAction({ ownerElegido, email, password });
       if (!resultado.ok) {
         setError(resultado.error);
         return;
@@ -62,13 +60,13 @@ export default function RegisterForm({ miembros }: { miembros: Miembro[] }) {
     </div>
   );
 
-  if (miembros.length === 0) {
+  if (owners.length === 0) {
     return (
       <div className="ac-card">
         <div className="ac-inner">
           {marca}
-          <h2 className="ac-h med">Sin cupos libres</h2>
-          <p className="ac-sub">Ya no hay nombres libres para registrar. Habla con Sebastián.</p>
+          <h2 className="ac-h med">Sin nombres disponibles</h2>
+          <p className="ac-sub">No hay owners libres en el pipeline todavía. Habla con Sebastián.</p>
           <div className="ac-foot">
             <Link href="/login">Ir a iniciar sesión</Link>
           </div>
@@ -144,20 +142,20 @@ export default function RegisterForm({ miembros }: { miembros: Miembro[] }) {
               <span className="ac-orgchip-name">Onepay</span>
             </div>
 
-            <label className="ac-label" htmlFor="idMiembro">Persona del equipo</label>
+            <label className="ac-label" htmlFor="ownerElegido">Tu nombre en el pipeline</label>
             <div className="ac-field ac-select" style={{ marginBottom: 24 }}>
-              <select id="idMiembro" required value={idMiembro}
-                onChange={(e) => setIdMiembro(e.target.value)}>
+              <select id="ownerElegido" required value={ownerElegido}
+                onChange={(e) => setOwnerElegido(e.target.value)}>
                 <option value="" disabled>Elige tu nombre</option>
-                {miembros.map((m) => (
-                  <option key={m.id} value={m.id}>{m.nombreDisplay}</option>
+                {owners.map((o) => (
+                  <option key={o} value={o}>{o}</option>
                 ))}
               </select>
             </div>
 
             {error && <div className="ac-error">{error}</div>}
 
-            <button className="ac-btn" disabled={enviando || idMiembro === ''}>
+            <button className="ac-btn" disabled={enviando || ownerElegido === ''}>
               {enviando ? 'Creando cuenta...' : 'Entrar a la cabina'}
             </button>
             <button type="button" className="ac-back" onClick={() => { setError(null); setPaso(1); }}>

@@ -1,7 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { auth } from '../lib/auth';
-import { miembrosLibres } from '../db/organizacion-repository';
+import { ownersDisponibles } from '../db/organizacion-repository';
 import RegisterForm from './RegisterForm';
 
 // V6: id 1 = Onepay, sembrada por scripts/seed_organizacion.ts. Una sola organizacion por
@@ -12,11 +12,11 @@ export default async function RegisterPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (session) redirect('/');
 
-  const miembros = miembrosLibres(ID_ORGANIZACION_ONEPAY);
+  const owners = ownersDisponibles(ID_ORGANIZACION_ONEPAY);
 
   return (
     <div className="auth-cockpit">
-      <RegisterForm miembros={miembros} />
+      <RegisterForm owners={owners} />
     </div>
   );
 }
