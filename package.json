@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "worker": "node --env-file=.env.local --experimental-strip-types --experimental-loader ./scripts/resolve-ts-ext.mjs ./app/worker/index.ts",
-    "test": "ISPS_DB_PATH=:memory: node --experimental-strip-types --experimental-loader ./scripts/resolve-ts-ext.mjs --test app/db/*.test.ts app/lib/*.test.ts app/core/*.test.ts app/core/**/*.test.ts app/adapters/*.test.ts app/worker/*.test.ts app/campanas/**/*.test.ts app/ui/*.test.ts app/cola/*.test.ts app/conectores/*.test.ts"
+    "test": "ISPS_DB_PATH=:memory: node --experimental-strip-types --experimental-loader ./scripts/resolve-ts-ext.mjs --test app/db/*.test.ts app/lib/*.test.ts app/core/*.test.ts app/core/**/*.test.ts app/adapters/*.test.ts app/worker/*.test.ts app/campanas/**/*.test.ts app/ui/*.test.ts app/cola/*.test.ts app/conectores/*.test.ts \"app/llamada/**/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
