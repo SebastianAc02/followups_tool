@@ -1,6 +1,7 @@
-import { listarSegmentos, valoresDistintosCampo } from '../../db/repository';
+import { listarSegmentos, lineasWhatsappDeUsuario, valoresDistintosCampo } from '../../db/repository';
 import { requireSession } from '../../lib/session';
 import { AppShell } from '../../ui/shell/AppShell';
+import { AvisoCanalUsuario } from './AvisoCanalUsuario';
 import { NuevaCampanaFlujo } from './NuevaCampanaFlujo';
 
 // Parte 3 campanas: crear una campana = elegir un segmento YA revisado (Parte 2) +
@@ -20,6 +21,7 @@ export default async function NuevaCampana({ searchParams }: { searchParams: Pro
     owner: valoresDistintosCampo('owner', sesion.idOrganizacion),
     rol: valoresDistintosCampo('rol', sesion.idOrganizacion),
   };
+  const tieneLineaWhatsappActiva = lineasWhatsappDeUsuario(sesion.id).some((l) => l.estado === 'activa');
 
   // Tarjeta "Sin cadencia" del hub (/campanas, SegmentoSueltoCard) trae de vuelta un
   // segmento que ya se guardo pero nunca llego a Cadencia -- ?segmento=<id> retoma
@@ -31,6 +33,7 @@ export default async function NuevaCampana({ searchParams }: { searchParams: Pro
 
   return (
     <AppShell>
+      <AvisoCanalUsuario tieneLineaWhatsappActiva={tieneLineaWhatsappActiva} />
       <NuevaCampanaFlujo segmentosIniciales={segmentos} opciones={opciones} segmentoInicial={segmentoInicial} />
     </AppShell>
   );
