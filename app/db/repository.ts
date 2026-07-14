@@ -281,6 +281,34 @@ export function colaReagendar(hoy: string, owner: string, idOrganizacion: number
     .all();
 }
 
+// Seccion "Contacto iniciado sin seguimiento" (2026-07-14): empresas en contacto_iniciado
+// que no se van a meter a ninguna cadencia por ahora y hoy son invisibles -- colaDelDia
+// exige fecha, esta no la tiene. General para cualquier owner (no gateado como el split de
+// /cola). Lista fija (sin filtro de fecha), mismo patron que colaCierres/colaReagendar.
+export function colaContactoIniciadoSinSeguimiento(owner: string, idOrganizacion: number) {
+  return db
+    .select(columnasCola)
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        eq(empresa.owner, owner),
+        eq(empresa.estadoNotion, 'contacto_iniciado'),
+        isNull(empresa.proximoFollowUpFecha),
+        notExists(
+          db
+            .select({ x: sql`1` })
+            .from(inscripcion)
+            .where(and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa'))),
+        ),
+      ),
+    )
+    .orderBy(empresa.nombreOficial)
+    .all();
+}
+
 // V3.9: busca CUALQUIER empresa por nombre, sin restringir por owner ni por
 // proximoFollowUpFecha, a diferencia de colaDelDia(), que solo trae leads propios
 // y vencidos. Sirve para registrar un toque con alguien que no es lead de la cola
