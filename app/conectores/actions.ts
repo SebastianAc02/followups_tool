@@ -7,10 +7,11 @@ import {
   actualizarModoConector,
   quitarConfigConector,
   modoConector,
+  leerCredencialConector,
 } from "../db/repository";
 import { requireSession } from "../lib/session";
 import { conectorDelCatalogo, type ModoConector } from "./catalogo";
-import { decidirGuardado } from "./politica";
+import { decidirGuardado, puedeRevelarCredencial } from "./politica";
 
 function modoValido(v: string): v is ModoConector {
   return v === "personal" || v === "admin";
@@ -86,4 +87,21 @@ export async function quitarConectorAction(formData: FormData) {
 
   quitarConfigConector(proveedor);
   revalidatePath("/conectores");
+}
+
+export type ResultadoRevelar = { ok: true; credencial: string } | { ok: false; error: string };
+
+// Bajo demanda: la pagina NUNCA trae el valor en el HTML inicial (page.tsx no llama
+// leerCredencialConector). Solo esta accion, invocada por un clic explicito del
+// admin, lo descifra y lo manda al cliente -- reduce la ventana de exposicion frente
+// a mostrarlo siempre.
+export async function revelarCredencialAction(proveedor: string): Promise<ResultadoRevelar> {
+  const sesion = await requireSession();
+  const modo = modoConector(proveedor);
+  if (!modo) return { ok: false, error: "Este conector no está habilitado." };
+  if (!puedeRevelarCredencial(modo, sesion.admin)) return { ok: false, error: "No podés revelar esta credencial." };
+
+  const credencial = leerCredencialConector(proveedor);
+  if (!credencial) return { ok: false, error: "No hay ninguna credencial guardada todavía." };
+  return { ok: true, credencial };
 }

@@ -6,6 +6,7 @@ import type { ConectorCatalogo, ModoConector } from "./catalogo.ts";
 import { vistaEstado } from "./estado-ui.ts";
 import { cambiarModoAction, quitarConectorAction } from "./actions";
 import { CredencialForm } from "./CredencialForm";
+import { RevelarCredencial } from "./RevelarCredencial";
 
 // Una fila de conector: columna izquierda de estado (punto + label + timestamp), columna
 // derecha con nombre + badge de modo + descripcion + formulario/estado/error. La autoridad
@@ -64,6 +65,7 @@ export function ConectorRow({
             Solo un admin puede configurar esta conexión. Si algo no llega, avísale a tu admin.
           </p>
         )}
+        {esAdmin && estado.tieneCredencial && <RevelarCredencial proveedor={cat.id} />}
 
         {/* Controles de admin: cambiar modo + quitar. Ghost/quiet a proposito: son
             secundarios frente al boton primario de conectar/reemplazar de arriba. Labels
