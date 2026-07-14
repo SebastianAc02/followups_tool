@@ -43,6 +43,7 @@ import {
   mensajeWhatsapp,
   lineaWhatsapp,
   empresaEstadoHistorial,
+  organizacionMiembro,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -3264,6 +3265,43 @@ export function lineaWhatsappActiva(): { referenciaProveedor: string } | null {
     .get();
   if (!fila || !fila.referenciaProveedor) return null;
   return { referenciaProveedor: fila.referenciaProveedor };
+}
+
+// Gate de canal (2026-07-14): persiste quien lanzo la campana -- lo necesita
+// lineaWhatsappActivaDeOwner para resolver la linea PROPIA de ese dueno en vez de
+// "cualquier linea activa del sistema" (ver pasoInscripcionesPendientes mas abajo).
+export function fijarOwnerCampana(idCampana: number, owner: string): void {
+  db.update(campana).set({ owner, updatedAt: new Date().toISOString() }).where(eq(campana.idCampana, idCampana)).run();
+}
+
+// Resuelve la linea de whatsapp ACTIVA del dueno de una campana (owner_canonico ->
+// organizacion_miembro -> id_user -> linea_whatsapp), no la primera activa del sistema.
+// owner null = campana vieja, lanzada antes de que este campo se poblara: cae al
+// fallback de la linea de POOL (mismo comportamiento que el sistema tenia antes de
+// este cambio), para no romper campanas ya lanzadas.
+export function lineaWhatsappActivaDeOwner(owner: string | null): { referenciaProveedor: string } | null {
+  if (!owner) {
+    const pool = db
+      .select({ referenciaProveedor: lineaWhatsapp.referenciaProveedor })
+      .from(lineaWhatsapp)
+      .where(and(isNull(lineaWhatsapp.idUsuario), eq(lineaWhatsapp.estado, 'activa')))
+      .get();
+    return pool?.referenciaProveedor ? { referenciaProveedor: pool.referenciaProveedor } : null;
+  }
+
+  const miembro = db
+    .select({ idUser: organizacionMiembro.idUser })
+    .from(organizacionMiembro)
+    .where(eq(organizacionMiembro.ownerCanonico, owner))
+    .get();
+  if (!miembro?.idUser) return null;
+
+  const linea = db
+    .select({ referenciaProveedor: lineaWhatsapp.referenciaProveedor })
+    .from(lineaWhatsapp)
+    .where(and(eq(lineaWhatsapp.idUsuario, miembro.idUser), eq(lineaWhatsapp.estado, 'activa')))
+    .get();
+  return linea?.referenciaProveedor ? { referenciaProveedor: linea.referenciaProveedor } : null;
 }
 
 // Tarea 8 (D6, plan-whatsapp-adapter.md): CRUD real de lineas, faltaba entero -- hasta
