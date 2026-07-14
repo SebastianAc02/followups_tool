@@ -45,3 +45,38 @@ export function conteosPorCanal(filas: FilaAgenda[]): Record<FiltroCanal, number
     whatsapp: filas.filter((f) => f.canal === "whatsapp").length,
   };
 }
+
+// Owner cuyo cola.page.tsx usa el split leads/cierres/reagendar (2026-07-14). Solo
+// Sebastian: los demas owners siguen viendo colaDelDia sin cambios.
+export const OWNER_COLA_SPLIT = "Sebastian Acosta Molina";
+
+// Shape minimo compartido por colaLeads/colaCierres/colaReagendar (repository.ts), lo que
+// necesita el mapeo a FilaAgenda.
+export type FilaCola = {
+  id: string;
+  empresa: string;
+  ciudad: string | null;
+  contacto: string | null;
+  cargo: string | null;
+  canal: string | null;
+  estado: string | null;
+  fecha: string | null;
+};
+
+// Cierres y Reagendar no tienen nocion de "vencido": una cuenta en negociacion o atascada
+// no se marca overdue solo por no tener proximo_follow_up_fecha. Si tiene fecha, se muestra
+// como texto informativo; si no, "sin fecha".
+export function filaSinVencimiento(c: FilaCola): FilaAgenda {
+  return {
+    id: c.id,
+    empresa: c.empresa,
+    ciudad: c.ciudad,
+    contacto: c.contacto,
+    cargo: c.cargo,
+    canal: canalNormalizado(c.canal),
+    estado: c.estado,
+    sev: "today",
+    severidadTexto: c.fecha ?? "sin fecha",
+    actual: false,
+  };
+}
