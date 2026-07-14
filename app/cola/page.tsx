@@ -1,4 +1,13 @@
-import { colaDelDia, colaLeads, colaCierres, colaReagendar, contadoresHoy, agendaHoyCadencias, historialPasosDestinatario } from "../db/repository";
+import {
+  colaDelDia,
+  colaLeads,
+  colaCierres,
+  colaReagendar,
+  colaContactoIniciadoSinSeguimiento,
+  contadoresHoy,
+  agendaHoyCadencias,
+  historialPasosDestinatario,
+} from "../db/repository";
 import { registrarTapAction } from "../actions";
 import { requireSession } from "../lib/session";
 import { AppShell } from "../ui/shell/AppShell";
@@ -7,6 +16,7 @@ import CadenciasHoy from "./CadenciasHoy";
 import { BarraAhora } from "./BarraAhora";
 import { AgendaHoy } from "./AgendaHoy";
 import { ColaUnificada } from "./ColaUnificada";
+import { ContactoIniciadoSinSeguimiento } from "./ContactoIniciadoSinSeguimiento";
 import { contarCerradas } from "./stats";
 import {
   filaConVencimiento,
@@ -31,6 +41,10 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
   const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
   const reagendar = splitActivo ? colaReagendar(hoy, owner, usuario.idOrganizacion) : [];
+  // Seccion "Contacto iniciado sin seguimiento" (2026-07-14): para CUALQUIER owner, no
+  // solo el split de Sebastian. Sin owner (visitante viendo TODA la organizacion) no hay
+  // un owner concreto contra el que filtrar -- la seccion simplemente no se muestra.
+  const sinSeguimiento = owner ? colaContactoIniciadoSinSeguimiento(owner, usuario.idOrganizacion) : [];
   const contadores = contadoresHoy(hoy, owner, usuario.idOrganizacion);
   // V5.7: cadencias (automatico Apollo + manual Tier 1) no son por owner todavia
   // (campana.owner es la campana masiva, no un individuo -- ver memoria del proyecto);
@@ -150,6 +164,8 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
           </>
         )}
       </section>
+
+      {owner && <ContactoIniciadoSinSeguimiento filas={sinSeguimiento} owner={owner} />}
     </AppShell>
   );
 }
