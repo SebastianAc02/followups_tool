@@ -137,7 +137,7 @@ export function AgendaHoy({
 // Tap rápido rediseñado (Fix 3, decidido 2026-07-08): menú "···" explícito por fila
 // en vez de un form que aparecía solo, sin avisar, al pasar el mouse. Mismo
 // registrarTapAction real, solo cambia cómo se dispara.
-function FilaAcciones({
+export function FilaAcciones({
   idEmpresa,
   registrarTapAction,
 }: {
