@@ -1,4 +1,4 @@
-import { colaDelDia, contadoresHoy, agendaHoyCadencias, historialPasosDestinatario } from "../db/repository";
+import { colaDelDia, colaLeads, colaCierres, colaReagendar, contadoresHoy, agendaHoyCadencias, historialPasosDestinatario } from "../db/repository";
 import { registrarTapAction } from "../actions";
 import { requireSession } from "../lib/session";
 import { AppShell } from "../ui/shell/AppShell";
@@ -7,7 +7,7 @@ import CadenciasHoy from "./CadenciasHoy";
 import { BarraAhora } from "./BarraAhora";
 import { AgendaHoy } from "./AgendaHoy";
 import { contarCerradas } from "./stats";
-import { canalNormalizado, type FilaAgenda } from "./agenda.ts";
+import { canalNormalizado, filaSinVencimiento, OWNER_COLA_SPLIT, type FilaAgenda } from "./agenda.ts";
 
 function diasVencido(fechaISO: string, hoyISO: string) {
   return Math.round((Date.parse(hoyISO) - Date.parse(fechaISO)) / 86400000);
@@ -21,8 +21,11 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   // lectura) sin ?owner= ve la cola de TODOS los owners, no una propia (que estaria vacia).
   const owner = sp.owner ?? (usuario.soloLectura ? undefined : usuario.owner);
   const hoy = new Date().toISOString().slice(0, 10);
-  const cola = colaDelDia(hoy, owner, usuario.idOrganizacion);
+  const splitActivo = owner === OWNER_COLA_SPLIT;
+  const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
+  const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
+  const reagendar = splitActivo ? colaReagendar(owner, usuario.idOrganizacion) : [];
   const contadores = contadoresHoy(hoy, owner, usuario.idOrganizacion);
   // V5.7: cadencias (automatico Apollo + manual Tier 1) no son por owner todavia
   // (campana.owner es la campana masiva, no un individuo -- ver memoria del proyecto);
@@ -51,6 +54,9 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
     };
   });
 
+  const filasCierres: FilaAgenda[] = cierres.map((c) => filaSinVencimiento(c));
+  const filasReagendar: FilaAgenda[] = reagendar.map((c) => filaSinVencimiento(c));
+
   const actual = cola[0];
   const diasActual = actual ? diasVencido(actual.fecha!, hoy) : 0;
 
@@ -59,8 +65,8 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   return (
     <AppShell>
       <div className="mb-8">
-        <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">Toques de hoy</h2>
-        <p className="mt-1 text-sm text-muted">Tu cola de follow-ups pendientes.</p>
+        <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">{splitActivo ? "Leads" : "Toques de hoy"}</h2>
+        <p className="mt-1 text-sm text-muted">{splitActivo ? "Leads con follow-up vencido o de hoy." : "Tu cola de follow-ups pendientes."}</p>
       </div>
 
       <div className="mb-8 grid grid-cols-3 gap-4">
@@ -101,6 +107,20 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
         {cadenciasHoy.length > 0 && (
           <div className="mt-4 overflow-hidden rounded-xl border border-line-card bg-card px-7 py-6">
             <CadenciasHoy items={cadenciasHoy} hoy={hoy} />
+          </div>
+        )}
+
+        {splitActivo && filasCierres.length > 0 && (
+          <div className="mt-8">
+            <h3 className="font-serif text-lg text-ink mb-3">Cierres</h3>
+            <AgendaHoy filas={filasCierres} registrarTapAction={registrarTapAction} />
+          </div>
+        )}
+
+        {splitActivo && filasReagendar.length > 0 && (
+          <div className="mt-8">
+            <h3 className="font-serif text-lg text-ink mb-3">Reagendar</h3>
+            <AgendaHoy filas={filasReagendar} registrarTapAction={registrarTapAction} />
           </div>
         )}
       </section>
