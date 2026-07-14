@@ -1,6 +1,7 @@
 // Panel lateral del embudo: lista las empresas de la etapa clickeada y, al elegir una,
 // abre la ficha completa (reusa DetallePanel de seguimiento -- misma vista de "toda la
-// historia" que ya existe ahi, no se duplica).
+// historia" que ya existe ahi, no se duplica). Solo se monta cuando FunnelCanvas tiene
+// una etapa elegida (ver onClose para volver al embudo de ancho completo).
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -15,10 +16,12 @@ export function EtapaEmpresasPanel({
   etapa,
   owner,
   campana,
+  onClose,
 }: {
-  etapa: EtapaSeleccionada | null;
+  etapa: EtapaSeleccionada;
   owner?: string;
   campana?: string;
+  onClose: () => void;
 }) {
   const [empresas, setEmpresas] = useState<EmpresaEnEtapa[]>([]);
   const [cargandoLista, setCargandoLista] = useState(false);
@@ -31,10 +34,6 @@ export function EtapaEmpresasPanel({
 
   useEffect(() => {
     setBusqueda('');
-    if (!etapa) {
-      setEmpresas([]);
-      return;
-    }
     let cancelado = false;
     setCargandoLista(true);
     empresasDeEtapaAction(etapa.estado, owner, campana)
@@ -60,14 +59,6 @@ export function EtapaEmpresasPanel({
     historialEtapasAction(idEmpresa).then((t) => setTimelineEtapas(t));
   }
 
-  if (!etapa) {
-    return (
-      <div className="rounded-2xl border border-line-card bg-pipeline-card p-6 flex items-center justify-center text-center text-sm text-muted min-h-[240px]">
-        Elegí una etapa del embudo para ver las cuentas.
-      </div>
-    );
-  }
-
   const filtro = busqueda.trim().toLowerCase();
   const empresasFiltradas = filtro
     ? empresas.filter((e) => e.nombre.toLowerCase().includes(filtro))
@@ -77,9 +68,19 @@ export function EtapaEmpresasPanel({
     <div className="rounded-2xl border border-line-card bg-pipeline-card overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-line">
         <span className="text-sm font-semibold text-ink">{etapa.label}</span>
-        <span className="mono text-xs text-muted">
-          {filtro ? `${empresasFiltradas.length}/${empresas.length}` : empresas.length}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="mono text-xs text-muted">
+            {filtro ? `${empresasFiltradas.length}/${empresas.length}` : empresas.length}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar panel de cuentas"
+            className="w-6 h-6 flex items-center justify-center rounded-md text-muted hover:text-ink hover:bg-white/5 transition-all"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {!cargandoLista && empresas.length > 0 && (

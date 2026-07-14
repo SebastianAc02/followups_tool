@@ -38,6 +38,14 @@ function colorEtapaCss(estado: string): string {
   return 'var(--color-line-strong)';
 }
 
+// Placeholders de import/CRM que no son un dato real -- se tratan como vacio en vez de
+// mostrarle "Unknown" literal a Sebastian.
+const VALORES_BASURA = new Set(['unknown', 'n/a', 'na', 'null', 'undefined', '-']);
+function valorLimpio(valor: string | null): string | null {
+  if (!valor) return null;
+  return VALORES_BASURA.has(valor.trim().toLowerCase()) ? null : valor;
+}
+
 export interface ContactoCompleto {
   nombre: string | null;
   cargo: string | null;
@@ -132,8 +140,22 @@ export function DetallePanel({
               {/* Header */}
               <div className="sticky top-0 z-10 bg-shell border-b border-line-card px-6 py-4 flex items-center justify-between gap-4 rounded-t-2xl">
                 <div className="min-w-0 flex-1">
-                  <h3 className="font-serif text-xl font-semibold text-ink truncate">{data.empresa}</h3>
-                  <p className="text-xs text-muted truncate">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <h3 className="font-serif text-xl font-semibold text-ink truncate">{data.empresa}</h3>
+                    {timelineEtapas?.etapaActual && (
+                      <span
+                        className={cn(
+                          'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide flex-shrink-0',
+                          'bg-pipeline-card border border-line-card',
+                          colorEtapaTexto(timelineEtapas.etapaActual),
+                        )}
+                      >
+                        <span className={cn('w-1.5 h-1.5 rounded-full', colorEtapa(timelineEtapas.etapaActual))} />
+                        {labelEtapa(timelineEtapas.etapaActual)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted truncate mt-0.5">
                     {[data.ciudad, data.categoria, data.campana].filter(Boolean).join(' · ') || 'Sin datos adicionales'}
                   </p>
                 </div>
@@ -171,19 +193,31 @@ export function DetallePanel({
                     <p className="text-xs text-muted">Sin contactos registrados.</p>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {data.contactos.map((c, i) => (
-                        <div key={i} className="bg-pipeline-card border border-line-card rounded-lg p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-semibold text-ink truncate">{c.nombre ?? 'Sin nombre'}</span>
-                            {c.esPrincipal && (
-                              <span className="text-[10px] font-bold uppercase tracking-wide text-accent">Principal</span>
+                      {data.contactos.map((c, i) => {
+                        const nombre = valorLimpio(c.nombre);
+                        const cargo = valorLimpio(c.cargo);
+                        const telefono = valorLimpio(c.telefono);
+                        const email = valorLimpio(c.email);
+                        return (
+                          <div key={i} className="bg-pipeline-card border border-line-card rounded-lg p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-semibold text-ink truncate">{nombre ?? 'Sin nombre'}</span>
+                              {c.esPrincipal && (
+                                <span className="text-[10px] font-bold uppercase tracking-wide text-accent flex-shrink-0">
+                                  Principal
+                                </span>
+                              )}
+                            </div>
+                            {cargo && <div className="text-xs text-muted truncate mt-0.5">{cargo}</div>}
+                            {(telefono || email) && (
+                              <div className="mt-2 pt-2 border-t border-line-card/60 space-y-1">
+                                {telefono && <div className="mono text-[11px] text-ink-soft truncate">{telefono}</div>}
+                                {email && <div className="mono text-[11px] text-ink-soft truncate">{email}</div>}
+                              </div>
                             )}
                           </div>
-                          <div className="text-xs text-muted truncate">{c.cargo ?? 'Sin cargo'}</div>
-                          <div className="text-xs text-ink-soft truncate mt-1">{c.telefono ?? 'Sin teléfono'}</div>
-                          <div className="text-xs text-ink-soft truncate">{c.email ?? 'Sin correo'}</div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </section>
@@ -220,15 +254,25 @@ export function DetallePanel({
                       Recorrido por etapas
                     </h4>
                     {timelineEtapas.transiciones.length === 0 ? (
-                      <div className="space-y-2">
-                        {timelineEtapas.etapaActual && (
-                          <div className="flex items-center gap-3 rounded-lg px-3 py-2 border border-line-card bg-pipeline-card">
-                            <span className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', colorEtapa(timelineEtapas.etapaActual))} aria-hidden="true" />
-                            <span className="text-xs text-ink-soft">{labelEtapa(timelineEtapas.etapaActual)}</span>
+                      timelineEtapas.etapaActual ? (
+                        <div className="relative pl-1">
+                          <div className="relative pl-7">
+                            <span
+                              className={cn(
+                                'absolute left-0 top-0.5 w-3.5 h-3.5 rounded-full border-2 border-shell flex-shrink-0',
+                                colorEtapa(timelineEtapas.etapaActual),
+                              )}
+                              aria-hidden="true"
+                            />
+                            <div className="text-[13px] font-semibold text-ink">{labelEtapa(timelineEtapas.etapaActual)}</div>
+                            <div className="mono text-[11px] text-muted mt-0.5">
+                              Sin transiciones registradas aún — días en etapa: —
+                            </div>
                           </div>
-                        )}
-                        <p className="text-xs text-muted">Sin transiciones registradas aún.</p>
-                      </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted">Sin etapa comercial asignada.</p>
+                      )
                     ) : (
                       <div className="relative pl-1">
                         {/* Linea degradada conectando todos los nodos -- igual al mockup original

@@ -1,10 +1,13 @@
 'use client';
 // Lienzo del embudo: leyenda de etapas + bandas apiladas + tarjetas de resultado, mas
 // el panel lateral que lista las cuentas de la etapa clickeada (EtapaEmpresasPanel).
+// El panel lateral SOLO existe cuando hay una etapa elegida -- el embudo ocupa todo el
+// ancho por defecto, no reserva espacio para un panel vacio (pedido de Sebastian).
 import { useState } from 'react';
 import type { Embudo } from '../../core/embudo';
 import { CLAVE_SIN_ETAPA } from '../../core/embudo';
 import { FUNNEL_ETAPAS } from '../../db/funnel';
+import { cn } from '../cn';
 import { FunnelBand } from './FunnelBand';
 import { OutcomeCard } from './OutcomeCard';
 import { EtapaEmpresasPanel, type EtapaSeleccionada } from './EtapaEmpresasPanel';
@@ -13,7 +16,7 @@ export function FunnelCanvas({ embudo, owner, campana }: { embudo: Embudo; owner
   const [etapaSeleccionada, setEtapaSeleccionada] = useState<EtapaSeleccionada | null>(null);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start">
+    <div className={cn('grid grid-cols-1 gap-4 items-start', etapaSeleccionada && 'lg:grid-cols-[1fr_360px]')}>
       <div className="rounded-2xl border border-line-card bg-pipeline-card overflow-hidden">
         <div className="flex flex-wrap gap-3 px-4 py-3 border-b border-line">
           {FUNNEL_ETAPAS.map((e) => (
@@ -59,7 +62,14 @@ export function FunnelCanvas({ embudo, owner, campana }: { embudo: Embudo; owner
         </div>
       </div>
 
-      <EtapaEmpresasPanel etapa={etapaSeleccionada} owner={owner} campana={campana} />
+      {etapaSeleccionada && (
+        <EtapaEmpresasPanel
+          etapa={etapaSeleccionada}
+          owner={owner}
+          campana={campana}
+          onClose={() => setEtapaSeleccionada(null)}
+        />
+      )}
     </div>
   );
 }
