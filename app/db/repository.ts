@@ -4019,8 +4019,21 @@ export function actualizarEstadoNotion(
 // Cardinalidad verificada contra isps.db real: empresa_usuarios.id_empresa es su PK
 // (1898 filas, 1898 id_empresa distintos) -> relacion 1:1 con empresa, un LEFT JOIN
 // simple no infla el count(*) de empresas.
-export function embudoPipeline(idOrganizacion: number): ConteoEtapa[] {
+export function embudoPipeline(
+  idOrganizacion: number,
+  filtros?: { owner?: string; idCampana?: string },
+): ConteoEtapa[] {
   const estadoExpr = sql<string>`coalesce(${empresa.estadoNotion}, ${CLAVE_SIN_ETAPA})`;
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion)];
+  if (filtros?.owner) {
+    condiciones.push(eq(empresa.owner, filtros.owner));
+  }
+  if (filtros?.idCampana) {
+    condiciones.push(
+      sql`${empresa.idEmpresa} IN (SELECT ${inscripcion.idEmpresa} FROM ${inscripcion} WHERE ${inscripcion.idCampana} = ${Number(filtros.idCampana)})`,
+    );
+  }
+
   const filas = db
     .select({
       estado: estadoExpr,
@@ -4029,7 +4042,7 @@ export function embudoPipeline(idOrganizacion: number): ConteoEtapa[] {
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(eq(empresa.organizacionActivaId, idOrganizacion))
+    .where(and(...condiciones))
     .groupBy(estadoExpr)
     .all();
 
@@ -4038,6 +4051,19 @@ export function embudoPipeline(idOrganizacion: number): ConteoEtapa[] {
     total: Number(f.total),
     usuarios: f.usuarios === null ? null : Number(f.usuarios),
   }));
+}
+
+// Owners distintos con al menos una empresa en la organizacion (para el chip de
+// filtro del embudo). Ordenado alfabetico, nulls excluidos (owner vacio no es un
+// filtro valido).
+export function listarOwnersEmpresa(idOrganizacion: number): string[] {
+  const filas = db
+    .selectDistinct({ owner: empresa.owner })
+    .from(empresa)
+    .where(and(eq(empresa.organizacionActivaId, idOrganizacion), isNotNull(empresa.owner)))
+    .orderBy(asc(empresa.owner))
+    .all();
+  return filas.map((f) => f.owner!).filter((o) => o.length > 0);
 }
 
 export type HistorialEtapas = {

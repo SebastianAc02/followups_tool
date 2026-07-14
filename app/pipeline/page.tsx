@@ -44,9 +44,15 @@ const MOCK_AJUSTES: AjustesMockData = {
   notificacionesToques: false,
 };
 
-async function PipelineContent({ tab }: { tab?: string }) {
+async function PipelineContent({
+  tab,
+  searchParams,
+}: {
+  tab?: string;
+  searchParams: { owner?: string; campana?: string };
+}) {
   if (tab === 'embudo') {
-    return <EmbudoPanel />;
+    return <EmbudoPanel searchParams={searchParams} />;
   }
   if (tab === 'reportes') {
     return <ReportesPanel data={MOCK_REPORTES} />;
@@ -136,13 +142,17 @@ async function PipelineContent({ tab }: { tab?: string }) {
   );
 }
 
-export default async function PipelinePage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+export default async function PipelinePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string; owner?: string; campana?: string }>;
+}) {
   const sp = await searchParams;
   const tab = sp.tab || 'overview';
 
   return (
     <PipelineShell>
-      <PipelineContent tab={tab} />
+      <PipelineContent tab={tab} searchParams={{ owner: sp.owner, campana: sp.campana }} />
     </PipelineShell>
   );
 }

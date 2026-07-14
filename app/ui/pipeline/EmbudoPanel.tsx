@@ -1,13 +1,28 @@
 // Contenedor del tab Embudo: trae los conteos reales del Repository y arma el
-// embudo (dominio puro) antes de pintarlo.
+// embudo (dominio puro) antes de pintarlo. Los filtros (owner, campana) llegan por
+// searchParams -- page.tsx ya los tiene del tab de arriba, aca solo se leen dos keys
+// mas (?owner=...&campana=...).
 import { requireSession } from '../../lib/session';
-import { embudoPipeline } from '../../db/repository';
+import { embudoPipeline, listarOwnersEmpresa, listarCampanas } from '../../db/repository';
 import { construirEmbudo } from '../../core/embudo';
 import { FunnelCanvas } from './FunnelCanvas';
+import { EmbudoFiltros } from './EmbudoFiltros';
 
-export async function EmbudoPanel() {
+export async function EmbudoPanel({ searchParams }: { searchParams?: { owner?: string; campana?: string } }) {
   const usuario = await requireSession();
-  const conteos = embudoPipeline(usuario.idOrganizacion);
+  const owner = searchParams?.owner;
+  const idCampana = searchParams?.campana;
+
+  const conteos = embudoPipeline(usuario.idOrganizacion, { owner, idCampana });
   const embudo = construirEmbudo(conteos);
-  return <FunnelCanvas embudo={embudo} />;
+
+  const owners = listarOwnersEmpresa(usuario.idOrganizacion);
+  const campanas = listarCampanas().map((c) => ({ id: c.id, nombre: c.nombre }));
+
+  return (
+    <div>
+      <EmbudoFiltros owners={owners} campanas={campanas} />
+      <FunnelCanvas embudo={embudo} />
+    </div>
+  );
 }

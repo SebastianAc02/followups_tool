@@ -7,7 +7,9 @@ import { crearDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { actualizarEstadoNotion, embudoPipeline, historialEtapasEmpresa } = await import('./repository.ts');
+const { actualizarEstadoNotion, embudoPipeline, historialEtapasEmpresa, listarOwnersEmpresa } = await import(
+  './repository.ts'
+);
 
 function seedEmpresa(id: string, estado: string | null) {
   const raw = new Database(dbPath);
@@ -86,6 +88,43 @@ test('embudoPipeline: suma usuarios_efectivos por etapa (empresa_usuarios es 1:1
   const fila = conteos.find((c) => c.estado === 'oportunidad');
   assert.equal(fila?.total, 2);
   assert.equal(fila?.usuarios, 120);
+});
+
+test('embudoPipeline: filtro por owner cuenta solo las empresas de ese owner', () => {
+  const raw = new Database(dbPath);
+  const ins = raw.prepare(
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, owner)
+     VALUES (?, 'nit', ?, ?, 'activo', ?, 1, ?)`,
+  );
+  ins.run('o1', 'o1', 'o1', 'owner_pipeline', 'sebastian');
+  ins.run('o2', 'o2', 'o2', 'owner_pipeline', 'sebastian');
+  ins.run('o3', 'o3', 'o3', 'owner_pipeline', 'camilo');
+  raw.close();
+
+  const conteos = embudoPipeline(1, { owner: 'sebastian' });
+  const byEstado = Object.fromEntries(conteos.map((c) => [c.estado, c.total]));
+  assert.equal(byEstado['owner_pipeline'], 2);
+});
+
+test('listarOwnersEmpresa: owners distintos de la organizacion, ordenados, sin nulls', () => {
+  const raw = new Database(dbPath);
+  const ins = raw.prepare(
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, owner)
+     VALUES (?, 'nit', ?, ?, 'activo', 'owners_pipeline', 1, ?)`,
+  );
+  ins.run('lo1', 'lo1', 'lo1', 'zoe');
+  ins.run('lo2', 'lo2', 'lo2', 'ana');
+  ins.run('lo3', 'lo3', 'lo3', 'ana');
+  ins.run('lo4', 'lo4', 'lo4', null);
+  ins.run('lo5', 'lo5', 'lo5', 'otro_org'); // org distinta abajo
+  raw.prepare(`UPDATE empresa SET organizacion_activa_id = 2 WHERE id_empresa = 'lo5'`).run();
+  raw.close();
+
+  const owners = listarOwnersEmpresa(1);
+  assert.ok(owners.includes('ana'));
+  assert.ok(owners.includes('zoe'));
+  assert.ok(!owners.includes('otro_org'));
+  assert.deepEqual(owners, [...owners].sort());
 });
 
 test('historialEtapasEmpresa: devuelve etapa actual + transiciones ordenadas', () => {
