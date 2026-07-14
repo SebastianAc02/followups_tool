@@ -8,6 +8,7 @@ import { PipelineShell } from '../ui/pipeline/PipelineShell';
 import { KpiRow, type KpiData } from '../ui/pipeline/KpiRow';
 import { EtapaGroup, type EtapaGroupData } from '../ui/pipeline/EtapaGroup';
 import type { EmpresaRowData } from '../ui/pipeline/EmpresaRow';
+import { EmbudoPanel } from '../ui/pipeline/EmbudoPanel';
 import { ReportesPanel, type ReporteMockData } from '../ui/pipeline/ReportesPanel';
 import { AjustesPanel, type AjustesMockData } from '../ui/pipeline/AjustesPanel';
 
@@ -44,6 +45,9 @@ const MOCK_AJUSTES: AjustesMockData = {
 };
 
 async function PipelineContent({ tab }: { tab?: string }) {
+  if (tab === 'embudo') {
+    return <EmbudoPanel />;
+  }
   if (tab === 'reportes') {
     return <ReportesPanel data={MOCK_REPORTES} />;
   }

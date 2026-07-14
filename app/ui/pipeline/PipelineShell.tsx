@@ -9,7 +9,7 @@ import { cn } from '../cn';
 import { DetallePanel, type DetallePanelData } from './DetallePanel';
 import { perfilPipelineEmpresaAction } from '../../pipeline/actions';
 
-export type PipelineTab = 'overview' | 'reportes' | 'ajustes';
+export type PipelineTab = 'overview' | 'embudo' | 'reportes' | 'ajustes';
 
 // Decisión: usar URL searchParams para los tabs (persist entre navegaciones) y estado
 // local para la ficha de detalle (UI transitoria). La ficha YA NO llega por props
@@ -47,7 +47,7 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
 
           {/* Tab navigation */}
           <nav className="flex items-center gap-2" role="tablist">
-            {['overview', 'reportes', 'ajustes'].map((t) => (
+            {['overview', 'embudo', 'reportes', 'ajustes'].map((t) => (
               <a
                 key={t}
                 href={`?tab=${t}`}
@@ -59,6 +59,7 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
                 )}
               >
                 {t === 'overview' && 'Seguimiento'}
+                {t === 'embudo' && 'Embudo'}
                 {t === 'reportes' && 'Reportes'}
                 {t === 'ajustes' && 'Ajustes'}
               </a>
