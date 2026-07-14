@@ -3455,15 +3455,15 @@ export function registrarPasoEnviadoConToque(
 // es el primer argumento posicional que push.ts le pasa a CanalEntrega.enviarPaso, sin
 // importar el canal -- ahi es donde Evolution espera el NOMBRE DE INSTANCIA, no un id
 // de secuencia de Apollo (ver evolution.ts:79-92, mismo parametro reusado a proposito).
-// Por eso, para whatsapp, se resuelve UNA vez por corrida contra lineaWhatsappActiva()
-// y se reusa para todas las filas -- nunca contra campana.proveedorCampanaId (que
-// whatsapp ni siquiera necesita: no crea secuencia externa por campana). Sin linea
-// activa, no hay a donde mandar: la corrida entera de whatsapp se salta (lista vacia),
-// en vez de dejar que cada fila intente y falle una por una gastando un reintento.
+// Gate de canal (2026-07-14): antes se resolvia UNA linea global contra
+// lineaWhatsappActiva() y se reusaba para TODAS las filas de whatsapp, sin importar de
+// que campana/dueno eran -- una campana de un vendedor podia terminar mandando por la
+// linea de otro. Ahora cada fila rutea por la linea ACTIVA del DUENO de SU PROPIA
+// campana (lineaWhatsappActivaDeOwner), campana por campana. Una campana cuyo dueno no
+// tiene linea activa propia se salta ENTERA (esa fila no aparece), en vez de gastar un
+// reintento fallido -- mismo criterio de "no hay a donde mandar, no lo intentes" que
+// tenia el gate global, pero aplicado por campana en vez de a la corrida completa.
 export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
-  const lineaActiva = canal === 'whatsapp' ? lineaWhatsappActiva() : null;
-  if (canal === 'whatsapp' && !lineaActiva) return [];
-
   const condiciones = [
     eq(pasoInscripcion.canal, canal),
     inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
@@ -3477,7 +3477,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
   ];
   // correo: sin secuencia externa (proveedor_campana_id) no hay a donde mandar. whatsapp
-  // no usa esta columna -- el gate de "hay a donde mandar" ya lo resolvio lineaActiva arriba.
+  // no usa esta columna -- su gate de "hay a donde mandar" se resuelve por fila mas abajo.
   if (canal !== 'whatsapp') condiciones.push(isNotNull(campana.proveedorCampanaId));
 
   const filas = db
@@ -3493,6 +3493,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
       proveedorCampanaId: campana.proveedorCampanaId,
+      owner: campana.owner,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
@@ -3505,13 +3506,37 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     .where(and(...condiciones))
     .all();
 
-  return filas.map((f) => ({
-    idPasoInscripcion: f.idPasoInscripcion,
-    proveedorCampanaId: (lineaActiva ? lineaActiva.referenciaProveedor : f.proveedorCampanaId) as string,
-    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
-    paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
-    intentos: f.intentos,
-  }));
+  if (canal !== 'whatsapp') {
+    return filas.map((f) => ({
+      idPasoInscripcion: f.idPasoInscripcion,
+      proveedorCampanaId: f.proveedorCampanaId as string,
+      destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
+      paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
+      intentos: f.intentos,
+    }));
+  }
+
+  // whatsapp: cada campana rutea por la linea ACTIVA de SU DUENO (fijarOwnerCampana),
+  // nunca "cualquier linea activa del sistema" (gate de canal 2026-07-14). Cache por
+  // owner dentro de esta corrida: varias filas de la misma campana comparten el mismo
+  // owner, no vale la pena repetir el JOIN de organizacion_miembro por cada una.
+  const cacheLinea = new Map<string | null, { referenciaProveedor: string } | null>();
+  const resultado: FilaPasoInscripcion[] = [];
+  for (const f of filas) {
+    const owner = f.owner ?? null;
+    if (!cacheLinea.has(owner)) cacheLinea.set(owner, lineaWhatsappActivaDeOwner(owner));
+    const linea = cacheLinea.get(owner) ?? null;
+    if (!linea) continue; // sin linea activa del dueno (ni fallback de pool si owner=null), se salta la fila
+
+    resultado.push({
+      idPasoInscripcion: f.idPasoInscripcion,
+      proveedorCampanaId: linea.referenciaProveedor,
+      destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
+      paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
+      intentos: f.intentos,
+    });
+  }
+  return resultado;
 }
 
 // enviando es un estado transitorio informativo (no lo lee ninguna query de

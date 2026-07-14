@@ -271,6 +271,67 @@ test('registrarPasoEnviadoConToque marca enviada con el proveedor real y deja un
   assert.strictEqual(toque.fuente, 'cadencia_manual');
 });
 
+// Gate de canal (2026-07-14): dos campanas de whatsapp con duenos DISTINTOS, cada uno
+// con su propia linea activa -- cada una debe resolver proveedorCampanaId a SU PROPIA
+// linea, nunca a la del otro ni a una linea global compartida.
+test('pasoInscripcionesPendientes: whatsapp rutea por la linea PROPIA del dueno de cada campana', () => {
+  const db1 = raw();
+  db1.prepare(`INSERT INTO organizacion_miembro (id_organizacion, owner_canonico, nombre_display, id_user) VALUES (1, 'Owner Uno', 'Owner Uno', 'user-owner-1')`).run();
+  db1.prepare(`INSERT INTO organizacion_miembro (id_organizacion, owner_canonico, nombre_display, id_user) VALUES (1, 'Owner Dos', 'Owner Dos', 'user-owner-2')`).run();
+  db1.prepare(`INSERT INTO linea_whatsapp (numero, tipo, id_usuario, referencia_proveedor, estado) VALUES ('573000000010', 'personal', 'user-owner-1', 'linea-owner-1', 'activa')`).run();
+  db1.prepare(`INSERT INTO linea_whatsapp (numero, tipo, id_usuario, referencia_proveedor, estado) VALUES ('573000000011', 'personal', 'user-owner-2', 'linea-owner-2', 'activa')`).run();
+  db1.close();
+
+  seedEmpresa('e-owner-a', 'a@empresa.com', 'owner-cat-a');
+  seedEmpresa('e-owner-b', 'b@empresa.com', 'owner-cat-b');
+
+  const idCadOwners = crearCadencia({ nombre: 'C owners', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', cuerpo: 'hola' }] });
+  const idSegA = guardarSegmento({ nombre: 'owner-seg-a', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['owner-cat-a'] }] } }, 1);
+  const idSegB = guardarSegmento({ nombre: 'owner-seg-b', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['owner-cat-b'] }] } }, 1);
+
+  const idCampA = crearCampana({ nombre: 'Camp Owner Uno', idCadencia: idCadOwners, idSegmento: idSegA, owner: 'Owner Uno' }, 1);
+  inscribirCampana(idCampA, 1);
+  const idCampB = crearCampana({ nombre: 'Camp Owner Dos', idCadencia: idCadOwners, idSegmento: idSegB, owner: 'Owner Dos' }, 1);
+  inscribirCampana(idCampB, 1);
+
+  const { idPaso: idPasoOwners, idVersion: idVersionOwners } = idsPasoYVersion(idCadOwners);
+  const idDestA = idDestinatarioDe('e-owner-a');
+  const idDestB = idDestinatarioDe('e-owner-b');
+  const idPasoInsA = crearPasoInscripcionPendiente({ idDestinatario: idDestA, idPaso: idPasoOwners, idVersion: idVersionOwners, canal: 'whatsapp' });
+  const idPasoInsB = crearPasoInscripcionPendiente({ idDestinatario: idDestB, idPaso: idPasoOwners, idVersion: idVersionOwners, canal: 'whatsapp' });
+
+  const pendientes = pasoInscripcionesPendientes('whatsapp');
+  const filaA = pendientes.find((f) => f.idPasoInscripcion === idPasoInsA);
+  const filaB = pendientes.find((f) => f.idPasoInscripcion === idPasoInsB);
+
+  assert.ok(filaA, 'la fila del dueno Uno aparece en pendientes');
+  assert.ok(filaB, 'la fila del dueno Dos aparece en pendientes');
+  assert.strictEqual(filaA!.proveedorCampanaId, 'linea-owner-1');
+  assert.strictEqual(filaB!.proveedorCampanaId, 'linea-owner-2');
+});
+
+// Dueno sin linea propia activa: su campana se salta entera (no gasta un intento
+// fallido), las de otros duenos con linea si aparecen -- confirma que el filtro es
+// POR CAMPANA, no un gate global como antes.
+test('pasoInscripcionesPendientes: campana cuyo dueno NO tiene linea activa se salta entera', () => {
+  const db1 = raw();
+  db1.prepare(`INSERT INTO organizacion_miembro (id_organizacion, owner_canonico, nombre_display, id_user) VALUES (1, 'Owner Sin Linea', 'Owner Sin Linea', 'user-owner-sin-linea')`).run();
+  db1.close();
+
+  seedEmpresa('e-sin-linea', 'sinlinea@empresa.com', 'owner-cat-sin-linea');
+  const idCadSinLinea = crearCadencia({ nombre: 'C sin linea', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', cuerpo: 'hola' }] });
+  const idSegSinLinea = guardarSegmento({ nombre: 'owner-seg-sin-linea', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['owner-cat-sin-linea'] }] } }, 1);
+  const idCampSinLinea = crearCampana({ nombre: 'Camp sin linea', idCadencia: idCadSinLinea, idSegmento: idSegSinLinea, owner: 'Owner Sin Linea' }, 1);
+  inscribirCampana(idCampSinLinea, 1);
+
+  const { idPaso: idPasoSinLinea, idVersion: idVersionSinLinea } = idsPasoYVersion(idCadSinLinea);
+  const idDestSinLinea = idDestinatarioDe('e-sin-linea');
+  const idPasoInsSinLinea = crearPasoInscripcionPendiente({ idDestinatario: idDestSinLinea, idPaso: idPasoSinLinea, idVersion: idVersionSinLinea, canal: 'whatsapp' });
+
+  const pendientes = pasoInscripcionesPendientes('whatsapp');
+  assert.ok(!pendientes.some((f) => f.idPasoInscripcion === idPasoInsSinLinea), 'sin linea propia activa, la campana no aparece');
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });
