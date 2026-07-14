@@ -3279,7 +3279,15 @@ export function fijarOwnerCampana(idCampana: number, owner: string): void {
 // owner null = campana vieja, lanzada antes de que este campo se poblara: cae al
 // fallback de la linea de POOL (mismo comportamiento que el sistema tenia antes de
 // este cambio), para no romper campanas ya lanzadas.
-export function lineaWhatsappActivaDeOwner(owner: string | null): { referenciaProveedor: string } | null {
+//
+// Fix (2026-07-14, code review Task 3): organizacion_miembro es multi-org -- su llave
+// real es (id_organizacion, owner_canonico), no owner_canonico solo (ver
+// scripts/seed_organizacion.ts y la org "Visitantes"). Sin el filtro de organizacion,
+// un owner_canonico que colisionara entre dos orgs distintas resolveria a la linea de
+// la org EQUIVOCADA -- misenvio real a los contactos de otra org. El fallback de pool
+// (owner null) SI queda sin filtro: linea_whatsapp no tiene columna id_organizacion,
+// la linea de pool es compartida a proposito en todo el sistema.
+export function lineaWhatsappActivaDeOwner(owner: string | null, idOrganizacion: number): { referenciaProveedor: string } | null {
   if (!owner) {
     const pool = db
       .select({ referenciaProveedor: lineaWhatsapp.referenciaProveedor })
@@ -3292,7 +3300,7 @@ export function lineaWhatsappActivaDeOwner(owner: string | null): { referenciaPr
   const miembro = db
     .select({ idUser: organizacionMiembro.idUser })
     .from(organizacionMiembro)
-    .where(eq(organizacionMiembro.ownerCanonico, owner))
+    .where(and(eq(organizacionMiembro.ownerCanonico, owner), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
     .get();
   if (!miembro?.idUser) return null;
 
@@ -3494,6 +3502,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       cuerpo: versionPaso.cuerpo,
       proveedorCampanaId: campana.proveedorCampanaId,
       owner: campana.owner,
+      idOrganizacion: campana.idOrganizacion,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
@@ -3520,13 +3529,14 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
   // nunca "cualquier linea activa del sistema" (gate de canal 2026-07-14). Cache por
   // owner dentro de esta corrida: varias filas de la misma campana comparten el mismo
   // owner, no vale la pena repetir el JOIN de organizacion_miembro por cada una.
-  const cacheLinea = new Map<string | null, { referenciaProveedor: string } | null>();
+  const cacheLinea = new Map<string, { referenciaProveedor: string } | null>();
   const resultado: FilaPasoInscripcion[] = [];
   for (const f of filas) {
     const owner = f.owner ?? null;
-    if (!cacheLinea.has(owner)) cacheLinea.set(owner, lineaWhatsappActivaDeOwner(owner));
-    const linea = cacheLinea.get(owner) ?? null;
-    if (!linea) continue; // sin linea activa del dueno (ni fallback de pool si owner=null), se salta la fila
+    const cacheKey = `${f.idOrganizacion}:${owner}`;
+    if (!cacheLinea.has(cacheKey)) cacheLinea.set(cacheKey, lineaWhatsappActivaDeOwner(owner, f.idOrganizacion));
+    const linea = cacheLinea.get(cacheKey) ?? null;
+    if (!linea) continue; // ni linea propia ni (si owner=null) pool: no hay a donde mandar, se salta la fila
 
     resultado.push({
       idPasoInscripcion: f.idPasoInscripcion,

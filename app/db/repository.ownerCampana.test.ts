@@ -61,8 +61,8 @@ test('lineaWhatsappActivaDeOwner devuelve la linea PROPIA del dueno, no cualquie
   seedMiembroConLinea('Felipe Castro', 'user-felipe', 'linea-felipe', 'activa');
   seedMiembroConLinea('Thomas Schumacher', 'user-thomas', 'linea-thomas', 'activa');
 
-  const deFelipe = lineaWhatsappActivaDeOwner('Felipe Castro');
-  const deThomas = lineaWhatsappActivaDeOwner('Thomas Schumacher');
+  const deFelipe = lineaWhatsappActivaDeOwner('Felipe Castro', 1);
+  const deThomas = lineaWhatsappActivaDeOwner('Thomas Schumacher', 1);
 
   assert.deepEqual(deFelipe, { referenciaProveedor: 'linea-felipe' });
   assert.deepEqual(deThomas, { referenciaProveedor: 'linea-thomas' });
@@ -70,16 +70,16 @@ test('lineaWhatsappActivaDeOwner devuelve la linea PROPIA del dueno, no cualquie
 
 test('lineaWhatsappActivaDeOwner devuelve null si el dueno no tiene linea activa', () => {
   seedMiembroConLinea('Camilo fonseca', 'user-camilo', 'linea-camilo', 'caida');
-  assert.strictEqual(lineaWhatsappActivaDeOwner('Camilo fonseca'), null);
+  assert.strictEqual(lineaWhatsappActivaDeOwner('Camilo fonseca', 1), null);
 });
 
 test('lineaWhatsappActivaDeOwner devuelve null si el owner no existe como miembro', () => {
-  assert.strictEqual(lineaWhatsappActivaDeOwner('Nadie Real'), null);
+  assert.strictEqual(lineaWhatsappActivaDeOwner('Nadie Real', 1), null);
 });
 
 test('lineaWhatsappActivaDeOwner(null) cae al fallback de la linea de pool (campana vieja sin owner)', () => {
   seedLineaPool('linea-pool', 'activa');
-  assert.deepEqual(lineaWhatsappActivaDeOwner(null), { referenciaProveedor: 'linea-pool' });
+  assert.deepEqual(lineaWhatsappActivaDeOwner(null, 1), { referenciaProveedor: 'linea-pool' });
 });
 
 test.after(() => {
