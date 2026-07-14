@@ -71,7 +71,7 @@ export function ConectorRow({
         {cat.id === "granola" && modo === "personal" ? (
           <VerificarGranola tieneCredencial={estado.tieneCredencial} />
         ) : puedeEditar ? (
-          cat.id === "gmail" ? (
+          cat.id === "gmail" && modo === "personal" ? (
             <GmailConector estado={estado} emailConectado={emailConectadoGmail ?? null} />
           ) : (
             <CredencialForm proveedor={cat.id} tieneCredencial={estado.tieneCredencial} />

@@ -55,11 +55,18 @@ test('intercambiarCodigoPorCredencial intercambia el code y resuelve el email de
   assert.strictEqual(credencial.emailCuenta, 'sebastian@onepay.la');
 });
 
-test('intercambiarCodigoPorCredencial truena con mensaje claro si Google no devuelve refresh_token', async (t) => {
+test('intercambiarCodigoPorCredencial truena con mensaje claro si Google responde con error', async (t) => {
   t.mock.method(globalThis, 'fetch', async () =>
     new Response(JSON.stringify({ error: 'invalid_grant', error_description: 'Malformed auth code' }), { status: 400 }),
   );
   await assert.rejects(() => intercambiarCodigoPorCredencial('code-malo'), /Malformed auth code/);
+});
+
+test('intercambiarCodigoPorCredencial truena si Google no incluye refresh_token en una respuesta 200', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () =>
+    new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 }),
+  );
+  await assert.rejects(() => intercambiarCodigoPorCredencial('code-sin-refresh'), /Google no devolvio tokens validos/);
 });
 
 test('emailGmailConectado devuelve la cuenta guardada sin exponer el refreshToken', () => {
@@ -154,7 +161,7 @@ test('enviarPaso propaga el error de Gmail con mensaje claro', async (t) => {
   );
 });
 
-test('mandarCorreoDePrueba manda al destinatario indicado con asunto de verificacion', async (t) => {
+test('mandarCorreoDePrueba manda al destinatario indicado con asunto de verificacion codificado RFC 2047', async (t) => {
   guardarCredencialConector('gmail', credencialDePrueba(), 'user-4');
   let mensajeDecodificado = '';
   t.mock.method(globalThis, 'fetch', async (url: string | URL, init: RequestInit = {}) => {
@@ -168,7 +175,36 @@ test('mandarCorreoDePrueba manda al destinatario indicado con asunto de verifica
 
   await mandarCorreoDePrueba('user-4', 'sebastian@onepay.la');
   assert.match(mensajeDecodificado, /^To: sebastian@onepay\.la/);
-  assert.match(mensajeDecodificado, /Subject: Conexión de Gmail verificada/);
+  const subjectLine = mensajeDecodificado.split('\r\n').find((l) => l.startsWith('Subject: '));
+  assert.ok(subjectLine);
+  const match = subjectLine!.match(/^Subject: =\?UTF-8\?B\?(.+)\?=$/);
+  assert.ok(match, `Subject no vino codificado RFC 2047: ${subjectLine}`);
+  const asuntoDecodificado = Buffer.from(match![1], 'base64').toString('utf8');
+  assert.match(asuntoDecodificado, /^Conexión de Gmail verificada/);
+});
+
+test('enviarPaso neutraliza un salto de linea en el asunto (no inyecta un header nuevo)', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-6');
+  let mensajeDecodificado = '';
+  t.mock.method(globalThis, 'fetch', async (url: string | URL, init: RequestInit = {}) => {
+    if (url.toString() === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    const cuerpo = JSON.parse(init.body as string) as { raw: string };
+    mensajeDecodificado = Buffer.from(cuerpo.raw, 'base64url').toString('utf8');
+    return new Response(JSON.stringify({ id: 'msg-inyeccion-1' }), { status: 200 });
+  });
+
+  const adapter = crearGmailAdapter('user-6');
+  await adapter.enviarPaso(
+    'prueba',
+    { email: 'destino@onepay.la', telefono: null, nombre: null, empresa: null, cargo: null },
+    { asunto: 'Hola\r\nBcc: atacante@evil.com', cuerpo: 'Cuerpo', canal: 'correo' },
+  );
+
+  const lineas = mensajeDecodificado.split('\r\n');
+  assert.strictEqual(lineas.filter((l) => l.startsWith('Bcc:')).length, 0, 'no debe haber ningun header Bcc: inyectado');
+  assert.strictEqual(lineas[1], 'Subject: Hola  Bcc: atacante@evil.com');
 });
 
 test.after(() => borrarDbPrueba(dbPath));

@@ -93,8 +93,10 @@ async function refrescarAccessToken(refreshToken: string): Promise<string> {
 
 async function resolverEmailCuenta(accessToken: string): Promise<string> {
   const res = await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${accessToken}` } });
-  const data = (await res.json()) as { email?: string };
-  if (!res.ok || !data.email) throw new Error(`Google no devolvio el email de la cuenta conectada (${res.status})`);
+  const data = (await res.json()) as { email?: string; error?: string; error_description?: string };
+  if (!res.ok || !data.email) {
+    throw new Error(`Google no devolvio el email de la cuenta conectada: ${data.error_description ?? data.error ?? res.status}`);
+  }
   return data.email;
 }
 
@@ -105,7 +107,7 @@ async function resolverEmailCuenta(accessToken: string): Promise<string> {
 export async function intercambiarCodigoPorCredencial(code: string): Promise<CredencialGmail> {
   const { accessToken, refreshToken } = await intercambiarCodigo(code);
   const emailCuenta = await resolverEmailCuenta(accessToken);
-  return { refreshToken, emailCuenta, scopes: SCOPES };
+  return { refreshToken, emailCuenta, scopes: [...SCOPES] };
 }
 
 function leerCredencial(idUsuario: string): CredencialGmail {
@@ -129,13 +131,35 @@ function base64Url(texto: string): string {
   return Buffer.from(texto, 'utf8').toString('base64url');
 }
 
+// Neutraliza (no trunca) un \r o \n dentro de un valor que va a un header RFC 2822 --
+// sin esto, un asunto o destinatario con un salto de linea podria inyectar un header
+// nuevo (ej. un Bcc: falso) en el mensaje `raw` que Gmail manda tal cual. `asunto` viene
+// de copy de campana editable en /cadencias, no es un dato de confiar a ciegas.
+function sinCrlf(texto: string): string {
+  return texto.replace(/[\r\n]/g, ' ');
+}
+
+// RFC 2822 exige headers en US-ASCII; un asunto con acentos/em-dash (el "Conexion de
+// Gmail verificada" de mandarCorreoDePrueba, por ejemplo) tiene que ir con la sintaxis
+// RFC 2047 (=?UTF-8?B?...?=), o Gmail lo recibe/mangla mal. Un asunto ya ASCII se deja
+// intacto -- no hay necesidad de codificarlo.
+function codificarHeaderSiHaceFalta(texto: string): string {
+  if (/^[\x00-\x7f]*$/.test(texto)) return texto;
+  return `=?UTF-8?B?${Buffer.from(texto, 'utf8').toString('base64')}?=`;
+}
+
 // RFC 2822 minimo (To/Subject/Content-Type + cuerpo texto plano) -- Gmail acepta el mensaje
 // completo en `raw`, base64url. v1 no manda HTML (eso llega en Etapa 3 junto con el
 // pixel/link de tracking, ver nota de reuso del design doc).
 function armarMensajeCrudo(destinatario: string, asunto: string, cuerpo: string): string {
-  const mensaje = [`To: ${destinatario}`, `Subject: ${asunto}`, 'Content-Type: text/plain; charset=utf-8', '', cuerpo].join(
-    '\r\n',
-  );
+  const asuntoSeguro = codificarHeaderSiHaceFalta(sinCrlf(asunto));
+  const mensaje = [
+    `To: ${sinCrlf(destinatario)}`,
+    `Subject: ${asuntoSeguro}`,
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    cuerpo,
+  ].join('\r\n');
   return base64Url(mensaje);
 }
 

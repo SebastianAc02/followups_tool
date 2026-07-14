@@ -34,7 +34,7 @@ export function GmailConector({ estado, emailConectado }: { estado: EstadoConect
   if (verificado) {
     return (
       <p className="text-sm text-muted">
-        Conectado como <strong className="text-ink">{emailConectado}</strong>.
+        Conectado como <strong className="text-ink">{emailConectado ?? 'tu cuenta'}</strong>.
       </p>
     );
   }
@@ -42,7 +42,7 @@ export function GmailConector({ estado, emailConectado }: { estado: EstadoConect
   return (
     <div className="max-w-sm rounded-lg border border-dashed border-line p-4">
       <p className="text-sm leading-relaxed text-muted">
-        Mandamos un correo de prueba a <strong className="text-ink">{emailConectado}</strong>. Revisa tu bandeja.
+        Mandamos un correo de prueba a <strong className="text-ink">{emailConectado ?? 'tu cuenta'}</strong>. Revisa tu bandeja.
       </p>
       <div className="mt-3 flex items-center gap-2">
         <form action={confirmarVerificacionGmailAction}>
