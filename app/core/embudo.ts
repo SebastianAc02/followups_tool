@@ -40,14 +40,29 @@ export function construirEmbudo(conteos: ConteoEtapa[]): Embudo {
   const porEstado = new Map(conteos.map((c) => [c.estado, c]));
   const get = (estado: string) => porEstado.get(estado) ?? { estado, total: 0, usuarios: null };
 
-  // ── HUECO DE SEBASTIAN (5-10 lineas) ─────────────────────────────
-  // Construir `bandas` recorriendo BANDAS_EMBUDO en orden, y para cada una:
-  //   - total y usuarios desde get(etapa.estado)
-  //   - conversionDesdeAnterior: null en la primera; si no, redondear
-  //     (total_actual / total_anterior) * 100. Decidir el denominador.
-  // Luego armar ganado = get(ETAPA_GANADA), onHold = get(ETAPA_ONHOLD),
-  // sinEtapa = get(CLAVE_SIN_ETAPA).total.
-  // TODO(sebastian): escribir aqui. Borrar el throw.
-  throw new Error('construirEmbudo: pendiente de implementar');
-  // ─────────────────────────────────────────────────────────────────
+  const bandas: BandaEmbudo[] = BANDAS_EMBUDO.map((etapa, i) => {
+    const actual = get(etapa.estado);
+    const anterior = i === 0 ? null : get(BANDAS_EMBUDO[i - 1].estado).total;
+    const conversionDesdeAnterior = anterior === null || anterior === 0 ? (i === 0 ? null : 0) : Math.round((actual.total / anterior) * 100);
+    return {
+      estado: etapa.estado,
+      label: etapa.label,
+      colorClass: etapa.colorClass,
+      total: actual.total,
+      usuarios: actual.usuarios,
+      conversionDesdeAnterior: i === 0 ? null : conversionDesdeAnterior,
+    };
+  });
+
+  const ganadoConteo = get(ETAPA_GANADA);
+  const onHoldConteo = get(ETAPA_ONHOLD);
+  const etapaGanada = FUNNEL_ETAPAS.find((e) => e.estado === ETAPA_GANADA);
+  const etapaOnHold = FUNNEL_ETAPAS.find((e) => e.estado === ETAPA_ONHOLD);
+
+  return {
+    bandas,
+    ganado: { estado: ETAPA_GANADA, label: etapaGanada?.label ?? ETAPA_GANADA, total: ganadoConteo.total, usuarios: ganadoConteo.usuarios },
+    onHold: { estado: ETAPA_ONHOLD, label: etapaOnHold?.label ?? ETAPA_ONHOLD, total: onHoldConteo.total, usuarios: onHoldConteo.usuarios },
+    sinEtapa: get(CLAVE_SIN_ETAPA).total,
+  };
 }
