@@ -60,6 +60,7 @@ import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
+import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -4010,4 +4011,31 @@ export function actualizarEstadoNotion(
       })
       .run();
   });
+}
+
+// Conteo de empresas por etapa comercial (estado_notion), scoped a la organizacion.
+// null -> '__sin_etapa__' (no se dropea, se reporta aparte). usuarios = suma de
+// usuarios_efectivos de la empresa (proxy de tamano), null si ninguna lo tiene.
+// Cardinalidad verificada contra isps.db real: empresa_usuarios.id_empresa es su PK
+// (1898 filas, 1898 id_empresa distintos) -> relacion 1:1 con empresa, un LEFT JOIN
+// simple no infla el count(*) de empresas.
+export function embudoPipeline(idOrganizacion: number): ConteoEtapa[] {
+  const estadoExpr = sql<string>`coalesce(${empresa.estadoNotion}, ${CLAVE_SIN_ETAPA})`;
+  const filas = db
+    .select({
+      estado: estadoExpr,
+      total: sql<number>`count(*)`,
+      usuarios: sql<number | null>`sum(${empresaUsuarios.usuariosEfectivos})`,
+    })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(eq(empresa.organizacionActivaId, idOrganizacion))
+    .groupBy(estadoExpr)
+    .all();
+
+  return filas.map((f) => ({
+    estado: f.estado,
+    total: Number(f.total),
+    usuarios: f.usuarios === null ? null : Number(f.usuarios),
+  }));
 }
