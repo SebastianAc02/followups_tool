@@ -1,11 +1,13 @@
-import { estadoConector, listarConfigConectores } from "../db/repository";
+import { estadoConector, listarConfigConectores, lineasWhatsappDeUsuario, lineasWhatsappPool, leerConfiguracionAdmin } from "../db/repository";
 import { requireSession } from "../lib/session";
 import { AppShell } from "../ui/shell/AppShell";
-import { CATALOGO_CONECTORES, conectorDelCatalogo, type ModoConector } from "./catalogo.ts";
+import { CATALOGO_CONECTORES, CATALOGO_CONFIGURACION, conectorDelCatalogo, type ModoConector } from "./catalogo.ts";
 import { vistaEstado, contarEstados } from "./estado-ui.ts";
 import { EstadoResumen } from "./EstadoResumen";
 import { ConectorRow } from "./ConectorRow";
 import { AgregarConector } from "./AgregarConector";
+import { ConfiguracionAdmin } from "./ConfiguracionAdmin";
+import { emailGmailConectado } from "../adapters/gmail";
 
 export default async function Conectores() {
   const sesion = await requireSession();
@@ -28,6 +30,17 @@ export default async function Conectores() {
 
   const agregados = new Set(activos.map((a) => a.cat.id));
   const disponibles = CATALOGO_CONECTORES.filter((c) => !agregados.has(c.id));
+
+  // Tarea 8 (D6): "tus lineas" no depende del modo del conector whatsapp (esa fila
+  // sigue siendo solo la credencial admin del servidor Evolution) -- se leen aparte,
+  // por sesion.id, y se le pasan a ConectorRow solo cuando el conector es whatsapp.
+  const misLineasWhatsapp = lineasWhatsappDeUsuario(sesion.id);
+  const lineasPoolWhatsapp = sesion.admin ? lineasWhatsappPool() : [];
+
+  // Etapa 1 (gmail): igual que emailCuenta de WhatsApp, el email conectado no es secreto
+  // (a diferencia del refreshToken) -- se resuelve por fuera de estadoConector (que nunca
+  // descifra nada) via una funcion Gmail-especifica en el adaptador.
+  const emailConectadoGmail = emailGmailConectado(sesion.id);
 
   return (
     <AppShell>
@@ -53,11 +66,31 @@ export default async function Conectores() {
           </p>
         ) : (
           activos.map((a) => (
-            <ConectorRow key={a.cat.id} cat={a.cat} estado={a.estado} modo={a.modo} esAdmin={sesion.admin} />
+            <ConectorRow
+              key={a.cat.id}
+              cat={a.cat}
+              estado={a.estado}
+              modo={a.modo}
+              esAdmin={sesion.admin}
+              misLineasWhatsapp={a.cat.id === "whatsapp" ? misLineasWhatsapp : undefined}
+              lineasWhatsappPool={a.cat.id === "whatsapp" ? lineasPoolWhatsapp : undefined}
+              emailConectadoGmail={a.cat.id === "gmail" ? emailConectadoGmail : undefined}
+            />
           ))
         )}
 
         {sesion.admin && <AgregarConector disponibles={disponibles} />}
+
+        {sesion.admin && (
+          <div className="mt-10">
+            <p className="mb-3 text-xs uppercase tracking-widest text-muted">Configuración</p>
+            <div className="flex flex-col gap-2.5">
+              {CATALOGO_CONFIGURACION.map((cat) => (
+                <ConfiguracionAdmin key={cat.clave} cat={cat} valor={leerConfiguracionAdmin(cat.clave)} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );

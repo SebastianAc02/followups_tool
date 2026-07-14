@@ -6,6 +6,9 @@ import type { ConectorCatalogo, ModoConector } from "./catalogo.ts";
 import { vistaEstado } from "./estado-ui.ts";
 import { cambiarModoAction, quitarConectorAction } from "./actions";
 import { CredencialForm } from "./CredencialForm";
+import { LineasWhatsapp } from "./LineasWhatsapp";
+import { GmailConector } from "./GmailConector";
+import type { LineaWhatsapp } from "../db/repository";
 
 // Una fila de conector: columna izquierda de estado (punto + label + timestamp), columna
 // derecha con nombre + badge de modo + descripcion + formulario/estado/error. La autoridad
@@ -15,11 +18,17 @@ export function ConectorRow({
   estado,
   modo,
   esAdmin,
+  misLineasWhatsapp,
+  lineasWhatsappPool,
+  emailConectadoGmail,
 }: {
   cat: ConectorCatalogo;
   estado: EstadoConector;
   modo: ModoConector;
   esAdmin: boolean;
+  misLineasWhatsapp?: LineaWhatsapp[];
+  lineasWhatsappPool?: LineaWhatsapp[];
+  emailConectadoGmail?: string | null;
 }) {
   const v = vistaEstado(estado);
   const color =
@@ -58,11 +67,26 @@ export function ConectorRow({
         )}
 
         {puedeEditar ? (
-          <CredencialForm proveedor={cat.id} tieneCredencial={estado.tieneCredencial} />
-        ) : (
+          cat.id === "gmail" ? (
+            <GmailConector estado={estado} emailConectado={emailConectadoGmail ?? null} />
+          ) : (
+            <CredencialForm proveedor={cat.id} tieneCredencial={estado.tieneCredencial} />
+          )
+        ) : cat.id !== "whatsapp" ? (
           <p className="max-w-sm rounded-lg border border-dashed border-line p-4 text-sm leading-relaxed text-muted">
             Solo un admin puede configurar esta conexión. Si algo no llega, avísale a tu admin.
           </p>
+        ) : null}
+
+        {/* A diferencia del resto de conectores (una sola credencial de equipo), WhatsApp
+            se expande a lineas: cada usuario conecta y prueba SU propio numero sin tocar
+            la credencial admin de arriba (D6, plan-whatsapp-adapter.md, tarea 8). */}
+        {cat.id === "whatsapp" && (
+          <LineasWhatsapp
+            misLineas={misLineasWhatsapp ?? []}
+            lineasPool={lineasWhatsappPool ?? []}
+            esAdmin={esAdmin}
+          />
         )}
 
         {/* Controles de admin: cambiar modo + quitar. Ghost/quiet a proposito: son
