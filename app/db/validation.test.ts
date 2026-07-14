@@ -51,6 +51,20 @@ test('campanaInputSchema acepta intakeDiario positivo y lo deja undefined si no 
   assert.equal(conIntake.intakeDiario, 50);
 });
 
+test('definicionSegmento acepta es_null sobre owner', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [{ campo: 'owner', op: 'es_null' }],
+  });
+  assert.equal(r.success, true);
+});
+
+test('definicionSegmento rechaza es_null sobre rol (1-a-muchos, sin semantica de columna)', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [{ campo: 'rol', op: 'es_null' }],
+  });
+  assert.equal(r.success, false);
+});
+
 test('definicionSegmento acepta orden y limite opcionales', () => {
   const r = definicionSegmentoSchema.safeParse({
     condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }],

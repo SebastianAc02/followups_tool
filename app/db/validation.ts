@@ -123,13 +123,19 @@ export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
 export const CAMPOS_SEGMENTO_NUMERICOS = ['prioridad', 'es_cliente', 'usuarios', 'personas'] as const;
 export type CampoSegmentoNumerico = (typeof CAMPOS_SEGMENTO_NUMERICOS)[number];
 
+// rol vive en contacto (1-a-muchos, resuelto via EXISTS en condicionRol): es_null/no_null
+// no tiene una semantica de columna ahi, y condicionRol lo rechaza en tiempo de ejecucion.
+// Excluirlo aca mueve ese rechazo a Zod (falla explicita en el Copiloto) en vez de reventar
+// la query al correr el segmento.
+const CAMPOS_SEGMENTO_NULEABLES = CAMPOS_SEGMENTO.filter((c) => c !== 'rol');
+
 const condicionEnSchema = z.object({
   campo: z.enum(CAMPOS_SEGMENTO),
   op: z.enum(['en', 'no_en']),
   valores: z.array(z.string().min(1)).min(1, 'la condicion en/no_en necesita al menos un valor'),
 });
 const condicionNullSchema = z.object({
-  campo: z.enum(CAMPOS_SEGMENTO),
+  campo: z.enum(CAMPOS_SEGMENTO_NULEABLES),
   op: z.enum(['es_null', 'no_null']),
 });
 

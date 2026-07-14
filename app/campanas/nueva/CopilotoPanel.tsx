@@ -10,6 +10,7 @@ type Mensaje = {
   noMapeado?: string[];
   error?: string;
   relleno?: { eje: string; motivo: string };
+  cargando?: boolean;
 };
 
 type Props = {
@@ -27,16 +28,20 @@ export function CopilotoPanel({ estadoActual, total, onResultado }: Props) {
     const dicho = frase.trim();
     if (!dicho || pendiente) return;
     setPendiente(true);
+    setFrase('');
+    setMensajes((prev) => [...prev, { frase: dicho, cargando: true }]);
     const r = await copilotoAction(dicho, estadoActual, total);
     if (r.ok) {
-      setMensajes((prev) => [
-        ...prev,
-        { frase: dicho, explicacion: r.explicacion, noMapeado: r.noMapeado, relleno: r.relleno },
-      ]);
+      setMensajes((prev) =>
+        prev.map((m, i) =>
+          i === prev.length - 1
+            ? { frase: dicho, explicacion: r.explicacion, noMapeado: r.noMapeado, relleno: r.relleno }
+            : m,
+        ),
+      );
       onResultado({ estado: r.estado, relleno: r.relleno, frase: dicho });
-      setFrase('');
     } else {
-      setMensajes((prev) => [...prev, { frase: dicho, error: r.error }]);
+      setMensajes((prev) => prev.map((m, i) => (i === prev.length - 1 ? { frase: dicho, error: r.error } : m)));
     }
     setPendiente(false);
   }
@@ -62,7 +67,12 @@ export function CopilotoPanel({ estadoActual, total, onResultado }: Props) {
             <div className="max-w-[88%] self-end rounded-[12px_12px_3px_12px] border border-accent/30 bg-accent/[.16] px-[13px] py-[10px] text-[13px] leading-[1.45] text-ink">
               {m.frase}
             </div>
-            {m.error ? (
+            {m.cargando ? (
+              <div className="flex max-w-[92%] items-center gap-2 text-[13px] leading-[1.5] text-ink-soft">
+                <span className="h-[7px] w-[7px] shrink-0 animate-pulse rounded-full bg-accent" aria-hidden="true" />
+                <span>Armando el segmento…</span>
+              </div>
+            ) : m.error ? (
               <div className="max-w-[92%] text-[13px] leading-[1.5] text-overdue">{m.error}</div>
             ) : (
               <>

@@ -28,7 +28,18 @@ type Resultado =
   | { ok: true; estado: DefinicionSegmento; explicacion: string; noMapeado: string[]; relleno?: { eje: string; motivo: string } }
   | { ok: false; error: string };
 
-function construirPrompt(instruccion: InstruccionCopiloto, campos: CampoDisponible[]): string {
+// Exportada solo para test (copiloto.test.ts verifica que la regla de ausencia este
+// en el prompt): construirPrompt es la unica fuente de verdad de como interpretamos
+// lenguaje natural, asi que un test que la ignore no protege nada.
+//
+// Bug real (2026-07-14): "las 50 ISPs mas grandes que no tienen owner" no se armaba.
+// CAMPOS DISPONIBLES para owner solo trae valores NO nulos (valoresDistintosCampo filtra
+// isNotNull en actions.ts), asi que sin una regla explicita el modelo nunca ve "ausencia"
+// representada y termina inventando un no_en con la lista de valores conocidos -- que en
+// SQL no trae las filas con la columna NULL (semantica de NOT IN), justo lo contrario de
+// lo pedido. La regla de abajo lo cubre; 'rol' queda afuera porque vive en otra tabla y
+// Zod ya rechaza es_null/no_null ahi (ver CAMPOS_SEGMENTO_NULEABLES en validation.ts).
+export function construirPrompt(instruccion: InstruccionCopiloto, campos: CampoDisponible[]): string {
   return `Eres el Copiloto de segmentacion de campanas de OnePay. El usuario te da una \
 instruccion en lenguaje natural sobre el ESTADO ACTUAL de un segmento de empresas, y vos \
 devolves el ESTADO NUEVO (no arrancas de cero, partis del actual).
@@ -48,6 +59,11 @@ Reglas:
 - Si algo de la instruccion no cae en ningun campo disponible, listalo en noMapeado, \
 nunca lo inventes como condicion.
 - "las N mas grandes" -> orden {campo:'usuarios', dir:'desc'} y limite N.
+- "sin X" / "que no tiene X" / "sin asignar" -> {campo:'X', op:'es_null'}; "con X" / "que \
+tiene X" -> {campo:'X', op:'no_null'}. Nunca inventes un no_en con la lista de valores \
+conocidos para expresar ausencia (en SQL no trae las filas sin dato, es lo contrario de \
+lo pedido). Excepcion: 'rol' no soporta es_null/no_null (vive en otra tabla) -- si la \
+instruccion es sobre rol ausente, listalo en noMapeado.
 - Si la instruccion pide completar a una meta y el estado actual trae menos cuentas, \
 identifica el eje que domina el segmento (tamano, region, vertical) y relajalo SOLO a \
 el; deja el resto igual y explica el cambio en relleno {eje, motivo}.
