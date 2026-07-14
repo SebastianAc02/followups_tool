@@ -12,6 +12,8 @@ import {
 import { requireSession } from "../lib/session";
 import { conectorDelCatalogo, type ModoConector } from "./catalogo";
 import { decidirGuardado, puedeRevelarCredencial } from "./politica";
+import { ultimaNotaDe } from "../adapters/granola";
+import { avisarAdminPorWhatsapp } from "../lib/alerta-admin";
 
 function modoValido(v: string): v is ModoConector {
   return v === "personal" || v === "admin";
@@ -104,4 +106,28 @@ export async function revelarCredencialAction(proveedor: string): Promise<Result
   const credencial = leerCredencialConector(proveedor);
   if (!credencial) return { ok: false, error: "No hay ninguna credencial guardada todavía." };
   return { ok: true, credencial };
+}
+
+export type ResultadoVerificacionGranola =
+  | { ok: true; nota: { titulo: string | null; fecha: string; resumenCorto: string | null } }
+  | { ok: false; error: "sin_llamadas" | "error_interno" };
+
+// Guarda la credencial (personal, del usuario en sesion) y de una trae su ultima
+// llamada real para que la confirme -- a diferencia de guardarCredencialAction (que
+// solo guarda a ciegas), esto es lo que Sebastian pidio para Granola especificamente
+// (2026-07-14): "estas es tu ultima llamada, este es el transcript correcto".
+export async function verificarGranolaAction(credencial: string): Promise<ResultadoVerificacionGranola> {
+  const sesion = await requireSession();
+  guardarCredencialConector("granola", credencial, sesion.id);
+
+  try {
+    const nota = await ultimaNotaDe(sesion.id);
+    if (!nota) return { ok: false, error: "sin_llamadas" };
+    return { ok: true, nota: { titulo: nota.titulo, fecha: nota.fecha, resumenCorto: nota.resumenCorto } };
+  } catch (e) {
+    await avisarAdminPorWhatsapp(
+      `${sesion.owner} intentó configurar Granola y tuvo un error: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return { ok: false, error: "error_interno" };
+  }
 }

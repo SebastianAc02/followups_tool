@@ -7,6 +7,7 @@ import { vistaEstado } from "./estado-ui.ts";
 import { cambiarModoAction, quitarConectorAction } from "./actions";
 import { CredencialForm } from "./CredencialForm";
 import { RevelarCredencial } from "./RevelarCredencial";
+import { VerificarGranola } from "./VerificarGranola";
 
 // Una fila de conector: columna izquierda de estado (punto + label + timestamp), columna
 // derecha con nombre + badge de modo + descripcion + formulario/estado/error. La autoridad
@@ -58,7 +59,9 @@ export function ConectorRow({
           </div>
         )}
 
-        {puedeEditar ? (
+        {cat.id === "granola" ? (
+          <VerificarGranola tieneCredencial={estado.tieneCredencial} />
+        ) : puedeEditar ? (
           <CredencialForm proveedor={cat.id} tieneCredencial={estado.tieneCredencial} />
         ) : (
           <p className="max-w-sm rounded-lg border border-dashed border-line p-4 text-sm leading-relaxed text-muted">
