@@ -25,7 +25,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
   const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
-  const reagendar = splitActivo ? colaReagendar(owner, usuario.idOrganizacion) : [];
+  const reagendar = splitActivo ? colaReagendar(hoy, owner, usuario.idOrganizacion) : [];
   const contadores = contadoresHoy(hoy, owner, usuario.idOrganizacion);
   // V5.7: cadencias (automatico Apollo + manual Tier 1) no son por owner todavia
   // (campana.owner es la campana masiva, no un individuo -- ver memoria del proyecto);

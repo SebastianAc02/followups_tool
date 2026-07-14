@@ -58,7 +58,7 @@ import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
-import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS, ETAPA_ONHOLD } from './funnel';
+import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
 import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
 import {
@@ -163,6 +163,13 @@ const columnasCola = {
   usuarios: empresaUsuarios.usuariosEfectivos,
 };
 
+// Deriva si el ULTIMO toque de una empresa fue "no_llego" (no-show de reunion), sin
+// columna nueva -- mismo principio que el resto del split (fase derivada, nunca un flag
+// que se pueda desincronizar). El COALESCE importa: una empresa sin ningun toque da NULL
+// en la subquery, y "NULL = 'no_llego'" es NULL (ni true ni false) -- sin el COALESCE, un
+// NOT(...) sobre eso la excluiria de colaCierres por error.
+const ultimoResultadoNoLlego = sql`COALESCE((SELECT ${toque.resultado} FROM ${toque} WHERE ${toque.idEmpresa} = ${empresa.idEmpresa} ORDER BY ${toque.idToque} DESC LIMIT 1), '') = 'no_llego'`;
+
 // Cola del día de un owner DENTRO de una organización: vencidos o para hoy, ordenados
 // por calor y luego antigüedad. idOrganizacion viene de la sesión (Parte 1, multi-org):
 // un lead compartido solo aparece en la cola de quien lo tiene activo ahora mismo.
@@ -230,10 +237,11 @@ export function colaCierres(owner: string, idOrganizacion: number) {
     .all();
 }
 
-// Bucket "Reagendar" del split de cola: cuentas on_hold del owner (se quedaron atascadas,
-// ej. no llegaron a la reunion). Mismo trato que colaCierres: lista fija, no depende de
-// fecha ni se marca "vencida".
-export function colaReagendar(owner: string, idOrganizacion: number) {
+// Bucket "Reagendar" del split de cola (2026-07-14, v3): reunion_agendada cuyo ULTIMO toque
+// fue no-show (no_llego). Es un follow-up real con fecha (vencido-o-hoy), igual que
+// colaLeads -- no una lista fija. on_hold NO es Reagendar (ver spec): eso queda fuera del
+// split.
+export function colaReagendar(hoy: string, owner: string, idOrganizacion: number) {
   return db
     .select(columnasCola)
     .from(empresa)
@@ -243,10 +251,13 @@ export function colaReagendar(owner: string, idOrganizacion: number) {
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
         eq(empresa.owner, owner),
-        eq(empresa.estadoNotion, ETAPA_ONHOLD),
+        eq(empresa.estadoNotion, 'reunion_agendada'),
+        ultimoResultadoNoLlego,
+        isNotNull(empresa.proximoFollowUpFecha),
+        lte(empresa.proximoFollowUpFecha, hoy),
       ),
     )
-    .orderBy(sql`${empresa.proximoFollowUpFecha} IS NULL`, empresa.proximoFollowUpFecha)
+    .orderBy(empresa.proximoFollowUpFecha)
     .all();
 }
 
