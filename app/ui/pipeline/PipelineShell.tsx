@@ -7,7 +7,8 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { cn } from '../cn';
 import { DetallePanel, type DetallePanelData } from './DetallePanel';
-import { perfilPipelineEmpresaAction } from '../../pipeline/actions';
+import { perfilPipelineEmpresaAction, historialEtapasAction } from '../../pipeline/actions';
+import type { HistorialEtapas } from '../../db/repository';
 
 export type PipelineTab = 'overview' | 'embudo' | 'reportes' | 'ajustes';
 
@@ -23,14 +24,18 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
   const [detalle, setDetalle] = useState<DetallePanelData | null>(null);
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [cargando, setCargando] = useState(false);
+  const [timelineEtapas, setTimelineEtapas] = useState<HistorialEtapas | undefined>(undefined);
 
   const handleSelectEmpresa = (idEmpresa: string) => {
     setDetalle(null);
+    setTimelineEtapas(undefined);
     setDetalleOpen(true);
     setCargando(true);
     perfilPipelineEmpresaAction(idEmpresa)
       .then((d) => setDetalle(d))
       .finally(() => setCargando(false));
+    // Timeline de etapas en paralelo: no bloquea la ficha principal, se pinta cuando llega.
+    historialEtapasAction(idEmpresa).then((t) => setTimelineEtapas(t));
   };
 
   const currentDetailData = detalle;
@@ -84,7 +89,13 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Ficha completa de la empresa */}
-      <DetallePanel data={currentDetailData} isOpen={detalleOpen} cargando={cargando} onClose={() => setDetalleOpen(false)} />
+      <DetallePanel
+        data={currentDetailData}
+        isOpen={detalleOpen}
+        cargando={cargando}
+        onClose={() => setDetalleOpen(false)}
+        timelineEtapas={timelineEtapas}
+      />
     </>
   );
 }
