@@ -28,6 +28,7 @@ import {
   syncCambios,
   conector,
   conectorConfig,
+  configuracionAdmin,
   empresaAlias,
   outbox,
   cadencia,
@@ -777,6 +778,26 @@ export function leerCredencialConector(proveedor: string, idUsuario?: string): s
     .get();
   if (!fila?.credencialCiphertext) return null;
   return descifrar(fila.credencialCiphertext);
+}
+
+// Config de negocio no secreta, editable por admin desde /conectores (2026-07-14): no
+// pasa por cifrar/descifrar como conector.credencialCiphertext porque no es un
+// secreto (buzon de envio de Apollo, etc.), solo un valor operativo. Mismo patron de
+// upsert explicito que guardarCredencialConector (una sola fila por clave).
+export function leerConfiguracionAdmin(clave: string): string | null {
+  const fila = db.select({ valor: configuracionAdmin.valor }).from(configuracionAdmin).where(eq(configuracionAdmin.clave, clave)).get();
+  return fila?.valor ?? null;
+}
+
+export function guardarConfiguracionAdmin(clave: string, valor: string, idUsuario?: string) {
+  const ahora = new Date().toISOString();
+  const existente = db.select({ clave: configuracionAdmin.clave }).from(configuracionAdmin).where(eq(configuracionAdmin.clave, clave)).get();
+
+  if (existente) {
+    db.update(configuracionAdmin).set({ valor, actualizadoPor: idUsuario ?? null, updatedAt: ahora }).where(eq(configuracionAdmin.clave, clave)).run();
+  } else {
+    db.insert(configuracionAdmin).values({ clave, valor, actualizadoPor: idUsuario ?? null, updatedAt: ahora }).run();
+  }
 }
 
 // Rediseño conectores: CRUD de la POLITICA (conector_config), separado de los secretos.

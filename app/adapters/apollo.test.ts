@@ -10,10 +10,11 @@ import { crearDbPrueba, borrarDbPrueba } from '../db/test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 process.env.FOLLOWUPS_CRYPTO_KEY = Buffer.alloc(32, 5).toString('base64');
-process.env.APOLLO_MAILBOX_ID = 'buzon-test-1';
 
-const { guardarCredencialConector } = await import('../db/repository.ts');
+const { guardarCredencialConector, guardarConfiguracionAdmin } = await import('../db/repository.ts');
 const { crearApolloAdapter } = await import('./apollo.ts');
+
+guardarConfiguracionAdmin('apollo_mailbox_id', 'buzon-test-1');
 
 function fetchFalso(handler: (path: string, init: RequestInit) => { status: number; body: unknown }) {
   return async (url: string | URL, init: RequestInit = {}) => {
@@ -301,11 +302,11 @@ test('enviarPaso manda empresa/cargo como organization_name/title para personali
 });
 
 test('enviarPaso truena si no hay buzon configurado (decision de negocio S2 pendiente)', async () => {
-  delete process.env.APOLLO_MAILBOX_ID;
+  guardarConfiguracionAdmin('apollo_mailbox_id', '');
   const adapter = crearApolloAdapter();
 
-  // finally (hallazgo real de /code-review): si assert.rejects fallara, la env var
-  // quedaria borrada y filtraria el fallo a los tests siguientes del archivo.
+  // finally (hallazgo real de /code-review): si assert.rejects fallara, la config
+  // quedaria vacia y filtraria el fallo a los tests siguientes del archivo.
   try {
     await assert.rejects(
       () =>
@@ -314,10 +315,10 @@ test('enviarPaso truena si no hay buzon configurado (decision de negocio S2 pend
           { email: 'ana@empresa.com', telefono: null, nombre: null, empresa: null, cargo: null },
           { asunto: null, cuerpo: 'x', canal: 'correo' },
         ),
-      /APOLLO_MAILBOX_ID/,
+      /Buzón de envío de Apollo no configurado/,
     );
   } finally {
-    process.env.APOLLO_MAILBOX_ID = 'buzon-test-1';
+    guardarConfiguracionAdmin('apollo_mailbox_id', 'buzon-test-1');
   }
 });
 

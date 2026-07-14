@@ -8,9 +8,10 @@ import {
   quitarConfigConector,
   modoConector,
   leerCredencialConector,
+  guardarConfiguracionAdmin,
 } from "../db/repository";
 import { requireSession } from "../lib/session";
-import { conectorDelCatalogo, type ModoConector } from "./catalogo";
+import { conectorDelCatalogo, configuracionDelCatalogo, type ModoConector } from "./catalogo";
 import { decidirGuardado, puedeRevelarCredencial } from "./politica";
 import { ultimaNotaDe } from "../adapters/granola";
 import { avisarAdminPorWhatsapp } from "../lib/alerta-admin";
@@ -77,6 +78,26 @@ export async function cambiarModoAction(formData: FormData) {
 
   actualizarModoConector(proveedor, modo);
   revalidatePath("/conectores");
+}
+
+// Guarda un ajuste de configuracion_admin (ej. buzon de Apollo). Solo admin. No es
+// secreto (no pasa por cifrar/descifrar) -- por eso el resultado no necesita el mismo
+// cuidado de "nunca devolver el valor" que guardarCredencialAction.
+export async function guardarConfiguracionAction(
+  _previo: ResultadoGuardado | null,
+  formData: FormData,
+): Promise<ResultadoGuardado> {
+  const sesion = await requireSession();
+  if (!sesion.admin) return { ok: false, error: "Solo un admin puede cambiar esta configuración." };
+
+  const clave = String(formData.get("clave") ?? "").trim();
+  const valor = String(formData.get("valor") ?? "").trim();
+  if (!configuracionDelCatalogo(clave)) return { ok: false, error: "Ajuste no reconocido." };
+  if (!valor) return { ok: false, error: "No tengo un valor: escribe algo antes de guardar." };
+
+  guardarConfiguracionAdmin(clave, valor, sesion.id);
+  revalidatePath("/conectores");
+  return { ok: true };
 }
 
 // Quita (duerme) un conector. Solo admin. No borra credenciales: re-agregar lo revive.

@@ -7,7 +7,7 @@ import type {
   PasoParaSincronizar,
   PasoSincronizado,
 } from '../core/ports/envio';
-import { leerCredencialConector } from '../db/repository';
+import { leerCredencialConector, leerConfiguracionAdmin } from '../db/repository';
 import { calcularWaitApollo } from '../core/motor-cadencia';
 import { reescribirLinksClic, inyectarPixelApertura } from '../core/tracking-links';
 
@@ -15,7 +15,7 @@ import { reescribirLinksClic, inyectarPixelApertura } from '../core/tracking-lin
 // sincronizarCopy sube el copy tal cual, sin pixel ni reescritura de links -- correo
 // sigue funcionando igual que antes, el tracking es un opt-in que se activa el dia que
 // exista un deploy publico y esta variable apunte a el (Gmail/Outlook no pueden tocar
-// localhost). Mismo patron que APOLLO_MAILBOX_ID: se lee en cada llamada, no congelada.
+// localhost). Se lee en cada llamada, no congelada en un const de modulo.
 function appBaseUrl(): string | undefined {
   return process.env.APP_BASE_URL;
 }
@@ -136,10 +136,11 @@ async function traerMensajesDeCampana(proveedorCampanaId: string, apiKey: string
 
 // Identidad de envio (que buzon manda): decision de negocio S2 pendiente con Camilo
 // (hoy solo hay 2 buzones, ambos de el). No bloquea construir el adaptador, si bloquea
-// que enviarPaso corra sin esta variable configurada. Se lee en cada llamada (no
-// congelada en un const de modulo) para que un cambio en tiempo de ejecucion aplique.
+// que enviarPaso corra sin este valor configurado. Vive en configuracion_admin (no es
+// secreto, editable por admin desde /conectores, 2026-07-14) en vez de env var: se lee
+// en cada llamada, no congelada en un const de modulo.
 function buzonEnvioId(): string | undefined {
-  return process.env.APOLLO_MAILBOX_ID;
+  return leerConfiguracionAdmin('apollo_mailbox_id') || undefined;
 }
 
 // Un solo INSERT por email: bulk_create con run_dedupe:true nunca duplica un contacto
@@ -367,7 +368,7 @@ export function crearApolloAdapter(): EnvioAdapter {
     ): Promise<EnvioResultado> {
       const buzon = buzonEnvioId();
       if (!buzon) {
-        throw new Error('APOLLO_MAILBOX_ID no configurado (decision de negocio S2 pendiente)');
+        throw new Error('Buzón de envío de Apollo no configurado (decision de negocio S2 pendiente) — configúralo en /conectores');
       }
       const apiKey = credencial();
       const contacto = await resolverContacto(apiKey, destinatario, true);

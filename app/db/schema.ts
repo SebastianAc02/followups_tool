@@ -137,6 +137,19 @@ export const conectorConfig = sqliteTable('conector_config', {
   updatedAt: text('updated_at'),
 });
 
+// Config de negocio editable por admin desde /conectores, sin pasar por SSH/.env del
+// VPS (2026-07-14, pedido de Sebastian tras revisar donde vivian los secretos de
+// produccion). Clave-valor deliberado en vez de columnas propias: valores como el
+// buzon de envio de Apollo no son secretos (no se cifran, a diferencia de `conector`)
+// y una tabla generica evita una migracion nueva cada vez que se agregue un ajuste
+// mas de este mismo tipo.
+export const configuracionAdmin = sqliteTable('configuracion_admin', {
+  clave: text('clave').primaryKey(),
+  valor: text('valor').notNull(),
+  actualizadoPor: text('actualizado_por'),
+  updatedAt: text('updated_at'),
+});
+
 // V3.1: patron outbox. Se escribe en la MISMA transaccion que el cambio real; el
 // worker (V3.5/V3.7) drena hacia Notion con reintentos, nunca la app llama a Notion
 // directo.
