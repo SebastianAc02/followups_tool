@@ -22,6 +22,7 @@ export function EtapaEmpresasPanel({
 }) {
   const [empresas, setEmpresas] = useState<EmpresaEnEtapa[]>([]);
   const [cargandoLista, setCargandoLista] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
 
   const [detalle, setDetalle] = useState<DetallePanelData | null>(null);
   const [detalleOpen, setDetalleOpen] = useState(false);
@@ -29,6 +30,7 @@ export function EtapaEmpresasPanel({
   const [timelineEtapas, setTimelineEtapas] = useState<HistorialEtapas | undefined>(undefined);
 
   useEffect(() => {
+    setBusqueda('');
     if (!etapa) {
       setEmpresas([]);
       return;
@@ -66,19 +68,42 @@ export function EtapaEmpresasPanel({
     );
   }
 
+  const filtro = busqueda.trim().toLowerCase();
+  const empresasFiltradas = filtro
+    ? empresas.filter((e) => e.nombre.toLowerCase().includes(filtro))
+    : empresas;
+
   return (
     <div className="rounded-2xl border border-line-card bg-pipeline-card overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-line">
         <span className="text-sm font-semibold text-ink">{etapa.label}</span>
-        <span className="mono text-xs text-muted">{empresas.length}</span>
+        <span className="mono text-xs text-muted">
+          {filtro ? `${empresasFiltradas.length}/${empresas.length}` : empresas.length}
+        </span>
       </div>
+
+      {!cargandoLista && empresas.length > 0 && (
+        <div className="px-4 py-2.5 border-b border-line">
+          <input
+            type="text"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder={`Buscar en ${etapa.label.toLowerCase()}...`}
+            className="w-full rounded-lg border border-line-card bg-shell px-3 py-1.5 text-xs text-ink placeholder:text-faint focus:outline-none focus:border-accent"
+          />
+        </div>
+      )}
+
       <div className="max-h-[520px] overflow-y-auto divide-y divide-line">
         {cargandoLista && <div className="px-4 py-4 text-sm text-muted">Cargando...</div>}
         {!cargandoLista && empresas.length === 0 && (
           <div className="px-4 py-4 text-sm text-muted">Sin cuentas en esta etapa.</div>
         )}
+        {!cargandoLista && empresas.length > 0 && empresasFiltradas.length === 0 && (
+          <div className="px-4 py-4 text-sm text-muted">Ninguna cuenta coincide con &quot;{busqueda}&quot;.</div>
+        )}
         {!cargandoLista &&
-          empresas.map((e) => (
+          empresasFiltradas.map((e) => (
             <button
               key={e.idEmpresa}
               type="button"

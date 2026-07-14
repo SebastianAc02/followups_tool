@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../cn';
 import { CanalTag, type Canal } from '../CanalTag';
-import { FUNNEL_ETAPAS } from '../../db/funnel';
+import { FUNNEL_ETAPAS, ETAPA_GANADA, ETAPA_ONHOLD } from '../../db/funnel';
 import type { HistorialEtapas } from '../../db/repository';
 
 const MS_POR_DIA = 1000 * 60 * 60 * 24;
@@ -20,6 +20,22 @@ function labelEtapa(estado: string): string {
 
 function colorEtapa(estado: string): string {
   return FUNNEL_ETAPAS.find((e) => e.estado === estado)?.colorClass ?? 'bg-line-strong';
+}
+
+// Mismo token de color que el dot, pero como utilidad de texto -- swap de prefijo, no
+// un color nuevo (single source of truth sigue siendo FUNNEL_ETAPAS.colorClass).
+function colorEtapaTexto(estado: string): string {
+  return colorEtapa(estado).replace(/^bg-/, 'text-');
+}
+
+// Valor CSS crudo (para la linea degradada del timeline, unico lugar donde un color
+// necesita ser un string de `background: linear-gradient(...)`, no una clase Tailwind).
+function colorEtapaCss(estado: string): string {
+  const clase = colorEtapa(estado);
+  const hex = clase.match(/^bg-\[(#[0-9a-fA-F]{3,8})\]$/)?.[1];
+  if (hex) return hex;
+  if (clase === 'bg-accent-soft') return 'var(--color-accent-soft)';
+  return 'var(--color-line-strong)';
 }
 
 export interface ContactoCompleto {
@@ -214,21 +230,44 @@ export function DetallePanel({
                         <p className="text-xs text-muted">Sin transiciones registradas aún.</p>
                       </div>
                     ) : (
-                      <div className="space-y-3">
+                      <div className="relative pl-1">
+                        {/* Linea degradada conectando todos los nodos -- igual al mockup original
+                            (index.html del pipeline): un solo trazo que atraviesa el timeline en
+                            vez de un borde recto por nodo. */}
+                        <div
+                          className="absolute left-[9px] top-1.5 bottom-2.5 w-0.5 rounded-full"
+                          style={{
+                            background: `linear-gradient(${timelineEtapas.transiciones.map((t) => colorEtapaCss(t.estado)).join(', ')})`,
+                          }}
+                          aria-hidden="true"
+                        />
                         {timelineEtapas.transiciones.map((t, i) => {
+                          const primero = timelineEtapas.transiciones[0];
                           const siguiente = timelineEtapas.transiciones[i + 1];
+                          const esUltimo = !siguiente;
+                          const esCierre = esUltimo && (t.estado === ETAPA_GANADA || t.estado === ETAPA_ONHOLD);
+
                           const desde = new Date(t.fecha).getTime();
                           const hasta = siguiente ? new Date(siguiente.fecha).getTime() : Date.now();
                           const dias = Math.round((hasta - desde) / MS_POR_DIA);
+                          const diasCiclo = Math.round((desde - new Date(primero.fecha).getTime()) / MS_POR_DIA);
+
                           return (
-                            <div key={`${t.estado}-${t.fecha}-${i}`} className="border-l-2 border-line-card pl-3 py-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', colorEtapa(t.estado))} aria-hidden="true" />
-                                <span className="text-xs font-semibold text-ink truncate">{labelEtapa(t.estado)}</span>
-                                <span className="mono text-xs text-ink-soft ml-auto">{t.fecha}</span>
-                              </div>
-                              <div className="text-xs text-muted">
-                                {dias} {dias === 1 ? 'día' : 'días'} en etapa{!siguiente ? ' (hasta hoy)' : ''}
+                            <div key={`${t.estado}-${t.fecha}-${i}`} className="relative pb-4 pl-7 last:pb-0">
+                              <span
+                                className={cn(
+                                  'absolute left-0 top-0.5 w-3.5 h-3.5 rounded-full border-2 border-shell flex-shrink-0',
+                                  colorEtapa(t.estado),
+                                  t.estado === ETAPA_GANADA && esUltimo && 'ring-2 ring-check/30',
+                                )}
+                                aria-hidden="true"
+                              />
+                              <div className="text-[13px] font-semibold text-ink">{labelEtapa(t.estado)}</div>
+                              <div className="mono text-[11px] text-muted mt-0.5">{t.fecha}</div>
+                              <div className={cn('mono text-[11px] font-medium mt-0.5', colorEtapaTexto(t.estado))}>
+                                {esCierre
+                                  ? `${t.estado === ETAPA_GANADA ? 'Ganado' : 'On hold'} · ciclo total ${diasCiclo} ${diasCiclo === 1 ? 'día' : 'días'}`
+                                  : `${dias} ${dias === 1 ? 'día' : 'días'} en etapa${esUltimo ? ' (hasta hoy)' : ''}`}
                               </div>
                             </div>
                           );
