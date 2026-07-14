@@ -186,6 +186,29 @@ export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacio
     .all();
 }
 
+// Bucket "Leads" del split de cola (2026-07-14): mismo criterio de colaDelDia (vencido o
+// de hoy) pero acotado a estado_notion = 'lead'. Los leads no aparecen en toques hasta
+// tener una fecha real (de una campana o puesta a mano); si no tienen fecha, no salen aqui
+// tampoco. owner es obligatorio: esta variante solo la usa la UI para un owner puntual.
+export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
+  return db
+    .select(columnasCola)
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        eq(empresa.owner, owner),
+        eq(empresa.estadoNotion, 'lead'),
+        isNotNull(empresa.proximoFollowUpFecha),
+        lte(empresa.proximoFollowUpFecha, hoy),
+      ),
+    )
+    .orderBy(empresa.proximoFollowUpFecha)
+    .all();
+}
+
 // V3.9: busca CUALQUIER empresa por nombre, sin restringir por owner ni por
 // proximoFollowUpFecha, a diferencia de colaDelDia(), que solo trae leads propios
 // y vencidos. Sirve para registrar un toque con alguien que no es lead de la cola
