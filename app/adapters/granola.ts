@@ -153,3 +153,30 @@ export function crearGranolaAdapter(idUsuario: string): TranscriptAdapter {
     },
   };
 }
+
+// Verificacion de conector (2026-07-14): a diferencia de buscarCandidatas (busca por
+// terminos dentro de una ventana), esto solo quiere "la ultima llamada, la que sea"
+// para que el usuario confirme visualmente que su API key trae SUS llamadas de
+// verdad. page_size=1 sin created_after/before: /v1/notes ya devuelve orden
+// descendente por fecha por default (confirmado en listarNotasEnVentana arriba).
+export async function ultimaNotaDe(idUsuario: string): Promise<{
+  id: string;
+  titulo: string | null;
+  fecha: string;
+  resumenCorto: string | null;
+} | null> {
+  const apiKey = leerCredencialConector('granola', idUsuario);
+  if (!apiKey) throw new Error(`No hay credencial de Granola configurada para el usuario ${idUsuario}`);
+
+  const lista = await llamarGranola<ListaNotas>(`/v1/notes?page_size=1`, apiKey);
+  const resumen = lista.notes[0];
+  if (!resumen) return null;
+
+  const detalle = await llamarGranola<NotaDetalle>(`/v1/notes/${resumen.id}`, apiKey);
+  return {
+    id: detalle.id,
+    titulo: detalle.title ?? null,
+    fecha: detalle.created_at,
+    resumenCorto: detalle.summary_text ? detalle.summary_text.slice(0, 200) : null,
+  };
+}
