@@ -33,3 +33,10 @@ test('estaEnPBX: empresa con un KDM con telefono no esta en PBX', () => {
 test('estaEnPBX: empresa sin contactos esta en PBX', () => {
   assert.equal(estaEnPBX([]), true);
 });
+
+test('estaEnPBX: KDM con solo correo (sin telefono) ya no esta en PBX', () => {
+  const contactos = [
+    { esKeyDecisionMaker: true, telefono: null, email: 'gerente@empresa.com' },
+  ];
+  assert.equal(estaEnPBX(contactos), false);
+});

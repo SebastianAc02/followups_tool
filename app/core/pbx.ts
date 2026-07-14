@@ -32,12 +32,9 @@ export function canalesDisponiblesKDM(contactos: ContactoPBX[]): Set<Canal> {
   return dir;
 }
 
+// Alcanzable = telefono, WhatsApp o correo del KDM (decision cerrada del spec,
+// seccion "Decisiones cerradas" punto 1). Cualquiera de los tres saca a la
+// empresa de PBX; PBX es la ausencia total de un canal directo al KDM.
 export function estaEnPBX(contactos: ContactoPBX[]): boolean {
-  // ── HUECO DE SEBASTIÁN (2-4 lineas) ────────────────────────────
-  // Definir el predicado: una empresa esta en PBX cuando NO hay un KDM alcanzable
-  // por su metodo directo. Decidir si el correo del KDM basta para NO estar en PBX,
-  // o si PBX es especificamente "sin telefono/WhatsApp del KDM".
-  // Usa canalesDisponiblesKDM(contactos). Borra el throw.
-  throw new Error('estaEnPBX: pendiente');
-  // ───────────────────────────────────────────────────────────────
+  return canalesDisponiblesKDM(contactos).size === 0;
 }
