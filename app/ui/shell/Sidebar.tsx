@@ -1,9 +1,10 @@
 'use client';
 
-// Sidebar del shell. Cliente: guarda si está fijado (pinned) en localStorage y, cuando está
-// oculto, se abre como flyout al pasar el mouse por el borde izquierdo. Recibe los datos ya
-// resueltos (nav items, conectores, owner) desde AppShell (server).
-import { useEffect, useRef, useState } from 'react';
+// Sidebar del shell. Cliente: guarda si está expandido (pinned) en localStorage. Colapsado
+// se muestra como riel de íconos (estático, sin flyout): el riel siempre está visible y empuja
+// el contenido igual que el sidebar completo. Recibe los datos ya resueltos (nav items,
+// conectores, owner) desde AppShell (server).
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { SidebarNav, type NavItem } from './SidebarNav';
 import { IconSidebarToggle } from './icons';
@@ -33,8 +34,6 @@ export function Sidebar({
   conectores: ConectorEstado[];
 }) {
   const [pinned, setPinned] = useState(true);
-  const [hoverOpen, setHoverOpen] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const guardado = window.localStorage.getItem(STORAGE_KEY);
@@ -45,82 +44,88 @@ export function Sidebar({
     setPinned((actual) => {
       const siguiente = !actual;
       window.localStorage.setItem(STORAGE_KEY, siguiente ? '1' : '0');
-      if (siguiente) setHoverOpen(false);
       return siguiente;
     });
   }
 
-  function abrirPorHover() {
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    setHoverOpen(true);
-  }
+  // Riel colapsado: mismo ancho de flex-none que el completo, solo que angosto (64px). Al
+  // estar siempre en el flujo empuja el contenido igual que el sidebar completo -- sin overlay,
+  // sin flyout, sin z-index. Ver decisión de Sebastián (2026-07-11): riel estático.
+  if (!pinned) {
+    return (
+      <div className="flex h-screen w-16 flex-none flex-col items-center border-r border-line-shell bg-shell-2 py-4">
+        <Link
+          href="/perfil"
+          title="OnePay"
+          className="mb-3 flex h-[34px] w-[34px] items-center justify-center rounded-[10px] bg-gradient-to-br from-accent to-accent-deep text-[15px] font-extrabold text-white shadow-[0_2px_10px_rgba(139,124,255,0.4)]"
+        >
+          O
+        </Link>
+        <button
+          type="button"
+          onClick={alternarPin}
+          title="Fijar sidebar"
+          className="mb-4 flex h-10 w-10 items-center justify-center rounded-[11px] text-faint hover:bg-card-hover hover:text-ink"
+        >
+          <IconSidebarToggle className="h-[17px] w-[17px]" />
+        </button>
 
-  function cerrarPorHover() {
-    closeTimer.current = setTimeout(() => setHoverOpen(false), 200);
-  }
+        <SidebarNav items={items} collapsed />
 
-  const abierto = pinned || hoverOpen;
-
-  return (
-    <div onMouseEnter={!pinned ? abrirPorHover : undefined} onMouseLeave={!pinned ? cerrarPorHover : undefined}>
-      {/* franja de borde: dispara el flyout aunque el sidebar esté oculto. Ancho generoso
-          (24px, no 12px) para que no haya que clavar el mouse en el filo exacto de la
-          pantalla. z-[60] a proposito, por encima de cualquier header sticky de pagina
-          para que nunca le robe los eventos de mouse. */}
-      {!pinned && <div className="fixed left-0 top-0 z-[60] h-full w-6" />}
-
-      {/* Fijado (pinned/"sticky"): en el flujo del flex, empuja el contenido. No fijado:
-          flyout fixed/overlay -- se abre encima del contenido sin moverlo, y solo se ve si
-          abierto (hover). Vuelto a este comportamiento a pedido explícito de Sebastián
-          (2026-07-08): el push permanente solo debe pasar cuando el sidebar está fijado. */}
-      <div
-        className={cx(
-          // h-screen explícito en los dos estados (no depender del stretch del flex padre):
-          // así el bloque de conectores (mt-auto) queda a la misma altura de referencia
-          // tanto fijado como en flyout, y no "salta" al cambiar de estado.
-          'flex h-screen w-[250px] flex-none flex-col border-r border-line-shell bg-shell-2 px-3 py-4 transition-transform duration-200 ease-out',
-          pinned
-            ? 'relative'
-            : 'fixed left-0 top-0 z-50 shadow-[0_0_32px_rgba(0,0,0,0.35)]',
-          !pinned && !abierto && '-translate-x-full',
-        )}
-      >
-        {/* Workspace switcher */}
-        <div className="mb-[18px] flex items-center gap-2.5">
-          <Link href="/perfil" className="flex flex-1 items-center gap-2.5 rounded-[11px] px-2.5 py-2 hover:bg-card-hover">
-            <span className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-accent to-accent-deep text-[14px] font-extrabold text-white shadow-[0_2px_10px_rgba(139,124,255,0.4)]">
-              O
-            </span>
-            <div className="flex-1 leading-[1.15]">
-              <div className="text-[13.5px] font-semibold text-ink">OnePay</div>
-              <div className="text-[11px] text-faint">{ownerNombre}</div>
-            </div>
-          </Link>
-          <button
-            type="button"
-            onClick={alternarPin}
-            title={pinned ? 'Ocultar sidebar' : 'Fijar sidebar'}
-            className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] text-faint hover:bg-card-hover hover:text-ink"
-          >
-            <IconSidebarToggle className="h-[15px] w-[15px]" />
-          </button>
-        </div>
-
-        <div className="mb-2 px-2.5 text-[10.5px] uppercase tracking-[0.16em] text-faint">Módulos</div>
-
-        <SidebarNav items={items} />
-
-        {/* Conectores mini-panel */}
-        <div className="mt-auto border-t border-line-shell px-2.5 pb-1 pt-3.5">
-          <div className="mb-[11px] text-[10.5px] uppercase tracking-[0.16em] text-faint">Conectores</div>
+        {/* Conectores como puntos de estado (sin texto) al pie del riel. */}
+        <div className="mt-auto flex flex-col items-center gap-2.5 border-t border-line-shell pt-3.5">
           {conectores.map((c) => (
-            <div key={c.nombre} className="mb-[9px] flex items-center gap-2.5">
-              <span className={`h-[7px] w-[7px] rounded-full ${DOT_TONE[c.tone]}`} />
-              <span className="flex-1 text-[12.5px] text-ink-soft">{c.nombre}</span>
-              <span className="text-[11px] text-faint">{c.detalle}</span>
-            </div>
+            <span
+              key={c.nombre}
+              title={`${c.nombre}: ${c.detalle}`}
+              className={`h-[7px] w-[7px] rounded-full ${DOT_TONE[c.tone]}`}
+            />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // Expandido: en el flujo del flex, empuja el contenido. h-screen explícito para que el
+  // bloque de conectores (mt-auto) tenga la misma altura de referencia que el riel y no salte
+  // al alternar. Push permanente a pedido de Sebastián (2026-07-08): nada de overlay.
+  return (
+    <div className="relative flex h-screen w-[250px] flex-none flex-col border-r border-line-shell bg-shell-2 px-3 py-4">
+      {/* Workspace switcher */}
+      <div className="mb-[18px] flex items-center gap-2.5">
+        <Link href="/perfil" className="flex flex-1 items-center gap-2.5 rounded-[11px] px-2.5 py-2 hover:bg-card-hover">
+          <span className="flex h-[30px] w-[30px] items-center justify-center rounded-[9px] bg-gradient-to-br from-accent to-accent-deep text-[14px] font-extrabold text-white shadow-[0_2px_10px_rgba(139,124,255,0.4)]">
+            O
+          </span>
+          <div className="flex-1 leading-[1.15]">
+            <div className="text-[13.5px] font-semibold text-ink">OnePay</div>
+            <div className="text-[11px] text-faint">{ownerNombre}</div>
+          </div>
+        </Link>
+        <button
+          type="button"
+          onClick={alternarPin}
+          title="Ocultar sidebar"
+          className="flex h-7 w-7 flex-none items-center justify-center rounded-[8px] text-faint hover:bg-card-hover hover:text-ink"
+        >
+          <IconSidebarToggle className="h-[15px] w-[15px]" />
+        </button>
+      </div>
+
+      <div className="mb-2 px-2.5 text-[10.5px] uppercase tracking-[0.16em] text-faint">Módulos</div>
+
+      <SidebarNav items={items} />
+
+      {/* Conectores mini-panel */}
+      <div className="mt-auto border-t border-line-shell px-2.5 pb-1 pt-3.5">
+        <div className="mb-[11px] text-[10.5px] uppercase tracking-[0.16em] text-faint">Conectores</div>
+        {conectores.map((c) => (
+          <div key={c.nombre} className="mb-[9px] flex items-center gap-2.5">
+            <span className={`h-[7px] w-[7px] rounded-full ${DOT_TONE[c.tone]}`} />
+            <span className="flex-1 text-[12.5px] text-ink-soft">{c.nombre}</span>
+            <span className="text-[11px] text-faint">{c.detalle}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

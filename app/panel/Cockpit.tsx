@@ -52,7 +52,7 @@ export function Cockpit({
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-muted px-5 py-4">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-5 py-4">
         <span className="rounded-lg border border-border bg-background px-3 py-1.5 font-mono text-xs font-bold tracking-wider text-primary">
           Pregunta
         </span>
@@ -121,7 +121,7 @@ export function Cockpit({
 
       {tablero.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-          Tu tablero está vacío. Ve a Constructor para armarlo.
+          Tu tablero está vacío. Dale a &quot;Editar&quot; para armarlo.
         </div>
       ) : null}
     </div>

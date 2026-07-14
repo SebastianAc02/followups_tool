@@ -7,20 +7,22 @@
 // con un widgetId que despues se borro del catalogo no rompe el render, simplemente
 // desaparece del tablero.
 
-import { widgetPorId } from './widgets.ts';
+import { WIDGETS, widgetPorId } from './widgets.ts';
 
 export type TableroItem = { widgetId: string; span: number };
 
-const TABLERO_DEFAULT_IDS = ['toques_total', 'promedio_diario', 'leads_tocados', 'toques_por_canal'];
-
+// Default = el catalogo completo (Decision 1 del plan: se porta TODO el shell visual del
+// mockup, con "sin datos" donde no hay fuente real -- no un subconjunto arbitrario que
+// deja secciones enteras (Velocity/Economia/Probabilidad) sin renderizar).
 export function tableroDefault(): TableroItem[] {
-  return TABLERO_DEFAULT_IDS.filter((id) => widgetPorId(id) !== undefined).map((id) => ({
-    widgetId: id,
-    span: widgetPorId(id)!.spanDefault,
-  }));
+  return WIDGETS.map((w) => ({ widgetId: w.id, span: w.spanDefault }));
 }
 
+// Invariante: un widgetId no se repite en el tablero (un usuario no puede tener "Toques
+// totales" dos veces). Si ya esta, agregar() es un no-op -- la UI usa esto para saber que
+// deshabilitar, no hay forma de forzar el duplicado desde afuera del core.
 export function agregar(layout: TableroItem[], widgetId: string): TableroItem[] {
+  if (layout.some((i) => i.widgetId === widgetId)) return layout;
   const widget = widgetPorId(widgetId);
   const span = widget?.spanDefault ?? 1;
   return [...layout, { widgetId, span }];
@@ -39,7 +41,9 @@ export function reordenar(layout: TableroItem[], from: number, to: number): Tabl
 }
 
 // Descarta widgetIds que ya no existen en WIDGETS -- un catalogo puede perder widgets
-// entre versiones y un layout guardado viejo no debe romper el render.
+// entre versiones y un layout guardado viejo no debe romper el render. Tambien descarta
+// repetidos (se pudo haber guardado un duplicado antes de que agregar() lo bloqueara):
+// el layout persistido se auto-repara al proximo load, no hace falta migracion.
 export function parse(json: string): TableroItem[] {
   let crudo: unknown;
   try {
@@ -49,6 +53,7 @@ export function parse(json: string): TableroItem[] {
   }
   if (!Array.isArray(crudo)) return [];
 
+  const vistos = new Set<string>();
   const out: TableroItem[] = [];
   for (const item of crudo) {
     if (
@@ -58,6 +63,8 @@ export function parse(json: string): TableroItem[] {
       widgetPorId((item as Record<string, unknown>).widgetId as string) !== undefined
     ) {
       const widgetId = (item as { widgetId: string }).widgetId;
+      if (vistos.has(widgetId)) continue;
+      vistos.add(widgetId);
       const spanCrudo = (item as { span?: unknown }).span;
       const span = typeof spanCrudo === 'number' && spanCrudo > 0 ? spanCrudo : widgetPorId(widgetId)!.spanDefault;
       out.push({ widgetId, span });

@@ -6,6 +6,11 @@ test('agregar añade al final', () => {
   assert.deepEqual(agregar([], 'toques_total'), [{ widgetId: 'toques_total', span: 1 }]);
 });
 
+test('agregar es un no-op si el widget ya esta en el tablero', () => {
+  const l = agregar([], 'toques_total');
+  assert.deepEqual(agregar(l, 'toques_total'), l);
+});
+
 test('quitar elimina por indice', () => {
   const l = [{ widgetId: 'a', span: 1 }, { widgetId: 'b', span: 1 }];
   assert.deepEqual(quitar(l, 0).map((w) => w.widgetId), ['b']);
@@ -23,6 +28,11 @@ test('parse descarta widgets desconocidos', () => {
 test('parse conserva widgets validos y su span', () => {
   const layout = parse('[{"widgetId":"toques_total","span":3}]');
   assert.deepEqual(layout, [{ widgetId: 'toques_total', span: 3 }]);
+});
+
+test('parse descarta widgetIds repetidos (se queda con el primero)', () => {
+  const layout = parse('[{"widgetId":"toques_total","span":2},{"widgetId":"toques_total","span":4}]');
+  assert.deepEqual(layout, [{ widgetId: 'toques_total', span: 2 }]);
 });
 
 test('parse con JSON invalido devuelve []', () => {

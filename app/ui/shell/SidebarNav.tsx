@@ -26,8 +26,42 @@ const BADGE_TONE: Record<NonNullable<NavItem['badgeTone']>, string> = {
   overdue: 'bg-overdue/10 text-overdue',
 };
 
-export function SidebarNav({ items }: { items: NavItem[] }) {
+// `collapsed`: modo riel de íconos (sidebar colapsado). Mismos items, sin label ni badge --
+// solo el ícono centrado + un puntito de atención cuando el item está en tono 'overdue' y
+// tiene conteo. El nombre del módulo se ofrece como title nativo (tooltip del navegador).
+export function SidebarNav({ items, collapsed = false }: { items: NavItem[]; collapsed?: boolean }) {
   const pathname = usePathname();
+
+  if (collapsed) {
+    return (
+      <nav className="flex flex-col items-center gap-1">
+        {items.map((item) => {
+          const activo =
+            item.href === '/' || item.exactMatch ? pathname === item.href : pathname.startsWith(item.href);
+          const atencion = item.badgeTone === 'overdue' && item.badge && item.badge !== '0';
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              title={item.label}
+              aria-label={item.label}
+              className={cx(
+                'relative flex h-10 w-10 items-center justify-center rounded-[11px] transition-colors',
+                activo
+                  ? 'bg-accent/10 text-ink'
+                  : 'text-nav-inactive hover:bg-card-hover hover:text-ink',
+              )}
+            >
+              <span className="shrink-0 text-current">{item.icon}</span>
+              {atencion && (
+                <span className="absolute right-1.5 top-1.5 h-[7px] w-[7px] rounded-full bg-overdue shadow-[0_0_6px_rgba(244,121,107,0.7)]" />
+              )}
+            </Link>
+          );
+        })}
+      </nav>
+    );
+  }
 
   return (
     <nav className="flex flex-col gap-0.5">

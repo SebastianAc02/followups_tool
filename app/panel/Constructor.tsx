@@ -7,11 +7,13 @@
 // Tarea 12 (DnD): dnd-kit. Biblioteca = draggables sueltos (useDraggable, id prefijado
 // `lib:`); lienzo = <SortableContext> de los widgetIds del tablero. `onDragEnd` decide
 // por el prefijo del id de origen: viene de la biblioteca -> agregar al final; viene del
-// lienzo -> reordenar. Cada cambio de layout es optimista (setState primero) y persiste
-// con debounce de 500ms via el server action `guardarTablero`.
-import { useState } from 'react';
+// lienzo -> reordenar. Cada cambio de layout es optimista y persiste con debounce de
+// 500ms via el server action `guardarTablero`. El estado del layout vive en PanelClient
+// (no aca) -- Constructor y Cockpit deben ver el mismo tablero sin recargar la pagina al
+// cambiar de modo, si no un widget que quitas en Editar sigue apareciendo en Cockpit.
 import {
   DndContext,
+  closestCenter,
   useDraggable,
   useDroppable,
   type DragEndEvent,
@@ -45,19 +47,38 @@ function guardarConDebounce(layout: TableroItem[]) {
   }, 500);
 }
 
-function TarjetaBiblioteca({ widget, onAgregar }: { widget: WidgetDef; onAgregar: () => void }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `${PREFIJO_BIBLIOTECA}${widget.id}` });
+function TarjetaBiblioteca({
+  widget,
+  yaAgregado,
+  onAgregar,
+}: {
+  widget: WidgetDef;
+  yaAgregado: boolean;
+  onAgregar: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `${PREFIJO_BIBLIOTECA}${widget.id}`,
+    disabled: yaAgregado,
+  });
   return (
     <button
       ref={setNodeRef}
       type="button"
-      onClick={onAgregar}
-      {...listeners}
-      {...attributes}
-      className={`flex cursor-grab items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-left text-xs text-foreground transition-colors hover:border-primary hover:bg-card active:cursor-grabbing ${isDragging ? 'opacity-40' : ''}`}
+      disabled={yaAgregado}
+      onClick={yaAgregado ? undefined : onAgregar}
+      {...(yaAgregado ? {} : listeners)}
+      {...(yaAgregado ? {} : attributes)}
+      title={yaAgregado ? 'Ya esta en tu tablero' : undefined}
+      className={`flex items-center justify-between rounded-lg border border-border px-3 py-2 text-left text-xs transition-colors ${
+        yaAgregado
+          ? 'cursor-not-allowed bg-transparent text-muted-foreground/60'
+          : `cursor-grab bg-card text-foreground hover:border-primary hover:bg-card-hover active:cursor-grabbing ${isDragging ? 'opacity-40' : ''}`
+      }`}
     >
       <span className="truncate">{widget.titulo}</span>
-      <span aria-hidden="true" className="text-muted-foreground">+</span>
+      <span aria-hidden="true" className={yaAgregado ? 'text-muted-foreground/60' : 'text-muted-foreground'}>
+        {yaAgregado ? '✓ en tu tablero' : '+'}
+      </span>
     </button>
   );
 }
@@ -82,6 +103,17 @@ function WidgetOrdenable({
   );
 }
 
+function LienzoVacio() {
+  // Droppable propio SOLO para el estado vacio: sin widgets no hay tarjetas sortable que
+  // sirvan de blanco de drop, asi que este es el unico droppable en pantalla.
+  const { setNodeRef } = useDroppable({ id: 'lienzo' });
+  return (
+    <div ref={setNodeRef} className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
+      Arrastra o toca una métrica de la biblioteca para agregarla.
+    </div>
+  );
+}
+
 function Lienzo({
   layout,
   metricas,
@@ -91,18 +123,15 @@ function Lienzo({
   metricas: Record<string, MetricaValor>;
   onQuitar: (idx: number) => void;
 }) {
-  const { setNodeRef } = useDroppable({ id: 'lienzo' });
+  if (layout.length === 0) return <LienzoVacio />;
 
-  if (layout.length === 0) {
-    return (
-      <div ref={setNodeRef} className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-        Arrastra o toca una métrica de la biblioteca para agregarla.
-      </div>
-    );
-  }
-
+  // Sin droppable propio en el contenedor a proposito: cada tarjeta (useSortable) ya es
+  // su propio droppable. Un droppable extra del tamaño de toda la grilla compite con las
+  // tarjetas por la colision y a veces gana (el "over" resuelve al contenedor, no a la
+  // tarjeta), lo que dejaba `findIndex` en -1 y el reordenar() se saltaba en silencio --
+  // causa raiz del bug "se mueve pero no se guarda" que reporto Sebastian.
   return (
-    <div ref={setNodeRef} className="grid auto-rows-min grid-cols-2 gap-3 md:grid-cols-4">
+    <div className="grid auto-rows-min grid-cols-2 gap-3 md:grid-cols-4">
       <SortableContext items={layout.map((i) => i.widgetId)} strategy={rectSortingStrategy}>
         {layout.map((item, idx) => {
           const widget = WIDGETS.find((w) => w.id === item.widgetId);
@@ -123,20 +152,34 @@ function Lienzo({
 }
 
 export function Constructor({
-  tableroInicial,
+  layout,
+  onLayoutChange,
   metricas,
 }: {
-  tableroInicial: TableroItem[];
+  layout: TableroItem[];
+  onLayoutChange: (layout: TableroItem[]) => void;
   metricas: Record<string, MetricaValor>;
 }) {
-  const [layout, setLayout] = useState<TableroItem[]>(tableroInicial);
-
   function actualizar(next: TableroItem[]) {
-    setLayout(next); // optimista: la UI no espera al server
+    onLayoutChange(next); // optimista, y sube al estado compartido con Cockpit -- ver PanelClient
     guardarConDebounce(next);
   }
 
+  // El cursor "grabbing" de Tailwind (:active) solo aplica mientras el puntero esta
+  // sobre el elemento que empezo el drag -- en cuanto se mueve rapido y el layout
+  // reacomoda debajo, el cursor vuelve a la flecha aunque el drag siga activo. Se fuerza
+  // a nivel de documento durante todo el gesto para que se sienta como "agarrado" en
+  // cualquier parte de la pantalla, no solo sobre la tarjeta original.
+  function onDragStart() {
+    document.body.style.cursor = 'grabbing';
+  }
+
+  function onDragCancel() {
+    document.body.style.cursor = '';
+  }
+
   function onDragEnd(event: DragEndEvent) {
+    document.body.style.cursor = '';
     const { active, over } = event;
     if (!over) return;
 
@@ -155,8 +198,15 @@ export function Constructor({
     actualizar(reordenar(layout, from, to));
   }
 
+  const idsEnLayout = new Set(layout.map((i) => i.widgetId));
+
   return (
-    <DndContext onDragEnd={onDragEnd}>
+    <DndContext
+      collisionDetection={closestCenter}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={onDragCancel}
+    >
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-4">
         {/* Biblioteca */}
         <aside className="sticky top-4 flex max-h-[calc(100vh-8rem)] flex-col gap-5 overflow-y-auto lg:col-span-1">
@@ -167,7 +217,12 @@ export function Constructor({
               </div>
               <div className="flex flex-col gap-2">
                 {WIDGETS.filter((w) => w.grupo === grupo).map((w) => (
-                  <TarjetaBiblioteca key={w.id} widget={w} onAgregar={() => actualizar(agregar(layout, w.id))} />
+                  <TarjetaBiblioteca
+                    key={w.id}
+                    widget={w}
+                    yaAgregado={idsEnLayout.has(w.id)}
+                    onAgregar={() => actualizar(agregar(layout, w.id))}
+                  />
                 ))}
               </div>
             </div>
@@ -176,7 +231,7 @@ export function Constructor({
 
         {/* Lienzo */}
         <div className="min-w-0 lg:col-span-3">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-muted px-4 py-3">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3">
             <span className="font-mono text-xs font-bold uppercase tracking-widest text-foreground">
               Mi tablero · {layout.length} widgets
             </span>

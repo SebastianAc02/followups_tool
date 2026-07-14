@@ -70,14 +70,15 @@ export function Widget({
 }) {
   return (
     <div
-      className={`${SPAN_CLASE[span ?? widget.spanDefault] ?? 'col-span-1'} relative flex flex-col gap-2.5 rounded-2xl border border-border bg-muted p-5 transition-colors hover:border-primary`}
+      className={`${SPAN_CLASE[span ?? widget.spanDefault] ?? 'col-span-1'} relative flex flex-col gap-2.5 rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary`}
     >
       {onQuitar ? (
         <button
           type="button"
           onClick={onQuitar}
+          onPointerDown={(e) => e.stopPropagation()}
           aria-label={`Quitar ${widget.titulo}`}
-          className="absolute right-3 top-3 text-muted-foreground hover:text-destructive"
+          className="absolute right-3 top-3 z-10 text-muted-foreground hover:text-destructive"
         >
           ×
         </button>
