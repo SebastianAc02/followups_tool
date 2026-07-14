@@ -1,3 +1,10 @@
 followupsonepay.duckdns.org {
-	reverse_proxy followups-web:3000
+	# lb_try_duration: si followups-web esta momentaneamente inalcanzable (recreacion
+	# del contenedor en un deploy), Caddy reintenta hasta 10s en vez de tirar 502 de una.
+	# next start levanta en ~250ms, asi que 10s cubre de sobra el parpadeo del deploy y
+	# el usuario ve una peticion un pelo mas lenta en vez de "no me deja entrar".
+	reverse_proxy followups-web:3000 {
+		lb_try_duration 10s
+		lb_try_interval 250ms
+	}
 }

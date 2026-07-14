@@ -42,6 +42,10 @@ jobs:
             set -e
             cd ~/followups-tool
             git pull origin main
+            # Aplicar el Caddyfile ANTES de recrear web: recargar Caddy no toca a
+            # followups-web, y deja activo el retry (lb_try_duration) que absorbe la
+            # recreacion del contenedor en este mismo deploy (sin 502 al usuario).
+            docker compose -f docker-compose.production.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile || true
             docker compose -f docker-compose.production.yml build followups-web followups-worker
             docker compose -f docker-compose.production.yml up -d
           '
