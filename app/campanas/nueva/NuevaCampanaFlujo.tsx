@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { NuevoSegmento } from './NuevoSegmento';
 import { CadenciaPaso } from './CadenciaPaso';
+import type { DefinicionSegmento } from '../../db/validation';
 
 export type Segmento = { id: number; nombre: string; descripcionNatural: string | null };
 export type Opciones = Record<'estado' | 'categoria' | 'estado_comercial' | 'ciudad' | 'departamento' | 'owner' | 'rol', string[]>;
@@ -11,10 +12,12 @@ export function NuevaCampanaFlujo({
   segmentosIniciales,
   opciones,
   segmentoInicial,
+  prefillSegmento,
 }: {
   segmentosIniciales: Segmento[];
   opciones: Opciones;
   segmentoInicial?: Segmento | null;
+  prefillSegmento?: DefinicionSegmento;
 }) {
   const [segmentos, setSegmentos] = useState(segmentosIniciales);
   const [segmentoElegido, setSegmentoElegido] = useState<Segmento | null>(null);
@@ -31,6 +34,7 @@ export function NuevaCampanaFlujo({
         opciones={opciones}
         segmentosGuardados={segmentos}
         reanudarDesde={ultimoSegmento}
+        prefill={prefillSegmento}
         onGuardado={(s) => {
           setSegmentos((prev) => (prev.some((p) => p.id === s.id) ? prev : [s, ...prev]));
           setUltimoSegmento(s);
