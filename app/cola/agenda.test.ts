@@ -1,6 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filtrarPorCanal, conteosPorCanal, filaSinVencimiento, diasVencido, filaConVencimiento, frescuraDe, bucketDeEtapa, type FilaAgenda, type FilaCola } from './agenda.ts';
+import {
+  filtrarPorCanal,
+  conteosPorCanal,
+  filaSinVencimiento,
+  diasVencido,
+  filaConVencimiento,
+  frescuraDe,
+  bucketDeEtapa,
+  unificarCola,
+  aplicarFiltrosUnificados,
+  type FilaAgenda,
+  type FilaCola,
+  type Bucket,
+  type FilaColaConBucket,
+  type FiltrosUnificados,
+} from './agenda.ts';
 
 function fila(canal: FilaAgenda['canal'], id: string = canal): FilaAgenda {
   return {
@@ -42,7 +57,11 @@ test('conteosPorCanal: cola vacia da todo en cero', () => {
 });
 
 function filaColaBase(id: string, fecha: string | null): FilaCola {
-  return { id, empresa: `Empresa ${id}`, ciudad: null, contacto: null, cargo: null, canal: null, estado: 'on_hold', fecha };
+  return { id, empresa: `Empresa ${id}`, ciudad: null, contacto: null, cargo: null, canal: null, estado: 'on_hold', fecha, campana: null };
+}
+
+function filaConBucket(id: string, fecha: string | null, bucket: Bucket, campana: string | null = null): FilaColaConBucket {
+  return { ...filaColaBase(id, fecha), campana, bucket };
 }
 
 test('filaSinVencimiento: con fecha la muestra tal cual, sin fecha dice "sin fecha"', () => {
@@ -85,4 +104,48 @@ test('bucketDeEtapa: estados calientes son cierre, el resto es lead', () => {
   assert.equal(bucketDeEtapa('contacto_iniciado'), 'lead');
   assert.equal(bucketDeEtapa('on_hold'), 'lead');
   assert.equal(bucketDeEtapa(null), 'lead');
+});
+
+test('unificarCola: ordena vigente < sin_fecha < desactualizado, y dentro de cada grupo por fecha ascendente', () => {
+  const filas: FilaColaConBucket[] = [
+    filaConBucket('viejo', '2026-06-01', 'lead'), // desactualizado (43 dias)
+    filaConBucket('hoy', '2026-07-14', 'lead'), // vigente
+    filaConBucket('sinfecha', null, 'cierre'),
+    filaConBucket('vencido3d', '2026-07-11', 'reagendar'), // vigente
+  ];
+
+  const r = unificarCola(filas, '2026-07-14');
+  assert.deepEqual(r.map((f) => f.id), ['vencido3d', 'hoy', 'sinfecha', 'viejo']);
+  assert.equal(r[0].actual, true); // el primero de la lista ordenada es "AHORA"
+  assert.equal(r[1].actual, false);
+  assert.equal(r.find((f) => f.id === 'viejo')?.frescura, 'desactualizado');
+});
+
+test('unificarCola: cierre usa filaSinVencimiento (sin severidad de vencido), lead/reagendar usan vencido', () => {
+  const filas: FilaColaConBucket[] = [
+    filaConBucket('c1', '2026-06-01', 'cierre'), // muy vencido, pero es cierre: no dice "vencido"
+    filaConBucket('l1', '2026-06-01', 'lead'), // muy vencido y es lead: si dice "vencido"
+  ];
+  const r = unificarCola(filas, '2026-07-14');
+  const c1 = r.find((f) => f.id === 'c1')!;
+  const l1 = r.find((f) => f.id === 'l1')!;
+  assert.equal(c1.severidadTexto, '2026-06-01'); // filaSinVencimiento: la fecha tal cual
+  assert.equal(l1.severidadTexto.startsWith('vencido'), true);
+});
+
+test('aplicarFiltrosUnificados: sin filtros trae todo; cada filtro corta por su campo', () => {
+  const filas: FilaColaConBucket[] = [
+    filaConBucket('a', '2026-07-14', 'lead', 'Campana A'),
+    filaConBucket('b', '2026-07-14', 'cierre', 'Campana B'),
+  ];
+  const unificadas = unificarCola(filas, '2026-07-14').map((f, i) => ({ ...f, canal: i === 0 ? 'llamada' : 'correo' }) as const);
+
+  const sinFiltro: FiltrosUnificados = { bucket: 'todos', campana: 'todas', canal: 'todos', frescura: 'todas' };
+  assert.equal(aplicarFiltrosUnificados(unificadas, sinFiltro).length, 2);
+
+  const soloLead = aplicarFiltrosUnificados(unificadas, { ...sinFiltro, bucket: 'lead' });
+  assert.deepEqual(soloLead.map((f) => f.id), ['a']);
+
+  const soloCampanaB = aplicarFiltrosUnificados(unificadas, { ...sinFiltro, campana: 'Campana B' });
+  assert.deepEqual(soloCampanaB.map((f) => f.id), ['b']);
 });

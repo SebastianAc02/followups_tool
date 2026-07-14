@@ -62,6 +62,9 @@ export type FilaCola = {
   canal: string | null;
   estado: string | null;
   fecha: string | null;
+  // Opcional: colaDelDia (todos los owners) no lo trae; colaLeads/colaCierres/
+  // colaReagendar (solo el split de Sebastian) si.
+  campana?: string | null;
 };
 
 // Cierres y Reagendar no tienen nocion de "vencido": una cuenta en negociacion o atascada
@@ -125,4 +128,50 @@ export function frescuraDe(fecha: string | null, hoy: string): Frescura {
 // de colaReagendar, se deriva del ULTIMO TOQUE, no del estado_notion solo).
 export function bucketDeEtapa(estado: string | null): "lead" | "cierre" {
   return estado != null && (ESTADOS_CALIENTES as readonly string[]).includes(estado) ? "cierre" : "lead";
+}
+
+export type FilaColaConBucket = FilaCola & { bucket: Bucket };
+
+export type FilaUnificada = FilaAgenda & {
+  bucket: Bucket;
+  campana: string | null;
+  frescura: Frescura;
+};
+
+function filaUnificada(c: FilaColaConBucket, hoy: string, actual: boolean): FilaUnificada {
+  const base = c.bucket === "cierre" ? filaSinVencimiento(c) : filaConVencimiento(c, hoy, actual);
+  return { ...base, bucket: c.bucket, campana: c.campana ?? null, frescura: frescuraDe(c.fecha, hoy) };
+}
+
+// Mezcla las filas de las 4 fuentes (Leads/Cierres/Reagendar/pasos de cadencia, ya
+// taggeadas con su bucket por el caller) en una sola lista ordenada: primero lo vigente,
+// luego lo sin fecha, al final lo desactualizado -- dentro de cada grupo, la fecha mas
+// vieja primero (mas urgente arriba). El primero de la lista resultante es "actual" (el
+// que pinta la barra "AHORA").
+export function unificarCola(filas: FilaColaConBucket[], hoy: string): FilaUnificada[] {
+  const pesoFrescura: Record<Frescura, number> = { vigente: 0, sin_fecha: 1, desactualizado: 2 };
+  const ordenadas = [...filas].sort((a, b) => {
+    const pa = pesoFrescura[frescuraDe(a.fecha, hoy)];
+    const pb = pesoFrescura[frescuraDe(b.fecha, hoy)];
+    if (pa !== pb) return pa - pb;
+    return (a.fecha ?? "9999-99-99").localeCompare(b.fecha ?? "9999-99-99");
+  });
+  return ordenadas.map((c, i) => filaUnificada(c, hoy, i === 0));
+}
+
+export type FiltrosUnificados = {
+  bucket: Bucket | "todos";
+  campana: string | "todas";
+  canal: FiltroCanal;
+  frescura: Frescura | "todas";
+};
+
+export function aplicarFiltrosUnificados(filas: FilaUnificada[], f: FiltrosUnificados): FilaUnificada[] {
+  return filas.filter(
+    (r) =>
+      (f.bucket === "todos" || r.bucket === f.bucket) &&
+      (f.campana === "todas" || r.campana === f.campana) &&
+      (f.canal === "todos" || r.canal === f.canal) &&
+      (f.frescura === "todas" || r.frescura === f.frescura),
+  );
 }
