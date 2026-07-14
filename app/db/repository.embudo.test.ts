@@ -7,9 +7,8 @@ import { crearDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { actualizarEstadoNotion, embudoPipeline, historialEtapasEmpresa, listarOwnersEmpresa } = await import(
-  './repository.ts'
-);
+const { actualizarEstadoNotion, embudoPipeline, historialEtapasEmpresa, listarOwnersEmpresa, empresasDeEtapa } =
+  await import('./repository.ts');
 
 function seedEmpresa(id: string, estado: string | null) {
   const raw = new Database(dbPath);
@@ -138,4 +137,40 @@ test('historialEtapasEmpresa: devuelve etapa actual + transiciones ordenadas', (
   assert.equal(r.transiciones[0].estado, 'oportunidad'); // mas antigua primero
   assert.equal(r.transiciones[0].fecha, '2026-07-10');
   assert.equal(r.transiciones[1].estado, 'cierre_documentacion');
+});
+
+test('empresasDeEtapa: lista empresas de una etapa, scoped a organizacion y owner', () => {
+  const raw = new Database(dbPath);
+  const ins = raw.prepare(
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, owner)
+     VALUES (?, 'nit', ?, ?, 'activo', ?, ?, ?)`,
+  );
+  ins.run('de1', 'Zeta SAS', 'zeta', 'lead_detalle', 1, 'ana');
+  ins.run('de2', 'Alfa SAS', 'alfa', 'lead_detalle', 1, 'zoe');
+  ins.run('de3', 'Beta SAS', 'beta', 'contacto_iniciado', 1, 'ana'); // otra etapa: no debe salir
+  ins.run('de4', 'Gama SAS', 'gama', 'lead_detalle', 2, 'ana'); // otra organizacion: no debe salir
+  raw.close();
+
+  const empresas = empresasDeEtapa('lead_detalle', 1);
+  const nombres = empresas.map((e) => e.nombre);
+  assert.deepEqual(nombres, ['Alfa SAS', 'Zeta SAS']); // orden alfabetico
+  assert.ok(!nombres.includes('Beta SAS'));
+  assert.ok(!nombres.includes('Gama SAS'));
+
+  const soloAna = empresasDeEtapa('lead_detalle', 1, { owner: 'ana' });
+  assert.deepEqual(soloAna.map((e) => e.idEmpresa), ['de1']);
+});
+
+test('empresasDeEtapa: CLAVE_SIN_ETAPA lista las empresas con estado_notion null', () => {
+  const raw = new Database(dbPath);
+  raw
+    .prepare(
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id)
+       VALUES ('de5', 'de5', 'Sin Etapa SAS', 'sinetapa', 'activo', NULL, 1)`,
+    )
+    .run();
+  raw.close();
+
+  const empresas = empresasDeEtapa('__sin_etapa__', 1);
+  assert.ok(empresas.some((e) => e.idEmpresa === 'de5'));
 });

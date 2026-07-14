@@ -3908,12 +3908,21 @@ export function toquesPorResultado(desde: string, hasta: string, owner?: string)
   return out;
 }
 
+// Personas reales del equipo (owner de empresa trae basura historica del seed de
+// Notion: "Manuel H." y combinaciones tipo "Felipe Castro, Thomas Schumacher" de cuando
+// una cuenta paso de mano en mano sin limpiar el campo). El filtro del panel solo debe
+// ofrecer gente real -- Sebastian confirmo la lista 2026-07-13.
+const OWNERS_REALES = ['Camilo fonseca', 'Felipe Castro', 'Sebastian Acosta Molina', 'Thomas Schumacher'];
+
 // Owners reales para el chip de filtro del panel (Tarea 14): distintos owner ya
 // asignados en empresa, no la lista completa de organizacion_miembro (esa incluye
 // miembros sin ninguna empresa asignada todavia).
 export function ownersConToques(): string[] {
   const filas = db.select({ owner: empresa.owner }).from(empresa).where(isNotNull(empresa.owner)).groupBy(empresa.owner).all();
-  return filas.map((f) => f.owner!).filter(Boolean).sort();
+  return filas
+    .map((f) => f.owner!)
+    .filter((owner) => OWNERS_REALES.includes(owner))
+    .sort();
 }
 
 // Sesion 2026-07-10: cancelarCampanaAction finaliza la campana pero no cascadea a las
@@ -4174,6 +4183,48 @@ export function listarOwnersEmpresa(idOrganizacion: number): string[] {
     .orderBy(asc(empresa.owner))
     .all();
   return filas.map((f) => f.owner!).filter((o) => o.length > 0);
+}
+
+export type EmpresaEnEtapa = {
+  idEmpresa: string;
+  nombre: string;
+  ciudad: string | null;
+  owner: string | null;
+};
+
+// Empresas de una etapa del embudo (para el panel lateral que se abre al clickear una
+// banda/tarjeta de resultado). Mismos filtros que embudoPipeline, scoped a organizacion.
+// CLAVE_SIN_ETAPA pide las empresas con estado_notion NULL (fuera de las bandas, no del
+// embudo en si).
+export function empresasDeEtapa(
+  estado: string,
+  idOrganizacion: number,
+  filtros?: { owner?: string; idCampana?: string },
+): EmpresaEnEtapa[] {
+  const condiciones = [
+    eq(empresa.organizacionActivaId, idOrganizacion),
+    estado === CLAVE_SIN_ETAPA ? isNull(empresa.estadoNotion) : eq(empresa.estadoNotion, estado),
+  ];
+  if (filtros?.owner) {
+    condiciones.push(eq(empresa.owner, filtros.owner));
+  }
+  if (filtros?.idCampana) {
+    condiciones.push(
+      sql`${empresa.idEmpresa} IN (SELECT ${inscripcion.idEmpresa} FROM ${inscripcion} WHERE ${inscripcion.idCampana} = ${Number(filtros.idCampana)})`,
+    );
+  }
+
+  return db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      ciudad: empresa.ciudadPrincipal,
+      owner: empresa.owner,
+    })
+    .from(empresa)
+    .where(and(...condiciones))
+    .orderBy(asc(empresa.nombreOficial))
+    .all();
 }
 
 export type HistorialEtapas = {
