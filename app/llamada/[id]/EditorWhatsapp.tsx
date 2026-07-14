@@ -90,7 +90,7 @@ export function EditorWhatsapp({
         setEnviando(false);
       }
     } else {
-      await registrarToqueSueltoAction(idEmpresa, "whatsapp", cuerpo);
+      await registrarToqueSueltoAction(idEmpresa, "whatsapp", cuerpo, undefined);
     }
   }
 

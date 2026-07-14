@@ -97,7 +97,7 @@ export function EditorCorreo({
       }
       // exito: enviarToqueCanalAction redirige, este componente se desmonta.
     } else {
-      await registrarToqueSueltoAction(idEmpresa, "correo", cuerpo);
+      await registrarToqueSueltoAction(idEmpresa, "correo", cuerpo, undefined);
     }
   }
 
