@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { definicionSegmentoSchema, campanaInputSchema } from './validation.ts';
+import {
+  definicionSegmentoSchema,
+  campanaInputSchema,
+  RESULTADOS,
+  RESULTADO_LABELS,
+  RESULTADOS_CONTESTO,
+  registrarToqueSchema,
+} from './validation.ts';
 
 test('acepta operador mayor_que sobre campo numerico', () => {
   const r = definicionSegmentoSchema.safeParse({
@@ -59,4 +66,15 @@ test('rechaza orden sobre campo no numerico', () => {
     orden: { campo: 'ciudad', dir: 'desc' },
   });
   assert.equal(r.success, false);
+});
+
+test('no_llego es un resultado valido, con label, y no dispara busqueda de transcript', () => {
+  assert.ok(RESULTADOS.includes('no_llego'));
+  assert.equal(RESULTADO_LABELS.no_llego, 'No llegó a la reunión');
+  assert.ok(!RESULTADOS_CONTESTO.includes('no_llego'));
+});
+
+test('registrarToqueSchema acepta no_llego sin exigir razonPerdida', () => {
+  const r = registrarToqueSchema.safeParse({ idEmpresa: 'e1', canal: 'llamada', resultado: 'no_llego' });
+  assert.equal(r.success, true);
 });

@@ -35,6 +35,11 @@ export const RESULTADOS = [
   'contesto_sigue_seguimiento',
   'contesto_no',
   'no_contesto',
+  // No-show de una reunion ya agendada (2026-07-14): distinto a las 4 salidas de arriba,
+  // que son intentos de CONTACTO. Esta es el desenlace de algo que ya estaba en el
+  // calendario. A proposito NO entra a RESULTADOS_CONTESTO -- no hubo conversacion, nada
+  // que buscar en Granola ni que calificar.
+  'no_llego',
 ] as const;
 export type Resultado = (typeof RESULTADOS)[number];
 
@@ -46,6 +51,7 @@ export const RESULTADO_LABELS: Record<Resultado, string> = {
   contesto_sigue_seguimiento: 'Sigue en follow-up',
   contesto_no: 'No sigue',
   no_contesto: 'No contestó',
+  no_llego: 'No llegó a la reunión',
 };
 
 // V3.4: variantes de "hubo conversacion real", disparan la busqueda en Granola.
