@@ -78,11 +78,11 @@ test('personas con entre 0..0 encuentra la empresa sin contactos', () => {
   assert.deepEqual(sinContacto.map((e) => e.id), ['antioquia1']);
 });
 
+// El rechazo de rol+es_null ahora pasa por Zod (definicionSegmentoSchema, ver
+// CAMPOS_SEGMENTO_NULEABLES en validation.ts) antes de tocar la DB, no por el throw
+// runtime de condicionRol: falla mas temprano, sin correr la query.
 test('rol con operador es_null se rechaza explicito (rol solo soporta en/no_en)', () => {
-  assert.throws(
-    () => empresasDeSegmento({ condiciones: [{ campo: 'rol', op: 'es_null' }] } as any, 1),
-    /rol.*en\/no_en/,
-  );
+  assert.throws(() => empresasDeSegmento({ condiciones: [{ campo: 'rol', op: 'es_null' }] } as any, 1));
 });
 
 test.after(() => {

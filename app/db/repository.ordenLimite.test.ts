@@ -14,12 +14,12 @@ const { empresasDeSegmento } = await import('./repository.ts');
 function seed() {
   const raw = new Database(dbPath);
   const insEmpresa = raw.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, es_cliente)
-     VALUES (?, 'nit', ?, ?, 'activo', 0)`,
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, es_cliente, owner)
+     VALUES (?, 'nit', ?, ?, 'activo', 0, ?)`,
   );
-  insEmpresa.run('grande', 'Grande', 'grande');
-  insEmpresa.run('media', 'Media', 'media');
-  insEmpresa.run('nula', 'Nula', 'nula'); // sin fila en empresa_usuarios
+  insEmpresa.run('grande', 'Grande', 'grande', null); // sin owner
+  insEmpresa.run('media', 'Media', 'media', 'Sebastian');
+  insEmpresa.run('nula', 'Nula', 'nula', null); // sin fila en empresa_usuarios, sin owner
 
   const insUsuarios = raw.prepare('INSERT INTO empresa_usuarios (id_empresa, usuarios_estimados) VALUES (?, ?)');
   insUsuarios.run('grande', 300000);
@@ -45,6 +45,20 @@ test('empresasDeSegmento sin orden ni limite sigue trayendo todas (comportamient
   const def = { condiciones: [{ campo: 'es_cliente' as const, op: 'entre' as const, desde: 0, hasta: 1 }] };
   const r = empresasDeSegmento(def, 1);
   assert.equal(r.length, 3);
+});
+
+test('empresasDeSegmento combina owner es_null con orden/limite (caso "las N mas grandes sin owner")', () => {
+  const def = {
+    condiciones: [{ campo: 'owner' as const, op: 'es_null' as const }],
+    orden: { campo: 'usuarios' as const, dir: 'desc' as const },
+    limite: 50,
+  };
+  const r = empresasDeSegmento(def, 1);
+  // 'media' tiene owner asignado: debe quedar fuera aunque su orden la pondria en medio.
+  assert.deepEqual(
+    r.map((e) => e.id),
+    ['grande', 'nula'],
+  );
 });
 
 test.after(() => {
