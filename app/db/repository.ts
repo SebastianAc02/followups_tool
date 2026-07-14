@@ -163,6 +163,14 @@ const columnasCola = {
   usuarios: empresaUsuarios.usuariosEfectivos,
 };
 
+// Shape de columnasCola + el nombre de la campana activa (si la hay). Solo lo usan
+// colaLeads/colaCierres/colaReagendar (parte del split, 2026-07-14) -- colaDelDia sigue
+// con columnasCola tal cual, sin este JOIN extra.
+const columnasColaConCampana = {
+  ...columnasCola,
+  campana: campana.nombre,
+};
+
 // Deriva si el ULTIMO toque de una empresa fue "no_llego" (no-show de reunion), sin
 // columna nueva -- mismo principio que el resto del split (fase derivada, nunca un flag
 // que se pueda desincronizar). El COALESCE importa: una empresa sin ningun toque da NULL
@@ -199,10 +207,12 @@ export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacio
 // tampoco. owner es obligatorio: esta variante solo la usa la UI para un owner puntual.
 export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
   return db
-    .select(columnasCola)
+    .select(columnasColaConCampana)
     .from(empresa)
     .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(inscripcion, and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa')))
+    .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
@@ -222,10 +232,12 @@ export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
 // eso el CASE explicito).
 export function colaCierres(owner: string, idOrganizacion: number) {
   return db
-    .select(columnasCola)
+    .select(columnasColaConCampana)
     .from(empresa)
     .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(inscripcion, and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa')))
+    .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
@@ -245,10 +257,12 @@ export function colaCierres(owner: string, idOrganizacion: number) {
 // split.
 export function colaReagendar(hoy: string, owner: string, idOrganizacion: number) {
   return db
-    .select(columnasCola)
+    .select(columnasColaConCampana)
     .from(empresa)
     .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(inscripcion, and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa')))
+    .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),

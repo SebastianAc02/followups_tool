@@ -34,6 +34,14 @@ function seedToque(idEmpresa: string, resultado: string) {
   raw.close();
 }
 
+function seedInscripcionActiva(idEmpresa: string, nombreCampana: string) {
+  const raw = new Database(dbPath);
+  raw.prepare(`INSERT INTO campana (nombre, id_cadencia, id_segmento) VALUES (?, 1, 1)`).run(nombreCampana);
+  const idCampana = (raw.prepare(`SELECT last_insert_rowid() id`).get() as { id: number }).id;
+  raw.prepare(`INSERT INTO inscripcion (id_campana, id_empresa, estado) VALUES (?, ?, 'activa')`).run(idCampana, idEmpresa);
+  raw.close();
+}
+
 test('colaLeads: solo estado lead, vencido o de hoy, del owner y organizacion pedidos', () => {
   seedEmpresa('l1', OWNER, 'lead', '2026-07-14'); // hoy: entra
   seedEmpresa('l2', OWNER, 'lead', '2026-07-10'); // vencido: entra
@@ -96,4 +104,16 @@ test('colaReagendar: reunion_agendada cuyo ultimo toque fue no_llego, vencido o 
   const r = colaReagendar('2026-07-14', OWNER, 1);
   const ids = r.map((f) => f.id).sort();
   assert.deepEqual(ids, ['r1', 'r2']);
+});
+
+test('colaLeads/colaCierres/colaReagendar: campana viene poblada solo si hay inscripcion activa', () => {
+  seedEmpresa('m1', OWNER, 'lead', '2026-07-10', 3);
+  seedInscripcionActiva('m1', 'Reactivacion express');
+  seedEmpresa('m2', OWNER, 'lead', '2026-07-10', 3); // sin inscripcion: campana null
+
+  const r = colaLeads('2026-07-14', OWNER, 3);
+  const m1 = r.find((f) => f.id === 'm1');
+  const m2 = r.find((f) => f.id === 'm2');
+  assert.equal(m1?.campana, 'Reactivacion express');
+  assert.equal(m2?.campana, null);
 });
