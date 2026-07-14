@@ -3670,7 +3670,7 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
 // comparar el string crudo: fechaProgramada es ISO datetime completo, comparar texto
 // contra una fecha corta 'YYYY-MM-DD' fallaria para las de HOY con hora (mismo bug
 // que ya se evito en el puente de V4.8).
-export function agendaHoyCadencias(hoy: string) {
+export function agendaHoyCadencias(hoy: string, owner?: string) {
   const filas = db
     .select({
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
@@ -3693,6 +3693,11 @@ export function agendaHoyCadencias(hoy: string) {
       modo: campana.modo,
       idEmpresa: empresa.idEmpresa,
       empresaNombre: empresa.nombreOficial,
+      // Campos nuevos (2026-07-14) para poder fusionar estas filas a la lista unificada
+      // de /cola sin una segunda consulta.
+      estadoNotion: empresa.estadoNotion,
+      ciudad: empresa.ciudadPrincipal,
+      nombreCampana: campana.nombre,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
@@ -3712,6 +3717,7 @@ export function agendaHoyCadencias(hoy: string) {
         // finalizada sepultaban las reales. Mismo criterio que pasosManualesPendientes.
         eq(campana.estado, 'activa'),
         eq(inscripcion.estado, 'activa'),
+        owner ? eq(empresa.owner, owner) : undefined,
       ),
     )
     .orderBy(pasoInscripcion.fechaProgramada)
