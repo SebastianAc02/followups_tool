@@ -35,3 +35,19 @@ export type Embudo = {
 };
 
 export const CLAVE_SIN_ETAPA = '__sin_etapa__';
+
+export function construirEmbudo(conteos: ConteoEtapa[]): Embudo {
+  const porEstado = new Map(conteos.map((c) => [c.estado, c]));
+  const get = (estado: string) => porEstado.get(estado) ?? { estado, total: 0, usuarios: null };
+
+  // ── HUECO DE SEBASTIAN (5-10 lineas) ─────────────────────────────
+  // Construir `bandas` recorriendo BANDAS_EMBUDO en orden, y para cada una:
+  //   - total y usuarios desde get(etapa.estado)
+  //   - conversionDesdeAnterior: null en la primera; si no, redondear
+  //     (total_actual / total_anterior) * 100. Decidir el denominador.
+  // Luego armar ganado = get(ETAPA_GANADA), onHold = get(ETAPA_ONHOLD),
+  // sinEtapa = get(CLAVE_SIN_ETAPA).total.
+  // TODO(sebastian): escribir aqui. Borrar el throw.
+  throw new Error('construirEmbudo: pendiente de implementar');
+  // ─────────────────────────────────────────────────────────────────
+}
