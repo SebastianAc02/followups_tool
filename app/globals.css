@@ -28,6 +28,7 @@
   --color-today: var(--amber);
   --color-today-bg: rgba(242, 183, 56, 0.13);
   --color-done: var(--green);
+  --color-done-bg: rgba(87, 201, 138, 0.13);
   --color-ring: rgba(255, 255, 255, 0.12);
 
   /* Cockpit de campañas (dirección 2A): acento violeta para acción/selección/foco. */
@@ -128,6 +129,20 @@
   --font-body: var(--ff-body), system-ui, sans-serif;
   --font-toque-heading: var(--ff-serif), Georgia, serif;
   --font-toque-mono: var(--ff-mono-tag), ui-monospace, monospace;
+
+  /* Panel cockpit + constructor (Tarea 1 del plan): el mockup viene con nombres
+     shadcn (bg-primary, text-muted-foreground, etc.) que el repo no tenia. Se
+     mapean a los primitivos/semanticos que ya existen en vez de traer hexes
+     nuevos -- primary = el mismo violeta de accent, no un color aparte. */
+  --color-border: var(--color-line);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: #ffffff;
+  --color-muted-foreground: var(--color-muted);
+  --color-destructive: var(--red);
+  --color-accent-foreground: var(--color-accent-ink);
+  --color-ring: var(--color-accent);
+  --color-background: var(--color-card);
+  --color-foreground: var(--color-accent-ink);
 }
 
 @utility mono {
@@ -170,6 +185,7 @@
   --today: #f2b738;
   --today-bg: rgba(242, 183, 56, 0.13);
   --done: #57c98a;
+  --done-bg: rgba(87, 201, 138, 0.13);
   --ring: rgba(255, 255, 255, 0.12);
   color-scheme: dark;
 }
