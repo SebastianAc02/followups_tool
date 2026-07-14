@@ -323,6 +323,15 @@ export function crearDbPrueba() {
       techo_diario INTEGER NOT NULL DEFAULT 25,
       fecha_creacion TEXT
     );
+
+    CREATE TABLE empresa_estado_historial (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_empresa TEXT NOT NULL,
+      estado_anterior TEXT,
+      estado_nuevo TEXT NOT NULL,
+      fecha TEXT NOT NULL,
+      id_organizacion INTEGER NOT NULL DEFAULT 1
+    );
   `);
 
   sqlite.close();

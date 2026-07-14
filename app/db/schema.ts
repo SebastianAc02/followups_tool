@@ -398,3 +398,15 @@ export const mensajeWhatsapp = sqliteTable('mensaje_whatsapp', {
   fecha: text('fecha'),
   createdAt: text('created_at'),
 });
+
+// Histórico de transiciones de etapa comercial (estado_notion). Una fila por cambio.
+// No existia: se crea para poder derivar "dias en etapa" y el timeline del drawer.
+// Se llena hacia adelante (actualizarEstadoNotion); el pasado pre-deploy es desconocido.
+export const empresaEstadoHistorial = sqliteTable('empresa_estado_historial', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  idEmpresa: text('id_empresa').notNull(),
+  estadoAnterior: text('estado_anterior'), // null si es el primer registro
+  estadoNuevo: text('estado_nuevo').notNull(),
+  fecha: text('fecha').notNull(), // ISO, cuando ocurrio la transicion
+  idOrganizacion: integer('id_organizacion').notNull().default(1),
+});
