@@ -3,11 +3,21 @@
 import type { ResultadoEmbudo } from '../../core/embudo';
 import { cn } from '../cn';
 
-export function OutcomeCard({ resultado, tono }: { resultado: ResultadoEmbudo; tono: 'ganado' | 'onhold' }) {
+export function OutcomeCard({
+  resultado,
+  tono,
+  onClick,
+}: {
+  resultado: ResultadoEmbudo;
+  tono: 'ganado' | 'onhold';
+  onClick?: () => void;
+}) {
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
       className={cn(
-        'flex-1 rounded-xl p-4 border',
+        'flex-1 rounded-xl p-4 border text-left',
         tono === 'ganado' ? 'border-check bg-done-bg' : 'border-overdue bg-overdue-bg',
       )}
     >
@@ -21,6 +31,6 @@ export function OutcomeCard({ resultado, tono }: { resultado: ResultadoEmbudo; t
           <span className="mono text-[14px] text-muted">{resultado.usuarios.toLocaleString('es-CO')} usuarios</span>
         )}
       </div>
-    </div>
+    </button>
   );
 }

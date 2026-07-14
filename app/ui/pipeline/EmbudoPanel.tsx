@@ -22,7 +22,7 @@ export async function EmbudoPanel({ searchParams }: { searchParams?: { owner?: s
   return (
     <div>
       <EmbudoFiltros owners={owners} campanas={campanas} />
-      <FunnelCanvas embudo={embudo} />
+      <FunnelCanvas embudo={embudo} owner={owner} campana={idCampana} />
     </div>
   );
 }
