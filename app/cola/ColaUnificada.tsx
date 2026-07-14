@@ -77,6 +77,14 @@ export function ColaUnificada({
                           PBX
                         </span>
                       )}
+                      {fila.origen === 'cadencia' && (
+                        <span
+                          className="shrink-0 rounded-[6px] border border-accent-soft bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-acento"
+                          title="Paso de cadencia (Apollo/manual), no un lead nuevo"
+                        >
+                          Cadencia
+                        </span>
+                      )}
                       {(pill || fila.ciudad || fila.campana) && (
                         <span className="shrink-0 truncate text-xs text-faint">
                           · {[pill?.label, fila.ciudad, fila.campana].filter(Boolean).join(' · ')}

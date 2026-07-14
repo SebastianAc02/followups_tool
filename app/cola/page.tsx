@@ -84,6 +84,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
             fecha: t.fechaProgramada ? t.fechaProgramada.slice(0, 10) : null,
             campana: t.nombreCampana,
             bucket: bucketDeEtapa(t.estadoNotion),
+            origen: 'cadencia',
           }),
         ),
       ]

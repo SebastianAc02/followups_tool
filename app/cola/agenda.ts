@@ -138,17 +138,24 @@ export function bucketDeEtapa(estado: string | null): "lead" | "cierre" {
   return estado != null && (ESTADOS_CALIENTES as readonly string[]).includes(estado) ? "cierre" : "lead";
 }
 
-export type FilaColaConBucket = FilaCola & { bucket: Bucket };
+// origen distingue un lead/cierre/reagendar "real" (viene directo de colaLeads/
+// colaCierres/colaReagendar) de un paso de cadencia que bucketDeEtapa clasifico como
+// lead o cierre por su estado_notion -- mismo bucket, pero un paso de cadencia no es un
+// lead nuevo. Sin esto la lista "Tus toques" no distinguia por que a veces hay mas filas
+// que el contador de Pendientes (que solo cuenta colaLeads). Opcional porque cola/
+// cierres/reagendar no lo setean (su ausencia = "directo").
+export type FilaColaConBucket = FilaCola & { bucket: Bucket; origen?: "cadencia" };
 
 export type FilaUnificada = FilaAgenda & {
   bucket: Bucket;
   campana: string | null;
   frescura: Frescura;
+  origen?: "cadencia";
 };
 
 function filaUnificada(c: FilaColaConBucket, hoy: string, actual: boolean): FilaUnificada {
   const base = c.bucket === "cierre" ? filaSinVencimiento(c) : filaConVencimiento(c, hoy, actual);
-  return { ...base, bucket: c.bucket, campana: c.campana ?? null, frescura: frescuraDe(c.fecha, hoy) };
+  return { ...base, bucket: c.bucket, campana: c.campana ?? null, frescura: frescuraDe(c.fecha, hoy), origen: c.origen };
 }
 
 // Mezcla las filas de las 4 fuentes (Leads/Cierres/Reagendar/pasos de cadencia, ya
