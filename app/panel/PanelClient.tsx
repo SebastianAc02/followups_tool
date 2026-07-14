@@ -15,9 +15,11 @@ type Props = {
   email: string;
   desde: string;
   hasta: string;
+  owner?: string;
+  owners: string[];
 };
 
-export function PanelClient({ tablero, metricas, email, desde, hasta }: Props) {
+export function PanelClient({ tablero, metricas, email, desde, hasta, owner, owners }: Props) {
   const [modo, setModo] = useState<'cockpit' | 'constructor'>('cockpit');
 
   return (
@@ -52,7 +54,7 @@ export function PanelClient({ tablero, metricas, email, desde, hasta }: Props) {
       </div>
 
       {modo === 'cockpit' ? (
-        <Cockpit tablero={tablero} metricas={metricas} />
+        <Cockpit tablero={tablero} metricas={metricas} owner={owner} owners={owners} desde={desde} hasta={hasta} />
       ) : (
         <Constructor tableroInicial={tablero} metricas={metricas} />
       )}

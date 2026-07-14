@@ -3263,6 +3263,61 @@ export function lineaWhatsappActiva(): { referenciaProveedor: string } | null {
   return { referenciaProveedor: fila.referenciaProveedor };
 }
 
+// Tarea 8 (D6, plan-whatsapp-adapter.md): CRUD real de lineas, faltaba entero -- hasta
+// ahora solo existia la lectura angosta de arriba para el goteo. `idUsuario: null` =
+// linea de POOL (compartida, la administra el admin); no-null = linea PERSONAL de ESE
+// usuario. Mismo criterio que filtroConector, pero a nivel de fila de linea en vez de
+// conector completo (no hay UNIQUE que lo fuerce aca: un usuario podria en teoria tener
+// mas de una, la UI de /conectores es quien limita a una por ahora).
+export type LineaWhatsapp = {
+  id: number;
+  numero: string;
+  tipo: string;
+  idUsuario: string | null;
+  referenciaProveedor: string | null;
+  estado: string;
+  techoDiario: number;
+  fechaCreacion: string | null;
+};
+
+export function lineasWhatsappDeUsuario(idUsuario: string): LineaWhatsapp[] {
+  return db.select().from(lineaWhatsapp).where(eq(lineaWhatsapp.idUsuario, idUsuario)).all();
+}
+
+export function lineasWhatsappPool(): LineaWhatsapp[] {
+  return db.select().from(lineaWhatsapp).where(isNull(lineaWhatsapp.idUsuario)).all();
+}
+
+export function lineaWhatsappPorId(id: number): LineaWhatsapp | null {
+  return db.select().from(lineaWhatsapp).where(eq(lineaWhatsapp.id, id)).get() ?? null;
+}
+
+export function crearLineaWhatsapp(input: {
+  numero: string;
+  tipo: 'personal' | 'pool';
+  idUsuario: string | null;
+  referenciaProveedor: string;
+  techoDiario: number;
+}): number {
+  const resultado = db
+    .insert(lineaWhatsapp)
+    .values({
+      numero: input.numero,
+      tipo: input.tipo,
+      idUsuario: input.idUsuario,
+      referenciaProveedor: input.referenciaProveedor,
+      estado: 'calentando',
+      techoDiario: input.techoDiario,
+      fechaCreacion: new Date().toISOString(),
+    })
+    .run();
+  return Number(resultado.lastInsertRowid);
+}
+
+export function actualizarEstadoLineaWhatsapp(id: number, estado: 'calentando' | 'activa' | 'caida') {
+  db.update(lineaWhatsapp).set({ estado }).where(eq(lineaWhatsapp.id, id)).run();
+}
+
 // Sesion 2026-07-10 (pedido de Sebastian: revisar-y-mandar de verdad): datos de UN
 // paso para que la server action lo mande por su canal (la action wirea el adaptador,
 // el repo/core no lo conoce -- regla de capas). A diferencia de pasoInscripcionesPendientes,
@@ -3721,6 +3776,31 @@ export function guardarMensajeEntrante(mensaje: MensajeEntrante, idContacto: num
   return 'insertado';
 }
 
+// Paso "recibir" del dialogo de prueba (tarea 8): busca el mensaje entrante mas
+// reciente de una linea DESPUES de que se abrio el dialogo (`desde`), para no mostrar
+// un mensaje viejo como si fuera la prueba en curso. left join a contacto (nullable:
+// un numero que escribe sin ser un contacto conocido igual cuenta como prueba valida).
+export type MensajeRecibidoResumen = {
+  telefono: string | null;
+  texto: string | null;
+  nombreContacto: string | null;
+};
+
+export function mensajeWhatsappMasRecienteDesde(referenciaProveedor: string, desde: string): MensajeRecibidoResumen | null {
+  const fila = db
+    .select({
+      telefono: mensajeWhatsapp.telefono,
+      texto: mensajeWhatsapp.texto,
+      nombreContacto: contacto.nombre,
+    })
+    .from(mensajeWhatsapp)
+    .leftJoin(contacto, eq(contacto.idContacto, mensajeWhatsapp.idContacto))
+    .where(and(eq(mensajeWhatsapp.referenciaProveedor, referenciaProveedor), gt(mensajeWhatsapp.createdAt, desde)))
+    .orderBy(desc(mensajeWhatsapp.createdAt))
+    .get();
+  return fila ?? null;
+}
+
 // Inscripciones activas de la empresa que hay que cortar cuando llega una respuesta.
 // Una fila por destinatario activo (proveedorCampanaId + email nullable): el core pausa
 // la inscripcion local y, si hay secuencia Apollo + email, la corta tambien alla.
@@ -3773,8 +3853,18 @@ export function registrarToqueEntrante(match: ContactoMatch, texto: string, fech
 const enRango = (desde: string, hasta: string): SQL =>
   sql`substr(${toque.fecha}, 1, 10) >= ${desde} AND substr(${toque.fecha}, 1, 10) <= ${hasta}`;
 
-export function contarToquesEnRango(desde: string, hasta: string): number {
-  const r = db.select({ n: sql<number>`count(*)` }).from(toque).where(enRango(desde, hasta)).get();
+// Filtro opcional de owner (Tarea 14 del panel): el toque no tiene owner propio, el
+// owner vive en empresa. El join a empresa SOLO se agrega cuando el caller filtra por
+// owner (dos ramas de query, no un join incondicional) -- asi las llamadas existentes
+// sin owner (panel de equipo completo) no dependen de que exista la tabla empresa.
+export function contarToquesEnRango(desde: string, hasta: string, owner?: string): number {
+  if (!owner) {
+    const r = db.select({ n: sql<number>`count(*)` }).from(toque).where(enRango(desde, hasta)).get();
+    return r?.n ?? 0;
+  }
+  const r = db.select({ n: sql<number>`count(*)` }).from(toque)
+    .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
+    .where(and(enRango(desde, hasta), eq(empresa.owner, owner))).get();
   return r?.n ?? 0;
 }
 
@@ -3783,25 +3873,45 @@ export function contarToquesEnDia(hoy: string): number {
   return contarToquesEnRango(ayer, ayer);
 }
 
-export function leadsTocadosEnRango(desde: string, hasta: string): number {
-  const r = db.select({ n: sql<number>`count(distinct ${toque.idEmpresa})` }).from(toque).where(enRango(desde, hasta)).get();
+export function leadsTocadosEnRango(desde: string, hasta: string, owner?: string): number {
+  if (!owner) {
+    const r = db.select({ n: sql<number>`count(distinct ${toque.idEmpresa})` }).from(toque).where(enRango(desde, hasta)).get();
+    return r?.n ?? 0;
+  }
+  const r = db.select({ n: sql<number>`count(distinct ${toque.idEmpresa})` }).from(toque)
+    .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
+    .where(and(enRango(desde, hasta), eq(empresa.owner, owner))).get();
   return r?.n ?? 0;
 }
 
-export function toquesPorCanal(desde: string, hasta: string): Record<Canal, number> {
-  const filas = db.select({ canal: toque.canal, n: sql<number>`count(*)` }).from(toque)
-    .where(enRango(desde, hasta)).groupBy(toque.canal).all();
+export function toquesPorCanal(desde: string, hasta: string, owner?: string): Record<Canal, number> {
+  const filas = !owner
+    ? db.select({ canal: toque.canal, n: sql<number>`count(*)` }).from(toque).where(enRango(desde, hasta)).groupBy(toque.canal).all()
+    : db.select({ canal: toque.canal, n: sql<number>`count(*)` }).from(toque)
+        .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
+        .where(and(enRango(desde, hasta), eq(empresa.owner, owner))).groupBy(toque.canal).all();
   const out = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
   for (const f of filas) if (f.canal && f.canal in out) out[f.canal as Canal] = f.n;
   return out;
 }
 
-export function toquesPorResultado(desde: string, hasta: string): Record<Resultado, number> {
-  const filas = db.select({ resultado: toque.resultado, n: sql<number>`count(*)` }).from(toque)
-    .where(enRango(desde, hasta)).groupBy(toque.resultado).all();
+export function toquesPorResultado(desde: string, hasta: string, owner?: string): Record<Resultado, number> {
+  const filas = !owner
+    ? db.select({ resultado: toque.resultado, n: sql<number>`count(*)` }).from(toque).where(enRango(desde, hasta)).groupBy(toque.resultado).all()
+    : db.select({ resultado: toque.resultado, n: sql<number>`count(*)` }).from(toque)
+        .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
+        .where(and(enRango(desde, hasta), eq(empresa.owner, owner))).groupBy(toque.resultado).all();
   const out = Object.fromEntries(RESULTADOS.map((r) => [r, 0])) as Record<Resultado, number>;
   for (const f of filas) if (f.resultado && f.resultado in out) out[f.resultado as Resultado] = f.n;
   return out;
+}
+
+// Owners reales para el chip de filtro del panel (Tarea 14): distintos owner ya
+// asignados en empresa, no la lista completa de organizacion_miembro (esa incluye
+// miembros sin ninguna empresa asignada todavia).
+export function ownersConToques(): string[] {
+  const filas = db.select({ owner: empresa.owner }).from(empresa).where(isNotNull(empresa.owner)).groupBy(empresa.owner).all();
+  return filas.map((f) => f.owner!).filter(Boolean).sort();
 }
 
 // Sesion 2026-07-10: cancelarCampanaAction finaliza la campana pero no cascadea a las
