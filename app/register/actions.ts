@@ -3,18 +3,11 @@
 import { z } from 'zod';
 import { auth } from '../lib/auth';
 import { crearMiembroYSetOwner, crearMiembroVisitante } from '../db/organizacion-repository';
+import { OWNERS_ONEPAY } from './owners';
 
 // V6: id 1 = Onepay, sembrada por scripts/seed_organizacion.ts. Una sola organizacion por
 // ahora (fuera de alcance: multi-organizacion real).
 const ID_ORGANIZACION_ONEPAY = 1;
-
-// Lista cerrada (2026-07-14), no derivada de empresa.owner via ownersDisponibles: esa
-// consulta trae basura de datos (strings vacios, owners mal normalizados con varios
-// nombres juntos) y ademas listaba nombres reales a cualquier visitante anonimo antes de
-// que decidiera si es del equipo. Estos 4 son el equipo real; casing EXACTO como vive en
-// empresa.owner (ver comentario en schema.ts) -- "Camilo fonseca" con f minuscula es
-// correcto, no un typo.
-export const OWNERS_ONEPAY = ['Felipe Castro', 'Sebastian Acosta Molina', 'Thomas Schumacher', 'Camilo fonseca'] as const;
 
 const credencialesSchema = z.object({
   email: z.string().email(),

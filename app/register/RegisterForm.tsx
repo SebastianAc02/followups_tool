@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { registrarUsuarioAction, OWNERS_ONEPAY } from './actions';
+import { registrarUsuarioAction } from './actions';
+import { OWNERS_ONEPAY } from './owners';
 
 export default function RegisterForm() {
   const router = useRouter();
@@ -133,7 +134,12 @@ export default function RegisterForm() {
               <button
                 type="button"
                 className="ac-btn"
-                style={{ opacity: soyOnepay === true ? 1 : 0.45 }}
+                style={{
+                  flex: 1,
+                  opacity: soyOnepay === true ? 1 : 0.5,
+                  outline: soyOnepay === true ? '2px solid #3ddc8b' : 'none',
+                  outlineOffset: 2,
+                }}
                 onClick={() => { setSoyOnepay(true); setError(null); }}
               >
                 Sí, soy de OnePay
@@ -141,7 +147,14 @@ export default function RegisterForm() {
               <button
                 type="button"
                 className="ac-btn"
-                style={{ opacity: soyOnepay === false ? 1 : 0.45, background: '#232a31', color: '#e7ecef' }}
+                style={{
+                  flex: 1,
+                  background: '#232a31',
+                  color: '#e7ecef',
+                  opacity: soyOnepay === false ? 1 : 0.5,
+                  outline: soyOnepay === false ? '2px solid #3ddc8b' : 'none',
+                  outlineOffset: 2,
+                }}
                 onClick={() => { setSoyOnepay(false); setError(null); }}
               >
                 No, soy visitante
