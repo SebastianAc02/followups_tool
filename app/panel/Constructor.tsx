@@ -159,7 +159,7 @@ export function Constructor({
     <DndContext onDragEnd={onDragEnd}>
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-4">
         {/* Biblioteca */}
-        <aside className="sticky top-4 flex flex-col gap-5 lg:col-span-1">
+        <aside className="sticky top-4 flex max-h-[calc(100vh-8rem)] flex-col gap-5 overflow-y-auto lg:col-span-1">
           {ORDEN_GRUPOS.map((grupo) => (
             <div key={grupo}>
               <div className="mb-2 font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
