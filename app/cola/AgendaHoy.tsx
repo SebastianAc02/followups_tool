@@ -108,6 +108,14 @@ export function AgendaHoy({
                     <span className={cn("truncate text-sm", fila.actual ? "font-semibold text-ink" : "font-medium text-ink-soft")}>
                       {fila.empresa}
                     </span>
+                    {fila.pbxForma && (
+                      <span
+                        className="shrink-0 rounded-[6px] border border-line-card bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-faint"
+                        title="Bucle PBX: sin decisor alcanzable todavía"
+                      >
+                        PBX
+                      </span>
+                    )}
                     {(pill || fila.ciudad) && (
                       <span className="shrink-0 truncate text-xs text-faint">
                         · {[pill?.label, fila.ciudad].filter(Boolean).join(" · ")}

@@ -56,7 +56,7 @@ import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
-import { estaEnPBX, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
+import { estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
@@ -162,6 +162,9 @@ const columnasCola = {
   contacto: contacto.nombre,
   cargo: contacto.cargo,
   usuarios: empresaUsuarios.usuariosEfectivos,
+  // Bucle PBX (Fase 5): no-null = la fila viene del bucle de enriquecimiento del
+  // decisor, la cola le pone un badge en vez de tratarla como cadencia comercial.
+  pbxForma: empresa.pbxForma,
 };
 
 // Shape de columnasCola + el nombre de la campana activa (si la hay). Solo lo usan
@@ -310,6 +313,7 @@ export function getCuenta(id: string, idOrganizacion: number) {
       fecha: empresa.proximoFollowUpFecha,
       usuarios: empresaUsuarios.usuariosEfectivos,
       notionPageId: empresa.notionPageId,
+      pbxForma: empresa.pbxForma,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
@@ -323,6 +327,7 @@ export function getCuenta(id: string, idOrganizacion: number) {
       telefono: contacto.telefono,
       email: contacto.email,
       esPrincipal: contacto.esPrincipal,
+      esKeyDecisionMaker: contacto.esKeyDecisionMaker,
     })
     .from(contacto)
     .where(eq(contacto.idEmpresa, id))
@@ -4077,6 +4082,16 @@ export type PasoSecuencia = {
   estado: 'hecho' | 'activo' | 'pendiente';
 };
 
+// Bucle PBX (Fase 5): lo que la ficha necesita para mostrar el carril + cerrar el
+// toque. null cuando la empresa no esta en PBX (estaEnPBX resuelto sobre sus contactos).
+export type PbxContexto = {
+  forma: string | null;
+  tieneNumeroConmutador: boolean;
+  numeroConmutador: string | null;
+  intentos: { llamadas: number; correos: number };
+  sugerenciaEscalar: boolean;
+};
+
 export type ContextoToque = {
   emp: ReturnType<typeof getCuenta>['emp'];
   principal: { nombre: string | null; cargo: string | null; telefono: string | null; email: string | null } | null;
@@ -4087,7 +4102,22 @@ export type ContextoToque = {
   // Los editores de correo/whatsapp lo necesitan para enviarToqueCanalAction (aprobar ese
   // paso puntual). null cuando no hay secuencia activa (toque suelto, sin cadencia).
   idPasoInscripcionActivo: number | null;
+  pbx: PbxContexto | null;
 };
+
+// Atajo documentado (plan Fase 3, "Riesgos/notas"): cuenta TODOS los toques
+// llamada/correo de la empresa, no solo los del bucle PBX (no hay marca temporal
+// limpia de "cuando entro a PBX"). Refinar si hace falta precision.
+export function intentosPBX(idEmpresa: string, idOrganizacion: number): { llamadas: number; correos: number } {
+  const filas = db
+    .select({ canal: toque.canal, n: sql<number>`count(*)` })
+    .from(toque)
+    .where(and(eq(toque.idEmpresa, idEmpresa), eq(toque.idOrganizacion, idOrganizacion)))
+    .groupBy(toque.canal)
+    .all();
+  const porCanal = new Map(filas.map((f) => [f.canal, f.n]));
+  return { llamadas: porCanal.get('llamada') ?? 0, correos: porCanal.get('correo') ?? 0 };
+}
 
 export function getContextoToque(id: string, idOrganizacion: number): ContextoToque {
   const { emp, contactos, toques } = getCuenta(id, idOrganizacion);
@@ -4099,6 +4129,24 @@ export function getContextoToque(id: string, idOrganizacion: number): ContextoTo
   const principal = principalRaw
     ? { nombre: principalRaw.nombre, cargo: principalRaw.cargo, telefono: principalRaw.telefono, email: principalRaw.email }
     : null;
+
+  const contactosPBX: ContactoPBX[] = contactos.map((c) => ({
+    esKeyDecisionMaker: c.esKeyDecisionMaker === 1,
+    telefono: c.telefono,
+    email: c.email,
+  }));
+  const contactoOficina = contactos.find((c) => c.esKeyDecisionMaker !== 1 && c.telefono);
+  let pbx: PbxContexto | null = null;
+  if (estaEnPBX(contactosPBX)) {
+    const intentos = intentosPBX(id, idOrganizacion);
+    pbx = {
+      forma: emp?.pbxForma ?? null,
+      tieneNumeroConmutador: Boolean(contactoOficina),
+      numeroConmutador: contactoOficina?.telefono ?? null,
+      intentos,
+      sugerenciaEscalar: sugerirEscalar(intentos),
+    };
+  }
 
   const inscripcionActiva = db
     .select({ idInscripcion: inscripcion.idInscripcion, idCadencia: campana.idCadencia })
@@ -4112,7 +4160,7 @@ export function getContextoToque(id: string, idOrganizacion: number): ContextoTo
     .get();
 
   if (!inscripcionActiva) {
-    return { emp, principal, toques, secuencia: [], objetivo: null, idPasoInscripcionActivo: null };
+    return { emp, principal, toques, secuencia: [], objetivo: null, idPasoInscripcionActivo: null, pbx };
   }
 
   const pasos = db
@@ -4166,7 +4214,7 @@ export function getContextoToque(id: string, idOrganizacion: number): ContextoTo
     return { idPaso: p.idPaso, orden: p.orden, diaOffset: p.diaOffset, canal: p.canal, objetivo: p.objetivo, estado };
   });
 
-  return { emp, principal, toques, secuencia, objetivo: objetivoActivo, idPasoInscripcionActivo };
+  return { emp, principal, toques, secuencia, objetivo: objetivoActivo, idPasoInscripcionActivo, pbx };
 }
 
 // Tarea 9 (rediseño UI de toque): versiones A/B/C de un paso, para la barra lateral

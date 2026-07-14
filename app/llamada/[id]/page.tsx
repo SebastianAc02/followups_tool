@@ -1,6 +1,7 @@
 import { getContextoToque, versionesDePaso } from "../../db/repository";
 import { Confirmacion, type CampoConfirmacion } from "./Confirmacion";
 import { LlamadaCard } from "./LlamadaCard";
+import { PbxPanel } from "./PbxPanel";
 import { EditorCorreo } from "./EditorCorreo";
 import { EditorWhatsapp } from "./EditorWhatsapp";
 import { ToqueShell } from "./ToqueShell";
@@ -86,17 +87,21 @@ export default async function Llamada({
       <SidebarFrame>
         <div className="wrap">
           <BackLink href="/cola" label="Cola" />
-          <LlamadaCard
-            ctx={ctx}
-            urlNotion={urlNotionDe(ctx)}
-            idPasoInscripcion={ctx.idPasoInscripcionActivo}
-            calificacion={calificar({
-              usuarios: ctx.emp.usuarios ?? null,
-              crm: ctx.emp.crm ?? null,
-              pasarela: ctx.emp.pasarela ?? null,
-              recaudo: null,
-            })}
-          />
+          {ctx.pbx ? (
+            <PbxPanel idEmpresa={ctx.emp.id} nombre={ctx.emp.nombre ?? "Cuenta sin nombre"} pbx={ctx.pbx} />
+          ) : (
+            <LlamadaCard
+              ctx={ctx}
+              urlNotion={urlNotionDe(ctx)}
+              idPasoInscripcion={ctx.idPasoInscripcionActivo}
+              calificacion={calificar({
+                usuarios: ctx.emp.usuarios ?? null,
+                crm: ctx.emp.crm ?? null,
+                pasarela: ctx.emp.pasarela ?? null,
+                recaudo: null,
+              })}
+            />
+          )}
         </div>
       </SidebarFrame>
     );

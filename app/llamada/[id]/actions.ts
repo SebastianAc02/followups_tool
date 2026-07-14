@@ -13,6 +13,8 @@ import {
   datosEnvioPasoManual,
   registrarPasoEnviadoConToque,
   lineaWhatsappActiva,
+  guardarProximoPasoPBX,
+  graduarDePBX,
 } from "../../db/repository";
 import { crearRegistroEnvio } from "../../adapters/registro-envio";
 import { registrarToqueSchema } from "../../db/validation";
@@ -23,6 +25,8 @@ import { crearClaudeAdapter } from "../../adapters/claude";
 import { agruparCandidatas, type CandidataOFusion } from "../../core/matcher";
 import { confirmarTranscript } from "../../core/confirmarTranscript";
 import { estructurarToque, type ToqueEstructurado } from "../../core/estructurar-toque";
+import { interpretarResultadoPBX, type PbxInterpretado } from "../../core/pbx-interpretar";
+import { proponerSiguientePaso, type ResultadoPBX } from "../../core/pbx";
 import { aprobarDesdeInboxAction, type AprobarDesdeInboxResultado } from "../../por-revisar/actions";
 
 export async function registrarToqueAction(formData: FormData) {
@@ -189,6 +193,80 @@ export async function enviarToqueCanalAction(
   if (!resultado.ok) return resultado;
   revalidatePath(`/llamada/${idEmpresa}`);
   redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
+}
+
+// Arranca el bucle PBX la primera vez que Sebastian visita una cuenta recien
+// detectada (pbxForma null, sin toque previo que interpretar): resultado null es la
+// entrada al bucle (proponerSiguientePaso decide llamar_conmutador vs conseguir_numero
+// segun tieneNumeroConmutador). No pasa por IA -- no hay "que paso" todavia.
+export async function iniciarPBXAction(idEmpresa: string, tieneNumeroConmutador: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { idOrganizacion } = await requireSession();
+  try {
+    const paso = proponerSiguientePaso({ resultado: null, tieneNumeroConmutador, intentos: { llamadas: 0, correos: 0 } });
+    guardarProximoPasoPBX(idEmpresa, paso, idOrganizacion);
+    revalidatePath(`/llamada/${idEmpresa}`);
+    revalidatePath("/cola");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "No se pudo iniciar el bucle" };
+  }
+}
+
+// Bucle PBX (Fase 5): interpreta el "que paso" libre del toque PBX. Solo PROPONE
+// (borrador -> aprobar, CLAUDE.md); no escribe nada -- PbxPanel muestra el borrador
+// editable antes de que cerrarPBXAction lo persista.
+export async function interpretarPBXAction(quePaso: string): Promise<PbxInterpretado> {
+  await requireEscritura();
+  const ia = crearClaudeAdapter();
+  return interpretarResultadoPBX(ia, quePaso);
+}
+
+// Cierra un toque del bucle PBX: registra el toque real (mismo idioma que
+// registrarToqueSueltoAction -- 'no_contesto' es el resultado mas honesto disponible
+// para un intento que no es una de las 4 salidas cerradas de llamada) y, segun la
+// clase interpretada, gradua la empresa (si se consiguio el KDM) o guarda el
+// siguiente paso propuesto (proponerSiguientePaso, core puro).
+export async function cerrarPBXAction(input: {
+  idEmpresa: string;
+  canal: "llamada" | "correo";
+  quePaso: string;
+  interpretado: PbxInterpretado;
+  tieneNumeroConmutador: boolean;
+  intentos: { llamadas: number; correos: number };
+  kdm?: { nombre: string; telefono: string | null; email: string | null };
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { idOrganizacion } = await requireSession();
+  try {
+    const parsed = registrarToqueSchema.parse({
+      idEmpresa: input.idEmpresa,
+      canal: input.canal,
+      resultado: "no_contesto",
+      quePaso: input.quePaso,
+    });
+    registrarToque(parsed, idOrganizacion);
+
+    if (input.interpretado.clase === "dato_conseguido" && input.kdm) {
+      graduarDePBX(input.idEmpresa, input.kdm, idOrganizacion);
+    } else {
+      const resultado: ResultadoPBX = {
+        clase: input.interpretado.clase,
+        nota: input.interpretado.proximoPasoTexto,
+        personaReferida: input.interpretado.personaReferida,
+      };
+      const paso = proponerSiguientePaso({
+        resultado,
+        tieneNumeroConmutador: input.tieneNumeroConmutador,
+        intentos: input.intentos,
+      });
+      guardarProximoPasoPBX(input.idEmpresa, paso, idOrganizacion);
+    }
+
+    revalidatePath(`/llamada/${input.idEmpresa}`);
+    revalidatePath("/cola");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "No se pudo guardar" };
+  }
 }
 
 // Tarea 12: correo/whatsapp SUELTO (sin inscripcion/cadencia activa -- no hay

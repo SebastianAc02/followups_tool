@@ -31,6 +31,11 @@ export type FilaAgenda = {
   sev: Severity;
   severidadTexto: string;
   actual: boolean;
+  // Bucle PBX (Fase 5): no-null = la fila viene del bucle de enriquecimiento del
+  // decisor (app/core/pbx.ts), la UI le pone un badge en vez de tratarla como
+  // cadencia comercial normal. Opcional: fixtures/tests que construyen FilaAgenda a
+  // mano fuera de filaSinVencimiento/filaConVencimiento no necesitan setearlo.
+  pbxForma?: string | null;
 };
 
 export function filtrarPorCanal(filas: FilaAgenda[], filtro: FiltroCanal): FilaAgenda[] {
@@ -65,6 +70,7 @@ export type FilaCola = {
   // Opcional: colaDelDia (todos los owners) no lo trae; colaLeads/colaCierres/
   // colaReagendar (solo el split de Sebastian) si.
   campana?: string | null;
+  pbxForma?: string | null;
 };
 
 // Cierres y Reagendar no tienen nocion de "vencido": una cuenta en negociacion o atascada
@@ -82,6 +88,7 @@ export function filaSinVencimiento(c: FilaCola): FilaAgenda {
     sev: "today",
     severidadTexto: c.fecha ?? "sin fecha",
     actual: false,
+    pbxForma: c.pbxForma ?? null,
   };
 }
 
@@ -107,6 +114,7 @@ export function filaConVencimiento(c: FilaCola, hoy: string, actual: boolean): F
     sev: dias > 0 ? "overdue" : "today",
     severidadTexto: dias > 0 ? `vencido ${dias}d` : "hoy",
     actual,
+    pbxForma: c.pbxForma ?? null,
   };
 }
 
