@@ -80,3 +80,28 @@ export function filaSinVencimiento(c: FilaCola): FilaAgenda {
     actual: false,
   };
 }
+
+// Dias de diferencia entre una fecha de follow-up y hoy (ambas ISO yyyy-mm-dd). Positivo =
+// vencida, 0 = hoy. Vivia duplicada como funcion local de app/cola/page.tsx; se centraliza
+// aca para que Leads y Reagendar (ambos date-driven) compartan el mismo calculo.
+export function diasVencido(fechaISO: string, hoyISO: string): number {
+  return Math.round((Date.parse(hoyISO) - Date.parse(fechaISO)) / 86400000);
+}
+
+// Fila con noción de vencido: usada por Leads y Reagendar (ambas son follow-ups reales con
+// fecha). Distinta de filaSinVencimiento (Cierres), que no tiene ese concepto.
+export function filaConVencimiento(c: FilaCola, hoy: string, actual: boolean): FilaAgenda {
+  const dias = diasVencido(c.fecha!, hoy);
+  return {
+    id: c.id,
+    empresa: c.empresa,
+    ciudad: c.ciudad,
+    contacto: c.contacto,
+    cargo: c.cargo,
+    canal: canalNormalizado(c.canal),
+    estado: c.estado,
+    sev: dias > 0 ? "overdue" : "today",
+    severidadTexto: dias > 0 ? `vencido ${dias}d` : "hoy",
+    actual,
+  };
+}
