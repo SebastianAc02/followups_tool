@@ -28,6 +28,7 @@
   --color-today: var(--amber);
   --color-today-bg: rgba(242, 183, 56, 0.13);
   --color-done: var(--green);
+  --color-done-bg: rgba(87, 201, 138, 0.13);
   --color-ring: rgba(255, 255, 255, 0.12);
 
   /* Cockpit de campañas (dirección 2A): acento violeta para acción/selección/foco. */
