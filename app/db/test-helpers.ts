@@ -118,6 +118,13 @@ export function crearDbPrueba() {
       updated_at TEXT
     );
 
+    CREATE TABLE configuracion_admin (
+      clave TEXT PRIMARY KEY,
+      valor TEXT NOT NULL,
+      actualizado_por TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE empresa_alias (
       id_alias INTEGER PRIMARY KEY AUTOINCREMENT,
       id_empresa TEXT NOT NULL,
