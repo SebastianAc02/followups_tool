@@ -15,7 +15,9 @@ function saludo(d: Date, primerNombre: string) {
 
 export default async function Dashboard() {
   const perfil = await cargarPerfil();
-  const owner = perfil.nombre;
+  // Visitante (solo lectura): ve el resumen de TODA la organizacion (todos los owners),
+  // no una cola propia -- por eso owner undefined.
+  const owner = perfil.soloLectura ? undefined : perfil.nombre;
 
   const ahora = new Date();
   const hoy = ahora.toISOString().slice(0, 10);

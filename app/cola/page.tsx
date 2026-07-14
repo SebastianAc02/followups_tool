@@ -17,8 +17,9 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const usuario = await requireSession();
   const sp = await searchParams;
   // Pipeline compartido (B3 v1): cualquier autenticado puede MIRAR la cola de otro por
-  // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0].
-  const owner = sp.owner ?? usuario.owner;
+  // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0]. Visitante (solo
+  // lectura) sin ?owner= ve la cola de TODOS los owners, no una propia (que estaria vacia).
+  const owner = sp.owner ?? (usuario.soloLectura ? undefined : usuario.owner);
   const hoy = new Date().toISOString().slice(0, 10);
   const cola = colaDelDia(hoy, owner, usuario.idOrganizacion);
   const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;

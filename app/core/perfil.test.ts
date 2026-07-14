@@ -6,7 +6,7 @@ import { construirPerfil, PREFERENCIAS_DEFAULT } from './perfil.ts';
 import type { UsuarioSesion } from '../lib/session-user.ts';
 
 function identidad(overrides: Partial<UsuarioSesion> = {}): UsuarioSesion {
-  return { id: 'u1', email: 'a@onepay.co', owner: 'Sebastian Acosta Molina', admin: false, idOrganizacion: 1, ...overrides };
+  return { id: 'u1', email: 'a@onepay.co', owner: 'Sebastian Acosta Molina', admin: false, idOrganizacion: 1, soloLectura: false, ...overrides };
 }
 
 test('iniciales de nombre con dos tokens toma la primera letra de cada uno', () => {
@@ -59,8 +59,14 @@ test('id y email vienen de la identidad, no de las preferencias', () => {
 
 test('construirPerfil pasa idOrganizacion de la identidad tal cual', () => {
   const perfil = construirPerfil(
-    { id: 'u1', email: 'a@b.com', owner: 'Ana Owner', admin: false, idOrganizacion: 3 },
+    { id: 'u1', email: 'a@b.com', owner: 'Ana Owner', admin: false, idOrganizacion: 3, soloLectura: false },
     PREFERENCIAS_DEFAULT,
   );
   assert.equal(perfil.idOrganizacion, 3);
+});
+
+test('visitante (soloLectura) tiene rol Visitante y propaga soloLectura al perfil', () => {
+  const perfil = construirPerfil(identidad({ soloLectura: true, admin: false }), PREFERENCIAS_DEFAULT);
+  assert.equal(perfil.rol, 'Visitante');
+  assert.equal(perfil.soloLectura, true);
 });

@@ -9,7 +9,7 @@ import {
   pasosParaSincronizarCopy,
   guardarSincronizacionCopy,
 } from '../../db/repository';
-import { requireSession } from '../../lib/session';
+import { requireSession, requireEscritura } from '../../lib/session';
 import { crearRegistroEnvio } from '../../adapters/registro-envio';
 
 // Fase 7 (ciclo de vida de campana): Pausar/Reanudar son reversibles y solo tocan
@@ -66,7 +66,7 @@ export async function cancelarCampanaAction(idCampana: number): Promise<CicloVid
 export type SincronizarCopyResultado = { ok: true; pasos: number } | { ok: false; error: string };
 
 export async function sincronizarCopyApolloAction(idCampana: number): Promise<SincronizarCopyResultado> {
-  const { idOrganizacion } = await requireSession();
+  const { idOrganizacion } = await requireEscritura();
   const camp = campanaParaSincronizarCopy(idCampana, idOrganizacion);
   if (!camp) {
     return { ok: false, error: 'Esta campaña todavía no tiene una secuencia creada en Apollo.' };

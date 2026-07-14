@@ -14,7 +14,7 @@ import {
   incluirDeSegmento,
 } from '../db/repository';
 import { CANALES, type Canal, definicionSegmentoSchema, type DefinicionSegmento } from '../db/validation';
-import { requireSession } from '../lib/session';
+import { requireSession, requireEscritura } from '../lib/session';
 import { crearClaudeAdapter } from '../adapters/claude';
 import { pedirAlCopiloto, type CampoDisponible } from './nueva/copiloto';
 import { marcarRelajadas } from '../core/relleno-segmento';
@@ -131,7 +131,7 @@ export type CopilotoResultado = Awaited<ReturnType<typeof pedirAlCopiloto>>;
 // nunca consulta la DB por su cuenta. Los numericos (usuarios, personas) no tienen lista
 // de valores -- se filtran por rango, no por membresia.
 export async function copilotoAction(frase: string, estadoActual: DefinicionSegmento, total?: number): Promise<CopilotoResultado> {
-  const sesion = await requireSession();
+  const sesion = await requireEscritura();
   const campos: CampoDisponible[] = [
     ...CAMPOS_TEXTO_COPILOTO.map((campo) => ({ campo, ejemplosValor: valoresDistintosCampo(campo, sesion.idOrganizacion) })),
     { campo: 'usuarios', numerico: true },

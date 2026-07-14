@@ -149,7 +149,16 @@ const calorDesc = sql`(CASE ${empresa.estadoNotion}
 // Cola del día de un owner DENTRO de una organización: vencidos o para hoy, ordenados
 // por calor y luego antigüedad. idOrganizacion viene de la sesión (Parte 1, multi-org):
 // un lead compartido solo aparece en la cola de quien lo tiene activo ahora mismo.
-export function colaDelDia(hoy: string, owner: string, idOrganizacion: number) {
+// owner opcional (2026-07-14, modo visitante): con owner filtra la cola de ese owner;
+// sin owner (undefined) trae la cola de TODA la organizacion (todos los owners), que es
+// lo que ve un visitante. Mismo patron que contarPorEstado.
+export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacion: number) {
+  const condiciones = [
+    eq(empresa.organizacionActivaId, idOrganizacion),
+    isNotNull(empresa.proximoFollowUpFecha),
+    lte(empresa.proximoFollowUpFecha, hoy),
+  ];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
   return db
     .select({
       id: empresa.idEmpresa,
@@ -168,14 +177,7 @@ export function colaDelDia(hoy: string, owner: string, idOrganizacion: number) {
     .from(empresa)
     .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(
-      and(
-        eq(empresa.owner, owner),
-        eq(empresa.organizacionActivaId, idOrganizacion),
-        isNotNull(empresa.proximoFollowUpFecha),
-        lte(empresa.proximoFollowUpFecha, hoy),
-      ),
-    )
+    .where(and(...condiciones))
     .orderBy(calorDesc, empresa.proximoFollowUpFecha)
     .all();
 }
@@ -441,18 +443,17 @@ export type ContadoresHoy = {
 // Solo lectura. El toque no tiene owner directo, se filtra vía JOIN a empresa.owner (mismo
 // filtro que colaDelDia). `toque.fecha` es un datetime ISO completo, se compara solo la
 // parte de fecha con substr(fecha, 1, 10).
-export function contadoresHoy(hoy: string, owner: string, idOrganizacion: number): ContadoresHoy {
+export function contadoresHoy(hoy: string, owner: string | undefined, idOrganizacion: number): ContadoresHoy {
+  const condiciones = [
+    eq(toque.idOrganizacion, idOrganizacion),
+    sql`substr(${toque.fecha}, 1, 10) = ${hoy}`,
+  ];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
   const filas = db
     .select({ canal: toque.canal, resultado: toque.resultado })
     .from(toque)
     .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
-    .where(
-      and(
-        eq(empresa.owner, owner),
-        eq(toque.idOrganizacion, idOrganizacion),
-        sql`substr(${toque.fecha}, 1, 10) = ${hoy}`,
-      ),
-    )
+    .where(and(...condiciones))
     .all();
 
   const porCanal = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
@@ -502,7 +503,7 @@ export function contarPorEstado(owner: string | undefined, idOrganizacion: numbe
 // Resumen del home (rediseño): las 4 métricas de las stat cards. Reusa colaDelDia (cola de
 // hoy = vencidos + para hoy) y contarPorEstado sobre toda la base para deals calientes y
 // cuentas activas. Solo lectura.
-export function resumenHome(owner: string, hoy: string, idOrganizacion: number) {
+export function resumenHome(owner: string | undefined, hoy: string, idOrganizacion: number) {
   const cola = colaDelDia(hoy, owner, idOrganizacion);
   const toquesHoy = cola.length;
   const vencidos = cola.filter((c) => (c.fecha ?? '') < hoy).length;

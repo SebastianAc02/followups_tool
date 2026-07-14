@@ -17,7 +17,7 @@ import {
 import { crearRegistroEnvio } from "../../adapters/registro-envio";
 import { registrarToqueSchema } from "../../db/validation";
 import type { CampoCalificacion } from "../../core/calificacion";
-import { requireSession } from "../../lib/session";
+import { requireSession, requireEscritura } from "../../lib/session";
 import { crearGranolaAdapter } from "../../adapters/granola";
 import { crearClaudeAdapter } from "../../adapters/claude";
 import { agruparCandidatas, type CandidataOFusion } from "../../core/matcher";
@@ -143,7 +143,7 @@ export async function confirmarGrabacionAction(idEmpresa: string, idToque: numbe
 // nunca audio). No escribe nada -- el owner corrige el borrador en CapturaLlamada y
 // recien registrarToqueAction (submit del form) persiste.
 export async function estructurarDictadoAction(dictado: string): Promise<ToqueEstructurado> {
-  await requireSession();
+  await requireEscritura();
   const ia = crearClaudeAdapter();
   return estructurarToque(dictado, ia);
 }
@@ -161,7 +161,7 @@ export async function enviarToqueCanalAction(
   idPasoInscripcion: number,
   cuerpo?: string,
 ): Promise<AprobarDesdeInboxResultado | void> {
-  await requireSession();
+  await requireEscritura();
 
   const datos = datosEnvioPasoManual(idPasoInscripcion);
   if (datos?.canal === "whatsapp") {

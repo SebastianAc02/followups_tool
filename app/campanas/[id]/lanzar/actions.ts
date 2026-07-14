@@ -16,7 +16,7 @@ import {
   type ConfigLanzamientoInput,
   type ResultadoInscripcion,
 } from '../../../db/repository';
-import { requireSession } from '../../../lib/session';
+import { requireSession, requireEscritura } from '../../../lib/session';
 import { calcularGoteo, type ResultadoGoteo } from '../../../core/goteo';
 import { crearRegistroEnvio } from '../../../adapters/registro-envio';
 import { materializarYEmpujarAhora } from '../../../worker/index';
@@ -70,7 +70,7 @@ export type LanzarCampanaResultado =
   | { ok: false; error: string };
 
 export async function lanzarCampanaAction(idCampana: number, config: ConfigLanzamientoInput): Promise<LanzarCampanaResultado> {
-  const sesion = await requireSession();
+  const sesion = await requireEscritura();
   try {
     actualizarConfigLanzamiento(idCampana, config);
     const resultado = inscribirCampana(idCampana, sesion.idOrganizacion);
@@ -167,7 +167,7 @@ export async function enviarPruebaAction(
   canal: 'correo' | 'whatsapp',
   destino: string,
 ): Promise<EnviarPruebaResultado> {
-  const sesion = await requireSession();
+  const sesion = await requireEscritura();
   try {
     const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
     if (!camp) return { ok: false, error: 'La campaña no existe' };
