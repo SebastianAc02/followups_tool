@@ -1,0 +1,47 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # Gate: nada llega al VPS si esto no pasa entero. tsc/tests/build corren en una
+  # maquina limpia de GitHub, no en el server -- codigo roto nunca toca produccion.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - name: build
+        # Mismo motivo que en el Dockerfile: app/db/index.ts abre la DB en la carga
+        # del modulo, next build necesita una ruta valida para eso, no una real.
+        env:
+          ISPS_DB_PATH: ":memory:"
+        run: npm run build
+
+  # Deploy: solo si el gate paso. Entra al VPS por SSH con una llave dedicada (no la
+  # personal de Sebastian) y hace git pull + rebuild -- no tumba Caddy ni la red onepay,
+  # solo recrea followups-web y followups-worker.
+  deploy:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy por SSH al VPS
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.VPS_HOST }} '
+            set -e
+            cd ~/followups-tool
+            git pull origin main
+            docker compose -f docker-compose.production.yml build followups-web followups-worker
+            docker compose -f docker-compose.production.yml up -d
+          '
