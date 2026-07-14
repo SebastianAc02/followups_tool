@@ -146,6 +146,23 @@ const calorDesc = sql`(CASE ${empresa.estadoNotion}
   WHEN 'on_hold' THEN 0
   ELSE 1 END) DESC`;
 
+// Columnas compartidas por las variantes de la cola (colaDelDia, colaLeads, colaCierres,
+// colaReagendar): mismo shape de fila en las cuatro, solo cambia el WHERE.
+const columnasCola = {
+  id: empresa.idEmpresa,
+  empresa: empresa.nombreOficial,
+  ciudad: empresa.ciudadPrincipal,
+  estado: empresa.estadoNotion,
+  crm: empresa.crmSoftware,
+  pasarela: empresa.pasarelaActual,
+  proximoPaso: empresa.proximoPaso,
+  canal: empresa.proximoCanal,
+  fecha: empresa.proximoFollowUpFecha,
+  contacto: contacto.nombre,
+  cargo: contacto.cargo,
+  usuarios: empresaUsuarios.usuariosEfectivos,
+};
+
 // Cola del día de un owner DENTRO de una organización: vencidos o para hoy, ordenados
 // por calor y luego antigüedad. idOrganizacion viene de la sesión (Parte 1, multi-org):
 // un lead compartido solo aparece en la cola de quien lo tiene activo ahora mismo.
@@ -160,20 +177,7 @@ export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacio
   ];
   if (owner) condiciones.push(eq(empresa.owner, owner));
   return db
-    .select({
-      id: empresa.idEmpresa,
-      empresa: empresa.nombreOficial,
-      ciudad: empresa.ciudadPrincipal,
-      estado: empresa.estadoNotion,
-      crm: empresa.crmSoftware,
-      pasarela: empresa.pasarelaActual,
-      proximoPaso: empresa.proximoPaso,
-      canal: empresa.proximoCanal,
-      fecha: empresa.proximoFollowUpFecha,
-      contacto: contacto.nombre,
-      cargo: contacto.cargo,
-      usuarios: empresaUsuarios.usuariosEfectivos,
-    })
+    .select(columnasCola)
     .from(empresa)
     .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
