@@ -71,7 +71,7 @@ export function SecuenciaRail({
             <p className="text-xs text-muted">Sin secuencia activa · llamada suelta</p>
             {estado != null && estado !== "lead" && (
               <p className="mt-2 rounded-lg border border-line bg-shell-2 px-2.5 py-2 text-[11px] leading-snug text-faint">
-                Hay historial que no se guardó en la herramienta — esta cuenta se empezó a
+                Hay historial que no se guardó en la herramienta: esta cuenta se empezó a
                 tocar antes.
               </p>
             )}
