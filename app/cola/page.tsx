@@ -7,11 +7,7 @@ import CadenciasHoy from "./CadenciasHoy";
 import { BarraAhora } from "./BarraAhora";
 import { AgendaHoy } from "./AgendaHoy";
 import { contarCerradas } from "./stats";
-import { canalNormalizado, filaSinVencimiento, OWNER_COLA_SPLIT, type FilaAgenda } from "./agenda.ts";
-
-function diasVencido(fechaISO: string, hoyISO: string) {
-  return Math.round((Date.parse(hoyISO) - Date.parse(fechaISO)) / 86400000);
-}
+import { filaSinVencimiento, filaConVencimiento, diasVencido, OWNER_COLA_SPLIT, type FilaAgenda } from "./agenda.ts";
 
 export default async function Cola({ searchParams }: { searchParams: Promise<{ owner?: string }> }) {
   const usuario = await requireSession();
@@ -38,24 +34,10 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
     historial: t.esManual === 1 ? historialPasosDestinatario(t.idDestinatario) : [],
   }));
 
-  const filas: FilaAgenda[] = cola.map((c, i) => {
-    const dias = diasVencido(c.fecha!, hoy);
-    return {
-      id: c.id,
-      empresa: c.empresa,
-      ciudad: c.ciudad,
-      contacto: c.contacto,
-      cargo: c.cargo,
-      canal: canalNormalizado(c.canal),
-      estado: c.estado,
-      sev: dias > 0 ? "overdue" : "today",
-      severidadTexto: dias > 0 ? `vencido ${dias}d` : "hoy",
-      actual: i === 0,
-    };
-  });
+  const filas: FilaAgenda[] = cola.map((c, i) => filaConVencimiento(c, hoy, i === 0));
 
   const filasCierres: FilaAgenda[] = cierres.map((c) => filaSinVencimiento(c));
-  const filasReagendar: FilaAgenda[] = reagendar.map((c) => filaSinVencimiento(c));
+  const filasReagendar: FilaAgenda[] = reagendar.map((c) => filaConVencimiento(c, hoy, false));
 
   const actual = cola[0];
   const diasActual = actual ? diasVencido(actual.fecha!, hoy) : 0;
