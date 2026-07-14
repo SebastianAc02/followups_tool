@@ -311,6 +311,63 @@ export function colaContactoIniciadoSinSeguimiento(owner: string, idOrganizacion
     .all();
 }
 
+export type FilaPipelineSinCadencia = {
+  idEmpresa: string;
+  empresa: string;
+  contacto: string | null;
+  cargo: string | null;
+  canal: string | null;
+  fecha: string | null;
+  estado: string | null;
+  esHoy: boolean;
+};
+
+// Franja "Sin cadencia" de /seguimiento (2026-07-14): el complemento de pipelineGlobal.
+// pipelineGlobal solo trae empresas inscritas en una cadencia activa; esta trae los toques
+// MANUALES (empresas con un follow-up pendiente, vencido o de hoy) que NO estan en ninguna
+// cadencia activa, org-wide. Asi Seguimiento muestra TODO lo pendiente, no solo lo cadenceado.
+// Los leads dormidos (proximo_follow_up_fecha en null) quedan fuera a proposito: "dormido" =
+// sin fecha = fuera de seguimiento hasta que alguien le ponga una.
+export function pipelineSinCadencia(idOrganizacion: number, hoy: string): FilaPipelineSinCadencia[] {
+  const filas = db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      empresa: empresa.nombreOficial,
+      contacto: contacto.nombre,
+      cargo: contacto.cargo,
+      canal: empresa.proximoCanal,
+      fecha: empresa.proximoFollowUpFecha,
+      estado: empresa.estadoNotion,
+    })
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        isNotNull(empresa.proximoFollowUpFecha),
+        // Cutoff de fecha: solo vencidos o de hoy (mismo criterio que la cola). Si algun dia se
+        // quieren ver tambien follow-ups a futuro en Seguimiento, se quita esta linea.
+        lte(empresa.proximoFollowUpFecha, hoy),
+        // Estado (decision de Sebastian 2026-07-14): on_hold = dormidos y firma_pago = clientes
+        // ganados; ninguno es un toque manual pendiente. contacto_iniciado y el resto SI entran.
+        // COALESCE para que estado vacio/null no caiga por el NULL NOT IN (que da NULL, no true).
+        sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago')`,
+        // "Sin cadencia" = no tiene inscripcion activa (mismo patron que
+        // colaContactoIniciadoSinSeguimiento). Si la tuviera, ya sale en las franjas "Toque N".
+        notExists(
+          db
+            .select({ x: sql`1` })
+            .from(inscripcion)
+            .where(and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa'))),
+        ),
+      ),
+    )
+    .orderBy(empresa.proximoFollowUpFecha)
+    .all();
+
+  return filas.map((f) => ({ ...f, esHoy: f.fecha === hoy }));
+}
+
 // V3.9: busca CUALQUIER empresa por nombre, sin restringir por owner ni por
 // proximoFollowUpFecha, a diferencia de colaDelDia(), que solo trae leads propios
 // y vencidos. Sirve para registrar un toque con alguien que no es lead de la cola

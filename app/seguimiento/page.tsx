@@ -3,7 +3,7 @@
 // Envuelta por layout.tsx que ya hace requireSession() + AppShell, así que esta página
 // solo renderiza el contenido específico de seguimiento.
 import { requireSession } from '../lib/session';
-import { kpisPipeline, pipelineGlobal } from '../db/repository';
+import { kpisPipeline, pipelineGlobal, pipelineSinCadencia } from '../db/repository';
 import { canalNormalizado } from '../cola/agenda.ts';
 import { SeguimientoShell } from '../ui/seguimiento/SeguimientoShell';
 import { KpiRow, type KpiData } from '../ui/seguimiento/KpiRow';
@@ -120,14 +120,58 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
     })
     .filter((g): g is { data: EtapaGroupData; empresas: EmpresaRowData[] } => g !== null);
 
+  // Franja "Sin cadencia" (2026-07-14): los toques manuales pendientes que no estan en
+  // ninguna cadencia activa. Van en su propia franja al final, separados de los "Toque N"
+  // cadenceados, para que Seguimiento muestre todo lo pendiente y no solo lo del motor.
+  const filasSinCadencia = pipelineSinCadencia(usuario.idOrganizacion, hoy);
+  const grupoSinCadencia = (() => {
+    if (filasSinCadencia.length === 0) return null;
+    const mezclaCanales = { ll: 0, wa: 0, co: 0 };
+    let toquesHoy = 0;
+    const empresas: EmpresaRowData[] = filasSinCadencia.map((f) => {
+      const canal = canalNormalizado(f.canal);
+      if (canal === 'llamada') mezclaCanales.ll += 1;
+      else if (canal === 'whatsapp') mezclaCanales.wa += 1;
+      else mezclaCanales.co += 1;
+      if (f.esHoy) toquesHoy += 1;
+
+      return {
+        id: f.idEmpresa,
+        nombre: f.empresa,
+        contacto: f.contacto ?? 'Sin contacto activo',
+        cargo: f.cargo ?? '',
+        pasoActual: 'Toque manual',
+        diaSecuencia: 0,
+        cadencia: 'Sin cadencia',
+        objetivo: null,
+        canal,
+        esHoy: f.esHoy,
+      };
+    });
+
+    const data: EtapaGroupData = {
+      estado: 'sin-cadencia',
+      label: 'Sin cadencia',
+      total: filasSinCadencia.length,
+      mezclaCanales,
+      toquesHoy,
+    };
+
+    return { data, empresas };
+  })();
+
+  const todosLosGrupos = grupoSinCadencia ? [...grupos, grupoSinCadencia] : grupos;
+
   return (
     <div className="space-y-6">
       <KpiRow data={kpis} />
       <div className="space-y-2">
-        {grupos.map((g, i) => (
+        {todosLosGrupos.map((g, i) => (
           <EtapaGroup key={g.data.estado} data={g.data} empresas={g.empresas} defaultExpanded={i === 0} />
         ))}
-        {grupos.length === 0 && <p className="text-sm text-muted px-2">No hay inscripciones activas todavía.</p>}
+        {todosLosGrupos.length === 0 && (
+          <p className="text-sm text-muted px-2">No hay inscripciones activas ni toques manuales pendientes.</p>
+        )}
       </div>
     </div>
   );
