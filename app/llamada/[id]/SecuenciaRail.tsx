@@ -48,10 +48,16 @@ export function SecuenciaRail({
   pasos,
   objetivo,
   toques,
+  estado,
 }: {
   pasos: PasoSecuencia[];
   objetivo: string | null;
   toques?: ContextoToque["toques"];
+  // Estado de la empresa (empresa.estado_notion): decide si se muestra el banner de
+  // "historial incompleto" cuando no hay secuencia activa (2026-07-14). 'lead' es la
+  // unica etapa donde la herramienta sabe con certeza que el ciclo de vida esta
+  // completo (nunca se trabajo fuera de ella) -- ahi no se muestra.
+  estado?: string | null;
 }) {
   return (
     <div className="flex flex-col border-b border-line md:border-b-0 md:border-r">
@@ -63,6 +69,12 @@ export function SecuenciaRail({
         {pasos.length === 0 ? (
           <div className="pl-1">
             <p className="text-xs text-muted">Sin secuencia activa · llamada suelta</p>
+            {estado != null && estado !== "lead" && (
+              <p className="mt-2 rounded-lg border border-line bg-shell-2 px-2.5 py-2 text-[11px] leading-snug text-faint">
+                Hay historial que no se guardó en la herramienta — esta cuenta se empezó a
+                tocar antes.
+              </p>
+            )}
             {toques && toques.length > 0 && (
               <ul className="mt-3 flex flex-col gap-2">
                 {toques.map((t) => (
