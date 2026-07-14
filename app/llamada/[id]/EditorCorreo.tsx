@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { ContextoToque, VersionDePaso } from "../../db/repository";
 import { resaltarVariables } from "../../core/personalizar-copy";
 import { enviarToqueCanalAction, registrarToqueSueltoAction } from "./actions";
+import { ProximoToque } from "./ProximoToque";
+import { plusDias } from "../../lib/date-utils";
 
 // Toque 2 (mockup "OnePay Email Editor Toque 2"): title bar + metadata strip + grid
 // [1fr_216px] con el copy editable a la izquierda y la barra de versiones a la derecha.
@@ -74,6 +76,7 @@ export function EditorCorreo({
   const [idVersionActiva, setIdVersionActiva] = useState<number | null>(defaultVersion?.idVersion ?? null);
   const [asunto, setAsunto] = useState(defaultVersion?.asunto ?? "");
   const [cuerpo, setCuerpo] = useState(defaultVersion?.cuerpo ?? "");
+  const [fecha, setFecha] = useState(plusDias(3));
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,7 +100,7 @@ export function EditorCorreo({
       }
       // exito: enviarToqueCanalAction redirige, este componente se desmonta.
     } else {
-      await registrarToqueSueltoAction(idEmpresa, "correo", cuerpo, undefined);
+      await registrarToqueSueltoAction(idEmpresa, "correo", cuerpo, fecha);
     }
   }
 
@@ -154,6 +157,11 @@ export function EditorCorreo({
             className="mb-4 min-h-[140px] w-full resize-y rounded-lg border border-line bg-hover px-3 py-2.5 text-[13px] leading-relaxed text-ink outline-none placeholder:text-faint focus:border-line-strong"
           />
 
+          {idPasoInscripcion == null && (
+            <div className="mb-3">
+              <ProximoToque fecha={fecha} onChange={setFecha} accentClase="border-accent-correo bg-accent-correo-soft text-ink" />
+            </div>
+          )}
           {error && <p className="mb-2 text-[12.5px] text-overdue">{error}</p>}
 
           <div className="flex items-center gap-2.5">

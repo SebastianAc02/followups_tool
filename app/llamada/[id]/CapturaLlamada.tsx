@@ -6,6 +6,7 @@ import { RESULTADO_LABELS, RESULTADOS, RESULTADOS_CONTESTO, type Resultado } fro
 import { plusDias } from "../../lib/date-utils";
 import type { ToqueEstructurado } from "../../core/estructurar-toque";
 import type { Calificacion } from "../../core/calificacion";
+import { ProximoToque } from "./ProximoToque";
 
 function outcomesPara(estado: string | null): { v: Resultado; l: string }[] {
   // "No llego a la reunion" solo tiene sentido cuando la empresa esta en reunion_agendada
@@ -13,7 +14,6 @@ function outcomesPara(estado: string | null): { v: Resultado; l: string }[] {
   const disponibles = estado === "reunion_agendada" ? RESULTADOS : RESULTADOS.filter((v) => v !== "no_llego");
   return disponibles.map((v) => ({ v, l: RESULTADO_LABELS[v] }));
 }
-const CHIPS: [string, number][] = [["+1d", 1], ["+3d", 3], ["+1sem", 7]];
 
 const inputClase =
   "w-full rounded-lg border border-line bg-shell px-2.5 py-2 text-[13px] text-ink placeholder:text-faint outline-none focus:border-accent-llamada";
@@ -211,32 +211,7 @@ export default function CapturaLlamada({
             </label>
           )}
 
-          <div>
-            <div className="mb-2 font-toque-mono text-[10.5px] uppercase tracking-wide text-faint">Próximo toque</div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {CHIPS.map(([l, d]) => (
-                <button
-                  type="button"
-                  key={l}
-                  onClick={() => setFecha(plusDias(d))}
-                  className={`rounded-full border px-2.5 py-1 text-[11.5px] font-medium ${
-                    fecha === plusDias(d)
-                      ? "border-accent-llamada bg-accent-llamada-soft text-ink"
-                      : "border-line text-muted hover:border-line-strong"
-                  }`}
-                >
-                  {l}
-                </button>
-              ))}
-              <input
-                type="date"
-                name="fecha"
-                value={fecha}
-                onChange={(e) => setFecha(e.target.value)}
-                className="rounded-lg border border-line bg-shell px-2 py-1 text-[12px] text-ink"
-              />
-            </div>
-          </div>
+          <ProximoToque fecha={fecha} onChange={setFecha} name="fecha" />
 
           <button
             type="submit"
