@@ -3,15 +3,17 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { registrarUsuarioAction } from './actions';
+import { registrarUsuarioAction, OWNERS_ONEPAY } from './actions';
 
-export default function RegisterForm({ owners }: { owners: string[] }) {
+export default function RegisterForm() {
   const router = useRouter();
   const [paso, setPaso] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmar, setConfirmar] = useState('');
+  const [soyOnepay, setSoyOnepay] = useState<boolean | null>(null);
   const [ownerElegido, setOwnerElegido] = useState('');
+  const [nombreVisitante, setNombreVisitante] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
@@ -34,7 +36,11 @@ export default function RegisterForm({ owners }: { owners: string[] }) {
     setError(null);
     setEnviando(true);
     try {
-      const resultado = await registrarUsuarioAction({ ownerElegido, email, password });
+      const input =
+        soyOnepay === true
+          ? { tipo: 'onepay' as const, ownerElegido, email, password }
+          : { tipo: 'visitante' as const, nombreVisitante, email, password };
+      const resultado = await registrarUsuarioAction(input);
       if (!resultado.ok) {
         setError(resultado.error);
         return;
@@ -60,20 +66,7 @@ export default function RegisterForm({ owners }: { owners: string[] }) {
     </div>
   );
 
-  if (owners.length === 0) {
-    return (
-      <div className="ac-card">
-        <div className="ac-inner">
-          {marca}
-          <h2 className="ac-h med">Sin nombres disponibles</h2>
-          <p className="ac-sub">No hay owners libres en el pipeline todavía. Habla con Sebastián.</p>
-          <div className="ac-foot">
-            <Link href="/login">Ir a iniciar sesión</Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const puedeEnviar = soyOnepay === true ? ownerElegido !== '' : soyOnepay === false ? nombreVisitante.trim() !== '' : false;
 
   return (
     <div className="ac-card">
@@ -89,7 +82,7 @@ export default function RegisterForm({ owners }: { owners: string[] }) {
         {paso === 1 && (
           <form onSubmit={irAPaso2}>
             <h2 className="ac-h med">Crea tu cuenta</h2>
-            <p className="ac-sub">Primero tus credenciales. Luego elegimos organización y rol.</p>
+            <p className="ac-sub">Primero tus credenciales. Luego nos dices quién eres.</p>
 
             <label className="ac-label" htmlFor="email">Correo</label>
             <div className="ac-field">
@@ -134,28 +127,55 @@ export default function RegisterForm({ owners }: { owners: string[] }) {
         {paso === 2 && (
           <form onSubmit={onSubmit}>
             <h2 className="ac-h med">Configura tu cabina</h2>
-            <p className="ac-sub">Cuenta creada para <em>{email}</em>. Dinos quién eres en el equipo.</p>
+            <p className="ac-sub">Cuenta creada para <em>{email}</em>. ¿Eres del equipo OnePay?</p>
 
-            <label className="ac-label">Organización</label>
-            <div className="ac-orgchip">
-              <div className="ac-orgchip-badge">O</div>
-              <span className="ac-orgchip-name">Onepay</span>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
+              <button
+                type="button"
+                className="ac-btn"
+                style={{ opacity: soyOnepay === true ? 1 : 0.45 }}
+                onClick={() => { setSoyOnepay(true); setError(null); }}
+              >
+                Sí, soy de OnePay
+              </button>
+              <button
+                type="button"
+                className="ac-btn"
+                style={{ opacity: soyOnepay === false ? 1 : 0.45, background: '#232a31', color: '#e7ecef' }}
+                onClick={() => { setSoyOnepay(false); setError(null); }}
+              >
+                No, soy visitante
+              </button>
             </div>
 
-            <label className="ac-label" htmlFor="ownerElegido">Tu nombre en el pipeline</label>
-            <div className="ac-field ac-select" style={{ marginBottom: 24 }}>
-              <select id="ownerElegido" required value={ownerElegido}
-                onChange={(e) => setOwnerElegido(e.target.value)}>
-                <option value="" disabled>Elige tu nombre</option>
-                {owners.map((o) => (
-                  <option key={o} value={o}>{o}</option>
-                ))}
-              </select>
-            </div>
+            {soyOnepay === true && (
+              <>
+                <label className="ac-label" htmlFor="ownerElegido">Tu nombre en el pipeline</label>
+                <div className="ac-field ac-select" style={{ marginBottom: 24 }}>
+                  <select id="ownerElegido" required value={ownerElegido}
+                    onChange={(e) => setOwnerElegido(e.target.value)}>
+                    <option value="" disabled>Elige tu nombre</option>
+                    {OWNERS_ONEPAY.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {soyOnepay === false && (
+              <>
+                <label className="ac-label" htmlFor="nombreVisitante">Tu nombre</label>
+                <div className="ac-field" style={{ marginBottom: 24 }}>
+                  <input id="nombreVisitante" type="text" placeholder="Como quieres que te veamos" required
+                    value={nombreVisitante} onChange={(e) => setNombreVisitante(e.target.value)} />
+                </div>
+              </>
+            )}
 
             {error && <div className="ac-error">{error}</div>}
 
-            <button className="ac-btn" disabled={enviando || ownerElegido === ''}>
+            <button className="ac-btn" disabled={enviando || !puedeEnviar}>
               {enviando ? 'Creando cuenta...' : 'Entrar a la cabina'}
             </button>
             <button type="button" className="ac-back" onClick={() => { setError(null); setPaso(1); }}>

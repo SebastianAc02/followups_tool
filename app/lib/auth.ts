@@ -8,13 +8,14 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: 'sqlite' }),
   emailAndPassword: {
     enabled: true,
-    // Cerrado (2026-07-14): /register no exigia dominio de correo, y el dropdown de
-    // owners libres dejaba que cualquier visitante con cualquier email reclamara la
-    // identidad de un vendedor real que todavia no se hubiera registrado (veria su
-    // pipeline completo). Gate real aca, no solo en la UI: aunque alguien llame
-    // registrarUsuarioAction directo, signUpEmail lo rechaza. Cuentas nuevas: a mano
-    // (scripts/seed_auth_users.ts), como antes de V6.
-    disableSignUp: true,
+    // Reabierto (2026-07-14) con un diseno distinto al original: /register ya no deriva
+    // la lista de owners de la DB (ownersDisponibles filtraba basura de datos y exponia
+    // nombres reales a cualquier visitante anonimo). Ahora hay dos caminos explicitos en
+    // registrarUsuarioAction: 'onepay' (lista cerrada de 4 nombres reales, casing exacto)
+    // o 'visitante' (nombre freeform, cae en la organizacion "Visitantes" -- vacia, sin
+    // acceso a ningun dato real de Onepay). La seguridad ya no depende de bloquear el
+    // signup a nivel de auth, sino de que "Visitantes" nunca tenga empresas reales.
+    disableSignUp: false,
   },
   user: {
     additionalFields: {

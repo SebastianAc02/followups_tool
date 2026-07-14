@@ -11,6 +11,8 @@ import {
   organizacionDeUsuario,
   ownersDisponibles,
   crearMiembroYSetOwner,
+  organizacionVisitantesIdOCrear,
+  crearMiembroVisitante,
   dbDePrueba,
 } from './organizacion-repository.ts';
 
@@ -144,4 +146,45 @@ test('crearMiembroYSetOwner falla si otro usuario ya reclamo ese owner (carrera)
   const otro = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('otro-user') as any;
   assert.equal(otro, undefined, 'el reclamo fallido no debe tocar la tabla user para el segundo usuario');
   raw.close();
+});
+
+test('organizacionVisitantesIdOCrear crea la organizacion la primera vez y reusa el mismo id despues', () => {
+  const db = dbDePrueba(dbPath);
+  const primero = organizacionVisitantesIdOCrear(db);
+  const segundo = organizacionVisitantesIdOCrear(db);
+  assert.equal(primero, segundo, 'la segunda llamada debe encontrar la fila ya creada, no duplicarla');
+
+  const raw = new Database(dbPath);
+  const filas = raw.prepare(`SELECT id_organizacion FROM organizacion WHERE nombre = 'Visitantes'`).all();
+  assert.equal(filas.length, 1, 'solo debe existir una fila Visitantes sin importar cuantas veces se llame');
+  raw.close();
+});
+
+test('crearMiembroVisitante cae en la organizacion Visitantes, no en Onepay', () => {
+  const db = dbDePrueba(dbPath);
+  const raw0 = new Database(dbPath);
+  raw0.prepare(`INSERT INTO user (id, name, email) VALUES ('user-visitante', 'Juan Curioso', 'juan@test.com')`).run();
+  raw0.close();
+
+  crearMiembroVisitante('Juan Curioso', 'user-visitante', db);
+
+  const idVisitantes = organizacionVisitantesIdOCrear(db);
+  const org = organizacionDeUsuario('user-visitante', db);
+  assert.equal(org?.idOrganizacion, idVisitantes);
+  assert.notEqual(org?.idOrganizacion, 1, 'un visitante nunca debe terminar en la organizacion Onepay');
+
+  const raw = new Database(dbPath);
+  const usuario = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('user-visitante') as any;
+  assert.equal(usuario.owner, 'Juan Curioso');
+  raw.close();
+});
+
+test('crearMiembroVisitante no choca si dos visitantes eligen el mismo nombre (freeform, sin dueno unico)', () => {
+  const db = dbDePrueba(dbPath);
+  crearMiembroVisitante('Ana Duplicada', 'user-visitante-1', db);
+  crearMiembroVisitante('Ana Duplicada', 'user-visitante-2', db);
+
+  const org1 = organizacionDeUsuario('user-visitante-1', db);
+  const org2 = organizacionDeUsuario('user-visitante-2', db);
+  assert.equal(org1?.idOrganizacion, org2?.idOrganizacion, 'ambos visitantes caen en la misma organizacion Visitantes');
 });

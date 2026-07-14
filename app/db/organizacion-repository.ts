@@ -142,6 +142,42 @@ export function crearMiembroYSetOwner(
   });
 }
 
+// Organizacion "Visitantes" (2026-07-14): sandbox para quien se registra sin ser del
+// equipo Onepay. Vacia de empresas reales -- ownerCanonico ahi es freeform (lo que el
+// visitante escriba), nunca toca ni expone el pipeline real. Auto-crea la fila la
+// primera vez que hace falta, no depende de un seed manual previo.
+const NOMBRE_ORGANIZACION_VISITANTES = 'Visitantes';
+
+export function organizacionVisitantesIdOCrear(db: DbInstancia = dbSingleton): number {
+  return db.transaction((tx) => {
+    const existente = tx
+      .select({ id: organizacion.idOrganizacion })
+      .from(organizacion)
+      .where(eq(organizacion.nombre, NOMBRE_ORGANIZACION_VISITANTES))
+      .get();
+    if (existente) return existente.id;
+
+    const res = tx
+      .insert(organizacion)
+      .values({ nombre: NOMBRE_ORGANIZACION_VISITANTES, createdAt: new Date().toISOString() })
+      .run();
+    return Number(res.lastInsertRowid);
+  });
+}
+
+// Sin contencion de "ya reclamado": a diferencia de crearMiembroYSetOwner (nombres reales,
+// un solo dueno posible por nombre), el nombre de un visitante es freeform -- dos personas
+// pueden escribir el mismo display name sin que eso choque con nada real.
+export function crearMiembroVisitante(nombreVisitante: string, idUsuario: string, db: DbInstancia = dbSingleton): void {
+  const idOrganizacion = organizacionVisitantesIdOCrear(db);
+  db.transaction((tx) => {
+    tx.insert(organizacionMiembro)
+      .values({ idOrganizacion, ownerCanonico: nombreVisitante, nombreDisplay: nombreVisitante, idUser: idUsuario, createdAt: new Date().toISOString() })
+      .run();
+    tx.update(user).set({ owner: nombreVisitante }).where(eq(user.id, idUsuario)).run();
+  });
+}
+
 // Helper solo para tests: crea una instancia Drizzle apuntando a un archivo de prueba, con
 // el MISMO shape de schema que el singleton real (schema + authSchema) para que el tipo
 // DbInstancia calce sin castear.
