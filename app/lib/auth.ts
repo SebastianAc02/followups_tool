@@ -8,9 +8,13 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: 'sqlite' }),
   emailAndPassword: {
     enabled: true,
-    // V6: registro self-service real via /register (organizacion-repository controla que
-    // solo se pueda tomar un nombre libre). Ya no depende de ALLOW_SIGNUP.
-    disableSignUp: false,
+    // Cerrado (2026-07-14): /register no exigia dominio de correo, y el dropdown de
+    // owners libres dejaba que cualquier visitante con cualquier email reclamara la
+    // identidad de un vendedor real que todavia no se hubiera registrado (veria su
+    // pipeline completo). Gate real aca, no solo en la UI: aunque alguien llame
+    // registrarUsuarioAction directo, signUpEmail lo rechaza. Cuentas nuevas: a mano
+    // (scripts/seed_auth_users.ts), como antes de V6.
+    disableSignUp: true,
   },
   user: {
     additionalFields: {
