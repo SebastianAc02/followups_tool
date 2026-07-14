@@ -7,7 +7,7 @@ import { crearDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { actualizarEstadoNotion, embudoPipeline } = await import('./repository.ts');
+const { actualizarEstadoNotion, embudoPipeline, historialEtapasEmpresa } = await import('./repository.ts');
 
 function seedEmpresa(id: string, estado: string | null) {
   const raw = new Database(dbPath);
@@ -86,4 +86,17 @@ test('embudoPipeline: suma usuarios_efectivos por etapa (empresa_usuarios es 1:1
   const fila = conteos.find((c) => c.estado === 'oportunidad');
   assert.equal(fila?.total, 2);
   assert.equal(fila?.usuarios, 120);
+});
+
+test('historialEtapasEmpresa: devuelve etapa actual + transiciones ordenadas', () => {
+  seedEmpresa('h1', 'reunion_agendada');
+  actualizarEstadoNotion('h1', 'oportunidad', 1, '2026-07-10');
+  actualizarEstadoNotion('h1', 'cierre_documentacion', 1, '2026-07-12');
+
+  const r = historialEtapasEmpresa('h1', 1);
+  assert.equal(r.etapaActual, 'cierre_documentacion');
+  assert.equal(r.transiciones.length, 2);
+  assert.equal(r.transiciones[0].estado, 'oportunidad'); // mas antigua primero
+  assert.equal(r.transiciones[0].fecha, '2026-07-10');
+  assert.equal(r.transiciones[1].estado, 'cierre_documentacion');
 });

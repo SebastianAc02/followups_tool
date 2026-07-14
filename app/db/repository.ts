@@ -4039,3 +4039,32 @@ export function embudoPipeline(idOrganizacion: number): ConteoEtapa[] {
     usuarios: f.usuarios === null ? null : Number(f.usuarios),
   }));
 }
+
+export type HistorialEtapas = {
+  etapaActual: string | null;
+  transiciones: { estado: string; fecha: string }[]; // orden ascendente por fecha
+};
+
+// Timeline de etapas de una cuenta: etapa actual (empresa.estado_notion) + las
+// transiciones registradas en empresa_estado_historial. El pasado pre-deploy es
+// desconocido a proposito (no se inventa): la lista empieza cuando el sync llama a
+// actualizarEstadoNotion. Scoped a la organizacion.
+export function historialEtapasEmpresa(idEmpresa: string, idOrganizacion: number): HistorialEtapas {
+  const emp = db
+    .select({ estadoNotion: empresa.estadoNotion })
+    .from(empresa)
+    .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .get();
+
+  const filas = db
+    .select({ estado: empresaEstadoHistorial.estadoNuevo, fecha: empresaEstadoHistorial.fecha })
+    .from(empresaEstadoHistorial)
+    .where(and(eq(empresaEstadoHistorial.idEmpresa, idEmpresa), eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion)))
+    .orderBy(asc(empresaEstadoHistorial.fecha), asc(empresaEstadoHistorial.id))
+    .all();
+
+  return {
+    etapaActual: emp?.estadoNotion ?? null,
+    transiciones: filas,
+  };
+}
