@@ -24,7 +24,10 @@ services:
   followups-worker:
     build: .
     container_name: followups_worker
-    command: ["npm", "run", "worker"]
+    # No usar "npm run worker": ese script trae --env-file=.env.local hardcodeado
+    # (conveniencia de dev local). En el contenedor las variables ya llegan via
+    # env_file: de Compose -- ese flag exige que el archivo exista y no existe aca.
+    command: ["node", "--experimental-strip-types", "--experimental-loader", "./scripts/resolve-ts-ext.mjs", "./app/worker/index.ts"]
     restart: unless-stopped
     env_file:
       - .env.production
