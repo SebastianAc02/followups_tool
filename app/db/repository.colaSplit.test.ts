@@ -52,3 +52,14 @@ test('colaCierres: estados calientes del owner, con y sin fecha, sin nocion de v
   const ids = r.map((f) => f.id).sort();
   assert.deepEqual(ids, ['c1', 'c2', 'c3']);
 });
+
+test('colaReagendar: solo on_hold del owner, con y sin fecha', () => {
+  seedEmpresa('r1', OWNER, 'on_hold', '2026-07-10');
+  seedEmpresa('r2', OWNER, 'on_hold', null);
+  seedEmpresa('r3', OWNER, 'oportunidad', '2026-07-10'); // no es on_hold: no entra
+  seedEmpresa('r4', OTRO_OWNER, 'on_hold', '2026-07-10'); // otro owner: no entra
+
+  const r = colaReagendar(OWNER, 1);
+  const ids = r.map((f) => f.id).sort();
+  assert.deepEqual(ids, ['r1', 'r2']);
+});

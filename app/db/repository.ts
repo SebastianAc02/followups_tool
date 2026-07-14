@@ -58,7 +58,7 @@ import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
-import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
+import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS, ETAPA_ONHOLD } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
 import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
 import {
@@ -224,6 +224,26 @@ export function colaCierres(owner: string, idOrganizacion: number) {
         eq(empresa.organizacionActivaId, idOrganizacion),
         eq(empresa.owner, owner),
         inArray(empresa.estadoNotion, [...ESTADOS_CALIENTES]),
+      ),
+    )
+    .orderBy(sql`${empresa.proximoFollowUpFecha} IS NULL`, empresa.proximoFollowUpFecha)
+    .all();
+}
+
+// Bucket "Reagendar" del split de cola: cuentas on_hold del owner (se quedaron atascadas,
+// ej. no llegaron a la reunion). Mismo trato que colaCierres: lista fija, no depende de
+// fecha ni se marca "vencida".
+export function colaReagendar(owner: string, idOrganizacion: number) {
+  return db
+    .select(columnasCola)
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        eq(empresa.owner, owner),
+        eq(empresa.estadoNotion, ETAPA_ONHOLD),
       ),
     )
     .orderBy(sql`${empresa.proximoFollowUpFecha} IS NULL`, empresa.proximoFollowUpFecha)
