@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { registrarUsuarioAction } from './actions';
 import { OWNERS_ONEPAY } from './owners';
+import { authClient } from '../lib/auth-client';
 
 export default function RegisterForm() {
   const router = useRouter();
@@ -46,7 +47,18 @@ export default function RegisterForm() {
         setError(resultado.error);
         return;
       }
-      router.push('/login');
+      // La cuenta ya existe; iniciamos sesion en el cliente (mismo patron que LoginForm)
+      // para dejar la cookie de sesion y entrar directo a la cabina, sin pasar por /login
+      // otra vez. El server action crea el usuario pero su Set-Cookie no llega al browser.
+      const { error: errLogin } = await authClient.signIn.email({ email, password, rememberMe: true });
+      if (errLogin) {
+        // No deberia pasar (recien la creamos); si el auto-login falla, al menos mandamos
+        // al login en vez de dejar la pantalla colgada.
+        router.push('/login');
+        return;
+      }
+      router.push('/');
+      router.refresh();
     } catch {
       setError('Error de conexión. Intenta de nuevo.');
     } finally {
