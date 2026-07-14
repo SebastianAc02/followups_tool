@@ -41,11 +41,16 @@ type Props = {
   opciones: Opciones;
   segmentosGuardados: Segmento[];
   reanudarDesde?: Segmento | null;
+  // Prefill de una definicion NUEVA (2026-07-14, boton "Promover a campana" de /cola) --
+  // distinto de reanudarDesde (que retoma un segmento YA guardado por id). Solo aplica
+  // como estado inicial: si tambien llega reanudarDesde, ese gana (useEffect de
+  // cargarSegmentoGuardado corre despues y sobreescribe `def`).
+  prefill?: DefinicionSegmento;
   onGuardado: (s: Segmento) => void;
 };
 
-export function NuevoSegmento({ opciones, segmentosGuardados, reanudarDesde, onGuardado }: Props) {
-  const [def, setDef] = useState<DefinicionSegmento>(VACIO);
+export function NuevoSegmento({ opciones, segmentosGuardados, reanudarDesde, prefill, onGuardado }: Props) {
+  const [def, setDef] = useState<DefinicionSegmento>(prefill ?? VACIO);
   // ids de la version ANTERIOR del segmento; se usan una sola vez para marcar
   // "relajada" las filas que el relleno del Copiloto sumo, luego se limpian.
   const [idsPrevios, setIdsPrevios] = useState<string[] | undefined>(undefined);
