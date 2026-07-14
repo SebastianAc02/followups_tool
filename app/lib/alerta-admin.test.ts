@@ -58,3 +58,7 @@ test('avisarAdminPorWhatsapp: si enviarPaso falla, no propaga la excepcion', asy
     }),
   );
 });
+
+test.after(() => {
+  delete process.env.ADMIN_ALERTA_WHATSAPP_NUMERO;
+});

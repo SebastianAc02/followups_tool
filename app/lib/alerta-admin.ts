@@ -28,7 +28,13 @@ export async function avisarAdminPorWhatsapp(mensaje: string, deps: DepsAlertaAd
     return;
   }
 
-  const linea = deps.lineaWhatsappActiva();
+  let linea: { referenciaProveedor: string } | null;
+  try {
+    linea = deps.lineaWhatsappActiva();
+  } catch (e) {
+    console.error('avisarAdminPorWhatsapp: fallo al resolver la linea activa:', e instanceof Error ? e.message : e);
+    return;
+  }
   if (!linea) {
     console.error('avisarAdminPorWhatsapp: no hay ninguna linea de WhatsApp activa, alerta no enviada:', mensaje);
     return;
