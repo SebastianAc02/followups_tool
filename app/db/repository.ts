@@ -209,6 +209,27 @@ export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
     .all();
 }
 
+// Bucket "Cierres" del split de cola: estados calientes (ESTADOS_CALIENTES), sin filtro de
+// fecha -- una cuenta en negociacion no es "vencida" solo porque no tiene fecha puesta.
+// Ordena por fecha si la tiene; las sin fecha van al final (NULL primero en SQLite ASC, por
+// eso el CASE explicito).
+export function colaCierres(owner: string, idOrganizacion: number) {
+  return db
+    .select(columnasCola)
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        eq(empresa.owner, owner),
+        inArray(empresa.estadoNotion, [...ESTADOS_CALIENTES]),
+      ),
+    )
+    .orderBy(sql`${empresa.proximoFollowUpFecha} IS NULL`, empresa.proximoFollowUpFecha)
+    .all();
+}
+
 // V3.9: busca CUALQUIER empresa por nombre, sin restringir por owner ni por
 // proximoFollowUpFecha, a diferencia de colaDelDia(), que solo trae leads propios
 // y vencidos. Sirve para registrar un toque con alguien que no es lead de la cola

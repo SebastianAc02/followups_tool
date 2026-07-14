@@ -40,3 +40,15 @@ test('colaLeads: solo estado lead, vencido o de hoy, del owner y organizacion pe
   const ids = r.map((f) => f.id).sort();
   assert.deepEqual(ids, ['l1', 'l2']);
 });
+
+test('colaCierres: estados calientes del owner, con y sin fecha, sin nocion de vencido', () => {
+  seedEmpresa('c1', OWNER, 'oportunidad', '2026-07-10'); // vencido segun fecha: igual entra
+  seedEmpresa('c2', OWNER, 'cierre_documentacion', null); // sin fecha: igual entra
+  seedEmpresa('c3', OWNER, 'reunion_agendada', '2026-08-01'); // futuro: igual entra
+  seedEmpresa('c4', OWNER, 'lead', '2026-07-10'); // no es estado caliente: no entra
+  seedEmpresa('c5', OTRO_OWNER, 'oportunidad', '2026-07-10'); // otro owner: no entra
+
+  const r = colaCierres(OWNER, 1);
+  const ids = r.map((f) => f.id).sort();
+  assert.deepEqual(ids, ['c1', 'c2', 'c3']);
+});
