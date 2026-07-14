@@ -1,8 +1,9 @@
 // Shell reusable del cockpit (rediseño home). Server component: hace su propio fetch de los
 // datos del shell y renderiza sidebar + top bar + main. Cualquier ruta lo puede envolver.
 import type { ReactNode } from 'react';
-import { colaDelDia, listarCampanas, estadoConector, contarPorEstado, inscripcionesBloqueadas } from '../../db/repository';
+import { colaDelDia, colaLeads, listarCampanas, estadoConector, contarPorEstado, inscripcionesBloqueadas } from '../../db/repository';
 import { ESTADOS_ACTIVOS } from '../../db/funnel';
+import { OWNER_COLA_SPLIT } from '../../cola/agenda.ts';
 import { requireSession } from '../../lib/session';
 import { cargarPerfil } from '../../lib/perfil';
 import { Sidebar, type ConectorEstado } from './Sidebar';
@@ -29,7 +30,7 @@ export async function datosSidebar() {
 
   const hoy = new Date().toISOString().slice(0, 10);
 
-  const toquesHoy = colaDelDia(hoy, owner, usuario.idOrganizacion).length;
+  const toquesHoy = (owner === OWNER_COLA_SPLIT ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion)).length;
   const campanasActivas = listarCampanas().filter((c) => c.estado === 'activa').length;
   const porEstado = contarPorEstado(undefined, usuario.idOrganizacion);
   const cuentasFunnel = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
