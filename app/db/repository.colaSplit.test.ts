@@ -48,15 +48,24 @@ test('colaLeads: solo estado lead, vencido o de hoy, del owner y organizacion pe
 });
 
 test('colaCierres: estados calientes del owner, con y sin fecha, sin nocion de vencido', () => {
-  seedEmpresa('c1', OWNER, 'oportunidad', '2026-07-10'); // vencido segun fecha: igual entra
-  seedEmpresa('c2', OWNER, 'cierre_documentacion', null); // sin fecha: igual entra
-  seedEmpresa('c3', OWNER, 'reunion_agendada', '2026-08-01'); // futuro: igual entra
-  seedEmpresa('c4', OWNER, 'lead', '2026-07-10'); // no es estado caliente: no entra
-  seedEmpresa('c5', OTRO_OWNER, 'oportunidad', '2026-07-10'); // otro owner: no entra
+  // Organizacion 2, aislada: c6 (reunion_agendada + no_llego) tambien cumple el criterio
+  // de colaReagendar, que corre en organizacion 1 en otro test de este mismo archivo (sin
+  // limpieza entre tests, mismo problema documentado en repository.contarPorEstado.test.ts).
+  seedEmpresa('c1', OWNER, 'oportunidad', '2026-07-10', 2); // vencido segun fecha: igual entra
+  seedEmpresa('c2', OWNER, 'cierre_documentacion', null, 2); // sin fecha: igual entra
+  seedEmpresa('c3', OWNER, 'reunion_agendada', '2026-08-01', 2); // futuro, sin toque: igual entra
+  seedEmpresa('c4', OWNER, 'lead', '2026-07-10', 2); // no es estado caliente: no entra
+  seedEmpresa('c5', OTRO_OWNER, 'oportunidad', '2026-07-10', 2); // otro owner: no entra
 
-  const r = colaCierres(OWNER, 1);
+  seedEmpresa('c6', OWNER, 'reunion_agendada', '2026-07-10', 2);
+  seedToque('c6', 'no_llego'); // no-show pendiente: se va a Reagendar, no entra aqui
+
+  seedEmpresa('c7', OWNER, 'oportunidad', '2026-07-10', 2);
+  seedToque('c7', 'no_llego'); // no_llego pero NO es reunion_agendada: si entra (la exclusion es solo para reunion_agendada)
+
+  const r = colaCierres(OWNER, 2);
   const ids = r.map((f) => f.id).sort();
-  assert.deepEqual(ids, ['c1', 'c2', 'c3']);
+  assert.deepEqual(ids, ['c1', 'c2', 'c3', 'c7']);
 });
 
 test('colaReagendar: reunion_agendada cuyo ultimo toque fue no_llego, vencido o de hoy', () => {

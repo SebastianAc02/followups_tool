@@ -231,6 +231,8 @@ export function colaCierres(owner: string, idOrganizacion: number) {
         eq(empresa.organizacionActivaId, idOrganizacion),
         eq(empresa.owner, owner),
         inArray(empresa.estadoNotion, [...ESTADOS_CALIENTES]),
+        // La reunion_agendada con no-show pendiente se muestra en Reagendar, no aqui.
+        sql`NOT (${empresa.estadoNotion} = 'reunion_agendada' AND ${ultimoResultadoNoLlego})`,
       ),
     )
     .orderBy(sql`${empresa.proximoFollowUpFecha} IS NULL`, empresa.proximoFollowUpFecha)
