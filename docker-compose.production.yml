@@ -1,0 +1,55 @@
+# Vive en ~/followups-tool/ del VPS (mismo repo, clonado ahí). Se une a la red
+# "onepay" ya creada por el stack de Evolution (ver ~/evolution/docker-compose.yml
+# en whatsapp-osserver/DEPLOY-VPS.md) -- misma imagen para web y worker, mismo
+# volumen de DB (SQLite en WAL: un escritor, funciona con los dos procesos en el
+# mismo host). Caddy es la única puerta pública (80/443); todo lo demás solo vive
+# en la red interna onepay.
+
+networks:
+  onepay:
+    external: true
+
+services:
+  followups-web:
+    build: .
+    container_name: followups_web
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    volumes:
+      - followups_data:/data
+    networks:
+      - onepay
+
+  followups-worker:
+    build: .
+    container_name: followups_worker
+    command: ["npm", "run", "worker"]
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    volumes:
+      - followups_data:/data
+    networks:
+      - onepay
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: followups_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - onepay
+    depends_on:
+      - followups-web
+
+volumes:
+  followups_data:
+  caddy_data:
+  caddy_config:

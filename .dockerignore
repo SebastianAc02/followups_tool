@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.worktrees
+.env
+.env.*
+!.env.example
+isps.db
+isps.db-*
+isps.db.*
+planning
+docs
+scripts/.apollo_test_*
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+coverage

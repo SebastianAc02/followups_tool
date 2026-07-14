@@ -1,0 +1,3 @@
+followupsonepay.duckdns.org {
+	reverse_proxy followups-web:3000
+}
