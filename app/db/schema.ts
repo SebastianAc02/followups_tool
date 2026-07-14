@@ -359,6 +359,15 @@ export const preferenciaUsuario = sqliteTable('preferencia_usuario', {
   updatedAt: text('updated_at'),
 });
 
+// Panel cockpit + constructor (Tarea 5 del plan): una fila por usuario, layout en JSON
+// ([{ widgetId, span }, ...]) serializado/validado por app/core/panel/tablero.ts. Mismo
+// patron que preferencia_usuario (upsert por id_user, sin sync a Notion).
+export const panelTablero = sqliteTable('panel_tablero', {
+  idUser: text('id_user').primaryKey(),
+  layout: text('layout'),
+  updatedAt: text('updated_at'),
+});
+
 // Fase 8 (WhatsApp adaptador): lineas WhatsApp activas (núcleo de identidad para
 // envios de lotes). Una linea por instancia Evolution API (u otro proveedor). techo_diario
 // es el limite local de esta linea; el motor de cadencias (V8.2) respeta el limite

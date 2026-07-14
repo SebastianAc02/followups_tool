@@ -302,6 +302,12 @@ export function crearDbPrueba() {
       updated_at TEXT
     );
 
+    CREATE TABLE panel_tablero (
+      id_user TEXT PRIMARY KEY,
+      layout TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE mensaje_whatsapp (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       mensaje_id TEXT NOT NULL UNIQUE,
