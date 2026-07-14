@@ -3,7 +3,7 @@
 import { requireSession } from "../lib/session";
 import { perfilPipelineEmpresa, historialEtapasEmpresa, type HistorialEtapas } from "../db/repository";
 import { canalNormalizado } from "../cola/agenda.ts";
-import type { DetallePanelData } from "../ui/pipeline/DetallePanel";
+import type { DetallePanelData } from "../ui/seguimiento/DetallePanel";
 
 // El modal de ficha completa (client component) no puede tocar el Repository directo --
 // pasa por este server action, scoped a la organizacion de quien pregunta (misma regla

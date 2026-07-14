@@ -1,16 +1,18 @@
-// Shell del pipeline: integra filtros laterales + tabs de navegación + detalle panel
+// Shell de seguimiento: integra filtros laterales + tabs de navegación + detalle panel
 // Se renderiza DENTRO de AppShell (no lo reemplaza). El sidebar global de AppShell
-// permanece; este componente agrega filtros + tabs específicos del pipeline.
+// permanece; este componente agrega filtros + tabs específicos de seguimiento.
+// El embudo por etapa comercial vive aparte, en la ruta /pipeline (ver app/pipeline y
+// app/ui/pipeline/EmbudoPanel.tsx) -- es un lente distinto, no un tab de aca.
 'use client';
 
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { cn } from '../cn';
 import { DetallePanel, type DetallePanelData } from './DetallePanel';
-import { perfilPipelineEmpresaAction, historialEtapasAction } from '../../pipeline/actions';
+import { perfilPipelineEmpresaAction, historialEtapasAction } from '../../seguimiento/actions';
 import type { HistorialEtapas } from '../../db/repository';
 
-export type PipelineTab = 'overview' | 'embudo' | 'reportes' | 'ajustes';
+export type SeguimientoTab = 'overview' | 'reportes' | 'ajustes';
 
 // Decisión: usar URL searchParams para los tabs (persist entre navegaciones) y estado
 // local para la ficha de detalle (UI transitoria). La ficha YA NO llega por props
@@ -18,9 +20,9 @@ export type PipelineTab = 'overview' | 'embudo' | 'reportes' | 'ajustes';
 // en data-empresa-id, ver EmpresaRow), asi no se trae la ficha completa (contactos +
 // historial + timeline) de las 40+ filas visibles si nadie las abre.
 
-export function PipelineShell({ children }: { children: React.ReactNode }) {
+export function SeguimientoShell({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
-  const tab = (searchParams.get('tab') as PipelineTab) || 'overview';
+  const tab = (searchParams.get('tab') as SeguimientoTab) || 'overview';
   const [detalle, setDetalle] = useState<DetallePanelData | null>(null);
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [cargando, setCargando] = useState(false);
@@ -52,7 +54,7 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
 
           {/* Tab navigation */}
           <nav className="flex items-center gap-2" role="tablist">
-            {['overview', 'embudo', 'reportes', 'ajustes'].map((t) => (
+            {['overview', 'reportes', 'ajustes'].map((t) => (
               <a
                 key={t}
                 href={`?tab=${t}`}
@@ -64,7 +66,6 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
                 )}
               >
                 {t === 'overview' && 'Seguimiento'}
-                {t === 'embudo' && 'Embudo'}
                 {t === 'reportes' && 'Reportes'}
                 {t === 'ajustes' && 'Ajustes'}
               </a>
