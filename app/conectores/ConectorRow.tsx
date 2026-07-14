@@ -65,7 +65,7 @@ export function ConectorRow({
             Solo un admin puede configurar esta conexión. Si algo no llega, avísale a tu admin.
           </p>
         )}
-        {esAdmin && estado.tieneCredencial && <RevelarCredencial proveedor={cat.id} />}
+        {esAdmin && modo === "admin" && estado.tieneCredencial && <RevelarCredencial proveedor={cat.id} />}
 
         {/* Controles de admin: cambiar modo + quitar. Ghost/quiet a proposito: son
             secundarios frente al boton primario de conectar/reemplazar de arriba. Labels
