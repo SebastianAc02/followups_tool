@@ -35,6 +35,7 @@ export function crearDbPrueba() {
       proximo_follow_up_fecha TEXT,
       proximo_paso TEXT,
       proximo_canal TEXT,
+      pbx_forma TEXT,
       notion_page_id TEXT,
       organizacion_activa_id INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),

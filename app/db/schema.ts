@@ -21,6 +21,10 @@ export const empresa = sqliteTable('empresa', {
   proximoFollowUpFecha: text('proximo_follow_up_fecha'),
   proximoPaso: text('proximo_paso'),
   proximoCanal: text('proximo_canal'),
+  // Bucle PBX (enriquecimiento del decisor): la forma actual (vocabulario de
+  // FormaPaso en app/core/pbx.ts), null cuando la empresa no esta en el bucle. Los
+  // intentos NO se persisten aqui, se cuentan desde `toque`.
+  pbxForma: text('pbx_forma'),
   // V3.1b: enlace directo a la pagina real de Notion. Se llena una vez (script de
   // enlace, V3.7) y de ahi en adelante el sync escribe por ID, nunca busca por nombre
   // (hay nombres normalizados duplicados reales en la base).
