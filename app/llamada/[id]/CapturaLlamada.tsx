@@ -7,7 +7,12 @@ import { plusDias } from "../../lib/date-utils";
 import type { ToqueEstructurado } from "../../core/estructurar-toque";
 import type { Calificacion } from "../../core/calificacion";
 
-const OUTCOMES: { v: Resultado; l: string }[] = RESULTADOS.map((v) => ({ v, l: RESULTADO_LABELS[v] }));
+function outcomesPara(estado: string | null): { v: Resultado; l: string }[] {
+  // "No llego a la reunion" solo tiene sentido cuando la empresa esta en reunion_agendada
+  // (2026-07-14) -- no se ofrece para el resto de estados.
+  const disponibles = estado === "reunion_agendada" ? RESULTADOS : RESULTADOS.filter((v) => v !== "no_llego");
+  return disponibles.map((v) => ({ v, l: RESULTADO_LABELS[v] }));
+}
 const CHIPS: [string, number][] = [["+1d", 1], ["+3d", 3], ["+1sem", 7]];
 
 const inputClase =
@@ -20,10 +25,14 @@ const inputClase =
 // clases legacy (.capture/.oc2/.reveal), para no desentonar con el resto de la tarjeta.
 export default function CapturaLlamada({
   idEmpresa,
+  estado,
   idPasoInscripcion,
   calificacion,
 }: {
   idEmpresa: string;
+  // Solo se ofrece "No llego a la reunion" cuando la empresa esta en reunion_agendada
+  // (2026-07-14) -- no tiene sentido para el resto de estados.
+  estado: string | null;
   // Sesion 2026-07-09: paso_inscripcion pendiente de HOY si esta llamada viene de una
   // cadencia (mismo patron que EditorCorreo/EditorWhatsapp) -- registrarToqueAction lo
   // usa para cerrar el paso con la fecha REAL una vez que el toque ya quedo guardado
@@ -35,6 +44,7 @@ export default function CapturaLlamada({
   // vuelve a preguntar todo (comportamiento anterior).
   calificacion?: Calificacion;
 }) {
+  const OUTCOMES = outcomesPara(estado);
   const [outcome, setOutcome] = useState<Resultado | "">("");
   const [fecha, setFecha] = useState(plusDias(3));
   const [dictado, setDictado] = useState("");
@@ -81,7 +91,7 @@ export default function CapturaLlamada({
 
       {/* Resumen + estructurar: no tiene sentido dictar un resumen de una llamada que no
           se contestó -- nunca hubo conversación que resumir. */}
-      {outcome !== "no_contesto" && (
+      {outcome !== "no_contesto" && outcome !== "no_llego" && (
         <div>
           <div className="mb-2 flex items-center gap-2">
             <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-accent-llamada-soft text-accent-llamada">

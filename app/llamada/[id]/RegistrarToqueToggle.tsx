@@ -10,17 +10,19 @@ import type { Calificacion } from "../../core/calificacion";
 // eso un click en un item "PREGUNTAR" del checklist no podia abrir el formulario.
 export function RegistrarToqueToggle({
   idEmpresa,
+  estado,
   idPasoInscripcion,
   calificacion,
 }: {
   idEmpresa: string;
+  estado: string | null;
   idPasoInscripcion: number | null;
   calificacion: Calificacion;
 }) {
   const { abierto, abrir } = usePreguntar();
 
   if (abierto) {
-    return <CapturaLlamada idEmpresa={idEmpresa} idPasoInscripcion={idPasoInscripcion} calificacion={calificacion} />;
+    return <CapturaLlamada idEmpresa={idEmpresa} estado={estado} idPasoInscripcion={idPasoInscripcion} calificacion={calificacion} />;
   }
 
   return (

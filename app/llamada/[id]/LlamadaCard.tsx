@@ -138,7 +138,7 @@ export function LlamadaCard({
                 <span>·</span>
                 <span>Confirmar</span>
               </div>
-              <RegistrarToqueToggle idEmpresa={emp?.id ?? ""} idPasoInscripcion={idPasoInscripcion} calificacion={calificacion} />
+              <RegistrarToqueToggle idEmpresa={emp?.id ?? ""} estado={emp?.estado ?? null} idPasoInscripcion={idPasoInscripcion} calificacion={calificacion} />
             </div>
           </div>
         </PreguntarProvider>
