@@ -1,5 +1,6 @@
 import type { Canal } from "../ui/canal-tag.variants.ts";
 import type { Severity } from "../ui/severity-text.variants.ts";
+import { ESTADOS_CALIENTES } from "../db/funnel";
 
 export type FiltroCanal = "todos" | Canal;
 
@@ -104,4 +105,24 @@ export function filaConVencimiento(c: FilaCola, hoy: string, actual: boolean): F
     severidadTexto: dias > 0 ? `vencido ${dias}d` : "hoy",
     actual,
   };
+}
+
+export type Bucket = "lead" | "cierre" | "reagendar";
+export type Frescura = "vigente" | "desactualizado" | "sin_fecha";
+
+// 7+ dias vencido deja de sentirse "urgente" y pasa a ser bagaje viejo que hay que
+// limpiar, no un toque real de hoy (decision 2026-07-14).
+const UMBRAL_DESACTUALIZADO_DIAS = 7;
+
+export function frescuraDe(fecha: string | null, hoy: string): Frescura {
+  if (!fecha) return "sin_fecha";
+  return diasVencido(fecha, hoy) >= UMBRAL_DESACTUALIZADO_DIAS ? "desactualizado" : "vigente";
+}
+
+// A que bucket pertenece una empresa por su estado_notion. Usado para las filas que NO
+// vienen ya taggeadas (los pasos de cadencia, que pueden ser de cualquier estado). El
+// bucket 'reagendar' NUNCA sale de aqui -- ese lo asigna el caller explicitamente (viene
+// de colaReagendar, se deriva del ULTIMO TOQUE, no del estado_notion solo).
+export function bucketDeEtapa(estado: string | null): "lead" | "cierre" {
+  return estado != null && (ESTADOS_CALIENTES as readonly string[]).includes(estado) ? "cierre" : "lead";
 }

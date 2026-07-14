@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filtrarPorCanal, conteosPorCanal, filaSinVencimiento, diasVencido, filaConVencimiento, type FilaAgenda, type FilaCola } from './agenda.ts';
+import { filtrarPorCanal, conteosPorCanal, filaSinVencimiento, diasVencido, filaConVencimiento, frescuraDe, bucketDeEtapa, type FilaAgenda, type FilaCola } from './agenda.ts';
 
 function fila(canal: FilaAgenda['canal'], id: string = canal): FilaAgenda {
   return {
@@ -68,4 +68,21 @@ test('filaConVencimiento: vencida dice "vencido Nd", de hoy dice "hoy"', () => {
   assert.equal(deHoy.sev, 'today');
   assert.equal(deHoy.severidadTexto, 'hoy');
   assert.equal(deHoy.actual, true);
+});
+
+test('frescuraDe: sin fecha, vigente (0-6 dias), desactualizado (7+ dias)', () => {
+  assert.equal(frescuraDe(null, '2026-07-14'), 'sin_fecha');
+  assert.equal(frescuraDe('2026-07-14', '2026-07-14'), 'vigente'); // hoy: 0 dias
+  assert.equal(frescuraDe('2026-07-08', '2026-07-14'), 'vigente'); // 6 dias
+  assert.equal(frescuraDe('2026-07-07', '2026-07-14'), 'desactualizado'); // 7 dias
+  assert.equal(frescuraDe('2026-06-01', '2026-07-14'), 'desactualizado');
+});
+
+test('bucketDeEtapa: estados calientes son cierre, el resto es lead', () => {
+  assert.equal(bucketDeEtapa('oportunidad'), 'cierre');
+  assert.equal(bucketDeEtapa('reunion_agendada'), 'cierre');
+  assert.equal(bucketDeEtapa('lead'), 'lead');
+  assert.equal(bucketDeEtapa('contacto_iniciado'), 'lead');
+  assert.equal(bucketDeEtapa('on_hold'), 'lead');
+  assert.equal(bucketDeEtapa(null), 'lead');
 });
