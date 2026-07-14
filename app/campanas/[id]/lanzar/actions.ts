@@ -12,6 +12,8 @@ import {
   canalesDeCadencia,
   primerPasoDeCadencia,
   lineaWhatsappActiva,
+  lineasWhatsappDeUsuario,
+  fijarOwnerCampana,
   type CampanaParaLanzar,
   type ConfigLanzamientoInput,
   type ResultadoInscripcion,
@@ -20,6 +22,7 @@ import { requireSession, requireEscritura } from '../../../lib/session';
 import { calcularGoteo, type ResultadoGoteo } from '../../../core/goteo';
 import { crearRegistroEnvio } from '../../../adapters/registro-envio';
 import { materializarYEmpujarAhora } from '../../../worker/index';
+import { readinessCanalUsuario } from '../../../core/readiness-canal-usuario';
 
 // Fase 8 (Lanzar), Task 8.4: recalcula la barra "asi se distribuye" con los valores QUE
 // EL USUARIO TIENE EN PANTALLA, sin guardar nada todavia -- mismo patron que
@@ -72,6 +75,20 @@ export type LanzarCampanaResultado =
 export async function lanzarCampanaAction(idCampana: number, config: ConfigLanzamientoInput): Promise<LanzarCampanaResultado> {
   const sesion = await requireEscritura();
   try {
+    const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
+    if (!camp) return { ok: false, error: 'La campaña no existe' };
+
+    // Gate de canal (2026-07-14): antes de tocar la DB, confirmar que quien lanza
+    // tiene listos TODOS los canales que la cadencia usa. Bloqueo duro -- si algo no
+    // esta listo, no se inscribe nada.
+    const canales = canalesDeCadencia(camp.idCadencia);
+    const tieneLineaWhatsapp = lineasWhatsappDeUsuario(sesion.id).some((l) => l.estado === 'activa');
+    for (const canal of canales) {
+      const veredicto = readinessCanalUsuario(canal, tieneLineaWhatsapp);
+      if (!veredicto.listo) return { ok: false, error: veredicto.motivo };
+    }
+
+    fijarOwnerCampana(idCampana, sesion.owner);
     actualizarConfigLanzamiento(idCampana, config);
     const resultado = inscribirCampana(idCampana, sesion.idOrganizacion);
 

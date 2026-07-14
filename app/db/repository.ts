@@ -43,6 +43,7 @@ import {
   mensajeWhatsapp,
   lineaWhatsapp,
   empresaEstadoHistorial,
+  organizacionMiembro,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -3367,6 +3368,51 @@ export function lineaWhatsappActiva(): { referenciaProveedor: string } | null {
   return { referenciaProveedor: fila.referenciaProveedor };
 }
 
+// Gate de canal (2026-07-14): persiste quien lanzo la campana -- lo necesita
+// lineaWhatsappActivaDeOwner para resolver la linea PROPIA de ese dueno en vez de
+// "cualquier linea activa del sistema" (ver pasoInscripcionesPendientes mas abajo).
+export function fijarOwnerCampana(idCampana: number, owner: string): void {
+  db.update(campana).set({ owner, updatedAt: new Date().toISOString() }).where(eq(campana.idCampana, idCampana)).run();
+}
+
+// Resuelve la linea de whatsapp ACTIVA del dueno de una campana (owner_canonico ->
+// organizacion_miembro -> id_user -> linea_whatsapp), no la primera activa del sistema.
+// owner null = campana vieja, lanzada antes de que este campo se poblara: cae al
+// fallback de la linea de POOL (mismo comportamiento que el sistema tenia antes de
+// este cambio), para no romper campanas ya lanzadas.
+//
+// Fix (2026-07-14, code review Task 3): organizacion_miembro es multi-org -- su llave
+// real es (id_organizacion, owner_canonico), no owner_canonico solo (ver
+// scripts/seed_organizacion.ts y la org "Visitantes"). Sin el filtro de organizacion,
+// un owner_canonico que colisionara entre dos orgs distintas resolveria a la linea de
+// la org EQUIVOCADA -- misenvio real a los contactos de otra org. El fallback de pool
+// (owner null) SI queda sin filtro: linea_whatsapp no tiene columna id_organizacion,
+// la linea de pool es compartida a proposito en todo el sistema.
+export function lineaWhatsappActivaDeOwner(owner: string | null, idOrganizacion: number): { referenciaProveedor: string } | null {
+  if (!owner) {
+    const pool = db
+      .select({ referenciaProveedor: lineaWhatsapp.referenciaProveedor })
+      .from(lineaWhatsapp)
+      .where(and(isNull(lineaWhatsapp.idUsuario), eq(lineaWhatsapp.estado, 'activa')))
+      .get();
+    return pool?.referenciaProveedor ? { referenciaProveedor: pool.referenciaProveedor } : null;
+  }
+
+  const miembro = db
+    .select({ idUser: organizacionMiembro.idUser })
+    .from(organizacionMiembro)
+    .where(and(eq(organizacionMiembro.ownerCanonico, owner), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!miembro?.idUser) return null;
+
+  const linea = db
+    .select({ referenciaProveedor: lineaWhatsapp.referenciaProveedor })
+    .from(lineaWhatsapp)
+    .where(and(eq(lineaWhatsapp.idUsuario, miembro.idUser), eq(lineaWhatsapp.estado, 'activa')))
+    .get();
+  return linea?.referenciaProveedor ? { referenciaProveedor: linea.referenciaProveedor } : null;
+}
+
 // Tarea 8 (D6, plan-whatsapp-adapter.md): CRUD real de lineas, faltaba entero -- hasta
 // ahora solo existia la lectura angosta de arriba para el goteo. `idUsuario: null` =
 // linea de POOL (compartida, la administra el admin); no-null = linea PERSONAL de ESE
@@ -3518,15 +3564,15 @@ export function registrarPasoEnviadoConToque(
 // es el primer argumento posicional que push.ts le pasa a CanalEntrega.enviarPaso, sin
 // importar el canal -- ahi es donde Evolution espera el NOMBRE DE INSTANCIA, no un id
 // de secuencia de Apollo (ver evolution.ts:79-92, mismo parametro reusado a proposito).
-// Por eso, para whatsapp, se resuelve UNA vez por corrida contra lineaWhatsappActiva()
-// y se reusa para todas las filas -- nunca contra campana.proveedorCampanaId (que
-// whatsapp ni siquiera necesita: no crea secuencia externa por campana). Sin linea
-// activa, no hay a donde mandar: la corrida entera de whatsapp se salta (lista vacia),
-// en vez de dejar que cada fila intente y falle una por una gastando un reintento.
+// Gate de canal (2026-07-14): antes se resolvia UNA linea global contra
+// lineaWhatsappActiva() y se reusaba para TODAS las filas de whatsapp, sin importar de
+// que campana/dueno eran -- una campana de un vendedor podia terminar mandando por la
+// linea de otro. Ahora cada fila rutea por la linea ACTIVA del DUENO de SU PROPIA
+// campana (lineaWhatsappActivaDeOwner), campana por campana. Una campana cuyo dueno no
+// tiene linea activa propia se salta ENTERA (esa fila no aparece), en vez de gastar un
+// reintento fallido -- mismo criterio de "no hay a donde mandar, no lo intentes" que
+// tenia el gate global, pero aplicado por campana en vez de a la corrida completa.
 export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
-  const lineaActiva = canal === 'whatsapp' ? lineaWhatsappActiva() : null;
-  if (canal === 'whatsapp' && !lineaActiva) return [];
-
   const condiciones = [
     eq(pasoInscripcion.canal, canal),
     inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
@@ -3540,7 +3586,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
   ];
   // correo: sin secuencia externa (proveedor_campana_id) no hay a donde mandar. whatsapp
-  // no usa esta columna -- el gate de "hay a donde mandar" ya lo resolvio lineaActiva arriba.
+  // no usa esta columna -- su gate de "hay a donde mandar" se resuelve por fila mas abajo.
   if (canal !== 'whatsapp') condiciones.push(isNotNull(campana.proveedorCampanaId));
 
   const filas = db
@@ -3556,6 +3602,8 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
       proveedorCampanaId: campana.proveedorCampanaId,
+      owner: campana.owner,
+      idOrganizacion: campana.idOrganizacion,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
@@ -3568,13 +3616,38 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     .where(and(...condiciones))
     .all();
 
-  return filas.map((f) => ({
-    idPasoInscripcion: f.idPasoInscripcion,
-    proveedorCampanaId: (lineaActiva ? lineaActiva.referenciaProveedor : f.proveedorCampanaId) as string,
-    destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
-    paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
-    intentos: f.intentos,
-  }));
+  if (canal !== 'whatsapp') {
+    return filas.map((f) => ({
+      idPasoInscripcion: f.idPasoInscripcion,
+      proveedorCampanaId: f.proveedorCampanaId as string,
+      destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
+      paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
+      intentos: f.intentos,
+    }));
+  }
+
+  // whatsapp: cada campana rutea por la linea ACTIVA de SU DUENO (fijarOwnerCampana),
+  // nunca "cualquier linea activa del sistema" (gate de canal 2026-07-14). Cache por
+  // owner dentro de esta corrida: varias filas de la misma campana comparten el mismo
+  // owner, no vale la pena repetir el JOIN de organizacion_miembro por cada una.
+  const cacheLinea = new Map<string, { referenciaProveedor: string } | null>();
+  const resultado: FilaPasoInscripcion[] = [];
+  for (const f of filas) {
+    const owner = f.owner ?? null;
+    const cacheKey = `${f.idOrganizacion}:${owner}`;
+    if (!cacheLinea.has(cacheKey)) cacheLinea.set(cacheKey, lineaWhatsappActivaDeOwner(owner, f.idOrganizacion));
+    const linea = cacheLinea.get(cacheKey) ?? null;
+    if (!linea) continue; // ni linea propia ni (si owner=null) pool: no hay a donde mandar, se salta la fila
+
+    resultado.push({
+      idPasoInscripcion: f.idPasoInscripcion,
+      proveedorCampanaId: linea.referenciaProveedor,
+      destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
+      paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
+      intentos: f.intentos,
+    });
+  }
+  return resultado;
 }
 
 // enviando es un estado transitorio informativo (no lo lee ninguna query de

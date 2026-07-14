@@ -9,6 +9,8 @@ import { CredencialForm } from "./CredencialForm";
 import { LineasWhatsapp } from "./LineasWhatsapp";
 import { GmailConector } from "./GmailConector";
 import type { LineaWhatsapp } from "../db/repository";
+import { RevelarCredencial } from "./RevelarCredencial";
+import { VerificarGranola } from "./VerificarGranola";
 
 // Una fila de conector: columna izquierda de estado (punto + label + timestamp), columna
 // derecha con nombre + badge de modo + descripcion + formulario/estado/error. La autoridad
@@ -66,7 +68,9 @@ export function ConectorRow({
           </div>
         )}
 
-        {puedeEditar ? (
+        {cat.id === "granola" && modo === "personal" ? (
+          <VerificarGranola tieneCredencial={estado.tieneCredencial} />
+        ) : puedeEditar ? (
           cat.id === "gmail" ? (
             <GmailConector estado={estado} emailConectado={emailConectadoGmail ?? null} />
           ) : (
@@ -88,6 +92,7 @@ export function ConectorRow({
             esAdmin={esAdmin}
           />
         )}
+        {esAdmin && modo === "admin" && estado.tieneCredencial && <RevelarCredencial proveedor={cat.id} />}
 
         {/* Controles de admin: cambiar modo + quitar. Ghost/quiet a proposito: son
             secundarios frente al boton primario de conectar/reemplazar de arriba. Labels

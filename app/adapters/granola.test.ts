@@ -14,7 +14,7 @@ process.env.ISPS_DB_PATH = dbPath;
 process.env.FOLLOWUPS_CRYPTO_KEY = Buffer.alloc(32, 5).toString('base64');
 
 const { guardarCredencialConector } = await import('../db/repository.ts');
-const { crearGranolaAdapter } = await import('./granola.ts');
+const { crearGranolaAdapter, ultimaNotaDe } = await import('./granola.ts');
 
 guardarCredencialConector('granola', 'grn_test_123', 'user-sebastian');
 
@@ -99,6 +99,38 @@ test('sin credencial configurada, lanza error claro en vez de llamar a fetch', a
     () => adapter.buscarCandidatas(['Redes del Norte'], '2026-07-04T00:00:00.000Z', '2026-07-04T23:59:59.000Z'),
     /No hay credencial de Granola/,
   );
+});
+
+test('ultimaNotaDe: trae la nota mas reciente (page_size=1, sin filtro de fecha) con resumen recortado', async (t) => {
+  const notes = [{ id: 'n-ultima', title: 'Cliente X - Llamada', created_at: '2026-07-14T09:00:00.000Z' }];
+  const detalles = {
+    'n-ultima': {
+      id: 'n-ultima',
+      title: 'Cliente X - Llamada',
+      created_at: '2026-07-14T09:00:00.000Z',
+      summary_text: 'a'.repeat(300),
+      web_url: 'https://notes.granola.ai/d/n-ultima',
+    },
+  };
+  t.mock.method(globalThis, 'fetch', fetchFalso(notes, detalles));
+
+  const nota = await ultimaNotaDe('user-sebastian');
+
+  assert.ok(nota);
+  assert.strictEqual(nota!.id, 'n-ultima');
+  assert.strictEqual(nota!.titulo, 'Cliente X - Llamada');
+  assert.strictEqual(nota!.fecha, '2026-07-14T09:00:00.000Z');
+  assert.strictEqual(nota!.resumenCorto!.length, 200);
+});
+
+test('ultimaNotaDe: devuelve null si el usuario no tiene ninguna llamada grabada', async (t) => {
+  t.mock.method(globalThis, 'fetch', fetchFalso([], {}));
+  const nota = await ultimaNotaDe('user-sebastian');
+  assert.strictEqual(nota, null);
+});
+
+test('ultimaNotaDe: lanza si no hay credencial guardada para ese usuario', async () => {
+  await assert.rejects(() => ultimaNotaDe('user-sin-credencial'), /No hay credencial de Granola/);
 });
 
 test.after(() => borrarDbPrueba(dbPath));

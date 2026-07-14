@@ -7,10 +7,13 @@ import {
   actualizarModoConector,
   quitarConfigConector,
   modoConector,
+  leerCredencialConector,
 } from "../db/repository";
 import { requireSession } from "../lib/session";
 import { conectorDelCatalogo, type ModoConector } from "./catalogo";
-import { decidirGuardado } from "./politica";
+import { decidirGuardado, puedeRevelarCredencial } from "./politica";
+import { ultimaNotaDe } from "../adapters/granola";
+import { avisarAdminPorWhatsapp } from "../lib/alerta-admin";
 
 function modoValido(v: string): v is ModoConector {
   return v === "personal" || v === "admin";
@@ -86,4 +89,48 @@ export async function quitarConectorAction(formData: FormData) {
 
   quitarConfigConector(proveedor);
   revalidatePath("/conectores");
+}
+
+export type ResultadoRevelar = { ok: true; credencial: string } | { ok: false; error: string };
+
+// Bajo demanda: la pagina NUNCA trae el valor en el HTML inicial (page.tsx no llama
+// leerCredencialConector). Solo esta accion, invocada por un clic explicito del
+// admin, lo descifra y lo manda al cliente -- reduce la ventana de exposicion frente
+// a mostrarlo siempre.
+export async function revelarCredencialAction(proveedor: string): Promise<ResultadoRevelar> {
+  const sesion = await requireSession();
+  const modo = modoConector(proveedor);
+  if (!modo) return { ok: false, error: "Este conector no está habilitado." };
+  if (!puedeRevelarCredencial(modo, sesion.admin)) return { ok: false, error: "No podés revelar esta credencial." };
+
+  const credencial = leerCredencialConector(proveedor);
+  if (!credencial) return { ok: false, error: "No hay ninguna credencial guardada todavía." };
+  return { ok: true, credencial };
+}
+
+export type ResultadoVerificacionGranola =
+  | { ok: true; nota: { titulo: string | null; fecha: string; resumenCorto: string | null } }
+  | { ok: false; error: "sin_llamadas" | "error_interno" };
+
+// Guarda la credencial (personal, del usuario en sesion) y de una trae su ultima
+// llamada real para que la confirme -- a diferencia de guardarCredencialAction (que
+// solo guarda a ciegas), esto es lo que Sebastian pidio para Granola especificamente
+// (2026-07-14): "estas es tu ultima llamada, este es el transcript correcto".
+export async function verificarGranolaAction(credencial: string): Promise<ResultadoVerificacionGranola> {
+  const sesion = await requireSession();
+  const modo = modoConector("granola");
+  if (modo !== "personal") return { ok: false, error: "error_interno" };
+  guardarCredencialConector("granola", credencial, sesion.id);
+  revalidatePath("/conectores");
+
+  try {
+    const nota = await ultimaNotaDe(sesion.id);
+    if (!nota) return { ok: false, error: "sin_llamadas" };
+    return { ok: true, nota: { titulo: nota.titulo, fecha: nota.fecha, resumenCorto: nota.resumenCorto } };
+  } catch (e) {
+    await avisarAdminPorWhatsapp(
+      `${sesion.owner} intentó configurar Granola y tuvo un error: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return { ok: false, error: "error_interno" };
+  }
 }
