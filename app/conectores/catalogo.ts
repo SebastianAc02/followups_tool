@@ -33,6 +33,12 @@ export const CATALOGO_CONECTORES: ConectorCatalogo[] = [
     modoSugerido: 'personal',
   },
   {
+    id: 'gmail',
+    nombre: 'Gmail',
+    descripcion: 'Manda cadencias de correo desde tu propio Gmail de Workspace.',
+    modoSugerido: 'personal',
+  },
+  {
     id: 'whatsapp',
     nombre: 'WhatsApp',
     descripcion:
@@ -48,4 +54,26 @@ export const CATALOGO_CONECTORES: ConectorCatalogo[] = [
 
 export function conectorDelCatalogo(id: string): ConectorCatalogo | undefined {
   return CATALOGO_CONECTORES.find((c) => c.id === id);
+}
+
+// Catalogo de ajustes de configuracion_admin (2026-07-14): igual razon que
+// CATALOGO_CONECTORES -- fuente de la verdad en codigo, no en DB, para que la accion
+// nunca escriba una clave arbitraria que llegue del formulario. Valores de negocio, NO
+// secretos (por eso viven fuera de `conector`, sin cifrar).
+export type ConfiguracionCatalogo = {
+  clave: string;
+  etiqueta: string;
+  descripcion: string;
+};
+
+export const CATALOGO_CONFIGURACION: ConfiguracionCatalogo[] = [
+  {
+    clave: 'apollo_mailbox_id',
+    etiqueta: 'Buzón de envío de Apollo',
+    descripcion: 'El email_account_id de Apollo desde el que salen los correos de campaña.',
+  },
+];
+
+export function configuracionDelCatalogo(clave: string): ConfiguracionCatalogo | undefined {
+  return CATALOGO_CONFIGURACION.find((c) => c.clave === clave);
 }
