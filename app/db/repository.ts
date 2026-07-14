@@ -42,6 +42,7 @@ import {
   eventoTracking,
   mensajeWhatsapp,
   lineaWhatsapp,
+  empresaEstadoHistorial,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -3973,4 +3974,40 @@ export function versionesDePaso(idPaso: number): VersionDePaso[] {
     .all();
 
   return filas.map((f) => ({ ...f, esDefault: f.esDefault === 1 }));
+}
+
+// Cambia la etapa comercial de una empresa y registra la transicion en el historico,
+// en una sola transaccion (patron Outbox ligero). Si la etapa no cambia, no registra.
+// Este es el UNICO camino de escritura de estado_notion: el sync de Notion debe llamarlo
+// (no un UPDATE suelto), asi el historico nunca se pierde una transicion.
+export function actualizarEstadoNotion(
+  idEmpresa: string,
+  estadoNuevo: string,
+  idOrganizacion: number,
+  fecha: string,
+): void {
+  db.transaction((tx) => {
+    const emp = tx
+      .select({ estadoNotion: empresa.estadoNotion })
+      .from(empresa)
+      .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+      .get();
+    if (!emp) return;
+    if (emp.estadoNotion === estadoNuevo) return;
+
+    tx.update(empresa)
+      .set({ estadoNotion: estadoNuevo, updatedAt: fecha })
+      .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+      .run();
+
+    tx.insert(empresaEstadoHistorial)
+      .values({
+        idEmpresa,
+        estadoAnterior: emp.estadoNotion,
+        estadoNuevo,
+        fecha,
+        idOrganizacion,
+      })
+      .run();
+  });
 }
