@@ -51,5 +51,9 @@ jobs:
               docker compose -f docker-compose.production.yml restart caddy
             fi
             docker compose -f docker-compose.production.yml build followups-web followups-worker
+            # Aplica contra isps.db real cualquier migracion nueva (drizzle/*.sql) antes
+            # de recrear los contenedores -- ver scripts/migrate.ts. Corre una sola vez,
+            # con la imagen recien construida, no en cada arranque de contenedor.
+            docker compose -f docker-compose.production.yml run --rm followups-web npm run migrate
             docker compose -f docker-compose.production.yml up -d
           '
