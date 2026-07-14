@@ -9,6 +9,18 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../cn';
 import { CanalTag, type Canal } from '../CanalTag';
+import { FUNNEL_ETAPAS } from '../../db/funnel';
+import type { HistorialEtapas } from '../../db/repository';
+
+const MS_POR_DIA = 1000 * 60 * 60 * 24;
+
+function labelEtapa(estado: string): string {
+  return FUNNEL_ETAPAS.find((e) => e.estado === estado)?.label ?? estado;
+}
+
+function colorEtapa(estado: string): string {
+  return FUNNEL_ETAPAS.find((e) => e.estado === estado)?.colorClass ?? 'bg-line-strong';
+}
 
 export interface ContactoCompleto {
   nombre: string | null;
@@ -68,11 +80,13 @@ export function DetallePanel({
   isOpen,
   cargando,
   onClose,
+  timelineEtapas,
 }: {
   data: DetallePanelData | null;
   isOpen: boolean;
   cargando?: boolean;
   onClose: () => void;
+  timelineEtapas?: HistorialEtapas;
 }) {
   // Portal a document.body: el wrapper de contenido de AppShell es `relative z-[1]`,
   // lo que crea su propio stacking context -- un modal `fixed` renderizado adentro
@@ -180,6 +194,47 @@ export function DetallePanel({
                         </div>
                       ))}
                     </div>
+                  </section>
+                )}
+
+                {/* Recorrido por etapas (timeline de empresa_estado_historial) */}
+                {timelineEtapas && (
+                  <section>
+                    <h4 className="text-xs font-semibold uppercase tracking-widest text-muted mb-3">
+                      Recorrido por etapas
+                    </h4>
+                    {timelineEtapas.transiciones.length === 0 ? (
+                      <div className="space-y-2">
+                        {timelineEtapas.etapaActual && (
+                          <div className="flex items-center gap-3 rounded-lg px-3 py-2 border border-line-card bg-pipeline-card">
+                            <span className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', colorEtapa(timelineEtapas.etapaActual))} aria-hidden="true" />
+                            <span className="text-xs text-ink-soft">{labelEtapa(timelineEtapas.etapaActual)}</span>
+                          </div>
+                        )}
+                        <p className="text-xs text-muted">Sin transiciones registradas aún.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {timelineEtapas.transiciones.map((t, i) => {
+                          const siguiente = timelineEtapas.transiciones[i + 1];
+                          const desde = new Date(t.fecha).getTime();
+                          const hasta = siguiente ? new Date(siguiente.fecha).getTime() : Date.now();
+                          const dias = Math.round((hasta - desde) / MS_POR_DIA);
+                          return (
+                            <div key={`${t.estado}-${t.fecha}-${i}`} className="border-l-2 border-line-card pl-3 py-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={cn('w-2.5 h-2.5 rounded-full flex-shrink-0', colorEtapa(t.estado))} aria-hidden="true" />
+                                <span className="text-xs font-semibold text-ink truncate">{labelEtapa(t.estado)}</span>
+                                <span className="mono text-xs text-ink-soft ml-auto">{t.fecha}</span>
+                              </div>
+                              <div className="text-xs text-muted">
+                                {dias} {dias === 1 ? 'día' : 'días'} en etapa{!siguiente ? ' (hasta hoy)' : ''}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </section>
                 )}
 

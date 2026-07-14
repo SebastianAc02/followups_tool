@@ -8,7 +8,7 @@ import { cargarPerfil } from '../../lib/perfil';
 import { Sidebar, type ConectorEstado } from './Sidebar';
 import { TopBar } from './TopBar';
 import type { NavItem } from './SidebarNav';
-import { IconInicio, IconCampanas, IconToques, IconPipeline, IconPanel, IconConectores, IconPorRevisar } from './icons';
+import { IconInicio, IconCampanas, IconToques, IconPipeline, IconSeguimiento, IconPanel, IconConectores, IconPorRevisar } from './icons';
 
 const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -46,10 +46,11 @@ export async function datosSidebar() {
   const items: NavItem[] = [
     { href: '/', label: 'Inicio', icon: <IconInicio /> },
     { href: '/campanas', label: 'Campañas', icon: <IconCampanas />, badge: String(campanasActivas), exactMatch: true },
-    // Seguimiento (antes "Pipeline"): vista operativa del funnel (estado_notion). El
-    // badge cuenta las empresas dentro del funnel activo -- ese conteo es del
-    // seguimiento, no del panel admin.
-    { href: '/pipeline', label: 'Seguimiento', icon: <IconPipeline />, badge: String(cuentasFunnel) },
+    // Pipeline: embudo comercial por etapa (estado_notion) -- lente agregado, "cuantas
+    // cuentas hay en cada etapa". Seguimiento: vista operativa por toque -- "que hay que
+    // hacer hoy". Son rutas distintas a proposito (2026-07-13): no son el mismo dato.
+    { href: '/pipeline', label: 'Pipeline', icon: <IconPipeline /> },
+    { href: '/seguimiento', label: 'Seguimiento', icon: <IconSeguimiento />, badge: String(cuentasFunnel) },
     { href: '/cola', label: 'Toques', icon: <IconToques />, badge: String(toquesHoy), badgeTone: toquesHoy > 0 ? 'done' : 'neutral' },
     { href: '/por-revisar', label: 'Por revisar', icon: <IconPorRevisar />, badge: String(porRevisar), badgeTone: porRevisar > 0 ? 'overdue' : 'neutral' },
     // Panel: dashboard de metricas, admin-only (la ruta redirige a / si no es admin), asi

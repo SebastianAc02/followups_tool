@@ -49,6 +49,14 @@ export function IconPipeline({ className }: IconProps) {
   );
 }
 
+export function IconSeguimiento({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <path d="M4 6h16M4 12h10M4 18h13" />
+    </svg>
+  );
+}
+
 export function IconPanel({ className }: IconProps) {
   return (
     <svg {...base(className)}>

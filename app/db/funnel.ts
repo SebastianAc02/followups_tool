@@ -41,3 +41,12 @@ export const ESTADOS_CALIENTES = [
 // Default: todas las etapas de FUNNEL_ETAPAS. El owner puede estrecharlo (ej. solo las
 // calientes, o incluir on_hold) en el checkpoint.
 export const ESTADOS_ACTIVOS: string[] = FUNNEL_ETAPAS.map((e) => e.estado);
+
+// Etapas que NO son banda del embudo: firma_pago es el resultado "ganado",
+// on_hold el resultado "parqueado/perdido". Se nombran aqui para que la UI y las
+// queries no hardcodeen los strings.
+export const ETAPA_GANADA = 'firma_pago';
+export const ETAPA_ONHOLD = 'on_hold';
+
+// Bandas del embudo = FUNNEL_ETAPAS sin la etapa ganada (que va como tarjeta de resultado).
+export const BANDAS_EMBUDO: EtapaFunnel[] = FUNNEL_ETAPAS.filter((e) => e.estado !== ETAPA_GANADA);

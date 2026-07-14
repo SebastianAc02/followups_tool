@@ -1,15 +1,18 @@
-// Shell del pipeline: integra filtros laterales + tabs de navegación + detalle panel
+// Shell de seguimiento: integra filtros laterales + tabs de navegación + detalle panel
 // Se renderiza DENTRO de AppShell (no lo reemplaza). El sidebar global de AppShell
-// permanece; este componente agrega filtros + tabs específicos del pipeline.
+// permanece; este componente agrega filtros + tabs específicos de seguimiento.
+// El embudo por etapa comercial vive aparte, en la ruta /pipeline (ver app/pipeline y
+// app/ui/pipeline/EmbudoPanel.tsx) -- es un lente distinto, no un tab de aca.
 'use client';
 
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { cn } from '../cn';
 import { DetallePanel, type DetallePanelData } from './DetallePanel';
-import { perfilPipelineEmpresaAction } from '../../pipeline/actions';
+import { perfilPipelineEmpresaAction, historialEtapasAction } from '../../seguimiento/actions';
+import type { HistorialEtapas } from '../../db/repository';
 
-export type PipelineTab = 'overview' | 'reportes' | 'ajustes';
+export type SeguimientoTab = 'overview' | 'reportes' | 'ajustes';
 
 // Decisión: usar URL searchParams para los tabs (persist entre navegaciones) y estado
 // local para la ficha de detalle (UI transitoria). La ficha YA NO llega por props
@@ -17,20 +20,24 @@ export type PipelineTab = 'overview' | 'reportes' | 'ajustes';
 // en data-empresa-id, ver EmpresaRow), asi no se trae la ficha completa (contactos +
 // historial + timeline) de las 40+ filas visibles si nadie las abre.
 
-export function PipelineShell({ children }: { children: React.ReactNode }) {
+export function SeguimientoShell({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
-  const tab = (searchParams.get('tab') as PipelineTab) || 'overview';
+  const tab = (searchParams.get('tab') as SeguimientoTab) || 'overview';
   const [detalle, setDetalle] = useState<DetallePanelData | null>(null);
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [cargando, setCargando] = useState(false);
+  const [timelineEtapas, setTimelineEtapas] = useState<HistorialEtapas | undefined>(undefined);
 
   const handleSelectEmpresa = (idEmpresa: string) => {
     setDetalle(null);
+    setTimelineEtapas(undefined);
     setDetalleOpen(true);
     setCargando(true);
     perfilPipelineEmpresaAction(idEmpresa)
       .then((d) => setDetalle(d))
       .finally(() => setCargando(false));
+    // Timeline de etapas en paralelo: no bloquea la ficha principal, se pinta cuando llega.
+    historialEtapasAction(idEmpresa).then((t) => setTimelineEtapas(t));
   };
 
   const currentDetailData = detalle;
@@ -83,7 +90,13 @@ export function PipelineShell({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Ficha completa de la empresa */}
-      <DetallePanel data={currentDetailData} isOpen={detalleOpen} cargando={cargando} onClose={() => setDetalleOpen(false)} />
+      <DetallePanel
+        data={currentDetailData}
+        isOpen={detalleOpen}
+        cargando={cargando}
+        onClose={() => setDetalleOpen(false)}
+        timelineEtapas={timelineEtapas}
+      />
     </>
   );
 }

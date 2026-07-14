@@ -1,9 +1,9 @@
 "use server";
 
 import { requireSession } from "../lib/session";
-import { perfilPipelineEmpresa } from "../db/repository";
+import { perfilPipelineEmpresa, historialEtapasEmpresa, type HistorialEtapas } from "../db/repository";
 import { canalNormalizado } from "../cola/agenda.ts";
-import type { DetallePanelData } from "../ui/pipeline/DetallePanel";
+import type { DetallePanelData } from "../ui/seguimiento/DetallePanel";
 
 // El modal de ficha completa (client component) no puede tocar el Repository directo --
 // pasa por este server action, scoped a la organizacion de quien pregunta (misma regla
@@ -26,4 +26,12 @@ export async function perfilPipelineEmpresaAction(idEmpresa: string): Promise<De
       ? { fecha: perfil.proximoToque.fecha, canal: canalNormalizado(perfil.proximoToque.canal), paso: perfil.proximoToque.paso }
       : undefined,
   };
+}
+
+// Timeline de etapas de una cuenta (para la seccion "Recorrido por etapas" de
+// DetallePanel). Mismo patron que perfilPipelineEmpresaAction: scoped a la
+// organizacion de quien pregunta, el Repository ya hace ese filtro.
+export async function historialEtapasAction(idEmpresa: string): Promise<HistorialEtapas> {
+  const usuario = await requireSession();
+  return historialEtapasEmpresa(idEmpresa, usuario.idOrganizacion);
 }

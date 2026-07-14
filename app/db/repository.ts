@@ -42,6 +42,7 @@ import {
   eventoTracking,
   mensajeWhatsapp,
   lineaWhatsapp,
+  empresaEstadoHistorial,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -59,6 +60,7 @@ import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
+import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -4083,4 +4085,122 @@ export function versionesDePaso(idPaso: number): VersionDePaso[] {
     .all();
 
   return filas.map((f) => ({ ...f, esDefault: f.esDefault === 1 }));
+}
+
+// Cambia la etapa comercial de una empresa y registra la transicion en el historico,
+// en una sola transaccion (patron Outbox ligero). Si la etapa no cambia, no registra.
+// Este es el UNICO camino de escritura de estado_notion: el sync de Notion debe llamarlo
+// (no un UPDATE suelto), asi el historico nunca se pierde una transicion.
+export function actualizarEstadoNotion(
+  idEmpresa: string,
+  estadoNuevo: string,
+  idOrganizacion: number,
+  fecha: string,
+): void {
+  db.transaction((tx) => {
+    const emp = tx
+      .select({ estadoNotion: empresa.estadoNotion })
+      .from(empresa)
+      .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+      .get();
+    if (!emp) return;
+    if (emp.estadoNotion === estadoNuevo) return;
+
+    tx.update(empresa)
+      .set({ estadoNotion: estadoNuevo, updatedAt: fecha })
+      .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+      .run();
+
+    tx.insert(empresaEstadoHistorial)
+      .values({
+        idEmpresa,
+        estadoAnterior: emp.estadoNotion,
+        estadoNuevo,
+        fecha,
+        idOrganizacion,
+      })
+      .run();
+  });
+}
+
+// Conteo de empresas por etapa comercial (estado_notion), scoped a la organizacion.
+// null -> '__sin_etapa__' (no se dropea, se reporta aparte). usuarios = suma de
+// usuarios_efectivos de la empresa (proxy de tamano), null si ninguna lo tiene.
+// Cardinalidad verificada contra isps.db real: empresa_usuarios.id_empresa es su PK
+// (1898 filas, 1898 id_empresa distintos) -> relacion 1:1 con empresa, un LEFT JOIN
+// simple no infla el count(*) de empresas.
+export function embudoPipeline(
+  idOrganizacion: number,
+  filtros?: { owner?: string; idCampana?: string },
+): ConteoEtapa[] {
+  const estadoExpr = sql<string>`coalesce(${empresa.estadoNotion}, ${CLAVE_SIN_ETAPA})`;
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion)];
+  if (filtros?.owner) {
+    condiciones.push(eq(empresa.owner, filtros.owner));
+  }
+  if (filtros?.idCampana) {
+    condiciones.push(
+      sql`${empresa.idEmpresa} IN (SELECT ${inscripcion.idEmpresa} FROM ${inscripcion} WHERE ${inscripcion.idCampana} = ${Number(filtros.idCampana)})`,
+    );
+  }
+
+  const filas = db
+    .select({
+      estado: estadoExpr,
+      total: sql<number>`count(*)`,
+      usuarios: sql<number | null>`sum(${empresaUsuarios.usuariosEfectivos})`,
+    })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(and(...condiciones))
+    .groupBy(estadoExpr)
+    .all();
+
+  return filas.map((f) => ({
+    estado: f.estado,
+    total: Number(f.total),
+    usuarios: f.usuarios === null ? null : Number(f.usuarios),
+  }));
+}
+
+// Owners distintos con al menos una empresa en la organizacion (para el chip de
+// filtro del embudo). Ordenado alfabetico, nulls excluidos (owner vacio no es un
+// filtro valido).
+export function listarOwnersEmpresa(idOrganizacion: number): string[] {
+  const filas = db
+    .selectDistinct({ owner: empresa.owner })
+    .from(empresa)
+    .where(and(eq(empresa.organizacionActivaId, idOrganizacion), isNotNull(empresa.owner)))
+    .orderBy(asc(empresa.owner))
+    .all();
+  return filas.map((f) => f.owner!).filter((o) => o.length > 0);
+}
+
+export type HistorialEtapas = {
+  etapaActual: string | null;
+  transiciones: { estado: string; fecha: string }[]; // orden ascendente por fecha
+};
+
+// Timeline de etapas de una cuenta: etapa actual (empresa.estado_notion) + las
+// transiciones registradas en empresa_estado_historial. El pasado pre-deploy es
+// desconocido a proposito (no se inventa): la lista empieza cuando el sync llama a
+// actualizarEstadoNotion. Scoped a la organizacion.
+export function historialEtapasEmpresa(idEmpresa: string, idOrganizacion: number): HistorialEtapas {
+  const emp = db
+    .select({ estadoNotion: empresa.estadoNotion })
+    .from(empresa)
+    .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .get();
+
+  const filas = db
+    .select({ estado: empresaEstadoHistorial.estadoNuevo, fecha: empresaEstadoHistorial.fecha })
+    .from(empresaEstadoHistorial)
+    .where(and(eq(empresaEstadoHistorial.idEmpresa, idEmpresa), eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion)))
+    .orderBy(asc(empresaEstadoHistorial.fecha), asc(empresaEstadoHistorial.id))
+    .all();
+
+  return {
+    etapaActual: emp?.estadoNotion ?? null,
+    transiciones: filas,
+  };
 }
