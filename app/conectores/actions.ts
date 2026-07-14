@@ -118,7 +118,10 @@ export type ResultadoVerificacionGranola =
 // (2026-07-14): "estas es tu ultima llamada, este es el transcript correcto".
 export async function verificarGranolaAction(credencial: string): Promise<ResultadoVerificacionGranola> {
   const sesion = await requireSession();
+  const modo = modoConector("granola");
+  if (modo !== "personal") return { ok: false, error: "error_interno" };
   guardarCredencialConector("granola", credencial, sesion.id);
+  revalidatePath("/conectores");
 
   try {
     const nota = await ultimaNotaDe(sesion.id);

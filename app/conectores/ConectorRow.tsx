@@ -59,7 +59,7 @@ export function ConectorRow({
           </div>
         )}
 
-        {cat.id === "granola" ? (
+        {cat.id === "granola" && modo === "personal" ? (
           <VerificarGranola tieneCredencial={estado.tieneCredencial} />
         ) : puedeEditar ? (
           <CredencialForm proveedor={cat.id} tieneCredencial={estado.tieneCredencial} />
