@@ -1,11 +1,12 @@
 import Link from 'next/link';
-import { resumenHome, contarPorEstado, listarCampanas } from './db/repository';
+import { resumenHome, colaLeads, contarPorEstado, listarCampanas } from './db/repository';
 import { cargarPerfil } from './lib/perfil';
 import { AppShell } from './ui/shell/AppShell';
 import { SectionLabel } from './ui/SectionLabel';
 import { StatCard } from './ui/home/StatCard';
 import { PipelineBar } from './ui/home/PipelineBar';
 import { CampaignRow, type CampaignVM } from './ui/home/CampaignRow';
+import { OWNER_COLA_SPLIT } from './cola/agenda.ts';
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
@@ -23,6 +24,13 @@ export default async function Dashboard() {
   const hoy = ahora.toISOString().slice(0, 10);
 
   const resumen = resumenHome(owner, hoy, perfil.idOrganizacion);
+  // Split leads/cierres/reagendar (2026-07-14): para Sebastian, "toques para hoy"/"vencidos"
+  // del home deben coincidir con /cola (solo Leads), no con colaDelDia mezclando estados.
+  if (owner === OWNER_COLA_SPLIT) {
+    const leads = colaLeads(hoy, owner, perfil.idOrganizacion);
+    resumen.toquesHoy = leads.length;
+    resumen.vencidos = leads.filter((c) => (c.fecha ?? '') < hoy).length;
+  }
   const porEstado = contarPorEstado(undefined, perfil.idOrganizacion);
   const campanas: CampaignVM[] = listarCampanas()
     .filter((c) => c.estado === 'activa' || c.estado === 'pausada')
