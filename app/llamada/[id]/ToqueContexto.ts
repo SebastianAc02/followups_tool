@@ -12,13 +12,20 @@ const CANAL_A_VISTA: Record<string, VistaToque> = {
   whatsapp: 'whatsapp',
 };
 
-// Decide la vista: `?vista=confirmacion` gana siempre (llega justo después de guardar
-// un toque). Si no, se sigue el canal del paso activo de la secuencia; sin secuencia
-// activa, el cockpit por defecto es la vista de llamada (canal más común en frío).
+// Decide la vista: `?vista=confirmacion` gana siempre (llega justo despues de guardar
+// un toque). Si hay un paso activo en la secuencia, ese canal manda -- una cadencia en
+// curso no se puede desviar con un ?vista= que no coincide. Sin paso activo, el
+// ?vista= explicito (2026-07-14: toques sueltos desde "Contacto iniciado sin
+// seguimiento") elige el editor; sin nada de eso, el cockpit por defecto es la vista
+// de llamada (canal mas comun en frio).
 export function decidirVista(ctx: ContextoToque, searchParams: { vista?: string }): VistaToque {
   if (searchParams.vista === 'confirmacion') return 'confirmacion';
   const pasoActivo = ctx.secuencia.find((p) => p.estado === 'activo');
-  return CANAL_A_VISTA[pasoActivo?.canal ?? ''] ?? 'llamada';
+  if (pasoActivo) return CANAL_A_VISTA[pasoActivo.canal] ?? 'llamada';
+  if (searchParams.vista === 'correo' || searchParams.vista === 'whatsapp' || searchParams.vista === 'llamada') {
+    return searchParams.vista;
+  }
+  return 'llamada';
 }
 
 export function urlNotionDe(ctx: ContextoToque): string | null {

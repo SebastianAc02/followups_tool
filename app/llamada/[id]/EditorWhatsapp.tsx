@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { ContextoToque, VersionDePaso } from "../../db/repository";
 import { resaltarVariables } from "../../core/personalizar-copy";
 import { enviarToqueCanalAction, registrarToqueSueltoAction } from "./actions";
+import { ProximoToque } from "./ProximoToque";
+import { plusDias } from "../../lib/date-utils";
 
 // Toque 3 (mockup "Message WPP Toque 3"), RECORTADO a v1 por decision explicita del plan:
 // composer de una linea + grilla "TUS VERSIONES DE ESTE TOQUE" (solo versionesDePaso).
@@ -70,6 +72,7 @@ export function EditorWhatsapp({
   const defaultVersion = versiones[0] ?? null;
   const [idVersionActiva, setIdVersionActiva] = useState<number | null>(defaultVersion?.idVersion ?? null);
   const [cuerpo, setCuerpo] = useState(defaultVersion?.cuerpo ?? "");
+  const [fecha, setFecha] = useState(plusDias(3));
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,7 +93,7 @@ export function EditorWhatsapp({
         setEnviando(false);
       }
     } else {
-      await registrarToqueSueltoAction(idEmpresa, "whatsapp", cuerpo);
+      await registrarToqueSueltoAction(idEmpresa, "whatsapp", cuerpo, fecha);
     }
   }
 
@@ -131,6 +134,11 @@ export function EditorWhatsapp({
             {enviando ? "Enviando..." : "Enviar"}
           </button>
         </div>
+        {idPasoInscripcion == null && (
+          <div className="mt-3">
+            <ProximoToque fecha={fecha} onChange={setFecha} accentClase="border-accent-whatsapp bg-accent-whatsapp-soft text-ink" />
+          </div>
+        )}
         {error && <p className="mt-1.5 text-[12.5px] text-overdue">{error}</p>}
       </div>
 

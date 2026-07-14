@@ -93,7 +93,7 @@ export function LlamadaCard({
 
       {/* Two-column body */}
       <div className="flex flex-col md:grid md:grid-cols-[192px_1fr]">
-        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} />
+        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} estado={emp?.estado} />
 
         <PreguntarProvider>
           <div className="flex flex-col gap-4 p-5">

@@ -282,15 +282,26 @@ export async function cerrarPBXAction(input: {
 // real de un mensaje que se acaba de mandar. Cuando el contacto responda, ESE es un toque
 // nuevo con su propio resultado real (via CapturaLlamada u otro flujo), no una correccion
 // de este.
-export async function registrarToqueSueltoAction(idEmpresa: string, canal: "correo" | "whatsapp", cuerpo: string) {
+//
+// proximoFollowUp (2026-07-14, seccion "Contacto iniciado sin seguimiento"): opcional,
+// deja fijado "en N dias vuelvo a intentar" en el mismo toque suelto -- sin esto, la
+// fecha se perdia y la cuenta volvia a quedar invisible en colaDelDia.
+export async function registrarToqueSueltoAction(
+  idEmpresa: string,
+  canal: "correo" | "whatsapp",
+  cuerpo: string,
+  proximoFollowUp?: string,
+) {
   const { idOrganizacion } = await requireSession();
   const parsed = registrarToqueSchema.parse({
     idEmpresa,
     canal,
     resultado: "no_contesto",
     quePaso: cuerpo || undefined,
+    proximoFollowUp: proximoFollowUp || undefined,
   });
   registrarToque(parsed, idOrganizacion);
   revalidatePath(`/llamada/${idEmpresa}`);
+  revalidatePath("/cola");
   redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
 }
