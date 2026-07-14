@@ -56,6 +56,7 @@ import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
+import { estaEnPBX, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
@@ -4356,4 +4357,153 @@ export function historialEtapasEmpresa(idEmpresa: string, idOrganizacion: number
     etapaActual: emp?.estadoNotion ?? null,
     transiciones: filas,
   };
+}
+
+// --- Bucle PBX (enriquecimiento del decisor) ---------------------------------------
+
+export type FilaPBX = {
+  id: string;
+  nombre: string;
+  proximoPaso: string | null;
+  proximoCanal: string | null;
+  proximoFollowUpFecha: string | null;
+  pbxForma: string | null;
+  tieneNumeroConmutador: boolean;
+};
+
+// Resuelve el predicado (estaEnPBX) en JS sobre los contactos de la organizacion,
+// mismo patron que empresasConReadiness/_contactosDe. Atajo aceptado (documentado):
+// si la base real (1400+ empresas) lo vuelve lento, mover la condicion espejo a SQL.
+export function empresasEnPBX(idOrganizacion: number): FilaPBX[] {
+  const empresas = db
+    .select({
+      id: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      proximoPaso: empresa.proximoPaso,
+      proximoCanal: empresa.proximoCanal,
+      proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      pbxForma: empresa.pbxForma,
+    })
+    .from(empresa)
+    .where(eq(empresa.organizacionActivaId, idOrganizacion))
+    .all();
+  if (empresas.length === 0) return [];
+
+  const contactos = db
+    .select({
+      idEmpresa: contacto.idEmpresa,
+      esKeyDecisionMaker: contacto.esKeyDecisionMaker,
+      telefono: contacto.telefono,
+      email: contacto.email,
+    })
+    .from(contacto)
+    .where(inArray(contacto.idEmpresa, empresas.map((e) => e.id)))
+    .all();
+
+  const contactosPorEmpresa = new Map<string, ContactoPBX[]>();
+  const tieneNumeroPorEmpresa = new Map<string, boolean>();
+  for (const c of contactos) {
+    const lista = contactosPorEmpresa.get(c.idEmpresa) ?? [];
+    lista.push({ esKeyDecisionMaker: c.esKeyDecisionMaker === 1, telefono: c.telefono, email: c.email });
+    contactosPorEmpresa.set(c.idEmpresa, lista);
+    if (c.telefono) tieneNumeroPorEmpresa.set(c.idEmpresa, true);
+  }
+
+  return empresas
+    .filter((e) => estaEnPBX(contactosPorEmpresa.get(e.id) ?? []))
+    .map((e) => ({
+      ...e,
+      tieneNumeroConmutador: tieneNumeroPorEmpresa.get(e.id) ?? false,
+    }));
+}
+
+// Guarda el paso aprobado (borrador -> aprobar, CLAUDE.md) en las columnas que ya
+// existen para la cola (proximoPaso/proximoCanal/proximoFollowUpFecha) mas el estado
+// minimo del bucle (pbxForma). Scoped a la organizacion, mismo guard que registrarToque.
+export function guardarProximoPasoPBX(idEmpresa: string, paso: PasoPropuesto, idOrganizacion: number): void {
+  db.transaction((tx) => {
+    const emp = tx
+      .select({ organizacionActivaId: empresa.organizacionActivaId })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, idEmpresa))
+      .get();
+    if (!emp) throw new Error(`Empresa ${idEmpresa} no existe`);
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      throw new Error(`La empresa ${idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+    }
+
+    const proximoFollowUpFecha =
+      paso.diasSugeridos === null ? new Date().toISOString().slice(0, 10) : diasDesdeHoy(paso.diasSugeridos);
+
+    tx.update(empresa)
+      .set({
+        proximoPaso: paso.nota,
+        proximoCanal: paso.canal,
+        proximoFollowUpFecha,
+        pbxForma: paso.forma,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(empresa.idEmpresa, idEmpresa))
+      .run();
+  });
+}
+
+function diasDesdeHoy(dias: number): string {
+  const fecha = new Date();
+  fecha.setDate(fecha.getDate() + dias);
+  return fecha.toISOString().slice(0, 10);
+}
+
+// Estado terminal exitoso del bucle: se consiguio el metodo directo del KDM. Inserta
+// el contacto (upsert por telefono, mismo idioma que el KDM opcional de registrarToque),
+// limpia pbxForma y la empresa sale de empresasEnPBX. No toca proximoPaso/proximoCanal:
+// eso lo decide la cadencia comercial normal, fuera del bucle PBX.
+export function graduarDePBX(
+  idEmpresa: string,
+  kdm: { nombre: string; telefono: string | null; email: string | null },
+  idOrganizacion: number,
+): void {
+  db.transaction((tx) => {
+    const emp = tx
+      .select({ organizacionActivaId: empresa.organizacionActivaId })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, idEmpresa))
+      .get();
+    if (!emp) throw new Error(`Empresa ${idEmpresa} no existe`);
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      throw new Error(`La empresa ${idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+    }
+
+    const existente = kdm.telefono
+      ? tx
+          .select({ idContacto: contacto.idContacto })
+          .from(contacto)
+          .where(and(eq(contacto.idEmpresa, idEmpresa), eq(contacto.telefono, kdm.telefono)))
+          .get()
+      : undefined;
+
+    if (existente) {
+      tx.update(contacto)
+        .set({ esKeyDecisionMaker: 1, nombre: kdm.nombre, email: kdm.email ?? undefined })
+        .where(eq(contacto.idContacto, existente.idContacto))
+        .run();
+    } else {
+      tx.insert(contacto)
+        .values({
+          idEmpresa,
+          nombre: kdm.nombre,
+          telefono: kdm.telefono,
+          email: kdm.email,
+          esKeyDecisionMaker: 1,
+          esPrincipal: 0,
+          fuente: 'cockpit',
+        })
+        .run();
+    }
+
+    tx.update(empresa)
+      .set({ pbxForma: null, updatedAt: new Date().toISOString() })
+      .where(eq(empresa.idEmpresa, idEmpresa))
+      .run();
+  });
 }
