@@ -16,33 +16,56 @@ const fusionSchema = z.object({ notas: z.string() });
 // llamada nueva es recuperable (esta en el toque), perder tres meses de discovery no lo es.
 const PISO_ENCOGIMIENTO = 0.5;
 
+// PENDIENTE DE REVISION DE SEBASTIÁN (2026-07-15). Este prompt era su hueco de diseño: lo
+// escribio la IA porque el pidio no parar. Las tres decisiones que tomo, y que el puede botar:
+//
+//   1. Contradiccion -> gana el fact nuevo, y se dice que cambio ("bajaron de 8 a 5 personas").
+//      Descartado guardar los dos con fecha: sin fecha no se sabe cual es cual, y con fecha las
+//      notas dejan de ser la foto de la cuenta y se vuelven un log. Para eso ya estan los toques.
+//   2. Dedup -> semantico, no literal. "CRM Wispro" y "usan Wispro" colapsan a uno.
+//   3. Orden -> se respeta el de las notas viejas y lo nuevo va al final. Descartado reagrupar
+//      por tema: lee mejor pero mueve texto que Sebastián ya reviso, y entonces cada fusion le
+//      obliga a releer todo para encontrar que cambio.
 function construirPrompt(notasActuales: string, factsNuevos: string): string {
-  // TODO(Sebastián): el prompt de fusion.
-  //
-  // Contexto: OnePay es una fintech colombiana que le vende software de gestion de pagos a ISPs.
-  // `notasActuales` son los facts que ya teniamos de la cuenta (acumulados de llamadas
-  // anteriores); `factsNuevos` son los que salieron de la llamada de hoy.
-  //
-  // Forma del destino (ejemplo real de Notion): "10.000 usuarios. Pasarela Epayco, con caidas y
-  // errores sobre todo en dias de pago. ~40-50% pagos digitales hoy. Factura el 1; cortes 10, 15
-  // y 20. 8 personas (una por zona) validan pagos. CRM Wispro."
-  //
-  // Lo que hay que decidir (esto es la decision de diseño, no el boilerplate):
-  //   - Que hace la IA cuando un fact nuevo CONTRADICE uno viejo. "Antes 8 personas en recaudo,
-  //     ahora 5": gana el nuevo? se guardan los dos con fecha? Ojo que sin fecha no se sabe cual
-  //     es cual, y con fecha las notas se vuelven un log.
-  //   - Que cuenta como duplicado. "CRM Wispro" y "usan Wispro" son el mismo fact escrito
-  //     distinto. Que tan agresivo con el dedup?
-  //   - El orden. Se respeta el de las notas viejas y lo nuevo va al final, o se reagrupa por
-  //     tema (pagos, operacion, gente)? Reagrupar lee mejor pero mueve texto que Sebastián ya
-  //     reviso.
-  //
-  // Reglas del repo que el prompt tiene que respetar: sin emojis, sin em dashes, español directo
-  // (voz colombiana ejecutiva). Solo facts, cero narracion (eso es el brief). Nunca inventar un
-  // dato que no este en ninguna de las dos entradas.
-  //
-  // El schema de salida ya esta: devolver { notas: string }.
-  throw new Error('TODO: construirPrompt sin implementar');
+  return `Eres un asistente de ventas B2B para OnePay, una fintech colombiana que vende \
+software de gestion de pagos a ISPs (proveedores de internet). Mantienes las notas de discovery \
+de una cuenta: los facts duros que sabemos de ella, acumulados llamada tras llamada.
+
+NOTAS ACTUALES (lo que ya sabiamos):
+${notasActuales}
+
+FACTS NUEVOS (lo que solto la llamada de hoy):
+${factsNuevos}
+
+Devuelve las notas fusionadas. Reglas, en orden de importancia:
+
+1. NO PIERDAS NADA. Todo fact de las notas actuales que los facts nuevos no contradigan tiene \
+que sobrevivir, literal. Costaron llamadas. Si dudas si algo es relevante, se queda.
+
+2. Si un fact nuevo CONTRADICE uno viejo, gana el nuevo y decis que cambio. Ejemplo: si antes \
+decia "8 personas validan pagos" y ahora son 5, escribis "5 personas validan pagos (antes 8)". \
+No acumules las dos versiones sueltas como si fueran ciertas a la vez.
+
+3. No repitas el mismo fact dos veces aunque este escrito distinto. "CRM Wispro" y "usan \
+Wispro" son el mismo fact: dejalo una sola vez. Ojo con confundir facts parecidos pero \
+distintos: "80% paga por Nequi" y "80% paga en efectivo en algunas sedes" NO son el mismo.
+
+4. Respeta el orden de las notas actuales y agrega lo nuevo al final. No reordenes ni reagrupes \
+lo que ya estaba: Sebastián ya lo leyo y necesita ver de un vistazo que se agrego.
+
+5. Nunca inventes un dato que no este en ninguna de las dos entradas. No completes, no \
+redondees, no interpretes.
+
+Solo facts: datos, cifras, porcentajes, herramientas, fechas de facturacion y corte, cuanta \
+gente hace que. Cero narracion, cero interpretacion, cero juicios (eso vive en el brief, no \
+aca). Frases cortas separadas por punto.
+
+Ejemplo del tono exacto del destino: "10.000 usuarios. Pasarela Epayco, con caidas y errores \
+sobre todo en dias de pago. ~40-50% pagos digitales hoy. Factura el 1; cortes 10, 15 y 20. ~50% \
+paga del 1 al 5; 10-15% llega a corte; ~3% no vuelve. 8 personas (una por zona) validan pagos y \
+apoyan cartera. CRM Wispro (piden integrar tambien Sigo)."
+
+Sin emojis, sin em-dashes, en espanol directo (voz colombiana ejecutiva).`;
 }
 
 export async function fusionarDiscovery(
