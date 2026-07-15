@@ -6,6 +6,8 @@ import { organizacionDeUsuario } from '../db/organizacion-repository';
 import { marcarSoloLectura, ErrorSoloLectura } from './read-only';
 import { marcarModoPrueba } from './modo-prueba';
 import { leerCookieModoPrueba } from './cookie-modo';
+import { marcarOffsetDias } from './reloj';
+import { leerCookieOffsetDemo } from './cookie-reloj';
 import { resolverMembresia } from './resolucion-sesion';
 
 // Gate de sesion (V2.2): toda pagina y todo server action lo llaman primero.
@@ -19,6 +21,11 @@ export async function requireSession(): Promise<UsuarioSesion> {
   // pero cualquier query de negocio de esta request si. esModoPrueba() no tiene default:
   // sin esta linea, toda pagina lanzaria.
   marcarModoPrueba(await leerCookieModoPrueba());
+
+  // El offset del reloj de demo se marca junto al modo: hoy() en las paginas RSC lo lee.
+  // Va despues de marcarModoPrueba porque offsetActual() lo consulta (solo aplica en
+  // prueba). En una request normal la cookie no existe y el offset es 0.
+  marcarOffsetDias(await leerCookieOffsetDemo());
 
   // Multi-organizacion (Parte 1): todo usuario que completo el registro (reclamo un
   // owner_canonico) tiene una fila en organizacion_miembro. Si no la tiene -- un usuario
