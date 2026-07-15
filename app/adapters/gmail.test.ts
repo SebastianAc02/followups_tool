@@ -141,6 +141,43 @@ test('enviarPaso refresca el access token y manda el mensaje bien armado a Gmail
   assert.match(mensajeDecodificado, /Cuerpo del correo/);
 });
 
+test('enviarPaso manda el cuerpo como HTML con el link reescrito y el pixel de apertura inyectados', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-7');
+  let mensajeDecodificado = '';
+
+  t.mock.method(globalThis, 'fetch', async (url: string | URL, init: RequestInit = {}) => {
+    const href = url.toString();
+    if (href === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    if (href === 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send') {
+      const cuerpo = JSON.parse(init.body as string) as { raw: string };
+      mensajeDecodificado = Buffer.from(cuerpo.raw, 'base64url').toString('utf8');
+      return new Response(JSON.stringify({ id: 'msg-html-1', threadId: 'thread-html-1' }), { status: 200 });
+    }
+    throw new Error(`fetch no mockeado: ${href}`);
+  });
+
+  const adapter = crearGmailAdapter('user-7');
+  const resultado = await adapter.enviarPaso(
+    'campana-42',
+    { email: 'destino@onepay.la', telefono: null, nombre: null, empresa: null, cargo: null },
+    { asunto: 'Hola', cuerpo: '<p>Hola</p><a href="https://onepay.la/x">visita</a>', canal: 'correo' },
+  );
+
+  assert.strictEqual(resultado.proveedorMensajeId, 'msg-html-1');
+  assert.strictEqual(resultado.proveedorHiloId, 'thread-html-1');
+  assert.match(mensajeDecodificado, /Content-Type: text\/html/);
+  assert.match(
+    mensajeDecodificado,
+    /href="https:\/\/app\.test\/api\/track\/click\?c=campana-42&e=destino@onepay\.la&u=https%3A%2F%2Fonepay\.la%2Fx"/,
+  );
+  assert.match(
+    mensajeDecodificado,
+    /<img src="https:\/\/app\.test\/api\/track\/open\?c=campana-42&e=destino@onepay\.la" width="1" height="1" alt="" style="display:none" \/>/,
+  );
+});
+
 test('enviarPaso propaga el error de Gmail con mensaje claro', async (t) => {
   guardarCredencialConector('gmail', credencialDePrueba(), 'user-3');
   t.mock.method(globalThis, 'fetch', async (url: string | URL) => {
