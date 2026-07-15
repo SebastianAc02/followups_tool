@@ -52,17 +52,25 @@ export async function registrarUsuarioAction(input: unknown): Promise<RegistroRe
     }
   }
 
-  const creado = crearMiembroYSetOwner(ID_ORGANIZACION_ONEPAY, datos.ownerElegido, datos.ownerElegido, userId);
-  if (!creado) {
-    // El nombre ya esta reclamado (los 4 reales ya se registraron, por ejemplo). Ademas de
-    // rechazar, borramos el usuario recien creado: si no, queda autenticado sin membresia
-    // y requireSession lo entierra (500 permanente, sin poder reintentar con ese correo).
+  try {
+    const creado = crearMiembroYSetOwner(ID_ORGANIZACION_ONEPAY, datos.ownerElegido, datos.ownerElegido, userId);
+    if (!creado) {
+      // El nombre ya esta reclamado (los 4 reales ya se registraron, por ejemplo). Ademas de
+      // rechazar, borramos el usuario recien creado: si no, queda autenticado sin membresia
+      // y requireSession lo entierra (500 permanente, sin poder reintentar con ese correo).
+      borrarUsuario(userId);
+      return {
+        ok: false,
+        error: 'Ese nombre ya tiene una cuenta. Si eres tú y perdiste el acceso, habla con Sebastián.',
+      };
+    }
+    return { ok: true };
+  } catch (e) {
+    // Antes este catch no existia: un throw real de crearMiembroYSetOwner (no el `false`
+    // controlado de arriba) se colaba sin compensar y enterraba al usuario igual que el
+    // caso que ya cubre la rama 'visitante'. Caso real: felipe@onepay.la, 2026-07-15.
+    console.error('registrarUsuarioAction: fallo crearMiembroYSetOwner, revirtiendo usuario', e);
     borrarUsuario(userId);
-    return {
-      ok: false,
-      error: 'Ese nombre ya tiene una cuenta. Si eres tú y perdiste el acceso, habla con Sebastián.',
-    };
+    return { ok: false, error: 'No se pudo completar el registro. Intenta de nuevo.' };
   }
-
-  return { ok: true };
 }

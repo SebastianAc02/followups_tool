@@ -174,6 +174,26 @@ test('crearMiembroYSetOwner que falla + borrarUsuario deja la tabla user sin hue
   raw.close();
 });
 
+test('crearMiembroYSetOwner que revienta con excepcion (no el `false` controlado) tambien se compensa con borrarUsuario', () => {
+  const db = dbDePrueba(dbPath);
+  // Provoca un throw real de la transaccion (no la carrera manejada con `false`): la tabla
+  // no existe para esta conexion, asi que el INSERT dentro de la tx de Drizzle revienta.
+  // Este es el caso que en produccion enterro a felipe@onepay.la: actions.ts no tenia
+  // try/catch en la rama 'onepay' y un throw asi se colaba sin compensar.
+  const raw = new Database(dbPath);
+  raw.exec('DROP TABLE organizacion_miembro');
+  raw.close();
+
+  assert.throws(() => crearMiembroYSetOwner(1, 'Ana Gomez', 'Ana Gomez', 'user-nuevo', db));
+
+  borrarUsuario('user-nuevo', db);
+
+  const check = new Database(dbPath);
+  const fila = check.prepare(`SELECT id FROM user WHERE id = ?`).get('user-nuevo');
+  assert.equal(fila, undefined, 'un throw de crearMiembroYSetOwner tambien debe dejar la tabla user sin huerfanos');
+  check.close();
+});
+
 test('organizacionVisitantesIdOCrear crea la organizacion la primera vez y reusa el mismo id despues', () => {
   const db = dbDePrueba(dbPath);
   const primero = organizacionVisitantesIdOCrear(db);
