@@ -13,10 +13,7 @@ import { conEscritura } from "../lib/read-only";
 // Devuelve true si el error era del primer tipo y la fila ya se corrigio; false si el
 // error era ambiguo y la fila quedo intacta a proposito.
 export function marcarCaidaSiNoExiste(id: number, e: unknown): boolean {
-  // TODO(Sebastián): 3-4 líneas.
-  //
-  // Pista: `e instanceof ErrorEvolution && e.instanciaNoExiste`, y la escritura va con
-  // conEscritura(() => actualizarEstadoLineaWhatsapp(id, 'caida')) -- el candado de
-  // solo-lectura, mismo patron que las demas escrituras de este archivo.
-  return false;
+  if (!(e instanceof ErrorEvolution) || !e.instanciaNoExiste) return false;
+  conEscritura(() => actualizarEstadoLineaWhatsapp(id, 'caida'));
+  return true;
 }
