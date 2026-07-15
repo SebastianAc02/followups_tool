@@ -46,7 +46,20 @@ async function pedirUnaVez<T>(client: Anthropic, prompt: string, jsonSchema: obj
   });
 
   const bloque = mensaje.content.find((b) => b.type === 'tool_use');
-  if (!bloque || bloque.type !== 'tool_use') throw new Error('El modelo no devolvio un tool_use.');
+  if (!bloque || bloque.type !== 'tool_use') {
+    // tool_choice forzado NO garantiza un tool_use: verificado en vivo (2026-07-15), si el
+    // schema pide algo imposible el modelo se sale y responde texto (5/5 llamadas,
+    // stop_reason 'end_turn'). Cuando eso pasa, el texto dice EXACTAMENTE que esta mal --
+    // el bug del Copiloto lo diagnostico el propio modelo ("el schema exige al menos una
+    // condicion, pero no tengo con que construirla de forma honesta") y este error lo
+    // tiraba, dejando un mensaje opaco que costo horas de debug. Se propaga hacia arriba.
+    const texto = mensaje.content
+      .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+      .map((b) => b.text)
+      .join(' ')
+      .trim();
+    throw new Error(texto ? `El modelo no devolvio un tool_use. Respondio: ${texto}` : 'El modelo no devolvio un tool_use.');
+  }
   return bloque.input;
 }
 
