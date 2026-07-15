@@ -9,6 +9,7 @@ import {
   inscripcionesActivasDeEmpresa,
   pausarInscripcion,
   registrarToqueEntrante,
+  registrarRespuestaDetectada,
 } from '../../../db/repository';
 import { crearRegistroEnvio } from '../../../adapters/registro-envio';
 import { parsearMensajeEntrante } from '../../../adapters/evolution';
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       inscripcionesActivas: inscripcionesActivasDeEmpresa,
       pausarInscripcion,
       registrarToqueEntrante,
+      registrarRespuestaDetectada,
     };
     await procesarRespuestaEntrante(deps, correo, mensaje);
   } catch (e) {

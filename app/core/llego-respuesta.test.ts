@@ -53,6 +53,7 @@ function fakes() {
     pausar: [] as number[],
     sacar: [] as { seq: string; email: string }[],
     toque: [] as { match: ContactoMatch; texto: string }[],
+    notificar: [] as { idInscripcion: number; idEmpresa: string; canal: string }[],
   };
   let matchResult: ContactoMatch | null = null;
   let activas: InscripcionActiva[] = [];
@@ -67,6 +68,7 @@ function fakes() {
     inscripcionesActivas: () => activas,
     pausarInscripcion: (id) => calls.pausar.push(id),
     registrarToqueEntrante: (match, texto) => calls.toque.push({ match, texto }),
+    registrarRespuestaDetectada: (idInscripcion, idEmpresa, canal) => calls.notificar.push({ idInscripcion, idEmpresa, canal }),
   };
   const envio: TrackingPoll = {
     sacarDestinatario: async (seq, email) => {
@@ -103,6 +105,20 @@ test('reply con match + inscripcion Apollo: pausa local, corta Apollo y deja toq
   assert.deepEqual(f.calls.sacar, [{ seq: 'seq-1', email: 'ana@x.com' }], 'corta la secuencia en Apollo');
   assert.equal(f.calls.toque.length, 1, 'deja el toque entrante');
   assert.equal(f.calls.toque[0].texto, 'Si me interesa');
+});
+
+test('reply con match registra la respuesta detectada por whatsapp para cada inscripcion activa', async () => {
+  const f = fakes();
+  f.set({ match, activas: [{ idInscripcion: 42, proveedorCampanaId: 'seq-1', email: 'ana@x.com' }] });
+  await procesarRespuestaEntrante(f.deps, f.envio, mensaje);
+  assert.deepEqual(f.calls.notificar, [{ idInscripcion: 42, idEmpresa: 'emp-A', canal: 'whatsapp' }]);
+});
+
+test('idempotencia: un mensaje duplicado no notifica de nuevo', async () => {
+  const f = fakes();
+  f.set({ match, activas: [{ idInscripcion: 42, proveedorCampanaId: 'seq-1', email: 'ana@x.com' }], dup: true });
+  await procesarRespuestaEntrante(f.deps, f.envio, mensaje);
+  assert.deepEqual(f.calls.notificar, []);
 });
 
 test('idempotencia: un mensaje duplicado no re-ejecuta efectos', async () => {

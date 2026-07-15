@@ -41,6 +41,7 @@ import {
   destinatario,
   pasoInscripcion,
   eventoTracking,
+  notificacionRespuesta,
   mensajeWhatsapp,
   lineaWhatsapp,
   empresaEstadoHistorial,
@@ -3952,6 +3953,7 @@ export function resolverDestinatarioPorEmail(proveedorCampanaId: string, email: 
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
       idDestinatario: pasoInscripcion.idDestinatario,
       idInscripcion: destinatario.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
@@ -4017,6 +4019,65 @@ export function quedanDestinatariosActivos(idInscripcion: number): boolean {
     .where(and(eq(destinatario.idInscripcion, idInscripcion), eq(destinatario.estado, 'activo')))
     .get();
   return (fila?.c ?? 0) > 0;
+}
+
+// ── Aviso de respuesta (V6.1): registro append-only + consulta para /cola y
+// /seguimiento. Ver core/tracking.ts y core/llego-respuesta.ts para el unico
+// punto de notificacion (se llama junto a pausarInscripcion, nunca solo).
+export function registrarRespuestaDetectada(idInscripcion: number, idEmpresa: string, canal: string) {
+  const ahora = new Date().toISOString();
+  db.insert(notificacionRespuesta)
+    .values({ idInscripcion, idEmpresa, canal, detectadaEn: ahora, createdAt: ahora })
+    .run();
+}
+
+// Marca TODAS las filas sin ver de esa empresa a la vez (no solo la ultima) -- si
+// respondio dos veces antes de que Sebastian abriera la ficha, abrir la ficha una
+// vez basta para apagar el destaque.
+export function marcarRespuestaVista(idEmpresa: string) {
+  db.update(notificacionRespuesta)
+    .set({ vistaEn: new Date().toISOString() })
+    .where(and(eq(notificacionRespuesta.idEmpresa, idEmpresa), isNull(notificacionRespuesta.vistaEn)))
+    .run();
+}
+
+export type FilaRespuestaPendiente = {
+  idEmpresa: string;
+  empresa: string;
+  contacto: string | null;
+  cargo: string | null;
+  canal: string;
+  fecha: string;
+};
+
+// Una fila por respuesta sin ver, org-wide, mas reciente primero; se dedupea a UNA
+// fila por empresa en TS (nos quedamos con la primera = la mas reciente) -- mas
+// simple que un correlated subquery en SQL para "el canal de la fila con MAX(fecha)".
+export function empresasConRespuestaPendiente(idOrganizacion: number): FilaRespuestaPendiente[] {
+  const filas = db
+    .select({
+      idEmpresa: notificacionRespuesta.idEmpresa,
+      empresa: empresa.nombreOficial,
+      contacto: contacto.nombre,
+      cargo: contacto.cargo,
+      canal: notificacionRespuesta.canal,
+      fecha: notificacionRespuesta.detectadaEn,
+    })
+    .from(notificacionRespuesta)
+    .innerJoin(empresa, eq(empresa.idEmpresa, notificacionRespuesta.idEmpresa))
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, notificacionRespuesta.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .where(and(isNull(notificacionRespuesta.vistaEn), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .orderBy(desc(notificacionRespuesta.detectadaEn))
+    .all();
+
+  const vistas = new Set<string>();
+  const unicas: FilaRespuestaPendiente[] = [];
+  for (const f of filas) {
+    if (vistas.has(f.idEmpresa)) continue;
+    vistas.add(f.idEmpresa);
+    unicas.push(f);
+  }
+  return unicas;
 }
 
 // ── WhatsApp entrante (tarea 6): primitivas que consume core/llego-respuesta.ts ──

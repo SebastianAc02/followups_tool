@@ -3,7 +3,7 @@
 // Envuelta por layout.tsx que ya hace requireSession() + AppShell, así que esta página
 // solo renderiza el contenido específico de seguimiento.
 import { requireSession } from '../lib/session';
-import { kpisPipeline, pipelineGlobal, pipelineSinCadencia } from '../db/repository';
+import { kpisPipeline, pipelineGlobal, pipelineSinCadencia, empresasConRespuestaPendiente } from '../db/repository';
 import { canalNormalizado } from '../cola/agenda.ts';
 import { SeguimientoShell } from '../ui/seguimiento/SeguimientoShell';
 import { KpiRow, type KpiData } from '../ui/seguimiento/KpiRow';
@@ -123,6 +123,36 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
   // Franja "Sin cadencia" (2026-07-14): los toques manuales pendientes que no estan en
   // ninguna cadencia activa. Van en su propia franja al final, separados de los "Toque N"
   // cadenceados, para que Seguimiento muestre todo lo pendiente y no solo lo del motor.
+  // Franja "Respondieron" (2026-07-14): empresas con una respuesta sin ver. Separada de
+  // los grupos "Toque N" a propósito -- pipelineGlobal solo trae inscripcion.estado =
+  // 'activa', y una empresa recién pausada por respuesta cae fuera de esos grupos. No se
+  // toca pipelineGlobal: una respuesta es "bandeja de revisión pendiente", no "progreso
+  // de cadencia", son conceptos distintos aunque ambos vivan en /seguimiento.
+  const respondieron = empresasConRespuestaPendiente(usuario.idOrganizacion);
+  const grupoRespondieron = (() => {
+    if (respondieron.length === 0) return null;
+    const empresas: EmpresaRowData[] = respondieron.map((f) => ({
+      id: f.idEmpresa,
+      nombre: f.empresa,
+      contacto: f.contacto ?? 'Sin contacto activo',
+      cargo: f.cargo ?? '',
+      pasoActual: 'Respondió',
+      diaSecuencia: 0,
+      cadencia: 'Nueva respuesta',
+      objetivo: null,
+      canal: canalNormalizado(f.canal),
+      respondio: true,
+    }));
+
+    const data: EtapaGroupData = {
+      estado: 'respondieron',
+      label: 'Respondieron',
+      total: respondieron.length,
+    };
+
+    return { data, empresas };
+  })();
+
   const filasSinCadencia = pipelineSinCadencia(usuario.idOrganizacion, hoy);
   const grupoSinCadencia = (() => {
     if (filasSinCadencia.length === 0) return null;
@@ -160,7 +190,11 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
     return { data, empresas };
   })();
 
-  const todosLosGrupos = grupoSinCadencia ? [...grupos, grupoSinCadencia] : grupos;
+  const todosLosGrupos = [
+    ...(grupoRespondieron ? [grupoRespondieron] : []),
+    ...grupos,
+    ...(grupoSinCadencia ? [grupoSinCadencia] : []),
+  ];
 
   return (
     <div className="space-y-6">

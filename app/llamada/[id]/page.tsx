@@ -1,4 +1,4 @@
-import { getContextoToque, versionesDePaso } from "../../db/repository";
+import { getContextoToque, versionesDePaso, marcarRespuestaVista } from "../../db/repository";
 import { Confirmacion, type CampoConfirmacion } from "./Confirmacion";
 import { LlamadaCard } from "./LlamadaCard";
 import { PbxPanel } from "./PbxPanel";
@@ -33,6 +33,11 @@ export default async function Llamada({
   const { id } = await params;
   const sp = await searchParams;
   const ctx = getContextoToque(id, usuario.idOrganizacion);
+
+  // Aviso de respuesta (V6.1): abrir la ficha de la empresa es la señal de "ya lo vi"
+  // -- apaga el destaque de /cola y /seguimiento sin que Sebastián tenga que hacer un
+  // click aparte. No-op si esta empresa no tenía ninguna respuesta pendiente.
+  marcarRespuestaVista(id);
 
   if (!ctx.emp) {
     return (

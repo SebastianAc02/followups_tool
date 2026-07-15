@@ -52,6 +52,10 @@ export type RespuestaEntranteDeps = {
   // Deja el toque entrante en el historial de la empresa, fuente 'whatsapp_entrante'
   // (decision C: es un hecho ocurrido, se persiste directo, no pasa por borrador).
   registrarToqueEntrante: (match: ContactoMatch, texto: string, fecha: string) => void;
+  // Aviso de respuesta (V6.1): mismo dep que core/tracking.ts, se llama SIEMPRE junto
+  // a pausarInscripcion, nunca por separado. Canal fijo 'whatsapp' -- este caso de uso
+  // ES el de WhatsApp, a diferencia de tracking.ts donde el canal viene del evento.
+  registrarRespuestaDetectada: (idInscripcion: number, idEmpresa: string, canal: string) => void;
 };
 
 export function normalizarTelefono(t: string): string {
@@ -100,6 +104,7 @@ export async function procesarRespuestaEntrante(
     // Corte local siempre, incondicional: es lo minimo que garantiza que el motor
     // deja de mandar el siguiente paso, sin depender de que Apollo responda.
     deps.pausarInscripcion(activa.idInscripcion, 'respuesta detectada (whatsapp)');
+    deps.registrarRespuestaDetectada(activa.idInscripcion, match.idEmpresa, 'whatsapp');
 
     if (activa.proveedorCampanaId && activa.email) {
       try {

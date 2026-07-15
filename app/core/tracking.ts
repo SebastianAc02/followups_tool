@@ -3,7 +3,7 @@
 import type { TrackingPoll, EventoProveedor } from './ports/envio';
 
 export type CampanaConSecuencia = { idCampana: number; proveedorCampanaId: string };
-export type DestinatarioResuelto = { idPasoInscripcion: number; idDestinatario: number; idInscripcion: number };
+export type DestinatarioResuelto = { idPasoInscripcion: number; idDestinatario: number; idInscripcion: number; idEmpresa: string };
 
 export type TrackingDeps = {
   campanasConSecuencia: () => CampanaConSecuencia[];
@@ -16,6 +16,10 @@ export type TrackingDeps = {
   pausarInscripcion: (idInscripcion: number, motivo: string) => void;
   marcarDestinatarioSalio: (idDestinatario: number) => void;
   quedanDestinatariosActivos: (idInscripcion: number) => boolean;
+  // Aviso de respuesta (V6.1): se llama SIEMPRE junto a pausarInscripcion cuando el
+  // evento es 'respondio', nunca por separado -- es aditivo, no reemplaza el corte
+  // de cadencia que pausarInscripcion ya hace.
+  registrarRespuestaDetectada: (idInscripcion: number, idEmpresa: string, canal: string) => void;
 };
 
 // Ventana fija de lectura: no hay cursor incremental persistido todavia (eso es una
@@ -44,6 +48,7 @@ export async function pollTracking(deps: TrackingDeps, envio: TrackingPoll, ahor
         // Reply de CUALQUIER destinatario pausa la inscripcion de inmediato (B6):
         // ningun paso futuro sale, sin importar si otros destinatarios siguen activos.
         deps.pausarInscripcion(destinatario.idInscripcion, 'respuesta detectada');
+        deps.registrarRespuestaDetectada(destinatario.idInscripcion, destinatario.idEmpresa, evento.canal);
       } else if (evento.tipo === 'rebota') {
         deps.marcarDestinatarioSalio(destinatario.idDestinatario);
         if (!deps.quedanDestinatariosActivos(destinatario.idInscripcion)) {
