@@ -68,7 +68,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
 
 ## Fase 1: Enlace page_id universal
 
-- [ ] **T5 · Repository + comando: enlazar page_id.**
+- [x] **T5 · Repository + comando: enlazar page_id.**
   Modificar: `app/db/repository.ts` (`enlazarPageId(idEmpresa, pageId)` idempotente).
   Crear: `scripts/enlazar_page_ids.ts` que recorre las empresas Notion ya deduplicadas
   (post Fase 0) y las enlaza por el par aprobado / match exacto.
@@ -79,20 +79,20 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
 
 ## Fase 2: Categoría "el no gana"
 
-- [ ] **T6 · Core: Industria Notion -> veto (función pura).**
+- [x] **T6 · Core: Industria Notion -> veto (función pura).**
   Crear: `app/core/reconciliacion/vetoCategoria.ts` + test.
   Mapea: ISP/vacío -> sin veto; Agua/Energía/Gas/Utility -> `es_utility_no_isp`;
   Telecom/Otro/Educación/Pasarela -> `es_no_isp_confirmado`.
   Lista cuando: prueba cubre las tres ramas (ISP, utility, telco).
 
-- [ ] **T7 · Repository: escribir el veto de Notion en empresa_clasificacion.**
+- [x] **T7 · Repository: escribir el veto de Notion en empresa_clasificacion.**
   Modificar: `app/db/repository.ts` (`marcarVetoNotion(idEmpresa, flag)`).
   Escribe el flag con `fuente='notion'`, sin borrar vetos DB existentes (unión, "el no
   gana"). Idempotente.
   Lista cuando: prueba que ENEL (Energía) queda `es_utility_no_isp` y la vista
   `empresa_categoria` la reporta fuera de `isp`.
 
-- [ ] **T8 · App: leer categoría de la vista, no de la columna plana.**
+- [x] **T8 · App: leer categoría de la vista, no de la columna plana.**
   Modificar: `app/db/repository.ts` (segmento/`COLUMNA_SEGMENTO` líneas ~1288/1394),
   filtros de campaña (`app/campanas/**`), `app/ui/seguimiento/DetallePanel.tsx`.
   Cambiar el origen de `categoria` de `empresa.categoria` a la de `empresa_categoria` /
@@ -104,7 +104,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
 
 ## Fase 3: Estados (mapeo + sync de la deriva)
 
-- [ ] **T9 · Core: mapeo estado Notion -> enum DB (función pura).**
+- [x] **T9 · Core: mapeo estado Notion -> enum DB (función pura).**
   Crear: `app/core/reconciliacion/mapeoEstados.ts` + test.
   Uno-a-uno por nombre; huérfanos (decidido): `CONTRATO FIRMADO -> cierre_documentacion`,
   `FIRMA PENDIENTE -> cierre_documentacion`. Un estado desconocido lanza error (no rompe el
@@ -112,7 +112,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
   Lista cuando: prueba cubre ON HOLD, FIRMA Y PAGO REALIZADO, los dos huérfanos y un
   desconocido (que debe fallar).
 
-- [ ] **T10 · Sync de la deriva por el camino auditado.**
+- [x] **T10 · Sync de la deriva por el camino auditado.**
   Crear: `scripts/sync_estados_notion.ts` (usa T9 + `cambiarEstadoNotion` de
   `repository.ts:4431`, NO escribe la columna a pelo).
   Notion sobrescribe (decidido). Solo toca las empresas con estado distinto.
@@ -123,7 +123,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
 
 ## Fase 4: Enriquecimiento desde Notion (Notion sobrescribe)
 
-- [ ] **T11 · Contactos: Contacto Principal + Buying Comittee -> contacto.**
+- [x] **T11 · Contactos: Contacto Principal + Buying Comittee -> contacto.**
   Modificar: `app/db/repository.ts` (`upsertContactoNotion`). Usa T1 (incluye leer las
   fichas del comité de las subcarpetas).
   Mapea Nombre/Cargo/Celular/Correo/LinkedIn -> `contacto` con `fuente='notion'`,
@@ -132,7 +132,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
   Lista cuando: Jigartel queda con Nayris (313 7933653); correr dos veces no duplica; los
   ~65 ISP genuinos quedan con contacto.
 
-- [ ] **T12 · Campos de empresa + usuarios (Notion sobrescribe, guarda anterior).**
+- [x] **T12 · Campos de empresa + usuarios (Notion sobrescribe, guarda anterior).**
   Modificar: `app/db/repository.ts` (`enriquecerDesdeNotion`).
   Sobrescribe `pasarela_actual`, `crm_software`, `owner` (respetar owner canónico),
   `proximo_paso`, `proximo_follow_up_fecha`; y `empresa_usuarios.usuarios_estimados` con
@@ -145,7 +145,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
 
 ## Fix separado (independiente): fuga de estado en la cola
 
-- [ ] **T13 · colaDelDia deja de mostrar on_hold y firma_pago.**
+- [x] **T13 · colaDelDia deja de mostrar on_hold y firma_pago.**
   Modificar: `app/db/repository.ts` (`colaDelDia`, ~línea 193) agregando
   `sql\`COALESCE(estado_notion,'') NOT IN ('on_hold','firma_pago')\``; revisar
   `app/cola/agenda.ts` (`bucketDeEtapa` mapea on_hold -> 'lead').
