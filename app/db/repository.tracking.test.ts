@@ -87,6 +87,7 @@ test('resolverDestinatarioPorEmail encuentra el destinatario por (proveedorCampa
   assert.strictEqual(resuelto!.idDestinatario, idDestinatario);
   assert.strictEqual(resuelto!.idInscripcion, idInscripcion);
   assert.strictEqual(resuelto!.idPasoInscripcion, idPasoInscripcion);
+  assert.strictEqual(resuelto!.idEmpresa, 'e-track-1');
 });
 
 test('resolverDestinatarioPorEmail con email desconocido devuelve null', () => {

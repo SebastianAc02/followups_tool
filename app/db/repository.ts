@@ -3953,6 +3953,7 @@ export function resolverDestinatarioPorEmail(proveedorCampanaId: string, email: 
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
       idDestinatario: pasoInscripcion.idDestinatario,
       idInscripcion: destinatario.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
