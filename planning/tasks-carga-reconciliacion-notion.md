@@ -40,7 +40,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
   901715847) vs su registro Notion -> par; dos empresas distintas -> no par; umbral de
   score configurable.
 
-- [ ] **T3 · Reporte de candidatos para aprobar.**
+- [x] **T3 · Reporte de candidatos para aprobar.**
   Crear: `scripts/dedup_reporte.ts` (orquesta T1 + T2 + Repository de solo-lectura).
   Escribe la lista de pares candidatos a `planning/dedup-candidatos.md` (o CSV):
   score, ambos ids, ambos nombres, campos en conflicto. Sin fundir nada.
@@ -48,12 +48,20 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
   cuáles fundir.
 
 - [ ] **T4 · Repository: fundir un par aprobado (idempotente).**
-  Modificar: `app/db/repository.ts` (nueva `fundirEmpresas(idSobrevive, idAbsorbido)`).
-  Regla de fusión (decidida): sobrevive el registro NIT en identidad (conserva NIT y nombre
-  legal); Notion gana en todo lo comercial (estado, owner, ciudad comercial, pasarela, crm,
-  usuarios) y aporta su `notion_page_id` y sus contactos. Mueve contactos/toques al
-  sobreviviente, escribe el alias en `empresa_alias`, registra el par en `sync_cambios`.
-  Test: fundir dos veces no duplica alias ni contactos; el absorbido queda desreferenciado.
+  Modificar: `app/db/repository.ts` (nueva `fundirEmpresas(idSobrevive, idsAbsorbidos: string[])`,
+  acepta MAS DE UN absorbido — Celsia Internet tiene 2 sinteticos con el mismo NIT).
+  Regla de fusión (decisión revisada 2026-07-14, cambia el spec original): sobrevive el
+  registro NIT en identidad (conserva el NIT); **`nombre_oficial` pasa a ser el nombre de
+  NOTION** (lo que se ve en toda la app — cola, segmentación, DetallePanel), el nombre legal
+  del NIT se guarda en `empresa.nombre_legal` (columna NUEVA, requiere migración chica antes
+  de esta tarea). Notion gana en todo lo demás comercial (estado, owner, ciudad comercial,
+  pasarela, crm, usuarios) y aporta su `notion_page_id` y sus contactos. Mueve
+  contactos/toques al sobreviviente, escribe el alias en `empresa_alias`, registra el par en
+  `sync_cambios`. Lista de pares aprobados: `planning/dedup-candidatos.md` (sección
+  "Decision de Sebastian").
+  Test: fundir dos veces no duplica alias ni contactos; el absorbido queda desreferenciado;
+  fundir dos absorbidos contra un mismo sobreviviente (caso Celsia) no pisa el segundo con
+  el primero.
   Lista cuando: la prueba de idempotencia pasa y el alias + `sync_cambios` quedan.
 
 ---

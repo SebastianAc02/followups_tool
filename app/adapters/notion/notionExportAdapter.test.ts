@@ -11,14 +11,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dirFixtures = path.join(__dirname, '__fixtures__');
 
 test('lee el export por-pagina + CSV y devuelve una empresa por fila del CSV', () => {
-  const adapter = crearNotionExportAdapter(dirFixtures, 'pipeline_all.csv');
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
   const empresas = adapter.leerEmpresas();
 
   assert.equal(empresas.length, 3);
 });
 
 test('enlaza pageId desde el nombre de archivo .md y detecta la subcarpeta', () => {
-  const adapter = crearNotionExportAdapter(dirFixtures, 'pipeline_all.csv');
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
   const empresas = adapter.leerEmpresas();
 
   const acuavalle = empresas.find((e) => e.nombre === 'ACUAVALLE');
@@ -31,7 +31,7 @@ test('enlaza pageId desde el nombre de archivo .md y detecta la subcarpeta', () 
 });
 
 test('empresa sin .md correspondiente queda con pageId null y sin subcarpeta', () => {
-  const adapter = crearNotionExportAdapter(dirFixtures, 'pipeline_all.csv');
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
   const empresas = adapter.leerEmpresas();
 
   const sinMd = empresas.find((e) => e.nombre === 'SIN MD SAS');
@@ -44,7 +44,7 @@ test('empresa sin .md correspondiente queda con pageId null y sin subcarpeta', (
 });
 
 test('quita el BOM de la primera columna del CSV', () => {
-  const adapter = crearNotionExportAdapter(dirFixtures, 'pipeline_all.csv');
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
   const empresas = adapter.leerEmpresas();
 
   assert.ok(empresas.every((e) => e.nombre.charCodeAt(0) !== 0xfeff));
@@ -55,6 +55,6 @@ test('quita el BOM de la primera columna del CSV', () => {
 });
 
 test('correr dos veces devuelve exactamente los mismos datos (idempotente en lectura)', () => {
-  const adapter = crearNotionExportAdapter(dirFixtures, 'pipeline_all.csv');
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
   assert.deepEqual(adapter.leerEmpresas(), adapter.leerEmpresas());
 });

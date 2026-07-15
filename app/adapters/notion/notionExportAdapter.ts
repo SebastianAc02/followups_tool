@@ -104,10 +104,11 @@ function mapaPageIdsYSubcarpetas(dirExport: string): Map<string, { pageId: strin
   return mapa;
 }
 
-export function crearNotionExportAdapter(dirExport: string, nombreCsv: string): NotionExportAdapter {
+// csvPath es una ruta independiente (no se une a dirExport): en el export real el CSV
+// vive un nivel arriba de la carpeta con los .md por-pagina, no adentro.
+export function crearNotionExportAdapter(dirExport: string, csvPath: string): NotionExportAdapter {
   return {
     leerEmpresas(): NotionEmpresaExport[] {
-      const csvPath = path.join(dirExport, nombreCsv);
       const filas = parseCsv(fs.readFileSync(csvPath, 'utf-8'));
       const porPagina = mapaPageIdsYSubcarpetas(dirExport);
 
