@@ -1,9 +1,10 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import { Button } from "../ui/Button";
 import { Pill } from "../ui/Pill";
 import { Dot } from "../ui/Dot";
+import { useConfirm } from "../ui/useConfirm";
 import type { LineaWhatsapp as LineaWhatsappRow } from "../db/repository";
 import {
   agregarLineaAction,
@@ -149,19 +150,38 @@ function ProbarConexionDialog({ linea, onCerrar }: { linea: LineaWhatsappRow; on
 
 function LineaRow({ linea }: { linea: LineaWhatsappRow }) {
   const [probando, setProbando] = useState(false);
-  // useActionState en vez de <form action={accionCruda}>: las dos acciones hablan con
-  // Evolution, y un proveedor caido tiene que caber en esta fila como texto rojo, no
-  // tumbar /conectores entera. Un estado por boton para que el error salga al lado del
-  // que lo produjo.
+  // useActionState en vez de <form action={accionCruda}>: la accion habla con Evolution,
+  // y un proveedor caido tiene que caber en esta fila como texto rojo, no tumbar
+  // /conectores entera.
   const [resVerificar, accionVerificar, verificando] = useActionState<ResultadoAccion | null, FormData>(
     verificarEstadoLineaAction,
     null,
   );
-  const [resDesconectar, accionDesconectar, desconectando] = useActionState<ResultadoAccion | null, FormData>(
-    desconectarLineaAction,
-    null,
-  );
-  const error = [resVerificar, resDesconectar].find((r) => r && !r.ok);
+  // Desconectar pregunta antes (useConfirm, no un form plano): un clic accidental no
+  // puede cerrar la sesion de WhatsApp de la linea. startTransition en vez de
+  // useActionState porque la accion la dispara un onClick tras confirmar, no un submit.
+  const { confirmar, elemento: dialogoDesconectar } = useConfirm();
+  const [pendienteDesc, startDesconectar] = useTransition();
+  const [errorDesc, setErrorDesc] = useState("");
+
+  async function desconectar() {
+    const ok = await confirmar({
+      titulo: `¿Desconectar ${linea.numero}?`,
+      mensaje:
+        "Cierra la sesión de WhatsApp de esta línea. Para volver a usarla hay que aparearla de nuevo con un código.",
+      textoConfirmar: "Desconectar",
+    });
+    if (!ok) return;
+    setErrorDesc("");
+    const fd = new FormData();
+    fd.set("id", String(linea.id));
+    startDesconectar(async () => {
+      const res = await desconectarLineaAction(null, fd);
+      if (!res.ok) setErrorDesc(res.error);
+    });
+  }
+
+  const error = resVerificar && !resVerificar.ok ? resVerificar.error : errorDesc;
   const sev = SEV_LINEA[linea.estado as keyof typeof SEV_LINEA] ?? "faint";
   const label = LABEL_LINEA[linea.estado as keyof typeof LABEL_LINEA] ?? linea.estado;
 
@@ -191,22 +211,21 @@ function LineaRow({ linea }: { linea: LineaWhatsappRow }) {
             {verificando ? "Verificando..." : "Verificar estado"}
           </Button>
         </form>
-        <form action={accionDesconectar}>
-          <input type="hidden" name="id" value={linea.id} />
-          <Button
-            type="submit"
-            variant="quiet"
-            disabled={desconectando}
-            className="text-overdue/80 hover:text-overdue"
-          >
-            {desconectando ? "Desconectando..." : "Desconectar"}
-          </Button>
-        </form>
+        <Button
+          type="button"
+          variant="quiet"
+          onClick={desconectar}
+          disabled={pendienteDesc}
+          className="text-overdue/80 hover:text-overdue"
+        >
+          {pendienteDesc ? "Desconectando..." : "Desconectar"}
+        </Button>
       </div>
 
-      {error && !error.ok && <p className="mt-2 text-xs text-overdue">{error.error}</p>}
+      {error && <p className="mt-2 text-xs text-overdue">{error}</p>}
 
       {probando && <ProbarConexionDialog linea={linea} onCerrar={() => setProbando(false)} />}
+      {dialogoDesconectar}
     </div>
   );
 }
