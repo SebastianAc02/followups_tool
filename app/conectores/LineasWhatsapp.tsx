@@ -47,13 +47,16 @@ function PasoEnviar({ id, onEnviado }: { id: number; onEnviado: () => void }) {
         <input
           name="destino"
           type="tel"
-          placeholder="Número de destino, con código de país"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-bg px-3 py-2.5 font-mono-tag text-sm text-ink outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-ring"
+          placeholder="573001234567"
+          className="min-w-0 flex-1 rounded-lg border border-line bg-bg px-3.5 py-2.5 font-mono-tag text-sm text-ink outline-none placeholder:text-faint focus-visible:ring-2 focus-visible:ring-ring"
         />
         <Button type="submit" disabled={pendiente}>
           {pendiente ? "Enviando..." : "Enviar prueba"}
         </Button>
       </form>
+      <p className="mt-1.5 text-xs text-faint">
+        Código de país + número, sin + ni espacios (Colombia 57, Estados Unidos 1).
+      </p>
       {resultado && !resultado.ok && <p className="mt-2 text-xs text-overdue">{resultado.error}</p>}
     </div>
   );
