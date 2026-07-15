@@ -19,10 +19,14 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm test
       - name: build
-        # Mismo motivo que en el Dockerfile: app/db/index.ts abre la DB en la carga
-        # del modulo, next build necesita una ruta valida para eso, no una real.
+        # Mismo motivo que en el Dockerfile: app/db/index.ts abre las DOS bases en la
+        # carga del modulo, next build necesita rutas validas para eso, no reales. Sin
+        # PRUEBAS_DB_PATH el default es una ruta del Mac de Sebastian que aca no existe,
+        # y better-sqlite3 revienta ("Cannot open database because the directory does
+        # not exist"): el build pasaba en local solo porque alli el archivo si esta.
         env:
           ISPS_DB_PATH: ":memory:"
+          PRUEBAS_DB_PATH: ":memory:"
         run: npm run build
 
   # Deploy: solo si el gate paso. Entra al VPS por SSH con una llave dedicada (no la
@@ -55,5 +59,10 @@ jobs:
             # de recrear los contenedores -- ver scripts/migrate.ts. Corre una sola vez,
             # con la imagen recien construida, no en cada arranque de contenedor.
             docker compose -f docker-compose.production.yml run --rm followups-web npm run migrate
+            # pruebas.db nace con el MISMO esquema que la real (migrate apunta a ella via
+            # ISPS_DB_PATH, ver el plan de modo-prueba). Sin este paso el archivo se crea
+            # vacio y el toggle de modo prueba revienta al primer query. Cero filas de
+            # negocio a proposito: en modo prueba no hay ISP real al que escribirle.
+            docker compose -f docker-compose.production.yml run --rm -e ISPS_DB_PATH=/data/pruebas.db followups-web npm run migrate
             docker compose -f docker-compose.production.yml up -d
           '

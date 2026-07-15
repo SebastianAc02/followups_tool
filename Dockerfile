@@ -18,6 +18,9 @@ COPY . .
 # base aislada, sin archivo ni lock que compartir. Se descarta al terminar este
 # stage; la ruta real la pone .env.production en runtime.
 ENV ISPS_DB_PATH=:memory:
+# Misma razon para pruebas.db (modo prueba abre las dos bases al cargar el modulo). Sin
+# esto el default apunta a una ruta del Mac que no existe en la imagen y el build muere.
+ENV PRUEBAS_DB_PATH=:memory:
 RUN npm run build
 
 # ---- runner: imagen final. Un solo runtime para dos procesos (web y worker): el
