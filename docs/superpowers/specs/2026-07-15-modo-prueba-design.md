@@ -62,8 +62,15 @@ te des cuenta. Mismo bug que ya pasó con `BETTER_AUTH_URL` en `.env.local` el 2
 
 ## Datos de prueba (seed)
 
-`pruebas.db` vive al lado de `isps.db` (un nivel arriba del proyecto), con el esquema aplicado por
-Drizzle y cero filas de negocio. Es imposible mandarle correo a un ISP real: no existe ninguno.
+`pruebas.db` vive al lado de `isps.db` (un nivel arriba del proyecto), con el esquema **replicado
+desde `isps.db`** (`.schema | sqlite3 pruebas.db`) y cero filas de negocio. Es imposible mandarle
+correo a un ISP real: no existe ninguno.
+
+**No se crea con `npm run migrate`** (verificado 2026-07-15): una base construida desde el journal
+tiene 31 tablas y `isps.db` tiene 50 — faltan 19, incluida `cliente`, que `repository.ts` usa 6
+veces. `isps.db` se seedeó desde Notion y muchas tablas nunca pasaron por Drizzle, así que el
+baseline solo modela lo que está en `schema.ts`. Replicar el esquema real es además lo que manda la
+constitución: "NO recrear tablas: reflejar las que hay".
 
 | Persona | WhatsApp | Correo |
 |---|---|---|

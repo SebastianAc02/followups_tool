@@ -512,14 +512,46 @@ git commit -m "feat(modo-prueba): cookie de sesion + marca en requireSession"
 **Files:**
 - Create: `scripts/seed_pruebas.ts`
 
-- [ ] **Step 1: Crear pruebas.db con el esquema**
+> **CORREGIDO 2026-07-15.** El plan original decía crear `pruebas.db` con `npm run migrate`.
+> **Está mal y se verificó:** una base creada desde el journal tiene **31 tablas; `isps.db` tiene
+> 50**. Faltan 19, incluida `cliente`, que `repository.ts` usa 6 veces. La causa es la de CLAUDE.md:
+> `isps.db` se seedeó desde Notion y muchas tablas nunca pasaron por Drizzle, así que el baseline
+> `0000` solo modela lo que está en `schema.ts`. Migrar produciría una `pruebas.db` que miente sobre
+> el esquema. Se replica el esquema REAL, que además es lo que manda la constitución del repo:
+> "NO recrear tablas: reflejar las que hay".
 
-`scripts/migrate.ts` ya respeta `ISPS_DB_PATH`, así que no hace falta código nuevo:
+- [ ] **Step 1: Crear pruebas.db replicando el esquema real (sin datos)**
 
-Run: `ISPS_DB_PATH=/Users/sebastianacostamolina/01_Documents/06_onepay/pruebas.db npm run migrate`
-Expected: `Migraciones al dia contra /Users/.../pruebas.db`
+Run:
+```bash
+sqlite3 /Users/sebastianacostamolina/01_Documents/06_onepay/isps.db .schema \
+  | grep -v "^CREATE TABLE sqlite_sequence" \
+  | sqlite3 /Users/sebastianacostamolina/01_Documents/06_onepay/pruebas.db
+```
 
-Verificar: `sqlite3 /Users/sebastianacostamolina/01_Documents/06_onepay/pruebas.db "SELECT count(*) FROM empresa;"` → `0`
+(`sqlite_sequence` es interna de SQLite: SQLite la crea sola y rechaza el CREATE explícito con
+"object name reserved for internal use".)
+
+Verificar que la réplica es exacta y está vacía:
+```bash
+PDB=/Users/sebastianacostamolina/01_Documents/06_onepay/pruebas.db
+RDB=/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db
+for tipo in table index view trigger; do
+  echo "$tipo: nueva=$(sqlite3 "$PDB" "SELECT count(*) FROM sqlite_master WHERE type='$tipo';") real=$(sqlite3 "$RDB" "SELECT count(*) FROM sqlite_master WHERE type='$tipo';")"
+done
+sqlite3 "$PDB" "SELECT (SELECT count(*) FROM empresa), (SELECT count(*) FROM contacto), (SELECT count(*) FROM toque);"
+```
+Expected: `table: nueva=50 real=50`, `index: 70/70`, `view: 3/3`, `trigger: 4/4`, y `0|0|0`.
+
+> **Deuda que esto NO arregla** (avisada por la sesión paralela, verificada aquí): el journal de
+> migraciones está inconsistente. `isps.db` tiene `identidad_decision` e `id_empresa_matriz`
+> creadas FUERA del journal (vienen de embudo-real-y-registro Task 12: se agregaron a `schema.ts`
+> sin generar migración), producción NO las tiene, y `drizzle/0007_brown_maverick.sql` está
+> generada sin correr. Aplicar `0007` sobre `isps.db` reventaría (columna y tabla ya existen). Es
+> la misma cicatriz que `scripts/migrate.ts` documenta con `empresa.pbx_forma` el 2026-07-14, y la
+> razón de fondo es que CI corre contra `:memory:` (siempre en sync con `schema.ts`) y nunca ve el
+> desfase. **Fuera del alcance de este plan** — pero mientras exista, `pruebas.db` DEBE nacer del
+> esquema real, no del journal.
 
 - [ ] **Step 2: Escribir el seed**
 
