@@ -277,6 +277,12 @@ export const campana = sqliteTable('campana', {
   owner: text('owner'),
   idOrganizacion: integer('id_organizacion').notNull(),
   proveedorCampanaId: text('proveedor_campana_id'),
+  // Gmail Etapa 2 (2026-07-15): compuerta de aprobacion para correo por Gmail. Se
+  // marca automaticamente en lanzarCampanaAction cuando el dueno resuelve a Gmail
+  // (el click de "Lanzar hoy" ES la aprobacion explicita, misma convencion real que
+  // ya usa Apollo -- ver nota del plan). pasoInscripcionesPendientes la usa como gate
+  // defensivo: sin esto en 1, ningun paso de correo de una campana Gmail sale.
+  aprobadaEnvioGmail: integer('aprobada_envio_gmail').notNull().default(0),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });
