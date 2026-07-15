@@ -4,6 +4,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+export interface NotionBuyingComitteeContacto {
+  nombre: string;
+  cargo: string;
+  celular: string;
+  correo: string;
+  linkedin: string;
+}
+
 export interface NotionEmpresaExport {
   pageId: string | null;
   nombre: string;
@@ -20,6 +28,10 @@ export interface NotionEmpresaExport {
   proximoPaso: string;
   fechaProximoPaso: string;
   subcarpeta: string | null;
+  // T11: fichas del comite de compras, una CSV plana dentro de la subcarpeta de la
+  // empresa (NO dentro de una sub-subcarpeta "Buying Comittee/", esa solo trae paginas
+  // .md por-persona que no se leen aqui). [] si no hay subcarpeta o no hay CSV.
+  buyingComittee: NotionBuyingComitteeContacto[];
 }
 
 export interface NotionExportAdapter {
@@ -86,6 +98,37 @@ function parseCsvFilas(texto: string): string[][] {
   return filas;
 }
 
+// Busca el CSV del comite de compras dentro de la subcarpeta de la empresa. Prefiere
+// la variante "_all.csv" (export completo); si no esta, cae a la variante sin "_all"
+// (en la practica ambas existen con contenido casi identico). null si no hay ninguna.
+function buscarArchivoBuyingComittee(subcarpeta: string): string | null {
+  let entradas: string[];
+  try {
+    entradas = fs.readdirSync(subcarpeta);
+  } catch {
+    return null;
+  }
+  const candidatos = entradas.filter((n) => n.startsWith('Buying Comittee') && n.endsWith('.csv'));
+  if (candidatos.length === 0) return null;
+  const conAll = candidatos.find((n) => n.endsWith('_all.csv'));
+  return path.join(subcarpeta, conAll ?? candidatos[0]);
+}
+
+function leerBuyingComittee(subcarpeta: string | null): NotionBuyingComitteeContacto[] {
+  if (!subcarpeta) return [];
+  const archivo = buscarArchivoBuyingComittee(subcarpeta);
+  if (!archivo) return [];
+
+  const filas = parseCsv(fs.readFileSync(archivo, 'utf-8'));
+  return filas.map((fila) => ({
+    nombre: fila['Nombre'] ?? '',
+    cargo: fila['Cargo'] ?? '',
+    celular: fila['Celular'] ?? '',
+    correo: fila['Correo'] ?? '',
+    linkedin: fila['LinkedIn'] ?? '',
+  }));
+}
+
 function mapaPageIdsYSubcarpetas(dirExport: string): Map<string, { pageId: string; subcarpeta: string | null }> {
   const entradas = fs.readdirSync(dirExport, { withFileTypes: true });
   const carpetas = new Set(entradas.filter((e) => e.isDirectory()).map((e) => e.name));
@@ -115,6 +158,7 @@ export function crearNotionExportAdapter(dirExport: string, csvPath: string): No
       return filas.map((fila): NotionEmpresaExport => {
         const nombre = fila['Empresa'] ?? '';
         const pagina = porPagina.get(nombre);
+        const subcarpeta = pagina?.subcarpeta ?? null;
         return {
           pageId: pagina?.pageId ?? null,
           nombre,
@@ -130,7 +174,8 @@ export function crearNotionExportAdapter(dirExport: string, csvPath: string): No
           owner: fila['Owner'] ?? '',
           proximoPaso: fila['Próximo Paso'] ?? '',
           fechaProximoPaso: fila['Fecha Próximo Paso'] ?? '',
-          subcarpeta: pagina?.subcarpeta ?? null,
+          subcarpeta,
+          buyingComittee: leerBuyingComittee(subcarpeta),
         };
       });
     },
