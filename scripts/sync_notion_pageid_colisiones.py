@@ -49,11 +49,14 @@ for r in json.load(open(JSON_PAIRS, encoding='utf-8')):
     nm = (r.get('Empresa') or '').strip()
     if not nm: continue
     idemp = byname.get(norm(nm))
-    if idemp: matches.setdefault(idemp, []).append((r['id'], nm))
+    # Notion/MCP entrega el id CON guiones; la DB lo guarda sin guiones (single format,
+    # ver Task C1 del plan de cierre 2026-07-15). Se normaliza aca, en el borde.
+    if idemp: matches.setdefault(idemp, []).append((r['id'].replace('-', ''), nm))
 colisiones = {i: p for i, p in matches.items() if len(p) > 1}
 
-# actividad por page_id
-act = {a['id']: a for a in json.load(open(JSON_ACT, encoding='utf-8'))}
+# actividad por page_id (mismo id sin guiones que en `matches`, si no el lookup de
+# viva() falla en silencio y trata todo como viva)
+act = {a['id'].replace('-', ''): a for a in json.load(open(JSON_ACT, encoding='utf-8'))}
 def viva(pid):
     a = act.get(pid, {})
     estado = (a.get('Estado') or '').strip()

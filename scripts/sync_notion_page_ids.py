@@ -67,7 +67,9 @@ for r in rows:
     if not idemp:
         sin_match.append(nombre)
         continue
-    matches.setdefault(idemp, []).append((r['id'], nombre))
+    # Notion/MCP entrega el id CON guiones; la DB lo guarda sin guiones (single format,
+    # ver Task C1 del plan de cierre 2026-07-15). Se normaliza aca, en el borde.
+    matches.setdefault(idemp, []).append((r['id'].replace('-', ''), nombre))
 
 # separar match limpio (1 pagina) de colision (>1 pagina a la misma empresa)
 limpios = {}                   # id_empresa -> notion_id
