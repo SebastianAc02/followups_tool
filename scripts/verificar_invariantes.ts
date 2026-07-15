@@ -29,7 +29,8 @@ const checks: { id: string; desc: string; valor: number; meta: number }[] = [
     desc: 'empresas de Industria=Energia sin veto utility (deberia ser 0)',
     valor: n(`select count(*) n from empresa e
               join empresa_categoria ec on ec.id_empresa = e.id_empresa
-              where ec.categoria = 'isp' and e.nombre_oficial in ('ENEL','CELSIA','AFINIA')`),
+              where ec.categoria = 'isp' and e.opera_bajo_id is null
+                and e.nombre_oficial in ('ENEL','CELSIA','AFINIA')`),
     meta: 0,
   },
   {
