@@ -10,6 +10,12 @@ import { crearNotionExportAdapter } from '../app/adapters/notion/notionExportAda
 import { mapearEstadoNotion } from '../app/core/reconciliacion/mapeoEstados.ts';
 import { embudoPipeline } from '../app/db/repository.ts';
 
+import { marcarModoPrueba } from '../app/lib/modo-prueba.ts';
+
+// Los scripts no pasan por requireSession(), asi que declaran su modo a mano: sin esto
+// el primer acceso a la DB lanza (modo-prueba.ts no tiene default a proposito).
+marcarModoPrueba(false);
+
 const DB_PATH = process.env.ISPS_DB_PATH ?? '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db';
 const db = new Database(DB_PATH, { readonly: true });
 

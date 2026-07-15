@@ -20,6 +20,12 @@ import {
 } from '../app/db/repository.ts';
 import { plusDias } from '../app/lib/date-utils.ts';
 
+import { marcarModoPrueba } from '../app/lib/modo-prueba.ts';
+
+// Los scripts no pasan por requireSession(), asi que declaran su modo a mano: sin esto
+// el primer acceso a la DB lanza (modo-prueba.ts no tiene default a proposito).
+marcarModoPrueba(false);
+
 // Guard duro, no solo el comentario de arriba: esta demo hace escrituras reales. Si
 // ISPS_DB_PATH no esta o apunta a un archivo isps.db (la base real), aborta antes de
 // tocar nada. La convencion sola no basta: un env var olvidado mutaria produccion.

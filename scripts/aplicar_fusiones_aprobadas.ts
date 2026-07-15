@@ -12,6 +12,12 @@
 
 import { fundirEmpresas } from '../app/db/repository.ts';
 
+import { marcarModoPrueba } from '../app/lib/modo-prueba.ts';
+
+// Los scripts no pasan por requireSession(), asi que declaran su modo a mano: sin esto
+// el primer acceso a la DB lanza (modo-prueba.ts no tiene default a proposito).
+marcarModoPrueba(false);
+
 const APROBADOS: { idSobrevive: string; idsAbsorbidos: string[]; nombreNotion: string }[] = [
   { idSobrevive: '901715847', idsAbsorbidos: ['ntn-8119deb48bf9', 'ntn-1e376ceb9dfb'], nombreNotion: 'CELSIA INTERNET S.A.S.' },
   { idSobrevive: '901403469', idsAbsorbidos: ['ntn-8ea10df5716e'], nombreNotion: 'WINS SOLUCIONES SAS' },

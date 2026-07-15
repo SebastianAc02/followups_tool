@@ -19,6 +19,12 @@ import { crearNotionExportAdapter } from '../app/adapters/notion/notionExportAda
 import { mapearEstadoNotion } from '../app/core/reconciliacion/mapeoEstados.ts';
 import { construirIndiceEmpresasDb, matchEmpresaNotion, type EmpresaDbMatch } from '../app/core/reconciliacion/matchNotion.ts';
 
+import { marcarModoPrueba } from '../app/lib/modo-prueba.ts';
+
+// Los scripts no pasan por requireSession(), asi que declaran su modo a mano: sin esto
+// el primer acceso a la DB lanza (modo-prueba.ts no tiene default a proposito).
+marcarModoPrueba(false);
+
 const DIR_EXPORT_NOTION = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline';
 const CSV_PATH = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline f5e2be53a1514d42ac6db30fd7c5202a_all.csv';
 const ID_ORGANIZACION = 1;

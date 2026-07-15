@@ -11,6 +11,12 @@ import { db, schema } from '../app/db/index.ts';
 import { crearNotionExportAdapter } from '../app/adapters/notion/notionExportAdapter.ts';
 import { encontrarGemelos, type EmpresaDbParaMatch, type TipoIdEmpresa } from '../app/core/reconciliacion/matcherGemelos.ts';
 
+import { marcarModoPrueba } from '../app/lib/modo-prueba.ts';
+
+// Los scripts no pasan por requireSession(), asi que declaran su modo a mano: sin esto
+// el primer acceso a la DB lanza (modo-prueba.ts no tiene default a proposito).
+marcarModoPrueba(false);
+
 const DIR_EXPORT_NOTION = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline';
 // El CSV vive un nivel arriba de la carpeta con los .md por-pagina.
 const CSV_PATH = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline f5e2be53a1514d42ac6db30fd7c5202a_all.csv';
