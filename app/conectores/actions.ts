@@ -9,6 +9,7 @@ import {
   modoConector,
   leerCredencialConector,
   guardarConfiguracionAdmin,
+  borrarCredencialConector,
 } from "../db/repository";
 import { requireSession } from "../lib/session";
 import { conectorDelCatalogo, configuracionDelCatalogo, type ModoConector } from "./catalogo";
@@ -100,16 +101,34 @@ export async function guardarConfiguracionAction(
   return { ok: true };
 }
 
-// Quita (duerme) un conector. Solo admin. No borra credenciales: re-agregar lo revive.
-export async function quitarConectorAction(formData: FormData) {
+export type ResultadoAccionConector = { ok: true } | { ok: false; error: string };
+
+// Quita un conector. Solo admin. Dos niveles (decision 2026-07-15):
+//   borrarCredencial=false -> "Desactivar": duerme la politica, el secreto sobrevive y
+//     re-agregarlo lo revive tal cual estaba. Es el comportamiento historico.
+//   borrarCredencial=true  -> "Quitar y borrar credencial": ademas borra el secreto, que
+//     es el UNICO camino a reconectar desde cero (antes Gmail volvia ya-conectado y no
+//     habia forma de rehacer el OAuth por la UI).
+export async function quitarConectorAction(
+  proveedor: string,
+  borrarCredencial: boolean,
+): Promise<ResultadoAccionConector> {
   const sesion = await requireSession();
-  if (!sesion.admin) return;
+  if (!sesion.admin) return { ok: false, error: "Solo un admin puede quitar un conector." };
+  if (!conectorDelCatalogo(proveedor)) return { ok: false, error: "Conector no reconocido." };
 
-  const proveedor = String(formData.get("proveedor") ?? "").trim();
-  if (!conectorDelCatalogo(proveedor)) return;
-
+  // El modo se lee ANTES de quitar la config, y el orden NO es cosmetico: modoConector
+  // solo mira filas con habilitado=1, asi que despues de quitarla devuelve null -- y un
+  // null aca haria borrar la credencial GLOBAL en vez de la personal del usuario. El modo
+  // decide de quien es el secreto (admin = fila global, personal = la del usuario en
+  // sesion), mismo criterio que decidirGuardado.
+  const modo = modoConector(proveedor);
   quitarConfigConector(proveedor);
+  if (borrarCredencial) {
+    borrarCredencialConector(proveedor, modo === "personal" ? sesion.id : undefined);
+  }
   revalidatePath("/conectores");
+  return { ok: true };
 }
 
 export type ResultadoRevelar = { ok: true; credencial: string } | { ok: false; error: string };

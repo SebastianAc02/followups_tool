@@ -4,7 +4,8 @@ import { Button } from "../ui/Button";
 import type { EstadoConector } from "../db/repository";
 import type { ConectorCatalogo, ModoConector } from "./catalogo.ts";
 import { vistaEstado } from "./estado-ui.ts";
-import { cambiarModoAction, quitarConectorAction } from "./actions";
+import { cambiarModoAction } from "./actions";
+import { QuitarConector } from "./QuitarConector";
 import { CredencialForm } from "./CredencialForm";
 import { LineasWhatsapp } from "./LineasWhatsapp";
 import { GmailConector } from "./GmailConector";
@@ -116,12 +117,7 @@ export function ConectorRow({
               </Button>
             </form>
             <span className="h-4 w-px bg-line" aria-hidden="true" />
-            <form action={quitarConectorAction}>
-              <input type="hidden" name="proveedor" value={cat.id} />
-              <Button type="submit" variant="quiet" className="text-overdue/80 hover:text-overdue">
-                Quitar conector
-              </Button>
-            </form>
+            <QuitarConector proveedor={cat.id} nombre={cat.nombre} />
           </div>
         )}
       </div>
