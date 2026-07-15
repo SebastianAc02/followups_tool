@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
 import * as authSchema from './auth-schema';
 import { esSoloLectura, ErrorSoloLectura } from '../lib/read-only';
+import { esModoPrueba } from '../lib/modo-prueba';
 
 // isps.db es la fuente de la verdad (un nivel arriba del proyecto).
 const DB_PATH =
@@ -32,22 +33,28 @@ const drizzlePruebas = drizzle(sqlitePruebas, { schema: esquema });
 export const dbReal = drizzleReal;
 export const dbPruebas = drizzlePruebas;
 
-const drizzleDb = drizzleReal;
-
-// Candado solo-lectura (modo visitante): un unico punto que bloquea TODA escritura a la
-// DB cuando la request esta marcada solo-lectura (ver app/lib/read-only.ts). Intercepta
-// los 4 metodos de escritura de Drizzle -- insert/update/delete/transaction (no hay
-// db.run crudo en el repo). Cualquier accion, gateada o no, cae aca: imposible que una
-// escritura se le escape al candado. Las lecturas (.select, .query, etc.) pasan directo.
+// El Proxy hace DOS cosas, y las dos en el mismo punto de choque:
+//   1. Resuelve CONTRA QUE BASE corre esta request (esModoPrueba, ver app/lib/modo-prueba.ts).
+//   2. Bloquea TODA escritura si la request es de un visitante (esSoloLectura, ver
+//      app/lib/read-only.ts). Intercepta los 4 metodos de escritura de Drizzle --
+//      insert/update/delete/transaction (no hay db.run crudo en runtime).
+//
+// Por eso repository.ts (5374 lineas) no tiene un solo if de modo prueba ni de candado:
+// no puede olvidarse de chequear porque nunca chequea. Para cuando recibe su db, ya es
+// la correcta. Cualquier accion, gateada o no, cae aca. Las lecturas pasan directo (pero
+// igual salen de la base que resolvio el paso 1).
 const METODOS_ESCRITURA = new Set(['insert', 'update', 'delete', 'transaction']);
 
-export const db: typeof drizzleDb = new Proxy(drizzleDb, {
-  get(target, prop, receiver) {
-    const valor = Reflect.get(target, prop, receiver);
+export const db: typeof drizzleReal = new Proxy(drizzleReal, {
+  get(_target, prop) {
+    const base = esModoPrueba() ? drizzlePruebas : drizzleReal;
+    // Receiver = base (no el proxy): si un getter de Drizzle leyera `this`, apuntar al
+    // proxy lo haria recursar sobre este mismo handler.
+    const valor = Reflect.get(base, prop, base);
     if (typeof prop === 'string' && METODOS_ESCRITURA.has(prop) && typeof valor === 'function') {
       return (...args: unknown[]) => {
         if (esSoloLectura()) throw new ErrorSoloLectura();
-        return (valor as (...a: unknown[]) => unknown).apply(target, args);
+        return (valor as (...a: unknown[]) => unknown).apply(base, args);
       };
     }
     return valor;
