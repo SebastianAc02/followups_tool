@@ -4810,3 +4810,14 @@ export function fundirEmpresas(idSobrevive: string, idsAbsorbidos: string[], nom
       .run();
   });
 }
+
+// T5: enlaza el page_id de Notion a una empresa ya existente en la DB. Idempotente
+// por construccion (un UPDATE al mismo valor es un no-op observable); no revienta si
+// idEmpresa no existe, para que el script orquestador pueda recorrer en lote sin
+// chequear existencia antes.
+export function enlazarPageId(idEmpresa: string, pageId: string): void {
+  db.update(empresa)
+    .set({ notionPageId: pageId, updatedAt: new Date().toISOString() })
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .run();
+}
