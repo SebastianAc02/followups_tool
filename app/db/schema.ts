@@ -33,6 +33,14 @@ export const empresa = sqliteTable('empresa', {
   prioridadComercial: integer('prioridad_comercial'),
   pasarelaActual: text('pasarela_actual'),
   categoria: text('categoria'),
+  // Facts crudos acumulados de la cuenta (cifras, sin narracion). Espeja la propiedad
+  // "Notas Discovery" de Notion. Hasta 2026-07-15 esto era escritura ciega: se encolaba al
+  // outbox y el adapter lo mapeaba, pero sin columna local la tool no las podia leer de
+  // vuelta ni acumularlas, solo pisarlas en cada sync.
+  notasDiscovery: text('notas_discovery'),
+  // Narrativa del estado de la cuenta, se hidrata con cada toque. Distinta de notasDiscovery:
+  // eso son datos sueltos, esto es la historia.
+  brief: text('brief'),
   owner: text('owner'),
   proximoFollowUpFecha: text('proximo_follow_up_fecha'),
   proximoPaso: text('proximo_paso'),
@@ -102,6 +110,15 @@ export const toque = sqliteTable('toque', {
   transcriptProveedor: text('transcript_proveedor'),
   transcriptId: text('transcript_id'),
   transcriptUrl: text('transcript_url'),
+  // El resumen que ESCRIBIO la tool para este toque (producto). Es lo que se ve al abrir el
+  // toque en el historial. Se llena venga de Granola o del dictado.
+  resumen: text('resumen'),
+  // El resumen que devolvio Granola, tal cual (insumo). Solo lo llena el camino de Granola;
+  // en un toque dictado queda null. Se guarda aparte de `resumen` para poder regenerar el
+  // producto cuando cambie el prompt, sin volver a pedirle a Granola con credencial por
+  // toques viejos. Es el "resumen cacheado" que pide el CLAUDE.md: el consumidor (CRO/MCP)
+  // lo lee sin credencial.
+  transcriptResumen: text('transcript_resumen'),
   razonPerdida: text('razon_perdida'),
   objecion: text('objecion'),
   fuente: text('fuente').notNull(),
