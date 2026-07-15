@@ -520,7 +520,7 @@ git commit -m "feat(modo-prueba): cookie de sesion + marca en requireSession"
 > el esquema. Se replica el esquema REAL, que además es lo que manda la constitución del repo:
 > "NO recrear tablas: reflejar las que hay".
 
-- [ ] **Step 1: Crear pruebas.db replicando el esquema real (sin datos)**
+- [x] **Step 1: Crear pruebas.db replicando el esquema real (sin datos)**
 
 Run:
 ```bash
@@ -553,7 +553,7 @@ Expected: `table: nueva=50 real=50`, `index: 70/70`, `view: 3/3`, `trigger: 4/4`
 > desfase. **Fuera del alcance de este plan** — pero mientras exista, `pruebas.db` DEBE nacer del
 > esquema real, no del journal.
 
-- [ ] **Step 2: Escribir el seed**
+- [x] **Step 2: Escribir el seed**
 
 Crear `scripts/seed_pruebas.ts`:
 
@@ -633,12 +633,12 @@ console.log(`Sembradas ${EMPRESAS.length} empresas y ${CONTACTOS.length} contact
 
 Nombres verificados contra `app/db/schema.ts:465-474`: la columna es `referenciaProveedor` (no `referencia`), y `idUsuario` es nullable, así que se omite.
 
-- [ ] **Step 3: Correr el seed [RUNBOOK — con Sebastián]**
+- [x] **Step 3: Correr el seed [RUNBOOK — con Sebastián]**
 
 Run: `PRUEBAS_DB_PATH=/Users/sebastianacostamolina/01_Documents/06_onepay/pruebas.db node --experimental-strip-types --experimental-loader ./scripts/resolve-ts-ext.mjs scripts/seed_pruebas.ts`
 Expected: `Sembradas 4 empresas y 4 contactos en pruebas.db`
 
-- [ ] **Step 4: Verificar el invariante que importa**
+- [x] **Step 4: Verificar el invariante que importa**
 
 Run: `sqlite3 /Users/sebastianacostamolina/01_Documents/06_onepay/isps.db "SELECT count(*) FROM empresa WHERE id_empresa LIKE 'prueba-%';"`
 Expected: `0` — la base real no recibió nada.
@@ -646,7 +646,7 @@ Expected: `0` — la base real no recibió nada.
 Run: `sqlite3 /Users/sebastianacostamolina/01_Documents/06_onepay/pruebas.db "SELECT count(*) FROM contacto;"`
 Expected: `4`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/seed_pruebas.ts
@@ -664,7 +664,7 @@ git commit -m "feat(modo-prueba): seed de pruebas.db con las 4 empresas y contac
 - Create: `app/ui/shell/modo-prueba-actions.ts`
 - Modify: `app/ui/shell/AppShell.tsx` (verificado: es el shell real; `app/layout.tsx` solo monta fuentes y `<body>`)
 
-- [ ] **Step 1: La server action**
+- [x] **Step 1: La server action**
 
 Crear `app/ui/shell/modo-prueba-actions.ts`:
 
@@ -685,7 +685,7 @@ export async function alternarModoPrueba(valor: boolean): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: El toggle + banner**
+- [x] **Step 2: El toggle + banner**
 
 Crear `app/ui/shell/ModoPruebaToggle.tsx`:
 
@@ -715,7 +715,7 @@ export function ModoPruebaToggle({ activo }: { activo: boolean }) {
 
 Nota de estilo: los colores van como token de `@theme`, no hex crudo (regla del repo). `amber-500` es de Tailwind; si el shell ya define un token de alerta, usar ese.
 
-- [ ] **Step 3: Montarlo en el shell**
+- [x] **Step 3: Montarlo en el shell**
 
 En `app/ui/shell/AppShell.tsx` (Server Component), agregar los imports:
 
@@ -740,12 +740,12 @@ Si `AppShell` hoy no es `async`, volverlo `async` (es Server Component, no rompe
 
 Ojo con la sesión concurrente: `AppShell.tsx` fue tocado en el split sidebar/IconPanel. Correr `git status app/ui/shell/` antes de editar y aislar el hunk propio si hay cambios ajenos sin commitear.
 
-- [ ] **Step 4: Verificar tipos**
+- [x] **Step 4: Verificar tipos**
 
 Run: `npx tsc --noEmit 2>&1 | grep -v "normalizar-fechas-toque"`
 Expected: sin salida.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/ui/ModoPruebaToggle.tsx app/ui/modo-prueba-actions.ts app/ui/AppShell.tsx
