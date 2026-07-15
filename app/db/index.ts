@@ -9,10 +9,30 @@ const DB_PATH =
   process.env.ISPS_DB_PATH ??
   '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db';
 
-const sqlite = new Database(DB_PATH);
-sqlite.pragma('journal_mode = WAL');
+// pruebas.db vive AL LADO de isps.db. Misma carpeta, mismo esquema, cero filas de
+// negocio: en modo prueba es imposible mandarle correo a un ISP real porque no existe
+// ninguno. Se crea con `ISPS_DB_PATH=../pruebas.db npm run migrate`.
+const PRUEBAS_DB_PATH =
+  process.env.PRUEBAS_DB_PATH ??
+  '/Users/sebastianacostamolina/01_Documents/06_onepay/pruebas.db';
 
-const drizzleDb = drizzle(sqlite, { schema: { ...schema, ...authSchema } });
+const sqliteReal = new Database(DB_PATH);
+sqliteReal.pragma('journal_mode = WAL');
+
+const sqlitePruebas = new Database(PRUEBAS_DB_PATH);
+sqlitePruebas.pragma('journal_mode = WAL');
+
+const esquema = { ...schema, ...authSchema };
+const drizzleReal = drizzle(sqliteReal, { schema: esquema });
+const drizzlePruebas = drizzle(sqlitePruebas, { schema: esquema });
+
+// dbReal: la identidad (auth, membresia, preferencias, panel) NUNCA conmuta. Tu sesion
+// es la misma en los dos modos; si conmutara, activar el modo prueba te sacaria a /login
+// (tu sesion no existe en pruebas.db) y loguearte ahi crearia una cuenta duplicada.
+export const dbReal = drizzleReal;
+export const dbPruebas = drizzlePruebas;
+
+const drizzleDb = drizzleReal;
 
 // Candado solo-lectura (modo visitante): un unico punto que bloquea TODA escritura a la
 // DB cuando la request esta marcada solo-lectura (ver app/lib/read-only.ts). Intercepta
