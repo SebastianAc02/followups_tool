@@ -244,4 +244,185 @@ test('enviarPaso neutraliza un salto de linea en el asunto (no inyecta un header
   assert.strictEqual(lineas[1], 'Subject: Hola  Bcc: atacante@evil.com');
 });
 
+test('sacarDestinatario es un no-op documentado (Gmail no tiene secuencia externa de la que sacar a alguien)', async () => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-8');
+  const adapter = crearGmailAdapter('user-8');
+  await assert.doesNotReject(() => adapter.sacarDestinatario('thread-x', 'quien@sea.com'));
+});
+
+test('leerEventosNuevos: hilo sin mensaje nuevo del destinatario devuelve []', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-9');
+  t.mock.method(globalThis, 'fetch', async (url: string | URL) => {
+    const href = url.toString();
+    if (href === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-solo')) {
+      return new Response(
+        JSON.stringify({
+          id: 'thread-solo',
+          messages: [
+            {
+              id: 'thread-solo',
+              internalDate: '1000',
+              payload: { headers: [{ name: 'From', value: 'sebastian@onepay.la' }, { name: 'To', value: 'prospecto@x.com' }] },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/messages?')) {
+      return new Response(JSON.stringify({}), { status: 200 }); // sin rebotes
+    }
+    throw new Error(`fetch no mockeado: ${href}`);
+  });
+
+  const adapter = crearGmailAdapter('user-9');
+  const eventos = await adapter.leerEventosNuevos('thread-solo', new Date(0).toISOString());
+  assert.deepStrictEqual(eventos, []);
+});
+
+test('leerEventosNuevos: mensaje nuevo en el hilo que no viene de la cuenta conectada es un evento respondio', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-10');
+  t.mock.method(globalThis, 'fetch', async (url: string | URL) => {
+    const href = url.toString();
+    if (href === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-resp')) {
+      return new Response(
+        JSON.stringify({
+          id: 'thread-resp',
+          messages: [
+            {
+              id: 'thread-resp',
+              internalDate: '1000',
+              payload: { headers: [{ name: 'From', value: 'sebastian@onepay.la' }, { name: 'To', value: 'prospecto@x.com' }] },
+            },
+            {
+              id: 'msg-respuesta-1',
+              internalDate: '2000',
+              payload: { headers: [{ name: 'From', value: 'Prospecto <prospecto@x.com>' }] },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/messages?')) {
+      return new Response(JSON.stringify({}), { status: 200 });
+    }
+    throw new Error(`fetch no mockeado: ${href}`);
+  });
+
+  const adapter = crearGmailAdapter('user-10');
+  const eventos = await adapter.leerEventosNuevos('thread-resp', new Date(0).toISOString());
+  assert.strictEqual(eventos.length, 1);
+  assert.strictEqual(eventos[0].tipo, 'respondio');
+  assert.strictEqual(eventos[0].proveedorEventoId, 'msg-respuesta-1');
+  assert.strictEqual(eventos[0].email, 'prospecto@x.com');
+  assert.strictEqual(eventos[0].canal, 'correo');
+});
+
+test('leerEventosNuevos: mensaje de mailer-daemon con el email del destinatario en el cuerpo es un evento rebota', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-11');
+  t.mock.method(globalThis, 'fetch', async (url: string | URL) => {
+    const href = url.toString();
+    if (href === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-rebote')) {
+      return new Response(
+        JSON.stringify({
+          id: 'thread-rebote',
+          messages: [
+            {
+              id: 'thread-rebote',
+              internalDate: '1000',
+              payload: {
+                headers: [
+                  { name: 'From', value: 'sebastian@onepay.la' },
+                  { name: 'To', value: 'noexiste@dominio-fantasma.com' },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/messages?')) {
+      return new Response(JSON.stringify({ messages: [{ id: 'bounce-1' }] }), { status: 200 });
+    }
+    if (href === 'https://gmail.googleapis.com/gmail/v1/users/me/messages/bounce-1?format=full') {
+      return new Response(
+        JSON.stringify({
+          id: 'bounce-1',
+          internalDate: '5000',
+          payload: {
+            headers: [{ name: 'From', value: 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>' }],
+            body: { data: Buffer.from('Tu mensaje a noexiste@dominio-fantasma.com no pudo entregarse.', 'utf8').toString('base64url') },
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    throw new Error(`fetch no mockeado: ${href}`);
+  });
+
+  const adapter = crearGmailAdapter('user-11');
+  const eventos = await adapter.leerEventosNuevos('thread-rebote', new Date(0).toISOString());
+  assert.strictEqual(eventos.length, 1);
+  assert.strictEqual(eventos[0].tipo, 'rebota');
+  assert.strictEqual(eventos[0].proveedorEventoId, 'bounce-1');
+  assert.strictEqual(eventos[0].email, 'noexiste@dominio-fantasma.com');
+});
+
+test('leerEventosNuevos: mensaje de mailer-daemon de OTRO destinatario no genera falso positivo en este hilo', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-12');
+  t.mock.method(globalThis, 'fetch', async (url: string | URL) => {
+    const href = url.toString();
+    if (href === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/threads/thread-ok')) {
+      return new Response(
+        JSON.stringify({
+          id: 'thread-ok',
+          messages: [
+            {
+              id: 'thread-ok',
+              internalDate: '1000',
+              payload: { headers: [{ name: 'From', value: 'sebastian@onepay.la' }, { name: 'To', value: 'si-existe@dominio.com' }] },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    if (href.startsWith('https://gmail.googleapis.com/gmail/v1/users/me/messages?')) {
+      return new Response(JSON.stringify({ messages: [{ id: 'bounce-otro' }] }), { status: 200 });
+    }
+    if (href === 'https://gmail.googleapis.com/gmail/v1/users/me/messages/bounce-otro?format=full') {
+      return new Response(
+        JSON.stringify({
+          id: 'bounce-otro',
+          internalDate: '5000',
+          payload: {
+            headers: [{ name: 'From', value: 'mailer-daemon@googlemail.com' }],
+            body: { data: Buffer.from('Tu mensaje a otro-cualquiera@dominio.com no pudo entregarse.', 'utf8').toString('base64url') },
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    throw new Error(`fetch no mockeado: ${href}`);
+  });
+
+  const adapter = crearGmailAdapter('user-12');
+  const eventos = await adapter.leerEventosNuevos('thread-ok', new Date(0).toISOString());
+  assert.deepStrictEqual(eventos, []);
+});
+
 test.after(() => borrarDbPrueba(dbPath));
