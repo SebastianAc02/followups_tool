@@ -2,12 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   definicionSegmentoSchema,
+  definicionSegmentoBorradorSchema,
   campanaInputSchema,
   RESULTADOS,
   RESULTADO_LABELS,
   RESULTADOS_CONTESTO,
   registrarToqueSchema,
 } from './validation.ts';
+
+// Los dos contratos, explicitos y probados juntos: el borrador (lo que el Copiloto puede
+// proponer y la UI puede tener en pantalla) admite cero condiciones; el estricto (lo que
+// se puede GUARDAR y EJECUTAR) no. Esa reja no es cosmetica: un segmento sin condiciones
+// matchea la base entera, o sea una campana masiva a todo el mundo.
+test('el schema estricto rechaza un segmento sin condiciones (reja de persistencia)', () => {
+  const r = definicionSegmentoSchema.safeParse({ condiciones: [] });
+  assert.equal(r.success, false, 'guardar/ejecutar un segmento vacio mandaria a la base entera');
+});
+
+test('el schema de borrador acepta un segmento sin condiciones (estado inicial del Copiloto)', () => {
+  const r = definicionSegmentoBorradorSchema.safeParse({ condiciones: [] });
+  assert.equal(r.success, true, 'vacio es el estado inicial legitimo, no un error');
+});
+
+test('el schema de borrador sigue rechazando un campo inventado', () => {
+  const r = definicionSegmentoBorradorSchema.safeParse({ condiciones: [{ campo: 'inventado', op: 'en', valores: ['x'] }] });
+  assert.equal(r.success, false, 'relajar min(1) no debe relajar la validacion de campos');
+});
 
 test('acepta operador mayor_que sobre campo numerico', () => {
   const r = definicionSegmentoSchema.safeParse({
