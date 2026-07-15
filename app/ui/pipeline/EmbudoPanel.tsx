@@ -17,7 +17,7 @@ export async function EmbudoPanel({ searchParams }: { searchParams?: { owner?: s
   const embudo = construirEmbudo(conteos);
 
   const owners = listarOwnersEmpresa(usuario.idOrganizacion);
-  const campanas = listarCampanas().map((c) => ({ id: c.id, nombre: c.nombre }));
+  const campanas = listarCampanas(usuario.idOrganizacion).map((c) => ({ id: c.id, nombre: c.nombre }));
 
   return (
     <div>

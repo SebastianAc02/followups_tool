@@ -31,7 +31,7 @@ export async function datosSidebar() {
   const hoy = new Date().toISOString().slice(0, 10);
 
   const toquesHoy = (owner === OWNER_COLA_SPLIT ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion)).length;
-  const campanasActivas = listarCampanas().filter((c) => c.estado === 'activa').length;
+  const campanasActivas = listarCampanas(usuario.idOrganizacion).filter((c) => c.estado === 'activa').length;
   const porEstado = contarPorEstado(undefined, usuario.idOrganizacion);
   const cuentasFunnel = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);
   // Sesion 2026-07-10: "Por revisar" es la cola de inscripciones bloqueadas (empresa

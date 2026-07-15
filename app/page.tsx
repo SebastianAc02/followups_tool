@@ -32,7 +32,7 @@ export default async function Dashboard() {
     resumen.vencidos = leads.filter((c) => (c.fecha ?? '') < hoy).length;
   }
   const porEstado = contarPorEstado(undefined, perfil.idOrganizacion);
-  const campanas: CampaignVM[] = listarCampanas()
+  const campanas: CampaignVM[] = listarCampanas(perfil.idOrganizacion)
     .filter((c) => c.estado === 'activa' || c.estado === 'pausada')
     .slice(0, 4)
     .map((c) => ({

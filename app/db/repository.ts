@@ -2628,7 +2628,7 @@ export function muestraDestinatarioDeSegmento(idSegmento: number, idOrganizacion
 
 // Parte 4 campanas: hub de /campanas. Resuelve nombre de cadencia/segmento (no ids
 // crudos) y el conteo de inscripciones activas, para que la UI no arme el join.
-export function listarCampanas() {
+export function listarCampanas(idOrganizacion: number) {
   return db
     .select({
       id: campana.idCampana,
@@ -2661,6 +2661,7 @@ export function listarCampanas() {
     .from(campana)
     .innerJoin(cadencia, eq(cadencia.idCadencia, campana.idCadencia))
     .innerJoin(segmento, eq(segmento.idSegmento, campana.idSegmento))
+    .where(eq(campana.idOrganizacion, idOrganizacion))
     .orderBy(desc(campana.idCampana))
     .all();
 }

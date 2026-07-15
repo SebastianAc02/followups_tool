@@ -10,7 +10,7 @@ import { CampanasGrid } from './CampanasGrid';
 // tiene contexto -- ver esa pagina y DestinatariosCockpit.
 export default async function Campanas() {
   const sesion = await requireSession();
-  const campanas = listarCampanas();
+  const campanas = listarCampanas(sesion.idOrganizacion);
   const metricas = metricasHub();
   const segmentosSueltos = segmentosSinCampana(sesion.idOrganizacion);
 

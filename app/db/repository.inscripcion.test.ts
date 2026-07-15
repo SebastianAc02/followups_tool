@@ -169,9 +169,9 @@ test('empresa excluida en la revision de leads no se inscribe en una campana nue
 // se quedaba en 'borrador' para siempre, un vacio real del estado de la campana).
 test('crearCampana nace borrador; inscribirCampana la pasa a activa', () => {
   const idCampanaD = crearCampana({ nombre: 'Camp D', idCadencia, idSegmento }, 1);
-  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'borrador');
+  assert.equal(listarCampanas(1).find((f) => f.nombre === 'Camp D')!.estado, 'borrador');
   inscribirCampana(idCampanaD, 1);
-  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp D')!.estado, 'activa');
+  assert.equal(listarCampanas(1).find((f) => f.nombre === 'Camp D')!.estado, 'activa');
 });
 
 // Parte 4 campanas: hub de campanas (pantalla /campanas). Trae nombre de cadencia y
@@ -181,7 +181,7 @@ test('listarCampanas trae nombre de cadencia y segmento, mas conteo de inscritas
   // "inscritas" (activas AHORA MISMO en esta campana) es un conteo estable de verdad.
   // Camp A ya fue reemplazada por campanas posteriores sobre el mismo segmento: sus
   // inscripciones pasaron a 'finalizada', y por eso inscritas=0 es lo correcto ahi.
-  const filas = listarCampanas();
+  const filas = listarCampanas(1);
   const cD = filas.find((f) => f.nombre === 'Camp D');
   assert.ok(cD);
   assert.equal(cD!.cadencia, 'C');
@@ -207,7 +207,7 @@ test('eliminarCampanaBorrador borra campana y cadencia si sigue en borrador', ()
   const idCampanaF = crearCampana({ nombre: 'Camp F', idCadencia: idCadenciaF, idSegmento }, 1);
   const res = eliminarCampanaBorrador(idCampanaF);
   assert.equal(res.ok, true);
-  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp F'), undefined);
+  assert.equal(listarCampanas(1).find((f) => f.nombre === 'Camp F'), undefined);
   const raw = new Database(dbPath);
   const cad = raw.prepare('SELECT id_cadencia FROM cadencia WHERE id_cadencia = ?').get(idCadenciaF);
   raw.close();
@@ -223,7 +223,7 @@ test('eliminarCampanaBorrador rechaza una campana que ya no esta en borrador', (
   inscribirCampana(idCampanaG, 1);
   const res = eliminarCampanaBorrador(idCampanaG);
   assert.equal(res.ok, false);
-  assert.ok(listarCampanas().find((f) => f.nombre === 'Camp G'));
+  assert.ok(listarCampanas(1).find((f) => f.nombre === 'Camp G'));
 });
 
 // Fase 7 (ciclo de vida): pausar/reanudar son reversibles y solo se mueven entre
@@ -240,11 +240,11 @@ test('pausarCampana/reanudarCampana solo se mueven entre activa y pausada', () =
 
   const p = pausarCampana(idCampanaH);
   assert.equal(p.ok, true);
-  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp H')!.estado, 'pausada');
+  assert.equal(listarCampanas(1).find((f) => f.nombre === 'Camp H')!.estado, 'pausada');
 
   const r = reanudarCampana(idCampanaH);
   assert.equal(r.ok, true);
-  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp H')!.estado, 'activa');
+  assert.equal(listarCampanas(1).find((f) => f.nombre === 'Camp H')!.estado, 'activa');
 });
 
 // marcarCampanaFinalizada es lo unico que "Cancelar" toca en la base (el archivado
@@ -261,7 +261,7 @@ test('marcarCampanaFinalizada rechaza un borrador y una campana ya archivada', (
   inscribirCampana(idCampanaI, 1);
   const primera = marcarCampanaFinalizada(idCampanaI);
   assert.equal(primera.ok, true);
-  assert.equal(listarCampanas().find((f) => f.nombre === 'Camp I')!.estado, 'archivada');
+  assert.equal(listarCampanas(1).find((f) => f.nombre === 'Camp I')!.estado, 'archivada');
 
   assert.equal(marcarCampanaFinalizada(idCampanaI).ok, false, 'ya esta archivada');
 });
