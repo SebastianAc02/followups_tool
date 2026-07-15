@@ -16,6 +16,35 @@
 
 ---
 
+## ESTADO: Tasks 1-6 EJECUTADAS Y VERDES (2026-07-15)
+
+`npm test` → **825 pass / 0 fail** en la suite + **2/0** en el aislado. `tsc` limpio.
+
+**Corrección importante al plan, descubierta al ejecutar la Task 4:** el throw NO costaba 9
+scripts, costaba **~59 archivos de test**. La estimación salió de contar los importadores
+*directos* de `db` (6), pero un throw se propaga por el **grafo de llamadas en runtime**:
+`repository.ts` importa `db` una vez y los 44 archivos que lo llaman heredan el throw sin importar
+nada. Para un cambio estático contar importadores sirve; para un cambio de comportamiento hay que
+correr la suite.
+
+**Solución adoptada (decisión de Sebastián):** setup global en `scripts/test-setup.ts`, cargado con
+`--import` en el script `test:suite`. Declara modo real una vez por proceso. **Cero archivos de test
+tocados** y el throw intacto. El test del throw vive en `app/db/aislado/modo-prueba-throw.test.ts`
+(fuera del glob de la suite) porque necesita un proceso sin marca: `enterWith` marca el contexto
+raíz para siempre, así que con el setup pasaría por la razón equivocada. Corre con
+`npm run test:aislado`, encadenado en `npm test`.
+
+**Otros hallazgos de la ejecución:**
+- Con `:memory:` las bases nacen SIN esquema. Los tests viejos no lo notan porque hacen
+  `db.insert()` sin `.run()` (arman el query builder y nunca ejecutan). Los tests nuevos que sí
+  ejecutan crean la tabla a mano.
+- `evolution.test.ts` es flaky (mockea `fetch` global, el runner corre archivos en paralelo). Ajeno
+  a este plan, quedó como tarea aparte.
+
+**Falta:** Tasks 7-9 (todas [RUNBOOK], las corre Sebastián).
+
+---
+
 ### Task 1: Segunda conexión y `dbReal`
 
 **Por qué:** hoy `app/db/index.ts` abre una sola conexión en el import (singleton de módulo). Necesitamos dos, y un export fijo para la identidad. Esta tarea NO conmuta nada todavía: `db` sigue apuntando a la real. Es un paso deliberadamente inerte para que el repo nunca quede roto.
@@ -25,7 +54,7 @@
 - Modify: `package.json` (el script `test`)
 - Test: `app/db/dos-conexiones.test.ts` (crear)
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Crear `app/db/dos-conexiones.test.ts`:
 
@@ -48,12 +77,12 @@ test('dbReal y dbPruebas son conexiones distintas y aisladas', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test para verificar que falla**
+- [x] **Step 2: Correr el test para verificar que falla**
 
 Run: `ISPS_DB_PATH=:memory: PRUEBAS_DB_PATH=:memory: node --experimental-strip-types --experimental-loader ./scripts/resolve-ts-ext.mjs --test app/db/dos-conexiones.test.ts`
 Expected: FAIL — `dbPruebas` no existe (`SyntaxError: The requested module './index.ts' does not provide an export named 'dbPruebas'`).
 
-- [ ] **Step 3: Abrir la segunda conexión**
+- [x] **Step 3: Abrir la segunda conexión**
 
 En `app/db/index.ts`, reemplazar las líneas 7-15 por:
 
@@ -90,7 +119,7 @@ const drizzleDb = drizzleReal;
 
 El resto del archivo (el Proxy de las líneas 22-35) queda intacto en esta tarea.
 
-- [ ] **Step 4: Aislar los tests de la pruebas.db real**
+- [x] **Step 4: Aislar los tests de la pruebas.db real**
 
 En `package.json`, el script `test` empieza con `ISPS_DB_PATH=:memory:`. Agregar `PRUEBAS_DB_PATH=:memory:` justo después, para que la suite no abra el archivo real:
 
@@ -100,17 +129,17 @@ En `package.json`, el script `test` empieza con `ISPS_DB_PATH=:memory:`. Agregar
 
 Nota: dos `new Database(':memory:')` crean dos bases en memoria SEPARADAS. Eso es exactamente lo que el test de arriba necesita.
 
-- [ ] **Step 5: Correr el test para verificar que pasa**
+- [x] **Step 5: Correr el test para verificar que pasa**
 
 Run: `npm test 2>&1 | tail -8`
 Expected: PASS, sin regresiones (`# fail 0`).
 
-- [ ] **Step 6: Verificar tipos**
+- [x] **Step 6: Verificar tipos**
 
 Run: `npx tsc --noEmit 2>&1 | grep -v "normalizar-fechas-toque"`
 Expected: sin salida. (El error de `scripts/normalizar-fechas-toque.ts` con `node:sqlite` es preexistente y ajeno a este plan.)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/db/index.ts app/db/dos-conexiones.test.ts package.json
@@ -130,7 +159,7 @@ git commit -m "feat(modo-prueba): abrir pruebas.db como segunda conexion + expor
 - Modify: `app/db/panel-tablero-repository.ts:2`
 - Modify: `app/adapters/preferencias-db.ts:4`
 
-- [ ] **Step 1: Anclar auth**
+- [x] **Step 1: Anclar auth**
 
 En `app/lib/auth.ts`, línea 3: `import { db } from '../db/index';` pasa a:
 
@@ -147,7 +176,7 @@ Y la línea 8: `database: drizzleAdapter(db, { provider: 'sqlite' }),` pasa a:
   database: drizzleAdapter(dbReal, { provider: 'sqlite' }),
 ```
 
-- [ ] **Step 2: Anclar los otros cuatro**
+- [x] **Step 2: Anclar los otros cuatro**
 
 En los cuatro archivos siguientes, el import `import { db as dbSingleton } from ...` pasa a importar `dbReal as dbSingleton` desde la misma ruta. El resto de cada archivo no cambia (ya usan el alias `dbSingleton`).
 
@@ -156,17 +185,17 @@ En los cuatro archivos siguientes, el import `import { db as dbSingleton } from 
 - `app/db/panel-tablero-repository.ts:2` → `import { dbReal as dbSingleton } from './index';`
 - `app/adapters/preferencias-db.ts:4` → `import { dbReal as dbSingleton } from '../db/index';`
 
-- [ ] **Step 3: Correr la suite**
+- [x] **Step 3: Correr la suite**
 
 Run: `npm test 2>&1 | tail -8`
 Expected: PASS, `# fail 0`.
 
-- [ ] **Step 4: Verificar tipos**
+- [x] **Step 4: Verificar tipos**
 
 Run: `npx tsc --noEmit 2>&1 | grep -v "normalizar-fechas-toque"`
 Expected: sin salida.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/lib/auth.ts app/db/organizacion-repository.ts app/db/preferencias-repository.ts app/db/panel-tablero-repository.ts app/adapters/preferencias-db.ts
@@ -182,7 +211,7 @@ git commit -m "refactor(modo-prueba): la identidad (auth, membresia, preferencia
 **Files (los 9, todos en `scripts/`):**
 `demo_fase4.ts`, `aplicar_fusiones_aprobadas.ts`, `dedup_reporte.ts`, `enlazar_page_ids.ts`, `enriquecer_desde_notion.ts`, `lanzar_prueba_multicanal.ts`, `sync_estados_notion.ts`, `verificar_invariantes.ts`, `importar_toques_legacy.ts`
 
-- [ ] **Step 1: Agregar la declaración a cada script**
+- [x] **Step 1: Agregar la declaración a cada script**
 
 En cada uno de los 9, después del último `import` y antes de cualquier otro código, agregar:
 
@@ -196,7 +225,7 @@ marcarModoPrueba(false);
 
 Nota: si el script ya importa algo de `../app/lib/`, agregar el import junto a los otros. La llamada `marcarModoPrueba(false)` va a nivel de módulo, no dentro de una función.
 
-- [ ] **Step 2: Declarar también en read-only.test.ts**
+- [x] **Step 2: Declarar también en read-only.test.ts**
 
 `app/lib/read-only.test.ts` importa `db` y lo usa directo (líneas 18-21, 29, 35, 37, 66, 68). Con el throw vivo, revienta. Agregar después de los imports:
 
@@ -208,17 +237,17 @@ import { marcarModoPrueba } from './modo-prueba.ts';
 marcarModoPrueba(false);
 ```
 
-- [ ] **Step 3: Verificar que ningún script quedó sin declarar**
+- [x] **Step 3: Verificar que ningún script quedó sin declarar**
 
 Run: `for f in scripts/demo_fase4.ts scripts/aplicar_fusiones_aprobadas.ts scripts/dedup_reporte.ts scripts/enlazar_page_ids.ts scripts/enriquecer_desde_notion.ts scripts/lanzar_prueba_multicanal.ts scripts/sync_estados_notion.ts scripts/verificar_invariantes.ts scripts/importar_toques_legacy.ts; do grep -L "marcarModoPrueba" "$f"; done`
 Expected: sin salida (todos declaran).
 
-- [ ] **Step 4: Correr la suite**
+- [x] **Step 4: Correr la suite**
 
 Run: `npm test 2>&1 | tail -8`
 Expected: PASS, `# fail 0`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/ app/lib/read-only.test.ts
@@ -235,7 +264,7 @@ git commit -m "chore(modo-prueba): los 9 scripts y read-only.test declaran modo 
 - Modify: `app/db/index.ts:22-35`
 - Test: `app/db/modo-prueba-proxy.test.ts` (crear)
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Crear `app/db/modo-prueba-proxy.test.ts`:
 
@@ -281,12 +310,12 @@ test('el candado solo-lectura sigue vivo dentro del modo prueba', () => {
 });
 ```
 
-- [ ] **Step 2: Correr el test para verificar que falla**
+- [x] **Step 2: Correr el test para verificar que falla**
 
 Run: `npm test 2>&1 | grep -A3 "modo prueba"`
 Expected: FAIL — hoy `db` siempre escribe en la real, así que el primer test falla en el assert de `isps.db NO debe recibir la escritura`.
 
-- [ ] **Step 3: Hacer que el Proxy resuelva la base**
+- [x] **Step 3: Hacer que el Proxy resuelva la base**
 
 En `app/db/index.ts`, agregar el import arriba (junto al de `read-only`):
 
@@ -323,17 +352,17 @@ export const db: typeof drizzleReal = new Proxy(drizzleReal, {
 
 Borrar la línea `const drizzleDb = drizzleReal;` de la Task 1: ya no se usa.
 
-- [ ] **Step 4: Correr los tests para verificar que pasan**
+- [x] **Step 4: Correr los tests para verificar que pasan**
 
 Run: `npm test 2>&1 | tail -8`
 Expected: PASS, `# fail 0`. Los 6 de `read-only.test.ts` siguen verdes (el candado no se rompió).
 
-- [ ] **Step 5: Verificar tipos**
+- [x] **Step 5: Verificar tipos**
 
 Run: `npx tsc --noEmit 2>&1 | grep -v "normalizar-fechas-toque"`
 Expected: sin salida.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/db/index.ts app/db/modo-prueba-proxy.test.ts
@@ -353,7 +382,7 @@ consulta."
 **Files:**
 - Modify: `app/db/modo-prueba-proxy.test.ts`
 
-- [ ] **Step 1: Escribir el test que falla**
+- [x] **Step 1: Escribir el test que falla**
 
 Agregar al final de `app/db/modo-prueba-proxy.test.ts`:
 
@@ -391,12 +420,12 @@ test('dos requests concurrentes (prueba y normal) escriben cada una en SU base',
 
 No hacen falta imports nuevos: `marcarModoPrueba`, `db`, `dbReal`, `dbPruebas` y `organizacion` ya están importados en el archivo desde la Task 4.
 
-- [ ] **Step 2: Correr el test**
+- [x] **Step 2: Correr el test**
 
 Run: `npm test 2>&1 | grep -A5 "concurrentes"`
 Expected: PASS. Si FALLA, es la señal real de que `enterWith` filtra y hay que migrar `modo-prueba.ts` y `read-only.ts` a `run()`. No migrar sin ver este test rojo.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/db/modo-prueba-proxy.test.ts
@@ -413,7 +442,7 @@ git commit -m "test(modo-prueba): regression de concurrencia, dos requests dos b
 - Create: `app/lib/cookie-modo.ts`
 - Modify: `app/lib/session.ts:11-31`
 
-- [ ] **Step 1: Crear el helper de la cookie**
+- [x] **Step 1: Crear el helper de la cookie**
 
 Crear `app/lib/cookie-modo.ts`:
 
@@ -439,7 +468,7 @@ export async function escribirCookieModoPrueba(valor: boolean): Promise<void> {
 }
 ```
 
-- [ ] **Step 2: Cablear en requireSession**
+- [x] **Step 2: Cablear en requireSession**
 
 En `app/lib/session.ts`, agregar a los imports:
 
@@ -457,17 +486,17 @@ Y dentro de `requireSession()`, insertar JUSTO DESPUÉS de `if (!session) redire
   marcarModoPrueba(await leerCookieModoPrueba());
 ```
 
-- [ ] **Step 3: Verificar tipos**
+- [x] **Step 3: Verificar tipos**
 
 Run: `npx tsc --noEmit 2>&1 | grep -v "normalizar-fechas-toque"`
 Expected: sin salida.
 
-- [ ] **Step 4: Correr la suite**
+- [x] **Step 4: Correr la suite**
 
 Run: `npm test 2>&1 | tail -8`
 Expected: PASS, `# fail 0`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/lib/cookie-modo.ts app/lib/session.ts
