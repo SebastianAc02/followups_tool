@@ -56,3 +56,37 @@ test('el candado solo-lectura sigue vivo dentro del modo prueba', () => {
   marcarSoloLectura(false);
   marcarModoPrueba(false);
 });
+
+// Gemelo del test de concurrencia de read-only.test.ts, con delays cruzados a proposito:
+// la request en prueba (lenta) resuelve DESPUES de que la normal ya cambio el ALS. Si
+// hubiera fuga entre contextos, esto es lo que la mostraria.
+//
+// Es LA prueba de que el diseño se sostiene: el modo prueba se para sobre el mismo
+// enterWith que el candado solo-lectura. Si este test se pone rojo, esa es la señal real
+// para migrar modo-prueba.ts y read-only.ts a run(). No migrar sin verlo rojo.
+test('dos requests concurrentes (prueba y normal) escriben cada una en SU base', async () => {
+  marcarSoloLectura(false);
+
+  async function simularRequest(enPrueba: boolean, delayMs: number, marca: string) {
+    marcarModoPrueba(enPrueba);
+    await new Promise((r) => setTimeout(r, delayMs));
+    // La escritura DESPUES del await es el criterio real: si el ALS se filtro entre
+    // contextos, esta fila aparece en la base equivocada.
+    db.insert(organizacion).values({ nombre: marca }).run();
+  }
+
+  await Promise.all([
+    simularRequest(true, 20, 'concurrente-prueba'),
+    simularRequest(false, 5, 'concurrente-real'),
+  ]);
+
+  const pruebas = dbPruebas.select().from(organizacion).all().map((o) => o.nombre);
+  const reales = dbReal.select().from(organizacion).all().map((o) => o.nombre);
+
+  assert.ok(pruebas.includes('concurrente-prueba'), 'la request de prueba escribe en pruebas.db');
+  assert.ok(!pruebas.includes('concurrente-real'), 'la normal NO debe filtrarse a pruebas.db');
+  assert.ok(reales.includes('concurrente-real'), 'la request normal escribe en isps.db');
+  assert.ok(!reales.includes('concurrente-prueba'), 'la de prueba NO debe filtrarse a isps.db');
+
+  marcarModoPrueba(false);
+});
