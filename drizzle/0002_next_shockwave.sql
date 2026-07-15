@@ -1,0 +1,1 @@
+ALTER TABLE `campana` ADD `aprobada_envio_gmail` integer DEFAULT 0 NOT NULL;
