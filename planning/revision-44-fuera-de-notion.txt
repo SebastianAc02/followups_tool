@@ -1,0 +1,65 @@
+REVISION MANUAL — 44 cuentas con estado de pipeline pero FUERA de Notion
+Generado 2026-07-15. TODAS tienen 0 toques y 0 historial de estado.
+Su estado viene del seed del 30-jun, no de trabajo real.
+
+Por tu regla: 'no se ha tocado nunca -> lead muerto, no deberia aparecer
+hasta que yo lo active; al activarlo, registrarlo en Notion'.
+Ninguna cae en el caso dos (tocada pero no subida a Notion): no hay ninguna tocada.
+
+==========================================================================
+GRUPO 1 — 15 CLIENTES REALES (es_cliente=1, estado=firma_pago)
+Nunca pasaron por el pipeline de Notion. Inflan 'firma y pago' de 87 a 95.
+==========================================================================
+  CONEXION DIGITAL COLOMBIA S.A.S
+  Elkin Centro de Servicios S.A.S
+  FIBERNET TV S.A.S
+  H V TELEVISION S.A.S.
+  Hola Internet
+  IMAX TELECOMUNICACIONES S.A.S.
+  MEDIALINK TELECOMUNICACIONES S.A.S.
+  PRT-TELECOMUNICACIONES S.A.S ZOMAC
+  Punto Red Telecomunicaciones Guaviare
+  REDES OPERACIONES Y CONTROL S A S
+  REDNET GROUP S.A.S
+  SOCIEDAD GOMEZ TORRES Y ALVAREZ ARENAS COMPAÑIA LIMITADA
+  SUPERCABLE TELECOMUNICACIONES SAS
+  TUFIBRA GRUPO EMPRESARIAL S.A.S.
+  ULTRANET COLOMBIA S.A.S
+
+==========================================================================
+GRUPO 2 — 19 con estado 'contacto_iniciado' y CERO toques
+El estado es falso: nadie las contacto nunca. Inflan 'contacto iniciado' de 14 a 34.
+==========================================================================
+  COMPAÑIA COLOMBIANA DE TELECOMUNICACIONES SAS
+  CONECTA COMUNICACIONES SAS
+  CONEXIONES TECNOLOGICAS Y COMUNICACION SAS
+  DIGITAL ETHERNET FIBER NET SAS
+  DS Nube
+  EMPRESAS MUNICIPALES DE CALI EICE E.S.P
+  Emcali (ISP)
+  FASTNET TELECOMUNICACIONES SAS
+  INGE&COM COMUNICACIONES S.A.S.
+  INTELCOM CALI SAS
+  INTERNET Y TELEVISIÓN DE COLOMBIA SOCIEDAD POR ACCIONES SIMPLIFICADA
+  ISP Gestión
+  LKS SOLUCIONES INFORMATICAS S.A.S
+  SERKOI SERVICIOS DE CONECTIVIDAD INALAMBRICA SAS
+  SERVIDATA ELECTRONIC SAS
+  SUPERREDES SAS
+  Super Redes - Ultimo km
+  TELECOMUNICACIONES FACILRED FJM S.A.S. ZOMAC
+  TV SANV SAS
+
+==========================================================================
+GRUPO 3 — 10 restantes (4 lead, 5 on_hold, 1 cierre_documentacion)
+==========================================================================
+  [cierre_documentacion] Cable Network
+  [lead] EA-BOGOTA Electronic Arts Inc.
+  [lead] LATITUDE-SH
+  [lead] LATITUDE-SH http://Latitude.sh
+  [lead] REINTECH SAS
+  [on_hold] CONEXXION WI-FI LTDA
+  [on_hold] FIBERCOMM SAS
+  [on_hold] Megas Exprés Telecomunicaciones
+  [on_hold] Pluss tv
+  [on_hold] TELECOMUNICACIONES FACILRED S.A.S.
