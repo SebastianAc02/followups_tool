@@ -72,9 +72,10 @@ Drizzle y cero filas de negocio. Es imposible mandarle correo a un ISP real: no 
 | Camilo | 3102186819 | sacostamolin@gmail.com |
 | Sebastián | +12368895214 | sacostamolina@outlook.com |
 
-Las empresas ficticias llevan `id_organizacion = 1` como entero suelto. No hace falta sembrar
-`organizacion` ni `organizacion_miembro`: la membresía sale de `dbReal`, y de todos modos
-`organizacion_miembro.id_user` es texto plano sin `REFERENCES` y SQLite tiene `foreign_keys = 0`.
+Las empresas ficticias llevan `empresa.organizacion_activa_id = 1` (columna real, NOT NULL con
+default 1) como entero suelto. No hace falta sembrar `organizacion` ni `organizacion_miembro`: la
+membresía sale de `dbReal`, y de todos modos `organizacion_miembro.id_user` es texto plano sin
+`REFERENCES` y SQLite tiene `foreign_keys = 0`.
 
 ## Lo que NO aísla (a propósito)
 
