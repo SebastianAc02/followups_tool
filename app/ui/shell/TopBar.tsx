@@ -3,8 +3,21 @@
 import type { Perfil } from '../../core/perfil';
 import { PerfilMenu } from './PerfilMenu';
 import { ModoPruebaToggle } from './ModoPruebaToggle';
+import { RelojDemo } from './RelojDemo';
 
-export function TopBar({ fecha, perfil, modoPrueba }: { fecha: string; perfil: Perfil; modoPrueba: boolean }) {
+export function TopBar({
+  fecha,
+  perfil,
+  modoPrueba,
+  fechaSimulada,
+  offsetDemo,
+}: {
+  fecha: string;
+  perfil: Perfil;
+  modoPrueba: boolean;
+  fechaSimulada: string;
+  offsetDemo: number;
+}) {
   return (
     <div className="relative z-10 flex flex-none items-center gap-4 border-b border-card-hover px-[30px] py-3.5">
       <div className="flex max-w-[420px] flex-1 items-center gap-2.5 rounded-[11px] border border-line-card bg-card px-[13px] py-[9px]">
@@ -20,6 +33,7 @@ export function TopBar({ fecha, perfil, modoPrueba }: { fecha: string; perfil: P
 
       <div className="ml-auto flex items-center gap-3">
         <ModoPruebaToggle activo={modoPrueba} />
+        {modoPrueba && <RelojDemo fechaSimulada={fechaSimulada} offset={offsetDemo} />}
         <div className="flex items-center gap-2 text-[12.5px] text-muted">
           <span className="h-[7px] w-[7px] rounded-full bg-done animate-[pulseLive_2s_ease-in-out_infinite]" />
           En vivo
