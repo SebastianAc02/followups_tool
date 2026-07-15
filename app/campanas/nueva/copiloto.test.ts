@@ -50,3 +50,18 @@ test('pedirAlCopiloto rechaza un estado invalido de la IA (campo inventado)', as
   const r = await pedirAlCopiloto({ frase: 'lo que sea', estadoActual: estadoVacio }, ia);
   assert.equal(r.ok, false);
 });
+
+// F (2026-07-15): el motor solo soporta AND entre condiciones. Al pedir "Sebastian en
+// owner O sin owner", el Copiloto descartaba la condicion de owner ENTERA y devolvia un
+// segmento con las otras dos -- Sebastian recibio cuentas de Thomas (CELSIA) creyendo
+// que habia filtrado por owner. Degradar en silencio es peor que no responder: el
+// resultado se ve plausible y nadie revisa. Ahora el prompt obliga a preguntar.
+test('el prompt prohibe descartar una condicion en silencio y exige preguntar', () => {
+  const prompt = construirPrompt(
+    { frase: 'top 20 isps on hold que sebastian en owner o no tiene owner', estadoActual: { condiciones: [] } },
+    [{ campo: 'owner', ejemplosValor: ['Sebastian Acosta Molina', 'Thomas Schumacher'] }],
+  );
+
+  assert.match(prompt, /OR|\bo\b/i, 'el prompt habla del caso OR');
+  assert.match(prompt, /pregunta/i, 'el prompt manda preguntar');
+});

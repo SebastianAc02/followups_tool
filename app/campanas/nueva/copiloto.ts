@@ -68,7 +68,17 @@ instruccion es sobre rol ausente, listalo en noMapeado.
 identifica el eje que domina el segmento (tamano, region, vertical) y relajalo SOLO a \
 el; deja el resto igual y explica el cambio en relleno {eje, motivo}.
 - Multi-turno: "quitame Bogota" quita ese valor de la condicion de region existente, no \
-la borra entera si tiene mas valores.`;
+la borra entera si tiene mas valores.
+- El motor SOLO sabe hacer Y (todas las condiciones se cumplen a la vez). NO sabe hacer \
+O. Si la instruccion necesita un O ("Sebastian en owner O sin owner", "Cali O Medellin" \
+sobre campos distintos), NO armes el segmento con las condiciones que si podes: devolve \
+las condiciones que ya estaban y explica en noMapeado que hace falta un O, con las dos \
+alternativas concretas para que el usuario elija una. Descartar la condicion y seguir con \
+las otras da un resultado que se ve bien y esta mal -- es el peor resultado posible.
+- Si la instruccion es ambigua sobre el universo (dice "ISPs" pero hay carriers, telcos \
+grandes y utilities en la base), NO decidas vos: armas el segmento con la lectura mas \
+estrecha (solo ISP) y en explicacion decis explicitamente que dejaste fuera y preguntas \
+si quiere incluirlos.`;
 }
 
 // El estado que propone la IA SIEMPRE pasa por definicionSegmentoSchema (compuesto
