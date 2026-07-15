@@ -6,6 +6,7 @@ import { ESTADOS_ACTIVOS } from '../../db/funnel';
 import { OWNER_COLA_SPLIT } from '../../cola/agenda.ts';
 import { requireSession } from '../../lib/session';
 import { leerCookieModoPrueba } from '../../lib/cookie-modo';
+import { hoy as hoyDemo, offsetActual } from '../../lib/reloj';
 import { cargarPerfil } from '../../lib/perfil';
 import { Sidebar, type ConectorEstado } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -29,7 +30,7 @@ export async function datosSidebar() {
   const usuario = await requireSession();
   const owner = usuario.owner;
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyDemo();
 
   const toquesHoy = (owner === OWNER_COLA_SPLIT ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion)).length;
   const campanasActivas = listarCampanas(usuario.idOrganizacion).filter((c) => c.estado === 'activa').length;

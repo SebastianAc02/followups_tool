@@ -29,6 +29,7 @@ import {
   type FilaAgenda,
   type FilaColaConBucket,
 } from "./agenda.ts";
+import { hoy as hoyDemo } from "../lib/reloj";
 
 export default async function Cola({ searchParams }: { searchParams: Promise<{ owner?: string }> }) {
   const usuario = await requireSession();
@@ -37,7 +38,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0]. Visitante (solo
   // lectura) sin ?owner= ve la cola de TODOS los owners, no una propia (que estaria vacia).
   const owner = sp.owner ?? (usuario.soloLectura ? undefined : usuario.owner);
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyDemo();
   const splitActivo = owner === OWNER_COLA_SPLIT;
   const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
   const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
