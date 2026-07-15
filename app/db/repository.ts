@@ -66,6 +66,7 @@ import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
 import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
+import { clasificarCargo } from '../core/reconciliacion/clasificarCargo';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -4846,4 +4847,87 @@ export function marcarVetoNotion(idEmpresa: string, flag: 'es_utility_no_isp' | 
       set: { [campo]: 1, fuente: 'notion', actualizadoEn: ahora },
     })
     .run();
+}
+
+export interface ContactoNotionInput {
+  nombre: string;
+  cargo: string;
+  telefono: string;
+  email: string;
+  linkedin?: string;
+  esPrincipal: boolean;
+}
+
+// Trim + lowercase + colapso de espacios: basta para comparar nombres de persona
+// (a diferencia de matcherGemelos.ts, que normaliza razon social con sufijos legales,
+// otra clase de problema). No se reusa esa normalizacion aca a proposito.
+function normalizarNombrePersona(nombre: string): string {
+  return nombre.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// T11: Contacto Principal + Buying Comittee (Notion, Fase 4) -> `contacto`.
+// Idempotente por (id_empresa, nombre normalizado) o telefono no vacio: si ya existe
+// una fila que matchea por cualquiera de los dos, se actualiza esa fila en vez de
+// insertar una nueva. uq_contacto_principal es un indice unico parcial (a lo sumo un
+// es_principal=1 por empresa): antes de marcar un contacto como principal, se demota
+// en la MISMA transaccion cualquier otro contacto de la empresa que ya lo fuera (pasada
+// previa de esta misma funcion, o dato seedeado de otra fuente) para no chocar con el
+// indice, tanto en el camino feliz como al re-correr.
+export function upsertContactoNotion(idEmpresa: string, contactos: ContactoNotionInput[]): void {
+  db.transaction((tx) => {
+    const existentes = tx
+      .select({
+        idContacto: contacto.idContacto,
+        nombre: contacto.nombre,
+        telefono: contacto.telefono,
+      })
+      .from(contacto)
+      .where(eq(contacto.idEmpresa, idEmpresa))
+      .all();
+
+    for (const entrada of contactos) {
+      const nombre = entrada.nombre.trim();
+      if (nombre === '') continue; // sin nombre no hay contacto que guardar
+
+      const nombreNormalizado = normalizarNombrePersona(nombre);
+      const telefono = entrada.telefono.trim();
+
+      const match = existentes.find((e) => {
+        const mismoNombre = e.nombre !== null && normalizarNombrePersona(e.nombre) === nombreNormalizado;
+        const mismoTelefono = telefono !== '' && e.telefono !== null && e.telefono.trim() === telefono;
+        return mismoNombre || mismoTelefono;
+      });
+
+      if (entrada.esPrincipal) {
+        // Union en id_contacto: cualquier OTRO contacto de esta empresa que hoy tenga
+        // es_principal=1 se demota, sin importar si viene o no de esta misma corrida.
+        tx.update(contacto)
+          .set({ esPrincipal: 0 })
+          .where(and(eq(contacto.idEmpresa, idEmpresa), eq(contacto.esPrincipal, 1), match ? ne(contacto.idContacto, match.idContacto) : sql`1=1`))
+          .run();
+      }
+
+      const valores = {
+        idEmpresa,
+        nombre,
+        cargo: entrada.cargo,
+        cargoCategoria: clasificarCargo(entrada.cargo),
+        telefono: telefono || null,
+        email: entrada.email || null,
+        linkedin: entrada.linkedin || null,
+        esPrincipal: entrada.esPrincipal ? 1 : 0,
+        fuente: 'notion',
+      };
+
+      if (match) {
+        tx.update(contacto).set(valores).where(eq(contacto.idContacto, match.idContacto)).run();
+      } else {
+        const [insertado] = tx.insert(contacto).values(valores).returning({ idContacto: contacto.idContacto }).all();
+        // Se agrega a `existentes` para que filas posteriores del MISMO lote (p. ej. dos
+        // entradas de Buying Comittee con el mismo nombre por error de captura) tambien
+        // hagan match contra este INSERT recien hecho, en vez de duplicar.
+        existentes.push({ idContacto: insertado.idContacto, nombre, telefono: telefono || null });
+      }
+    }
+  });
 }

@@ -56,6 +56,8 @@ export const contacto = sqliteTable('contacto', {
   esKeyDecisionMaker: integer('es_key_decision_maker').notNull().default(0),
   telefono: text('telefono'),
   email: text('email'),
+  // T11: enriquecimiento Notion (Buying Comittee) trae LinkedIn per-persona.
+  linkedin: text('linkedin'),
   notas: text('notas'),
   esPrincipal: integer('es_principal').notNull().default(0),
   fuente: text('fuente').notNull(),

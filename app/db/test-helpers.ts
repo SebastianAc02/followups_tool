@@ -55,9 +55,12 @@ export function crearDbPrueba() {
       es_principal INTEGER NOT NULL DEFAULT 0,
       telefono TEXT,
       email TEXT,
+      linkedin TEXT,
       notas TEXT,
       fuente TEXT NOT NULL
     );
+
+    CREATE UNIQUE INDEX uq_contacto_principal ON contacto(id_empresa) WHERE es_principal = 1;
 
     CREATE TABLE toque (
       id_toque INTEGER PRIMARY KEY AUTOINCREMENT,
