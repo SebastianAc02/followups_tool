@@ -29,7 +29,7 @@ process.env.WHATSAPP_WEBHOOK_URL = 'http://followups-web:3000/api/webhooks/whats
 process.env.WHATSAPP_WEBHOOK_TOKEN = 'tok_test';
 
 const { guardarCredencialConector } = await import('../db/repository.ts');
-const { crearEvolutionAdapter, iniciarConexionPorQr } = await import('./evolution.ts');
+const { crearEvolutionAdapter, iniciarConexionPorQr, ErrorEvolution } = await import('./evolution.ts');
 
 function fetchFalso(handler: (path: string, init: RequestInit) => { status: number; body: unknown }) {
   return async (url: string | URL, init: RequestInit = {}) => {
@@ -370,6 +370,47 @@ test('iniciarConexion NO recrea una instancia que ya existe: pide connect y rege
 
   assert.deepEqual(inicio, { tipo: 'codigo', formato: 'pairing', data: 'OTRO1234' });
   assert.deepEqual(llamadas, ['GET /instance/fetchInstances', 'GET /instance/connect/wa-573105182997']);
+});
+
+// A (2026-07-15): descubierto reparando /conectores en vivo -- Evolution resuelve la
+// instancia ANTES de validar la apikey, asi que un 404 en una ruta por-instancia
+// ("logout/prueba", "sendText/prueba") no dice nada de la llave, dice que la instancia
+// no existe. Es informacion DEFINITIVA (a diferencia de un timeout o un 500, donde de
+// verdad no sabemos que paso), y quien llama necesita distinguirlos para poder corregir
+// la fila de linea_whatsapp en vez de dejarla mintiendo en "activa".
+test('ErrorEvolution reconoce el 404 de instancia inexistente y lo distingue de otros errores', () => {
+  const err404 = new ErrorEvolution(
+    404,
+    '{"status":404,"error":"Not Found","response":{"message":["The \\"prueba\\" instance does not exist"]}}',
+    '/instance/logout/prueba',
+  );
+  assert.strictEqual(err404.instanciaNoExiste, true);
+  // El mensaje no cambia: hay tests y UI que lo leen tal cual.
+  assert.match(err404.message, /Evolution respondio 404 en \/instance\/logout\/prueba/);
+
+  const err500 = new ErrorEvolution(500, 'boom', '/message/sendText/x');
+  assert.strictEqual(err500.instanciaNoExiste, false);
+  // Un 404 que NO es de instancia (ruta mal escrita) tampoco cuenta.
+  assert.strictEqual(new ErrorEvolution(404, '{"error":"Cannot POST /nope"}', '/nope').instanciaNoExiste, false);
+});
+
+test('llamarEvolution tira ErrorEvolution (no un Error generico) cuando la respuesta no es ok', async (t) => {
+  guardarCredencialConector('whatsapp', 'evolution_test_key');
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso(() => ({
+      status: 404,
+      body: { status: 404, error: 'Not Found', response: { message: ['The "prueba" instance does not exist'] } },
+    })),
+  );
+
+  const adapter = crearEvolutionAdapter();
+  await assert.rejects(() => adapter.desconectar('prueba'), (e: unknown) => {
+    assert.ok(e instanceof ErrorEvolution, 'tiene que ser ErrorEvolution, no un Error generico');
+    assert.strictEqual((e as InstanceType<typeof ErrorEvolution>).instanciaNoExiste, true);
+    return true;
+  });
 });
 
 test.after(() => borrarDbPrueba(dbPath));

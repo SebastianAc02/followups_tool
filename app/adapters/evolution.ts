@@ -45,6 +45,30 @@ function webhookDeCreacion(): WebhookCreacion {
   };
 }
 
+// Evolution resuelve la instancia ANTES de validar la apikey: por eso una llave mala
+// contra /instance/logout/X vuelve como 404 ("no existe") y no como 401. Guardar el
+// status crudo deja que el que llama decida sin tener que hurgar el texto del Error.
+export class ErrorEvolution extends Error {
+  status: number;
+  cuerpo: string;
+  path: string;
+
+  constructor(status: number, cuerpo: string, path: string) {
+    // Mensaje IDENTICO al de antes: evolution.test.ts y la UI lo leen tal cual.
+    super(`Evolution respondio ${status} en ${path}: ${cuerpo}`);
+    this.name = 'ErrorEvolution';
+    this.status = status;
+    this.cuerpo = cuerpo;
+    this.path = path;
+  }
+
+  // 404 + este texto = Evolution no conoce la instancia. Es informacion definitiva
+  // (no una ambiguedad como un timeout): quien llama SI puede corregir la fila.
+  get instanciaNoExiste(): boolean {
+    return this.status === 404 && /instance does not exist/i.test(this.cuerpo);
+  }
+}
+
 async function llamarEvolution<T>(path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -68,7 +92,7 @@ async function llamarEvolution<T>(path: string, apiKey: string, init: RequestIni
     // sin conectar): {status, error, response:{message}}. Se cuelga el body crudo en el
     // mensaje para no perder detalle mientras no hay mas variedad de errores capturados.
     const cuerpo = await res.text();
-    throw new Error(`Evolution respondio ${res.status} en ${path}: ${cuerpo}`);
+    throw new ErrorEvolution(res.status, cuerpo, path);
   }
   return res.json() as Promise<T>;
 }
