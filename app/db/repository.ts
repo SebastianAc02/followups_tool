@@ -4734,3 +4734,79 @@ export function graduarDePBX(
       .run();
   });
 }
+
+// T4 (Fase 0 dedup Notion, decision revisada 2026-07-14): funde uno o mas registros
+// sinteticos/duplicados (idsAbsorbidos) contra el registro NIT sobreviviente. Nunca
+// automatico -- solo se llama sobre pares que Sebastian aprobo a mano (ver
+// planning/dedup-candidatos.md). Politica de nombre: nombre_oficial pasa a ser el
+// nombre de NOTION (lo que ve toda la app); nombre_legal guarda la razon social
+// original del NIT, solo para referencia/auditoria.
+//
+// Idempotente: un absorbido con opera_bajo_id ya seteado se salta (evita duplicar
+// alias, re-mover contactos/toques que ya estan vacios, o re-loguear en
+// sync_cambios). El absorbido NUNCA se borra -- queda "desreferenciado" (sin
+// contactos/toques propios, marcado opera_bajo_id) para no romper referencias en
+// otras tablas que no audita esta funcion (segmento_exclusion, inscripcion, etc).
+export function fundirEmpresas(idSobrevive: string, idsAbsorbidos: string[], nombreNotion: string): void {
+  const ahora = new Date().toISOString();
+
+  db.transaction((tx) => {
+    const sobrevive = tx
+      .select({ nombreOficial: empresa.nombreOficial, nombreLegal: empresa.nombreLegal })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, idSobrevive))
+      .get();
+    if (!sobrevive) throw new Error(`fundirEmpresas: ${idSobrevive} no existe`);
+
+    for (const idAbsorbido of idsAbsorbidos) {
+      if (idAbsorbido === idSobrevive) continue;
+
+      const absorbido = tx
+        .select({ nombreOficial: empresa.nombreOficial, operaBajoId: empresa.operaBajoId })
+        .from(empresa)
+        .where(eq(empresa.idEmpresa, idAbsorbido))
+        .get();
+      if (!absorbido || absorbido.operaBajoId === idSobrevive) continue; // no existe o ya fundido: idempotente
+
+      tx.update(contacto).set({ idEmpresa: idSobrevive }).where(eq(contacto.idEmpresa, idAbsorbido)).run();
+      tx.update(toque).set({ idEmpresa: idSobrevive }).where(eq(toque.idEmpresa, idAbsorbido)).run();
+
+      const aliasExistente = tx
+        .select({ idAlias: empresaAlias.idAlias })
+        .from(empresaAlias)
+        .where(and(eq(empresaAlias.idEmpresa, idSobrevive), eq(empresaAlias.alias, absorbido.nombreOficial)))
+        .get();
+      if (!aliasExistente) {
+        tx.insert(empresaAlias)
+          .values({ idEmpresa: idSobrevive, alias: absorbido.nombreOficial, fuente: 'dedup', confianza: 'alta', createdAt: ahora })
+          .run();
+      }
+
+      tx.insert(syncCambios)
+        .values({
+          fecha: ahora,
+          corrida: 'dedup_notion',
+          fuente: 'notion',
+          entidad: 'empresa',
+          idRegistro: idAbsorbido,
+          accion: `fundir_en:${idSobrevive}`,
+          detalle: `nombre_legal_previo=${sobrevive.nombreLegal ?? sobrevive.nombreOficial}`,
+        })
+        .run();
+
+      tx.update(empresa)
+        .set({ operaBajoId: idSobrevive, updatedAt: ahora })
+        .where(eq(empresa.idEmpresa, idAbsorbido))
+        .run();
+    }
+
+    tx.update(empresa)
+      .set({
+        nombreOficial: nombreNotion,
+        nombreLegal: sobrevive.nombreLegal ?? sobrevive.nombreOficial,
+        updatedAt: ahora,
+      })
+      .where(eq(empresa.idEmpresa, idSobrevive))
+      .run();
+  });
+}

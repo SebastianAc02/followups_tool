@@ -1,0 +1,1 @@
+ALTER TABLE `empresa` ADD `nombre_legal` text;

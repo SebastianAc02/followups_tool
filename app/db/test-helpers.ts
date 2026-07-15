@@ -21,6 +21,8 @@ export function crearDbPrueba() {
       tipo_id TEXT NOT NULL,
       nombre_oficial TEXT NOT NULL,
       nombre_normalizado TEXT NOT NULL,
+      nombre_legal TEXT,
+      opera_bajo_id TEXT,
       ciudad_principal TEXT,
       departamento TEXT,
       es_cliente INTEGER NOT NULL DEFAULT 0,

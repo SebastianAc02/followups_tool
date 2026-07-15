@@ -47,7 +47,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
   Lista cuando: corro el script y obtengo la lista de pares para que Sebastián marque
   cuáles fundir.
 
-- [ ] **T4 · Repository: fundir un par aprobado (idempotente).**
+- [x] **T4 · Repository: fundir un par aprobado (idempotente).**
   Modificar: `app/db/repository.ts` (nueva `fundirEmpresas(idSobrevive, idsAbsorbidos: string[])`,
   acepta MAS DE UN absorbido — Celsia Internet tiene 2 sinteticos con el mismo NIT).
   Regla de fusión (decisión revisada 2026-07-14, cambia el spec original): sobrevive el

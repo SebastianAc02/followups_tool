@@ -7,6 +7,14 @@ export const empresa = sqliteTable('empresa', {
   tipoId: text('tipo_id').notNull(),
   nombreOficial: text('nombre_oficial').notNull(),
   nombreNormalizado: text('nombre_normalizado').notNull(),
+  // Fase 0 dedup Notion (2026-07-14): al fundir un gemelo NIT<->sintetico,
+  // nombreOficial pasa a ser el nombre de NOTION (lo que ve toda la app). La razon
+  // social del NIT queda aca, solo para referencia/auditoria, nunca en la UI.
+  nombreLegal: text('nombre_legal'),
+  // Ya existe en isps.db (sin mapear hasta ahora). Fase 0 dedup lo usa como marca de
+  // fusion: si esta seteado, esta fila es un duplicado absorbido por otra empresa
+  // (el sobreviviente), no se borra pero deja de ser una identidad activa.
+  operaBajoId: text('opera_bajo_id'),
   ciudadPrincipal: text('ciudad_principal'),
   departamento: text('departamento'),
   esCliente: integer('es_cliente').notNull().default(0),

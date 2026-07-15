@@ -8,6 +8,20 @@
       "when": 1784066805101,
       "tag": "0000_baseline_2026_07_14",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784091749570,
+      "tag": "0001_whole_blink",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784091877070,
+      "tag": "0002_flashy_dust",
+      "breakpoints": true
     }
   ]
 }
