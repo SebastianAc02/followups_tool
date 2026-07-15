@@ -153,7 +153,9 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
     return { data, empresas };
   })();
 
-  const filasSinCadencia = pipelineSinCadencia(usuario.idOrganizacion, hoy);
+  // B (2026-07-15): cada quien ve SUS cuentas. El visitante de solo lectura no tiene
+  // cuentas propias, asi que no se le arma la franja (no una vacia con su nombre).
+  const filasSinCadencia = usuario.soloLectura ? [] : pipelineSinCadencia(usuario.idOrganizacion, hoy, usuario.owner);
   const grupoSinCadencia = (() => {
     if (filasSinCadencia.length === 0) return null;
     const mezclaCanales = { ll: 0, wa: 0, co: 0 };

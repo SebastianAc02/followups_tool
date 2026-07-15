@@ -41,7 +41,7 @@ test('colaDelDia no muestra la fila fundida', () => {
 
 test('pipelineSinCadencia no muestra la fila fundida', () => {
   seedPar('viva-seg', 'fundida-seg', 'contacto_iniciado', '2026-07-01');
-  const filas = pipelineSinCadencia(1, '2026-07-15');
+  const filas = pipelineSinCadencia(1, '2026-07-15', 'Sebastian Acosta Molina');
   const ids = filas.map((f) => f.idEmpresa);
   assert.ok(ids.includes('viva-seg'));
   assert.ok(!ids.includes('fundida-seg'));

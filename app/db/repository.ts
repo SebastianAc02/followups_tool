@@ -345,15 +345,28 @@ export type FilaPipelineSinCadencia = {
   fecha: string | null;
   estado: string | null;
   esHoy: boolean;
+  esVencido: boolean;
 };
 
-// Franja "Sin cadencia" de /seguimiento (2026-07-14): el complemento de pipelineGlobal.
-// pipelineGlobal solo trae empresas inscritas en una cadencia activa; esta trae los toques
-// MANUALES (empresas con un follow-up pendiente, vencido o de hoy) que NO estan en ninguna
-// cadencia activa, org-wide. Asi Seguimiento muestra TODO lo pendiente, no solo lo cadenceado.
-// Los leads dormidos (proximo_follow_up_fecha en null) quedan fuera a proposito: "dormido" =
-// sin fecha = fuera de seguimiento hasta que alguien le ponga una.
-export function pipelineSinCadencia(idOrganizacion: number, hoy: string): FilaPipelineSinCadencia[] {
+// Franja "Sin cadencia" de /seguimiento: los deals ACTIVOS del owner que no estan en
+// ninguna cadencia. Complemento de pipelineGlobal (que solo trae los inscritos).
+//
+// B (2026-07-15): antes era org-wide y Sebastian veia las cuentas de Thomas. Ahora el
+// owner es obligatorio: cada quien ve lo suyo (decision de Sebastian).
+//
+// L (2026-07-15): antes exigia proximo_follow_up_fecha NOT NULL y <= hoy, lo que
+// ocultaba ~90% de los deals activos (Felipe: 24 activas, 3 visibles). Un deal vivo SIN
+// fecha es justamente el que hay que ver para ponerle una -- esconderlo lo vuelve
+// invisible para siempre. La urgencia ahora se comunica con esHoy/esVencido, no
+// dejando la fila fuera.
+//
+// Lo que SIGUE fuera: on_hold (dormido) y firma_pago (ya cliente) -- no son trabajo
+// activo. COALESCE para que estado null no caiga por el NULL NOT IN (que da NULL).
+export function pipelineSinCadencia(
+  idOrganizacion: number,
+  hoy: string,
+  owner: string,
+): FilaPipelineSinCadencia[] {
   const filas = db
     .select({
       idEmpresa: empresa.idEmpresa,
@@ -370,16 +383,8 @@ export function pipelineSinCadencia(idOrganizacion: number, hoy: string): FilaPi
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
         EMPRESA_VIVA,
-        isNotNull(empresa.proximoFollowUpFecha),
-        // Cutoff de fecha: solo vencidos o de hoy (mismo criterio que la cola). Si algun dia se
-        // quieren ver tambien follow-ups a futuro en Seguimiento, se quita esta linea.
-        lte(empresa.proximoFollowUpFecha, hoy),
-        // Estado (decision de Sebastian 2026-07-14): on_hold = dormidos y firma_pago = clientes
-        // ganados; ninguno es un toque manual pendiente. contacto_iniciado y el resto SI entran.
-        // COALESCE para que estado vacio/null no caiga por el NULL NOT IN (que da NULL, no true).
+        eq(empresa.owner, owner),
         sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago')`,
-        // "Sin cadencia" = no tiene inscripcion activa (mismo patron que
-        // colaContactoIniciadoSinSeguimiento). Si la tuviera, ya sale en las franjas "Toque N".
         notExists(
           db
             .select({ x: sql`1` })
@@ -388,10 +393,16 @@ export function pipelineSinCadencia(idOrganizacion: number, hoy: string): FilaPi
         ),
       ),
     )
-    .orderBy(empresa.proximoFollowUpFecha)
+    // Primero lo vencido, despues lo de hoy, despues lo agendado a futuro, y de ultimo
+    // lo que no tiene fecha (NULLS LAST explicito: en SQLite NULL ordena primero).
+    .orderBy(sql`CASE WHEN ${empresa.proximoFollowUpFecha} IS NULL THEN 1 ELSE 0 END`, empresa.proximoFollowUpFecha)
     .all();
 
-  return filas.map((f) => ({ ...f, esHoy: f.fecha === hoy }));
+  return filas.map((f) => ({
+    ...f,
+    esHoy: f.fecha === hoy,
+    esVencido: f.fecha != null && f.fecha < hoy,
+  }));
 }
 
 // V3.9: busca CUALQUIER empresa por nombre, sin restringir por owner ni por
