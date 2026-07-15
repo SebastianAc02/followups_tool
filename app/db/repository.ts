@@ -4956,11 +4956,20 @@ export function fundirEmpresas(idSobrevive: string, idsAbsorbidos: string[], nom
 
   db.transaction((tx) => {
     const sobrevive = tx
-      .select({ nombreOficial: empresa.nombreOficial, nombreLegal: empresa.nombreLegal })
+      .select({ nombreOficial: empresa.nombreOficial, nombreLegal: empresa.nombreLegal, operaBajoId: empresa.operaBajoId })
       .from(empresa)
       .where(eq(empresa.idEmpresa, idSobrevive))
       .get();
     if (!sobrevive) throw new Error(`fundirEmpresas: ${idSobrevive} no existe`);
+    // Bug real encontrado 2026-07-15 (CABLETELCO, plan embudo-real-y-registro): fundir
+    // contra un "sobreviviente" que en realidad ya esta muerto (fundido antes en OTRA
+    // fila) deja al absorbido nuevo colgado de una identidad invisible para el resto de
+    // la app (EMPRESA_VIVA la filtra). Falla explicito en vez de dejar la cadena rota.
+    if (sobrevive.operaBajoId) {
+      throw new Error(
+        `fundirEmpresas: ${idSobrevive} no puede ser sobreviviente, ya esta fundido en ${sobrevive.operaBajoId}. Usa ${sobrevive.operaBajoId} como sobreviviente.`,
+      );
+    }
 
     for (const idAbsorbido of idsAbsorbidos) {
       if (idAbsorbido === idSobrevive) continue;

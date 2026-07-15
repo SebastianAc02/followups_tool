@@ -121,6 +121,19 @@ test('dos absorbidos con el mismo NIT (caso Celsia: dos sinteticos) no se pisan 
   assert.deepEqual(aliases.map((a) => a.alias), ['CELSIA', 'CELSIA INTERNET S.A.S.']);
 });
 
+test('rechaza fundir contra un sobreviviente que ya esta muerto (CABLETELCO, 2026-07-15)', () => {
+  seedEmpresa('815001640', 'Cable Cauca-Home TV', 'nit');
+  seedEmpresa('900552398', 'CABLE Y TELECOMUNICACIONES DE COLOMBIA S.A.S CABLETELCO', 'nit');
+  fundirEmpresas('815001640', ['900552398'], 'Cable Cauca-Home TV'); // 900552398 ya fundida
+
+  seedEmpresa('ntn-cabletelco-nueva', 'CABLE Y TELECOMUNICACIONES CABLETELCO', 'interno');
+  assert.throws(
+    () => fundirEmpresas('900552398', ['ntn-cabletelco-nueva'], 'CABLETELCO'),
+    /ya esta fundido en 815001640/,
+    'fundir contra una fila ya muerta dejaria al absorbido nuevo colgado de una identidad invisible (EMPRESA_VIVA la filtra)',
+  );
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });
