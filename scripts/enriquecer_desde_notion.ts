@@ -15,26 +15,23 @@ import { db, schema } from '../app/db/index.ts';
 import { marcarVetoNotion, upsertContactoNotion, enriquecerDesdeNotion, type ContactoNotionInput } from '../app/db/repository.ts';
 import { crearNotionExportAdapter } from '../app/adapters/notion/notionExportAdapter.ts';
 import { vetoCategoria } from '../app/core/reconciliacion/vetoCategoria.ts';
-import { normalizarRazonSocial } from '../app/core/reconciliacion/normalizarRazonSocial.ts';
+import { construirIndiceEmpresasDb, matchEmpresaNotion, type EmpresaDbMatch } from '../app/core/reconciliacion/matchNotion.ts';
 
 const DIR_EXPORT_NOTION = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline';
 const CSV_PATH = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline f5e2be53a1514d42ac6db30fd7c5202a_all.csv';
 const ID_ORGANIZACION = 1;
 
-interface EmpresaDb {
-  idEmpresa: string;
-  nombreOficial: string;
-  notionPageId: string | null;
-  operaBajoId: string | null;
-}
-
-function leerEmpresasDb(): EmpresaDb[] {
+function leerEmpresasDb(): EmpresaDbMatch[] {
   return db.select({
     idEmpresa: schema.empresa.idEmpresa,
     nombreOficial: schema.empresa.nombreOficial,
     notionPageId: schema.empresa.notionPageId,
     operaBajoId: schema.empresa.operaBajoId,
   }).from(schema.empresa).all();
+}
+
+function leerAlias() {
+  return db.select({ idEmpresa: schema.empresaAlias.idEmpresa, alias: schema.empresaAlias.alias }).from(schema.empresaAlias).all();
 }
 
 function contactosDe(notionEmpresa: ReturnType<ReturnType<typeof crearNotionExportAdapter>['leerEmpresas']>[number]): ContactoNotionInput[] {
@@ -63,46 +60,26 @@ function contactosDe(notionEmpresa: ReturnType<ReturnType<typeof crearNotionExpo
 
 function main() {
   const empresasDb = leerEmpresasDb();
-  const activas = empresasDb.filter((e) => !e.operaBajoId);
-
-  const porPageId = new Map<string, EmpresaDb>();
-  const porNombreNormalizado = new Map<string, EmpresaDb[]>();
-  for (const e of activas) {
-    if (e.notionPageId) porPageId.set(e.notionPageId, e);
-    const key = normalizarRazonSocial(e.nombreOficial);
-    if (!porNombreNormalizado.has(key)) porNombreNormalizado.set(key, []);
-    porNombreNormalizado.get(key)!.push(e);
-  }
+  const indice = construirIndiceEmpresasDb(empresasDb, leerAlias());
 
   const empresasNotion = crearNotionExportAdapter(DIR_EXPORT_NOTION, CSV_PATH).leerEmpresas()
     .filter((e) => e.nombre.trim().length > 0);
 
-  console.log(`empresas DB activas (sin fundir): ${activas.length}`);
+  console.log(`empresas DB activas (sin fundir): ${empresasDb.filter((e) => !e.operaBajoId).length}`);
   console.log(`empresas Notion en el export: ${empresasNotion.length}`);
 
   let vetosAplicados = 0;
   let contactosAplicados = 0; // empresas con >=1 contacto en la entrada, no filas individuales
   let enriquecidas = 0;
   const sinMatchDb: string[] = [];
-  const ambiguos: string[] = [];
 
   for (const notionEmpresa of empresasNotion) {
-    let empresaDb: EmpresaDb | undefined;
-    if (notionEmpresa.pageId) {
-      empresaDb = porPageId.get(notionEmpresa.pageId);
-    }
+    // M (2026-07-15): el helper unico -- page_id como llave eterna, alias resuelto a
+    // mano, y razon social solo si es unico candidato (ambiguo = null, nunca adivina).
+    const empresaDb = matchEmpresaNotion(indice, { pageId: notionEmpresa.pageId, nombre: notionEmpresa.nombre });
     if (!empresaDb) {
-      const key = normalizarRazonSocial(notionEmpresa.nombre);
-      const candidatos = porNombreNormalizado.get(key);
-      if (!candidatos || candidatos.length === 0) {
-        sinMatchDb.push(notionEmpresa.nombre);
-        continue;
-      }
-      if (candidatos.length > 1) {
-        ambiguos.push(`${notionEmpresa.nombre} -> [${candidatos.map((c) => c.idEmpresa).join(', ')}]`);
-        continue;
-      }
-      empresaDb = candidatos[0];
+      sinMatchDb.push(notionEmpresa.nombre);
+      continue;
     }
 
     // Fase 2: veto de categoria (union, nunca quita un veto existente).
@@ -138,10 +115,8 @@ function main() {
   console.log(`vetos de categoria aplicados: ${vetosAplicados}`);
   console.log(`empresas con contactos aplicados: ${contactosAplicados}`);
   console.log(`empresas pasadas por enriquecerDesdeNotion (no-op si Notion no traia dato nuevo): ${enriquecidas}`);
-  console.log(`empresas Notion sin match en la DB: ${sinMatchDb.length}`);
+  console.log(`empresas Notion sin match en la DB (o ambiguo por razon social): ${sinMatchDb.length}`);
   if (sinMatchDb.length > 0) console.log('  ' + sinMatchDb.join('\n  '));
-  console.log(`empresas Notion con match ambiguo: ${ambiguos.length}`);
-  if (ambiguos.length > 0) console.log('  ' + ambiguos.join('\n  '));
 }
 
 main();
