@@ -1,8 +1,9 @@
 // Tarea 6: caso de uso de respuesta entrante de WhatsApp. Dos bloques:
-//  (1) resolverPorUltimos10 / normalizarTelefono: matcher PURO (decision A). Verde ya.
-//  (2) procesarRespuestaEntrante: contrato con deps falsas. ROJO A PROPOSITO hasta que
-//      Sebastian escriba el cuerpo (hueco learning-mode en llego-respuesta.ts). Los tests
-//      fijan los OUTCOMES no negociables de las decisiones A/B/C, no el orden interno.
+//  (1) resolverPorUltimos10 / normalizarTelefono: matcher PURO (decision A).
+//  (2) procesarRespuestaEntrante: contrato con deps falsas -- idempotencia primero,
+//      corte local (pausarInscripcion + registrarRespuestaDetectada), sacarDestinatario
+//      en Apollo (aislado con try/catch), y el toque entrante. Los tests fijan los
+//      OUTCOMES no negociables de las decisiones A/B/C, no el orden interno.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
