@@ -918,6 +918,18 @@ export function guardarCredencialConector(proveedor: string, credencial: string,
   }
 }
 
+// A (2026-07-15): borra el secreto pero NO la fila -- ultima_corrida/ultimo_resultado son
+// historial del conector, no del secreto, y perderlos borraria la unica pista de cuando
+// dejo de andar. Complemento de quitarConfigConector (que solo duerme la POLITICA): sin
+// esto, re-agregar un conector lo revivia ya conectado y no habia forma de reconectar
+// desde cero por la UI (decision: "Quitar" se parte en Desactivar vs Quitar-y-borrar).
+export function borrarCredencialConector(proveedor: string, idUsuario?: string) {
+  db.update(conector)
+    .set({ credencialCiphertext: null, estado: 'sin_credencial', updatedAt: new Date().toISOString() })
+    .where(filtroConector(proveedor, idUsuario))
+    .run();
+}
+
 // V3.5: heartbeat del worker por tarea. Upsert igual que guardarCredencialConector
 // (mismo motivo: SQLite no fusiona NULLs en un UNIQUE index, el lookup explicito es
 // la garantia real). No toca credencialCiphertext, si la fila no existia, nace con
