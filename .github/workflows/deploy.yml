@@ -54,7 +54,9 @@ jobs:
             if git diff --name-only "$PREV" HEAD | grep -qx "Caddyfile"; then
               docker compose -f docker-compose.production.yml restart caddy
             fi
-            docker compose -f docker-compose.production.yml build followups-web followups-worker
+            # Solo followups-web construye (el worker reusa su imagen, ver el compose).
+            # Construir los dos en paralelo reventaba la RAM del host y mataba al daemon.
+            docker compose -f docker-compose.production.yml build followups-web
             # Aplica contra isps.db real cualquier migracion nueva (drizzle/*.sql) antes
             # de recrear los contenedores -- ver scripts/migrate.ts. Corre una sola vez,
             # con la imagen recien construida, no en cada arranque de contenedor.

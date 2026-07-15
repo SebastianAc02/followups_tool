@@ -11,7 +11,14 @@ networks:
 
 services:
   followups-web:
+    # Unico servicio que CONSTRUYE, y nombra la imagen para que el worker la reuse.
+    # Antes los dos declaraban `build: .` con el mismo Dockerfile y contexto: Compose
+    # lanzaba dos builds de Next EN PARALELO para producir dos imagenes identicas. En
+    # una caja de 7.6GB sin swap eso reventaba la memoria y el kernel se llevaba por
+    # delante al daemon de Docker, tumbando TODOS los contenedores del host (caido el
+    # 2026-07-15). Un solo build: mitad de memoria y mitad de tiempo.
     build: .
+    image: followups-tool:latest
     container_name: followups_web
     restart: unless-stopped
     env_file:
@@ -22,7 +29,10 @@ services:
       - onepay
 
   followups-worker:
-    build: .
+    # Sin `build:` a proposito: reusa la imagen que ya construyo followups-web.
+    image: followups-tool:latest
+    depends_on:
+      - followups-web
     container_name: followups_worker
     # No usar "npm run worker": ese script trae --env-file=.env.local hardcodeado
     # (conveniencia de dev local). En el contenedor las variables ya llegan via

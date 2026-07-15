@@ -21,6 +21,11 @@ ENV ISPS_DB_PATH=:memory:
 # Misma razon para pruebas.db (modo prueba abre las dos bases al cargar el modulo). Sin
 # esto el default apunta a una ruta del Mac que no existe en la imagen y el build muere.
 ENV PRUEBAS_DB_PATH=:memory:
+# Techo de heap: el VPS tiene 7.6GB y CERO swap, compartidos con Evolution/Postgres/dario.
+# Sin techo, un pico del build se lo lleva el OOM killer del kernel, que no mata al build
+# sino al daemon de Docker -- y con el, TODOS los contenedores del host (caido el
+# 2026-07-15). Acotado, si no cabe revienta el build y produccion sigue viva.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN npm run build
 
 # ---- runner: imagen final. Un solo runtime para dos procesos (web y worker): el
