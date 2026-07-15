@@ -6,7 +6,7 @@ import { crearDbPrueba } from './test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { colaLeads, colaCierres, colaReagendar } = await import('./repository.ts');
+const { colaLeads, colaCierres, colaReagendar, colaDelDia } = await import('./repository.ts');
 
 const OWNER = 'Sebastian Acosta Molina';
 const OTRO_OWNER = 'Felipe Castro';
@@ -104,6 +104,20 @@ test('colaReagendar: reunion_agendada cuyo ultimo toque fue no_llego, vencido o 
   const r = colaReagendar('2026-07-14', OWNER, 1);
   const ids = r.map((f) => f.id).sort();
   assert.deepEqual(ids, ['r1', 'r2']);
+});
+
+test('colaDelDia: excluye on_hold y firma_pago; conserva otros estados y estado null', () => {
+  // Organizacion 4, aislada de los demas tests de este archivo. Todas vencidas o de hoy,
+  // asi que todas calificarian por fecha -- el filtro que se prueba es el de estado.
+  seedEmpresa('d1', OWNER, 'lead', '2026-07-10', 4); // lead: entra
+  seedEmpresa('d2', OWNER, 'on_hold', '2026-07-10', 4); // durmiente: NO entra
+  seedEmpresa('d3', OWNER, 'firma_pago', '2026-07-10', 4); // ya cliente: NO entra
+  seedEmpresa('d4', OWNER, 'contacto_iniciado', '2026-07-10', 4); // otro estado: entra
+  seedEmpresa('d5', OWNER, null, '2026-07-10', 4); // estado null: entra (COALESCE)
+
+  const r = colaDelDia('2026-07-14', OWNER, 4);
+  const ids = r.map((f) => f.id).sort();
+  assert.deepEqual(ids, ['d1', 'd4', 'd5']);
 });
 
 test('colaLeads/colaCierres/colaReagendar: campana viene poblada solo si hay inscripcion activa', () => {

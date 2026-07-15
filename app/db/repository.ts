@@ -198,6 +198,11 @@ export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacio
     eq(empresa.organizacionActivaId, idOrganizacion),
     isNotNull(empresa.proximoFollowUpFecha),
     lte(empresa.proximoFollowUpFecha, hoy),
+    // Excluye on_hold (durmiente, "dijeron que no") y firma_pago (ya cliente): no son
+    // trabajo del dia, se filtraban en pipelineSinCadencia pero se colaban aca. El
+    // COALESCE(...,'') importa: estado_notion puede ser NULL, y "NULL NOT IN (...)" es NULL
+    // (ni true) en SQL -- sin el, una empresa con estado null quedaria excluida por error.
+    sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago')`,
   ];
   if (owner) condiciones.push(eq(empresa.owner, owner));
   return db
