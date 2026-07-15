@@ -3550,6 +3550,13 @@ export function marcarCampanaAprobadaGmail(idCampana: number): void {
 // Cuenta pasos 'enviada' con proveedor='gmail' de campanas cuyo owner resuelve a este
 // idUsuario, con fecha_enviada de hoy. hoy en formato YYYY-MM-DD (mismo criterio que
 // el resto del repository, ver kpisPipeline.entrandoHoy).
+//
+// Fix (2026-07-15, code review): mismo bug ya encontrado antes en
+// lineaWhatsappActivaDeOwner (ver comentario alli, lineas ~3490-3496) --
+// organizacion_miembro es multi-org, la llave real es (id_organizacion, owner_canonico),
+// no owner_canonico solo. Sin filtrar tambien campana.idOrganizacion aqui, un
+// owner_canonico que colisionara entre dos orgs sumaria envios de AMBAS, inflando el
+// conteo contra el tope diario de una organizacion con los envios de otra.
 export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: string): number {
   const miembro = db
     .select({ owner: organizacionMiembro.ownerCanonico })
@@ -3569,6 +3576,7 @@ export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: s
         eq(pasoInscripcion.proveedor, 'gmail'),
         eq(pasoInscripcion.estado, 'enviada'),
         eq(campana.owner, miembro.owner),
+        eq(campana.idOrganizacion, idOrganizacion),
         sql`substr(${pasoInscripcion.fechaEnviada}, 1, 10) = ${hoy}`,
       ),
     )

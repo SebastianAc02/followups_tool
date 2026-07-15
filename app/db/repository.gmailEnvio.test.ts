@@ -44,11 +44,19 @@ function seedConector(proveedor: string, idUsuario: string, ultimoResultado: str
   db.close();
 }
 
-function seedEmpresa(id: string, categoria: string, contactos: { email: string; principal?: boolean }[]) {
+function idsPasoYVersion(idCadencia: number) {
+  const db = raw();
+  const paso = db.prepare('SELECT id_paso FROM paso_cadencia WHERE id_cadencia = ?').get(idCadencia) as any;
+  const version = db.prepare('SELECT id_version FROM version_paso WHERE id_paso = ?').get(paso.id_paso) as any;
+  db.close();
+  return { idPaso: paso.id_paso, idVersion: version.id_version };
+}
+
+function seedEmpresa(id: string, categoria: string, contactos: { email: string; principal?: boolean }[], idOrganizacion = 1) {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria, organizacion_activa_id) VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?, 1)`,
-  ).run(id, id, id.toLowerCase(), categoria);
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria, organizacion_activa_id) VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?, ?)`,
+  ).run(id, id, id.toLowerCase(), categoria, idOrganizacion);
   for (const c of contactos) {
     db.prepare(
       `INSERT INTO contacto (id_empresa, nombre, es_key_decision_maker, es_principal, email, fuente) VALUES (?, 'Contacto', 0, ?, ?, 'seed')`,
@@ -110,11 +118,47 @@ test('enviosGmailHoy cuenta solo pasos enviados por gmail, hoy, del dueno resuel
   const idDestinatario = destinatariosDeInscripcion(idInscripcion)[0]?.id;
   assert.ok(idDestinatario, 'la inscripcion deberia tener al menos un destinatario');
 
-  const idPaso1 = crearPasoInscripcionPendiente({ idDestinatario, idPaso: 1, idVersion: 1, canal: 'correo' });
+  const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
+  const idPaso1 = crearPasoInscripcionPendiente({ idDestinatario, idPaso, idVersion, canal: 'correo' });
   marcarPasoInscripcionEnviada(idPaso1, 'gmail', 'msg-1', hoy);
 
   assert.equal(enviosGmailHoy('user-ana', 1, hoy.slice(0, 10)), 1);
   assert.equal(enviosGmailHoy('user-beto', 1, hoy.slice(0, 10)), 0, 'no cuenta envios de otro dueno');
+});
+
+// Code review (2026-07-15): mismo bug ya encontrado en lineaWhatsappActivaDeOwner --
+// owner_canonico no es unico globalmente, la llave real es (id_organizacion,
+// owner_canonico). Dos organizaciones distintas con el MISMO nombre de owner no deben
+// mezclar sus conteos de envio.
+test('enviosGmailHoy no mezcla organizaciones distintas con el mismo owner_canonico', () => {
+  const hoy = new Date().toISOString();
+
+  seedOrganizacionMiembro(2, 'Ana Gmail', 'user-ana-org2');
+  seedConector('gmail', 'user-ana-org2', 'ok');
+
+  const idCadenciaOrg2 = crearCadencia({ nombre: 'C gmail org2', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola', cuerpo: 'x' }] });
+  const idSegmentoOrg2 = guardarSegmento(
+    { nombre: 'gmail-seg-org2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['gmail-cat-org2'] }] } },
+    2,
+  );
+  const idCampanaOrg2 = crearCampana({ nombre: 'Camp gmail org2', idCadencia: idCadenciaOrg2, idSegmento: idSegmentoOrg2 }, 2);
+  fijarOwnerCampana(idCampanaOrg2, 'Ana Gmail');
+
+  seedEmpresa('e-gmail-conteo-org2', 'gmail-cat-org2', [{ email: 'ana2@empresa.com', principal: true }], 2);
+
+  inscribirCampana(idCampanaOrg2, 2);
+  const histOrg2 = historialInscripciones('e-gmail-conteo-org2').find((i) => i.estado === 'activa')!;
+  const idDestinatarioOrg2 = destinatariosDeInscripcion(histOrg2.id)[0]?.id;
+  assert.ok(idDestinatarioOrg2, 'la inscripcion de org2 deberia tener al menos un destinatario');
+
+  const { idPaso: idPasoOrg2Def, idVersion: idVersionOrg2 } = idsPasoYVersion(idCadenciaOrg2);
+  const idPasoOrg2 = crearPasoInscripcionPendiente({ idDestinatario: idDestinatarioOrg2, idPaso: idPasoOrg2Def, idVersion: idVersionOrg2, canal: 'correo' });
+  marcarPasoInscripcionEnviada(idPasoOrg2, 'gmail', 'msg-org2-1', hoy);
+
+  // org2 cuenta su propio envio...
+  assert.equal(enviosGmailHoy('user-ana-org2', 2, hoy.slice(0, 10)), 1);
+  // ...pero no se filtra hacia el conteo de org1, que sigue en 1 (del test anterior).
+  assert.equal(enviosGmailHoy('user-ana', 1, hoy.slice(0, 10)), 1, 'el envio de org2 no deberia sumar al conteo de org1');
 });
 
 test.after(() => {
