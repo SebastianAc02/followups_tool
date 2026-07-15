@@ -1,4 +1,5 @@
 import { sqliteTable, sqliteView, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 
 // Refleja las tablas que YA existen en isps.db (no se crean aquí). Solo las que usa el cockpit.
 
@@ -69,10 +70,14 @@ export const empresaUsuarios = sqliteTable('empresa_usuarios', {
   usuariosRealesFuente: text('usuarios_reales_fuente'),
   usuariosEstimados: real('usuarios_estimados'),
   usuariosEstFuente: text('usuarios_est_fuente'),
-  // Columna GENERATED ALWAYS ... STORED en isps.db real (COALESCE(reales, estimados)):
-  // se lee, nunca se escribe. Mapeada como real plano de solo-lectura; jamas debe ir en
-  // un values()/set() (SQLite rechaza escribir una columna generada).
-  usuariosEfectivos: real('usuarios_efectivos'),
+  // Columna GENERATED ALWAYS ... STORED en isps.db real (COALESCE(reales, estimados)).
+  // generatedAlwaysAs() es necesario, no cosmetico: sin marcarla como generada, Drizzle
+  // incluye IGUAL esta columna (con null) en el INSERT de cualquier .values() sobre esta
+  // tabla que no la mencione explicitamente -- y SQLite rechaza CUALQUIER referencia a
+  // una columna generada en la lista de un INSERT, incluso null (encontrado corriendo
+  // enriquecerDesdeNotion contra la DB real, T12; el DDL de prueba no la declaraba
+  // generada y por eso el test no lo agarro).
+  usuariosEfectivos: real('usuarios_efectivos').generatedAlwaysAs(sql`(COALESCE(usuarios_reales, usuarios_estimados))`, { mode: 'stored' }),
   actualizadoEn: text('actualizado_en'),
   actualizadoPor: text('actualizado_por'),
 });
