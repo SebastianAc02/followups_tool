@@ -138,6 +138,53 @@ test('guarda linkedin cuando viene en la fila (Buying Comittee)', () => {
   assert.equal(contactos[0].linkedin, 'linkedin.com/in/camiloruiz');
 });
 
+// G (2026-07-15): sin esto, 120 empresas con el contacto correcto de Notion caian al
+// bucle PBX ("sin decisor alcanzable") con el telefono de la persona impreso justo
+// debajo -- estaEnPBX exige es_key_decision_maker=1.
+test('el Contacto Principal de Notion queda marcado como KDM', () => {
+  seedEmpresa('kdm-1', 'KDM Uno SAS');
+
+  upsertContactoNotion('kdm-1', [{ nombre: 'Nayris', cargo: '', telefono: '313 7933653', email: '', esPrincipal: true }]);
+
+  const contactos = leerContactos('kdm-1');
+  assert.equal(contactos[0].es_key_decision_maker, 1, 'cargo vacio no lo vuelve un desconocido');
+});
+
+test('un miembro del comite que no decide NO queda marcado como KDM', () => {
+  seedEmpresa('kdm-2', 'KDM Dos SAS');
+
+  upsertContactoNotion('kdm-2', [
+    { nombre: 'Tecnico', cargo: 'Soporte Tecnico', telefono: '300 1112233', email: '', esPrincipal: false },
+  ]);
+
+  const contactos = leerContactos('kdm-2');
+  assert.equal(contactos[0].es_key_decision_maker, 0);
+});
+
+// Union, nunca resta: el bucle PBX marca un KDM a mano al graduar (repository.ts,
+// graduarPBX). Si re-correr el enriquecimiento lo desmarcara, se perderia trabajo
+// humano. Mismo criterio que marcarVetoNotion ("el no gana", nunca borra un veto).
+test('re-correr el enriquecimiento NO desmarca un KDM puesto a mano', () => {
+  seedEmpresa('kdm-3', 'KDM Tres SAS');
+
+  upsertContactoNotion('kdm-3', [
+    { nombre: 'Tecnico Graduado', cargo: 'Soporte Tecnico', telefono: '300 4445566', email: '', esPrincipal: false },
+  ]);
+
+  // El bucle PBX lo gradua a decisor a mano.
+  const raw1 = new Database(dbPath);
+  raw1.prepare('UPDATE contacto SET es_key_decision_maker = 1 WHERE id_empresa = ?').run('kdm-3');
+  raw1.close();
+
+  // Segunda corrida del enriquecimiento con el MISMO dato de Notion.
+  upsertContactoNotion('kdm-3', [
+    { nombre: 'Tecnico Graduado', cargo: 'Soporte Tecnico', telefono: '300 4445566', email: '', esPrincipal: false },
+  ]);
+
+  const contactos = leerContactos('kdm-3');
+  assert.equal(contactos[0].es_key_decision_maker, 1, 'el KDM puesto a mano sobrevive al re-import');
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

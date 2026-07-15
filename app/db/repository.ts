@@ -68,6 +68,7 @@ import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
 import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
 import { clasificarCargo } from '../core/reconciliacion/clasificarCargo';
+import { esKdmDesdeNotion } from '../core/reconciliacion/kdmNotion';
 import type { AccionImportacionToque, ToqueDbExistente } from '../core/reconciliacion/toquesNotion';
 import {
   registrarToqueSchema,
@@ -5043,6 +5044,11 @@ export function upsertContactoNotion(idEmpresa: string, contactos: ContactoNotio
           .run();
       }
 
+      // Union, nunca resta (mismo criterio que marcarVetoNotion): si Notion dice que
+      // este contacto decide, se marca; si dice que no, se DEJA como este -- el bucle
+      // PBX pudo haberlo graduado a mano y re-correr el import no debe perder eso.
+      const esKdm = esKdmDesdeNotion({ esPrincipal: entrada.esPrincipal, cargo: entrada.cargo });
+
       const valores = {
         idEmpresa,
         nombre,
@@ -5053,12 +5059,17 @@ export function upsertContactoNotion(idEmpresa: string, contactos: ContactoNotio
         linkedin: entrada.linkedin || null,
         esPrincipal: entrada.esPrincipal ? 1 : 0,
         fuente: 'notion',
+        ...(esKdm ? { esKeyDecisionMaker: 1 } : {}),
       };
 
       if (match) {
         tx.update(contacto).set(valores).where(eq(contacto.idContacto, match.idContacto)).run();
       } else {
-        const [insertado] = tx.insert(contacto).values(valores).returning({ idContacto: contacto.idContacto }).all();
+        const [insertado] = tx
+          .insert(contacto)
+          .values({ esKeyDecisionMaker: 0, ...valores })
+          .returning({ idContacto: contacto.idContacto })
+          .all();
         // Se agrega a `existentes` para que filas posteriores del MISMO lote (p. ej. dos
         // entradas de Buying Comittee con el mismo nombre por error de captura) tambien
         // hagan match contra este INSERT recien hecho, en vez de duplicar.
