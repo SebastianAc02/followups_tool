@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "823a21d7-1086-45cc-a4b5-9c5d4ba7407d",
-  "prevId": "70f0ced3-a242-44b4-85ac-8b3c2e6d1b97",
+  "id": "70f0ced3-a242-44b4-85ac-8b3c2e6d1b97",
+  "prevId": "b23257f4-7ce1-4fad-86b3-6a994b8717e1",
   "tables": {
     "cadencia": {
       "name": "cadencia",
@@ -907,20 +907,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "usuarios_reales": {
-          "name": "usuarios_reales",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "usuarios_reales_fuente": {
-          "name": "usuarios_reales_fuente",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "usuarios_estimados": {
           "name": "usuarios_estimados",
           "type": "real",
@@ -928,30 +914,9 @@
           "notNull": false,
           "autoincrement": false
         },
-        "usuarios_est_fuente": {
-          "name": "usuarios_est_fuente",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "usuarios_efectivos": {
           "name": "usuarios_efectivos",
           "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "actualizado_en": {
-          "name": "actualizado_en",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "actualizado_por": {
-          "name": "actualizado_por",
-          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

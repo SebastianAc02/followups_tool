@@ -85,6 +85,14 @@ export function ColaUnificada({
                           Cadencia
                         </span>
                       )}
+                      {fila.respuestaPendiente && (
+                        <span
+                          className="shrink-0 rounded-[6px] border border-done/40 bg-done-bg px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-done"
+                          title="Respondió y todavía no has abierto su ficha"
+                        >
+                          Respondió
+                        </span>
+                      )}
                       {(pill || fila.ciudad || fila.campana) && (
                         <span className="shrink-0 truncate text-xs text-faint">
                           · {[pill?.label, fila.ciudad, fila.campana].filter(Boolean).join(' · ')}

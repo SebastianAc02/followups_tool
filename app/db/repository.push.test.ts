@@ -26,6 +26,9 @@ const {
   lineaWhatsappActiva,
   datosEnvioPasoManual,
   registrarPasoEnviadoConToque,
+  fijarOwnerCampana,
+  guardarProveedorCampanaId,
+  marcarCampanaAprobadaGmail,
 } = await import('./repository.ts');
 
 function raw() {
@@ -330,6 +333,42 @@ test('pasoInscripcionesPendientes: campana cuyo dueno NO tiene linea activa se s
 
   const pendientes = pasoInscripcionesPendientes('whatsapp');
   assert.ok(!pendientes.some((f) => f.idPasoInscripcion === idPasoInsSinLinea), 'sin linea propia activa, la campana no aparece');
+});
+
+// Gmail Etapa 2, Task 5: pasoInscripcionesPendientes('correo') proyecta owner,
+// idOrganizacion y aprobadaEnvioGmail en cada fila -- registro-envio.ts (tarea
+// posterior) los usa para resolver Gmail vs Apollo por fila SIN que push.ts ni
+// repository.ts tengan que saber que Gmail existe (aditivo, ver core/push.ts).
+seedEmpresa('e-push-gmail', 'gmail-owner@empresa.com', 'push-cat-gmail');
+const idCadGmail = crearCadencia({ nombre: 'C push gmail', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola', cuerpo: 'x' }] });
+const idSegGmail = guardarSegmento({ nombre: 'push-seg-gmail', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['push-cat-gmail'] }] } }, 1);
+const idCampanaGmail = crearCampana({ nombre: 'Camp push gmail', idCadencia: idCadGmail, idSegmento: idSegGmail }, 1);
+fijarOwnerCampana(idCampanaGmail, 'Ana Gmail');
+guardarProveedorCampanaId(idCampanaGmail, 'gmail-camp-1', 1);
+inscribirCampana(idCampanaGmail, 1);
+const { idPaso: idPasoGmail, idVersion: idVersionGmail } = idsPasoYVersion(idCadGmail);
+
+test('pasoInscripcionesPendientes(correo) proyecta owner, idOrganizacion y aprobadaEnvioGmail (default sin aprobar)', () => {
+  const idDestinatario = idDestinatarioDe('e-push-gmail');
+  const id = crearPasoInscripcionPendiente({ idDestinatario, idPaso: idPasoGmail, idVersion: idVersionGmail, canal: 'correo' });
+
+  const pendientes = pasoInscripcionesPendientes('correo');
+  const fila = pendientes.find((f) => f.idPasoInscripcion === id);
+
+  assert.ok(fila);
+  assert.strictEqual(fila!.owner, 'Ana Gmail');
+  assert.strictEqual(fila!.idOrganizacion, 1);
+  assert.strictEqual(fila!.aprobadaEnvioGmail, false, 'aprobada_envio_gmail default es 0 -- sin marcar todavia');
+});
+
+test('pasoInscripcionesPendientes(correo): aprobadaEnvioGmail refleja true tras marcarCampanaAprobadaGmail', () => {
+  marcarCampanaAprobadaGmail(idCampanaGmail);
+
+  const pendientes = pasoInscripcionesPendientes('correo');
+  const fila = pendientes.find((f) => f.owner === 'Ana Gmail');
+
+  assert.ok(fila);
+  assert.strictEqual(fila!.aprobadaEnvioGmail, true);
 });
 
 test.after(() => {

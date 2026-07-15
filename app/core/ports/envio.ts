@@ -78,6 +78,13 @@ export type PasoEnvio = {
 export type EnvioResultado = {
   proveedor: string;
   proveedorMensajeId: string;
+  // Etapa 3 (2026-07-14-secuencias-correo-gmail-design.md): Gmail no tiene "secuencia
+  // externa" -- el threadId que devuelve users.messages.send es lo que despues permite
+  // pollear respuestas/rebotes de ESE envio puntual (leerEventosNuevos de Gmail recibe
+  // el threadId como si fuera su proveedorCampanaId, ver gmail.ts). Opcional y
+  // undefined para Apollo/Evolution -- ninguno de los dos lo necesita, aditivo a
+  // proposito para no tocar su firma ni sus tests.
+  proveedorHiloId?: string;
 };
 
 // sincronizarCopy (sesion 2026-07-08): sube/actualiza el copy de TODA la cadencia de

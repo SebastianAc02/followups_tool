@@ -36,6 +36,8 @@ export type FilaAgenda = {
   // cadencia comercial normal. Opcional: fixtures/tests que construyen FilaAgenda a
   // mano fuera de filaSinVencimiento/filaConVencimiento no necesitan setearlo.
   pbxForma?: string | null;
+  // Aviso de respuesta (V6.1): true = esta empresa tiene una respuesta sin ver.
+  respuestaPendiente?: boolean;
 };
 
 export function filtrarPorCanal(filas: FilaAgenda[], filtro: FiltroCanal): FilaAgenda[] {
@@ -71,6 +73,7 @@ export type FilaCola = {
   // colaReagendar (solo el split de Sebastian) si.
   campana?: string | null;
   pbxForma?: string | null;
+  respuestaPendiente?: boolean;
 };
 
 // Cierres y Reagendar no tienen nocion de "vencido": una cuenta en negociacion o atascada
@@ -89,6 +92,7 @@ export function filaSinVencimiento(c: FilaCola): FilaAgenda {
     severidadTexto: c.fecha ?? "sin fecha",
     actual: false,
     pbxForma: c.pbxForma ?? null,
+    respuestaPendiente: c.respuestaPendiente,
   };
 }
 
@@ -115,6 +119,7 @@ export function filaConVencimiento(c: FilaCola, hoy: string, actual: boolean): F
     severidadTexto: dias > 0 ? `vencido ${dias}d` : "hoy",
     actual,
     pbxForma: c.pbxForma ?? null,
+    respuestaPendiente: c.respuestaPendiente,
   };
 }
 

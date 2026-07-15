@@ -231,7 +231,8 @@ export function crearDbPrueba() {
       id_organizacion INTEGER NOT NULL DEFAULT 1,
       proveedor_campana_id TEXT,
       created_at TEXT,
-      updated_at TEXT
+      updated_at TEXT,
+      aprobada_envio_gmail INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE inscripcion (
@@ -297,6 +298,16 @@ export function crearDbPrueba() {
 
     CREATE INDEX ix_evento_tracking_fecha_evento
       ON evento_tracking(fecha_evento);
+
+    CREATE TABLE notificacion_respuesta (
+      id_notificacion INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_inscripcion INTEGER NOT NULL,
+      id_empresa TEXT NOT NULL,
+      canal TEXT NOT NULL,
+      detectada_en TEXT NOT NULL,
+      vista_en TEXT,
+      created_at TEXT
+    );
 
     CREATE TABLE organizacion (
       id_organizacion INTEGER PRIMARY KEY AUTOINCREMENT,

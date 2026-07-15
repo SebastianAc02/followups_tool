@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "70f0ced3-a242-44b4-85ac-8b3c2e6d1b97",
-  "prevId": "b23257f4-7ce1-4fad-86b3-6a994b8717e1",
+  "id": "b23257f4-7ce1-4fad-86b3-6a994b8717e1",
+  "prevId": "4f6a3881-925b-4d19-8429-f63c755f64ff",
   "tables": {
     "cadencia": {
       "name": "cadencia",
@@ -429,13 +429,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "linkedin": {
-          "name": "linkedin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "notas": {
           "name": "notas",
           "type": "text",
@@ -739,99 +732,6 @@
         },
         "created_at": {
           "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "empresa_clasificacion": {
-      "name": "empresa_clasificacion",
-      "columns": {
-        "id_empresa": {
-          "name": "id_empresa",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "es_carrier": {
-          "name": "es_carrier",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "es_corporativo_grande": {
-          "name": "es_corporativo_grande",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "es_utility_no_isp": {
-          "name": "es_utility_no_isp",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "es_extranjero": {
-          "name": "es_extranjero",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "es_no_isp_confirmado": {
-          "name": "es_no_isp_confirmado",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "alianza_sae_plus": {
-          "name": "alianza_sae_plus",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "motivo": {
-          "name": "motivo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "fuente": {
-          "name": "fuente",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "actualizado_en": {
-          "name": "actualizado_en",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "actualizado_por": {
-          "name": "actualizado_por",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -2033,42 +1933,7 @@
       "checkConstraints": {}
     }
   },
-  "views": {
-    "empresa_categoria": {
-      "columns": {
-        "id_empresa": {
-          "name": "id_empresa",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "nombre_oficial": {
-          "name": "nombre_oficial",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "categoria": {
-          "name": "categoria",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "atacable": {
-          "name": "atacable",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "name": "empresa_categoria",
-      "isExisting": true
-    }
-  },
+  "views": {},
   "enums": {},
   "_meta": {
     "schemas": {},

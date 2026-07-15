@@ -1,7 +1,7 @@
 "use server";
 
 import { requireSession } from "../lib/session";
-import { perfilPipelineEmpresa, historialEtapasEmpresa, type HistorialEtapas } from "../db/repository";
+import { perfilPipelineEmpresa, historialEtapasEmpresa, marcarRespuestaVista, type HistorialEtapas } from "../db/repository";
 import { canalNormalizado } from "../cola/agenda.ts";
 import type { DetallePanelData } from "../ui/seguimiento/DetallePanel";
 
@@ -13,6 +13,10 @@ export async function perfilPipelineEmpresaAction(idEmpresa: string): Promise<De
   const usuario = await requireSession();
   const perfil = perfilPipelineEmpresa(idEmpresa, usuario.idOrganizacion);
   if (!perfil) return null;
+
+  // Aviso de respuesta (V6.1): abrir la ficha es la señal de "ya lo vi", igual que en
+  // /llamada/[id]. No-op si esta empresa no tenía ninguna respuesta pendiente.
+  marcarRespuestaVista(idEmpresa);
 
   return {
     empresa: perfil.empresa,

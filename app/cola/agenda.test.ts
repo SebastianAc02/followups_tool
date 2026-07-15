@@ -149,3 +149,34 @@ test('aplicarFiltrosUnificados: sin filtros trae todo; cada filtro corta por su 
   const soloCampanaB = aplicarFiltrosUnificados(unificadas, { ...sinFiltro, campana: 'Campana B' });
   assert.deepEqual(soloCampanaB.map((f) => f.id), ['b']);
 });
+
+test('filaConVencimiento propaga respuestaPendiente cuando la fila lo trae', () => {
+  const c: FilaCola = {
+    id: 'e-1',
+    empresa: 'Empresa 1',
+    ciudad: null,
+    contacto: null,
+    cargo: null,
+    canal: 'correo',
+    estado: null,
+    fecha: '2026-07-10',
+    respuestaPendiente: true,
+  };
+  const f = filaConVencimiento(c, '2026-07-14', false);
+  assert.strictEqual(f.respuestaPendiente, true);
+});
+
+test('filaConVencimiento sin respuestaPendiente en el origen lo deja undefined', () => {
+  const c: FilaCola = {
+    id: 'e-2',
+    empresa: 'Empresa 2',
+    ciudad: null,
+    contacto: null,
+    cargo: null,
+    canal: 'correo',
+    estado: null,
+    fecha: '2026-07-10',
+  };
+  const f = filaConVencimiento(c, '2026-07-14', false);
+  assert.strictEqual(f.respuestaPendiente, undefined);
+});

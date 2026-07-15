@@ -7,6 +7,7 @@ import {
   contadoresHoy,
   agendaHoyCadencias,
   historialPasosDestinatario,
+  empresasConRespuestaPendiente,
 } from "../db/repository";
 import { registrarTapAction } from "../actions";
 import { requireSession } from "../lib/session";
@@ -67,11 +68,13 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const cadenciasParaCadenciasHoy = splitActivo ? cadenciasHoy.filter((t) => t.esManual === 1 && t.modo === 'batch') : cadenciasHoy;
   const cadenciasParaUnificar = splitActivo ? cadenciasHoy.filter((t) => !(t.esManual === 1 && t.modo === 'batch')) : [];
 
+  const respuestasPendientes = new Set(empresasConRespuestaPendiente(usuario.idOrganizacion).map((f) => f.idEmpresa));
+
   const filasParaUnificar: FilaColaConBucket[] = splitActivo
     ? [
-        ...cola.map((c): FilaColaConBucket => ({ ...c, bucket: 'lead' })),
-        ...cierres.map((c): FilaColaConBucket => ({ ...c, bucket: 'cierre' })),
-        ...reagendar.map((c): FilaColaConBucket => ({ ...c, bucket: 'reagendar' })),
+        ...cola.map((c): FilaColaConBucket => ({ ...c, bucket: 'lead', respuestaPendiente: respuestasPendientes.has(c.id) })),
+        ...cierres.map((c): FilaColaConBucket => ({ ...c, bucket: 'cierre', respuestaPendiente: respuestasPendientes.has(c.id) })),
+        ...reagendar.map((c): FilaColaConBucket => ({ ...c, bucket: 'reagendar', respuestaPendiente: respuestasPendientes.has(c.id) })),
         ...cadenciasParaUnificar.map(
           (t): FilaColaConBucket => ({
             id: t.idEmpresa,
@@ -85,6 +88,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
             campana: t.nombreCampana,
             bucket: bucketDeEtapa(t.estadoNotion),
             origen: 'cadencia',
+            respuestaPendiente: respuestasPendientes.has(t.idEmpresa),
           }),
         ),
       ]

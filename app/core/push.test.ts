@@ -132,3 +132,28 @@ test('calcularProximoIntentoPush crece y tiene tope', () => {
   assert.ok(t1 < t5);
   assert.strictEqual(t5, t99);
 });
+
+test('con throttleMs>0, espera entre envios consecutivos (no rafaga)', async () => {
+  const iniciales = [filaBase(1, 'ana@empresa.com'), filaBase(2, 'beto@empresa.com')];
+  const { deps } = depsFalsos(iniciales);
+  const envio = envioFalso(() => true);
+
+  const inicio = Date.now();
+  await pushPendientes(deps, envio, new Date(), 50);
+  const duracion = Date.now() - inicio;
+
+  assert.equal(envio.llamadas.length, 2);
+  assert.ok(duracion >= 50, `deberia tardar al menos 50ms por el throttle entre los 2 envios, tardo ${duracion}ms`);
+});
+
+test('sin throttleMs (default), no espera entre envios', async () => {
+  const iniciales = [filaBase(1, 'ana@empresa.com'), filaBase(2, 'beto@empresa.com')];
+  const { deps } = depsFalsos(iniciales);
+  const envio = envioFalso(() => true);
+
+  const inicio = Date.now();
+  await pushPendientes(deps, envio);
+  const duracion = Date.now() - inicio;
+
+  assert.ok(duracion < 50, `sin throttle no deberia tardar casi nada, tardo ${duracion}ms`);
+});

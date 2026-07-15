@@ -27,6 +27,7 @@ function depsFalsos(destinatarios: Record<string, DestinatarioResuelto>, activos
   const eventosGuardados = new Set<string>();
   const pausadas: { idInscripcion: number; motivo: string }[] = [];
   const salidos: number[] = [];
+  const notificadas: { idInscripcion: number; idEmpresa: string; canal: string }[] = [];
 
   const deps: TrackingDeps = {
     campanasConSecuencia: (): CampanaConSecuencia[] => [{ idCampana: 1, proveedorCampanaId: 'seq-1' }],
@@ -44,8 +45,11 @@ function depsFalsos(destinatarios: Record<string, DestinatarioResuelto>, activos
       salidos.push(idDestinatario);
     },
     quedanDestinatariosActivos: (idInscripcion) => activosPorInscripcion[idInscripcion] ?? false,
+    registrarRespuestaDetectada: (idInscripcion, idEmpresa, canal) => {
+      notificadas.push({ idInscripcion, idEmpresa, canal });
+    },
   };
-  return { deps, pausadas, salidos, eventosGuardados };
+  return { deps, pausadas, salidos, eventosGuardados, notificadas };
 }
 
 const evento = (over: Partial<EventoProveedor>): EventoProveedor => ({
@@ -59,7 +63,7 @@ const evento = (over: Partial<EventoProveedor>): EventoProveedor => ({
 });
 
 test('un reply pausa la inscripcion de inmediato', async () => {
-  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10 } };
+  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10, idEmpresa: 'emp-A' } };
   const { deps, pausadas } = depsFalsos(destinatarios, { 10: true });
   const envio = envioFalso({ 'seq-1': [evento({ proveedorEventoId: 'evt-reply', tipo: 'respondio' })] });
 
@@ -70,8 +74,28 @@ test('un reply pausa la inscripcion de inmediato', async () => {
   assert.strictEqual(pausadas[0].motivo, 'respuesta detectada');
 });
 
+test('un reply tambien registra la respuesta detectada (empresa + canal del evento)', async () => {
+  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10, idEmpresa: 'emp-A' } };
+  const { deps, notificadas } = depsFalsos(destinatarios, { 10: true });
+  const envio = envioFalso({ 'seq-1': [evento({ proveedorEventoId: 'evt-reply', tipo: 'respondio', canal: 'correo' })] });
+
+  await pollTracking(deps, envio);
+
+  assert.deepEqual(notificadas, [{ idInscripcion: 10, idEmpresa: 'emp-A', canal: 'correo' }]);
+});
+
+test('un bounce NO registra respuesta detectada (no es una respuesta)', async () => {
+  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10, idEmpresa: 'emp-A' } };
+  const { deps, notificadas } = depsFalsos(destinatarios, { 10: true });
+  const envio = envioFalso({ 'seq-1': [evento({ proveedorEventoId: 'evt-bounce', tipo: 'rebota' })] });
+
+  await pollTracking(deps, envio);
+
+  assert.deepEqual(notificadas, []);
+});
+
 test('un bounce marca al destinatario como salio; si quedan otros activos, la inscripcion NO se pausa', async () => {
-  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10 } };
+  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10, idEmpresa: 'emp-A' } };
   const { deps, pausadas, salidos } = depsFalsos(destinatarios, { 10: true }); // quedanActivos=true (otro destinatario sigue vivo)
   const envio = envioFalso({ 'seq-1': [evento({ proveedorEventoId: 'evt-bounce', tipo: 'rebota' })] });
 
@@ -82,7 +106,7 @@ test('un bounce marca al destinatario como salio; si quedan otros activos, la in
 });
 
 test('un bounce cuando YA NO quedan destinatarios activos pausa la inscripcion con motivo visible', async () => {
-  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10 } };
+  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10, idEmpresa: 'emp-A' } };
   const { deps, pausadas } = depsFalsos(destinatarios, { 10: false }); // ya no quedan activos
   const envio = envioFalso({ 'seq-1': [evento({ proveedorEventoId: 'evt-bounce-2', tipo: 'rebota' })] });
 
@@ -93,7 +117,7 @@ test('un bounce cuando YA NO quedan destinatarios activos pausa la inscripcion c
 });
 
 test('doble poll del mismo evento no se duplica ni pausa dos veces', async () => {
-  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10 } };
+  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10, idEmpresa: 'emp-A' } };
   const { deps, pausadas } = depsFalsos(destinatarios, { 10: true });
   const envio = envioFalso({ 'seq-1': [evento({ proveedorEventoId: 'evt-reply', tipo: 'respondio' })] });
 
@@ -113,7 +137,7 @@ test('un evento de un email que no reconocemos se ignora sin tronar', async () =
 });
 
 test('una campana cuyo leerEventosNuevos truena no bloquea el poll de las demas', async () => {
-  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10 } };
+  const destinatarios = { 'ana@empresa.com': { idPasoInscripcion: 1, idDestinatario: 1, idInscripcion: 10, idEmpresa: 'emp-A' } };
   const { deps, pausadas } = depsFalsos(destinatarios, { 10: true });
   deps.campanasConSecuencia = () => [
     { idCampana: 1, proveedorCampanaId: 'seq-rota' },

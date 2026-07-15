@@ -1,5 +1,6 @@
 import { leerCredencialConector } from '../db/repository';
-import type { CanalEntrega, DestinatarioEnvio, PasoEnvio, EnvioResultado } from '../core/ports/envio';
+import type { CanalEntrega, TrackingPoll, DestinatarioEnvio, PasoEnvio, EnvioResultado, EventoProveedor } from '../core/ports/envio';
+import { reescribirLinksClic, inyectarPixelApertura } from '../core/tracking-links';
 
 // Etapa 1 (2026-07-14-secuencias-correo-gmail-design.md): OAuth de Gmail Workspace, app
 // interna (@onepay.la). Fetch crudo, sin SDK `googleapis` -- decision explicita de
@@ -10,6 +11,8 @@ const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const OAUTH_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+const GMAIL_THREADS_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/threads';
+const GMAIL_MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -148,48 +151,210 @@ function codificarHeaderSiHaceFalta(texto: string): string {
   return `=?UTF-8?B?${Buffer.from(texto, 'utf8').toString('base64')}?=`;
 }
 
-// RFC 2822 minimo (To/Subject/Content-Type + cuerpo texto plano) -- Gmail acepta el mensaje
-// completo en `raw`, base64url. v1 no manda HTML (eso llega en Etapa 3 junto con el
-// pixel/link de tracking, ver nota de reuso del design doc).
-function armarMensajeCrudo(destinatario: string, asunto: string, cuerpo: string): string {
+// URL publica de ESTA app (mismo criterio que apollo.ts): sin configurar, se manda sin
+// pixel/link de tracking en vez de mandar URLs rotas.
+function appBaseUrl(): string | undefined {
+  return process.env.APP_BASE_URL;
+}
+
+// RFC 2822 minimo (To/Subject/Content-Type + cuerpo HTML) -- Etapa 3: paso.cuerpo ya es
+// HTML (mismo criterio que Apollo en sincronizarCopy, ver apollo.ts -- paso.cuerpo se pasa
+// directo a body_html sin pasar por ningun parser markdown->HTML). El pixel/link de
+// tracking se inyectan con el MISMO helper compartido que usa Apollo (core/tracking-links.ts,
+// la "nota de reuso" del design doc ya esta resuelta ahi, no hace falta duplicar nada).
+function armarMensajeCrudo(destinatario: string, asunto: string, cuerpoHtml: string, proveedorCampanaId: string): string {
   const asuntoSeguro = codificarHeaderSiHaceFalta(sinCrlf(asunto));
+  let cuerpo = cuerpoHtml;
+  const base = appBaseUrl();
+  if (base) {
+    const params = { baseUrl: base, proveedorCampanaId };
+    // reescribirLinksClic/inyectarPixelApertura dejan el tag {{email}} LITERAL a
+    // proposito (asi lo necesita Apollo: sube UNA plantilla compartida y su PROPIO
+    // motor de merge-tags lo resuelve por destinatario). Gmail arma el HTML por
+    // destinatario en el momento del envio y ya conoce el email real -- lo sustituye
+    // el mismo, si no /api/track/open lo descarta a proposito (email==='{{email}}')
+    // y nunca se registraria un evento de tracking para correo mandado por Gmail.
+    cuerpo = inyectarPixelApertura(reescribirLinksClic(cuerpo, params), params).replaceAll('{{email}}', destinatario);
+  }
   const mensaje = [
     `To: ${sinCrlf(destinatario)}`,
     `Subject: ${asuntoSeguro}`,
-    'Content-Type: text/plain; charset=utf-8',
+    'Content-Type: text/html; charset=utf-8',
     '',
     cuerpo,
   ].join('\r\n');
   return base64Url(mensaje);
 }
 
-type GmailSendRespuesta = { id?: string; error?: { message?: string } };
+type GmailSendRespuesta = { id?: string; threadId?: string; error?: { message?: string } };
 
-async function enviarCorreoGmail(idUsuario: string, destinatario: string, asunto: string, cuerpo: string): Promise<string> {
+async function enviarCorreoGmail(
+  idUsuario: string,
+  destinatario: string,
+  asunto: string,
+  cuerpo: string,
+  proveedorCampanaId: string,
+): Promise<{ mensajeId: string; hiloId: string | undefined }> {
   const credencial = leerCredencial(idUsuario);
   const accessToken = await refrescarAccessToken(credencial.refreshToken);
   const res = await fetch(GMAIL_SEND_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw: armarMensajeCrudo(destinatario, asunto, cuerpo) }),
+    body: JSON.stringify({ raw: armarMensajeCrudo(destinatario, asunto, cuerpo, proveedorCampanaId) }),
   });
   const data = (await res.json()) as GmailSendRespuesta;
   if (!res.ok || !data.id) throw new Error(`Gmail respondio ${res.status} al mandar: ${data.error?.message ?? 'sin detalle'}`);
-  return data.id;
+  return { mensajeId: data.id, hiloId: data.threadId };
 }
 
-// CanalEntrega solamente (Etapa 1): TrackingPoll (leerEventosNuevos/sacarDestinatario) llega
-// en Etapa 3, cuando de verdad hay hilos que pollear -- declarar esos metodos ahora como
-// stubs que tiran seria el "half-finished implementation" que CLAUDE.md prohibe.
-// `proveedorCampanaId` queda sin usar a proposito: Gmail no tiene concepto de secuencia
-// externa, la identidad de quien manda vive en idUsuario (cerrado sobre el adapter) -- mismo
-// margen que Evolution ya se tomo con ese mismo parametro posicional (ver evolution.ts).
-export function crearGmailAdapter(idUsuario: string): CanalEntrega {
+type GmailHeader = { name: string; value: string };
+type GmailMensaje = { id: string; internalDate?: string; payload?: { headers?: GmailHeader[]; body?: { data?: string } } };
+type GmailHiloRespuesta = { id?: string; messages?: GmailMensaje[]; error?: { message?: string } };
+type GmailListaRespuesta = { messages?: { id: string }[]; error?: { message?: string } };
+
+function headerDe(mensaje: GmailMensaje, nombre: string): string | null {
+  const header = mensaje.payload?.headers?.find((h) => h.name.toLowerCase() === nombre.toLowerCase());
+  return header?.value ?? null;
+}
+
+// El header From/To viene como "Nombre <email@dominio>" o solo "email@dominio" -- se
+// extrae el email real para comparar contra la cuenta conectada / usar como correlator,
+// mismo criterio que resolverEmailCuenta con el userinfo de Google.
+function emailDeHeader(valor: string | null): string | null {
+  if (!valor) return null;
+  const match = valor.match(/[^<\s]+@[^>\s]+/);
+  return match ? match[0].toLowerCase() : null;
+}
+
+async function leerHilo(idUsuario: string, threadId: string): Promise<GmailMensaje[]> {
+  const credencial = leerCredencial(idUsuario);
+  const accessToken = await refrescarAccessToken(credencial.refreshToken);
+  const res = await fetch(`${GMAIL_THREADS_URL}/${threadId}?format=metadata&metadataHeaders=From&metadataHeaders=To`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = (await res.json()) as GmailHiloRespuesta;
+  if (!res.ok) throw new Error(`Gmail respondio ${res.status} al leer el hilo ${threadId}: ${data.error?.message ?? 'sin detalle'}`);
+  return data.messages ?? [];
+}
+
+// El primer mensaje del hilo es SIEMPRE el que nosotros mandamos (threadId = id de ESE
+// mensaje cuando Gmail arranca un hilo nuevo, que es siempre nuestro caso: enviarPaso
+// nunca contesta un hilo existente) -- de ahi se saca el email del destinatario original.
+function destinatarioOriginalDe(mensajes: GmailMensaje[], threadId: string): string | null {
+  const original = mensajes.find((m) => m.id === threadId) ?? mensajes[0];
+  return original ? emailDeHeader(headerDe(original, 'To')) : null;
+}
+
+function detectarRespuestas(
+  threadId: string,
+  mensajes: GmailMensaje[],
+  cuentaConectada: string,
+  desdeMs: number,
+): EventoProveedor[] {
+  const destinatario = destinatarioOriginalDe(mensajes, threadId);
+  if (!destinatario) return [];
+  return mensajes
+    .filter((m) => m.id !== threadId)
+    .filter((m) => emailDeHeader(headerDe(m, 'From')) !== cuentaConectada.toLowerCase())
+    .filter((m) => Number(m.internalDate ?? '0') >= desdeMs)
+    .map((m) => ({
+      proveedorEventoId: m.id,
+      tipo: 'respondio',
+      canal: 'correo',
+      fechaEvento: new Date(Number(m.internalDate ?? '0')).toISOString(),
+      email: destinatario,
+      detalle: { via: 'thread', threadId },
+    }));
+}
+
+function decodificarCuerpo(mensaje: GmailMensaje): string {
+  const data = mensaje.payload?.body?.data;
+  if (!data) return '';
+  return Buffer.from(data, 'base64url').toString('utf8');
+}
+
+// mailer-daemon/postmaster: los remitentes de sistema que Gmail/Google Workspace usa
+// para un rebote -- PENDIENTE de confirmar contra un rebote real (ver plan Etapa 3,
+// "Puntos de integracion pendientes"), el mismo texto del design doc marca este parser
+// como el punto mas fragil de la etapa.
+const REMITENTE_SISTEMA_RE = /mailer-daemon|postmaster/i;
+
+// Decision de diseno (se aparta del texto literal del spec, con razon -- ver plan Etapa
+// 3): el spec pide correlacionar por el `messageId` citado en el rebote, pero ese
+// `messageId` es el header RFC 2822 `Message-ID:` real del correo, NO el `id` que
+// devuelve la API de Gmail (que es lo unico que guardamos hoy) -- son dos identificadores
+// distintos. En vez de perseguir esa cita exacta, se correlaciona por el EMAIL del
+// destinatario original del hilo: un DSN real siempre lo incluye en texto plano
+// (Original-Recipient o en el cuerpo), mas robusto que un id que ni siquiera capturamos.
+async function buscarRebote(idUsuario: string, destinatarioOriginal: string, desdeMs: number): Promise<EventoProveedor | null> {
+  const credencial = leerCredencial(idUsuario);
+  const accessToken = await refrescarAccessToken(credencial.refreshToken);
+  const despuesDeEpoch = Math.floor(desdeMs / 1000);
+  const query = encodeURIComponent('from:(mailer-daemon OR postmaster)');
+  const res = await fetch(`${GMAIL_MESSAGES_URL}?q=${query}+after:${despuesDeEpoch}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = (await res.json()) as GmailListaRespuesta;
+  if (!res.ok || !data.messages?.length) return null;
+
+  for (const ref of data.messages) {
+    const msgRes = await fetch(`${GMAIL_MESSAGES_URL}/${ref.id}?format=full`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const msg = (await msgRes.json()) as GmailMensaje;
+    if (!msgRes.ok) continue;
+    if (!REMITENTE_SISTEMA_RE.test(headerDe(msg, 'From') ?? '')) continue;
+    if (Number(msg.internalDate ?? '0') < desdeMs) continue;
+    const cuerpo = decodificarCuerpo(msg);
+    if (!cuerpo.toLowerCase().includes(destinatarioOriginal.toLowerCase())) continue;
+    return {
+      proveedorEventoId: msg.id,
+      tipo: 'rebota',
+      canal: 'correo',
+      fechaEvento: new Date(Number(msg.internalDate ?? '0')).toISOString(),
+      email: destinatarioOriginal,
+      detalle: { via: 'bounce' },
+    };
+  }
+  return null;
+}
+
+// proveedorCampanaId: Gmail no tiene concepto de secuencia externa (a diferencia de
+// Apollo) -- lo usa solo como correlator opaco para el pixel/link de tracking
+// (armarMensajeCrudo), la identidad de quien manda vive en idUsuario (cerrado sobre el
+// adapter), mismo margen que Evolution ya se tomo con ese mismo parametro (evolution.ts).
+//
+// Etapa 3: TrackingPoll reinterpreta ese mismo parametro como threadId de Gmail (ver
+// decision de diseno en el plan 2026-07-14-gmail-conector-etapa3-tracking.md) -- Gmail
+// no tiene "campana externa" con muchos destinatarios, cada hilo es un destinatario.
+export function crearGmailAdapter(idUsuario: string): CanalEntrega & TrackingPoll {
   return {
-    async enviarPaso(_proveedorCampanaId: string, destinatario: DestinatarioEnvio, paso: PasoEnvio): Promise<EnvioResultado> {
+    async enviarPaso(proveedorCampanaId: string, destinatario: DestinatarioEnvio, paso: PasoEnvio): Promise<EnvioResultado> {
       if (!destinatario.email) throw new Error('Gmail requiere email y el destinatario no trae uno');
-      const mensajeId = await enviarCorreoGmail(idUsuario, destinatario.email, paso.asunto ?? '(sin asunto)', paso.cuerpo);
-      return { proveedor: 'gmail', proveedorMensajeId: mensajeId };
+      const { mensajeId, hiloId } = await enviarCorreoGmail(
+        idUsuario,
+        destinatario.email,
+        paso.asunto ?? '(sin asunto)',
+        paso.cuerpo,
+        proveedorCampanaId,
+      );
+      return { proveedor: 'gmail', proveedorMensajeId: mensajeId, proveedorHiloId: hiloId };
+    },
+
+    // Gmail no tiene secuencia externa de la que sacar a alguien (a diferencia de
+    // Apollo, remove_or_stop_contact_ids) -- que un destinatario deje de recibir pasos
+    // futuros lo decide pollTracking pausando la inscripcion en NUESTRA base, no un
+    // side-effect en Gmail. No-op deliberado, documentado, no un TODO a medias.
+    async sacarDestinatario(_threadId: string, _email: string): Promise<void> {},
+
+    async leerEventosNuevos(threadId: string, desde: string): Promise<EventoProveedor[]> {
+      const credencial = leerCredencial(idUsuario);
+      const mensajes = await leerHilo(idUsuario, threadId);
+      const desdeMs = new Date(desde).getTime();
+      const respuestas = detectarRespuestas(threadId, mensajes, credencial.emailCuenta, desdeMs);
+      const destinatario = destinatarioOriginalDe(mensajes, threadId);
+      const rebote = destinatario ? await buscarRebote(idUsuario, destinatario, desdeMs) : null;
+      return rebote ? [...respuestas, rebote] : respuestas;
     },
   };
 }

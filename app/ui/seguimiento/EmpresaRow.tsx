@@ -15,6 +15,9 @@ export interface EmpresaRowData {
   objetivo: string | null;
   canal: Canal;
   esHoy?: boolean;
+  // Aviso de respuesta (V6.1): fila de la franja "Respondieron", acento visual propio
+  // (no reusa el badge "HOY" -- son dos conceptos distintos).
+  respondio?: boolean;
 }
 
 export function EmpresaRow({
@@ -34,6 +37,8 @@ export function EmpresaRow({
         'hover:-translate-y-0.5 hover:shadow-md',
         data.esHoy
           ? 'bg-pipeline-card-today border-amber-400/30 hover:border-amber-400/55'
+          : data.respondio
+          ? 'bg-done-bg border-done/30 hover:border-done/55'
           : 'bg-pipeline-card border-line-card hover:border-line-card'
       )}
     >
@@ -50,7 +55,7 @@ export function EmpresaRow({
           <span className="w-1.5 h-1.5 rounded-sm bg-blue-400" aria-hidden="true" />
           {data.pasoActual}
         </span>
-        {data.esHoy && (
+        {data.esHoy ? (
           <span className="flex items-center gap-1 text-xs font-bold tracking-wide text-amber-400">
             <span
               className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-[0_0_0_3px_rgba(242,183,56,0.22)]"
@@ -58,7 +63,12 @@ export function EmpresaRow({
             />
             HOY
           </span>
-        )}
+        ) : data.respondio ? (
+          <span className="flex items-center gap-1 text-xs font-bold tracking-wide text-done">
+            <span className="w-1.5 h-1.5 rounded-full bg-done shadow-[0_0_0_3px_rgba(87,201,138,0.22)]" aria-hidden="true" />
+            RESPONDIÓ
+          </span>
+        ) : null}
       </div>
     </article>
   );

@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b23257f4-7ce1-4fad-86b3-6a994b8717e1",
-  "prevId": "4f6a3881-925b-4d19-8429-f63c755f64ff",
+  "id": "4f6a3881-925b-4d19-8429-f63c755f64ff",
+  "prevId": "814b6007-e2b4-4eb5-b9df-4b51acc410bf",
   "tables": {
     "cadencia": {
       "name": "cadencia",
@@ -537,13 +537,6 @@
         },
         "nombre_legal": {
           "name": "nombre_legal",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "opera_bajo_id": {
-          "name": "opera_bajo_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
