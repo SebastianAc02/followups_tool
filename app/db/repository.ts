@@ -61,6 +61,7 @@ import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking
 import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/llego-respuesta';
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
+import { normalizarFechaToque } from '../core/fecha-toque';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { aplicaBuclePBX, estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { cifrar, descifrar } from '../lib/crypto';
@@ -5303,6 +5304,23 @@ function parseUsuariosNotion(v: string | number | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// A (2026-07-15): el CSV de Notion trae "Fecha Proximo Paso" en formato humano ('July 14,
+// 2026', a veces con hora: 'June 23, 2026 5:00 AM (GMT-5)'). Esta es la unica escritura
+// de proximo_follow_up_fecha que llegaba sin pasar por un parser (los scripts .py de sync
+// si parseaban) -- colaDelDia compara la columna como texto y una fecha humana nunca
+// entra a la cola. Reusa normalizarFechaToque (el mismo parser de toque.fecha, ver
+// project_notion_sync_spec1_implementado en memoria: ya hubo un normalizador duplicado
+// x3 en este repo). undefined pasa igual (Notion no trae el campo); vacio pasa igual (no
+// destructivo, lo maneja el loop generico); no parseable -> undefined, mismo criterio que
+// parseUsuariosNotion con "N/A": no se inventa una fecha, no se pisa la que ya hay.
+function parseFechaNotion(v: string | undefined): string | undefined {
+  if (v == null) return v;
+  const limpio = v.trim();
+  if (limpio === '') return limpio;
+  const n = normalizarFechaToque(limpio);
+  return n.tipo === 'dia' ? n.iso : undefined;
+}
+
 // T12: enriquece los campos comerciales de una empresa desde Notion (Fase 4). Politica de
 // escritura: "Notion sobrescribe, pero SOLO donde Notion trae dato" (mismo criterio no
 // destructivo que scripts/sync_notion_estado.py). Si el CSV viene vacio para un campo, NO
@@ -5340,7 +5358,7 @@ export function enriquecerDesdeNotion(
       { entrada: datos.crm, col: 'crmSoftware' as const, snake: 'crm_software', actual: emp.crmSoftware },
       { entrada: datos.owner, col: 'owner' as const, snake: 'owner', actual: emp.owner },
       { entrada: datos.proximoPaso, col: 'proximoPaso' as const, snake: 'proximo_paso', actual: emp.proximoPaso },
-      { entrada: datos.fechaProximoPaso, col: 'proximoFollowUpFecha' as const, snake: 'proximo_follow_up_fecha', actual: emp.proximoFollowUpFecha },
+      { entrada: parseFechaNotion(datos.fechaProximoPaso), col: 'proximoFollowUpFecha' as const, snake: 'proximo_follow_up_fecha', actual: emp.proximoFollowUpFecha },
     ];
 
     const sets: Record<string, unknown> = {};

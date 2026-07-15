@@ -24,10 +24,14 @@ const MESES_ES_NUM: Record<string, string> = {
   jul: '07', ago: '08', sep: '09', oct: '10', nov: '11', dic: '12',
 };
 
-// Reconoce 'June 18, 2026' (formato que dejo el seed de Notion) -> '2026-06-18'.
-// Devuelve null si no matchea, para que el caller decida que hacer.
+// Reconoce 'June 18, 2026' (formato que dejo el seed de Notion) -> '2026-06-18'. Tambien
+// 'July 14, 2026 3:30 AM (GMT-5)' (mismo formato con hora pegada, visto en
+// empresa.proximo_follow_up_fecha cuando el follow-up tiene hora): la hora se descarta,
+// solo importa el dia. Devuelve null si no matchea, para que el caller decida que hacer.
 export function parsearFechaTextoEn(fecha: string): string | null {
-  const m = /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/.exec(fecha.trim());
+  const m = /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:\s+\d{1,2}:\d{2}\s*[AP]M\s*\(GMT[+-]\d+\))?$/.exec(
+    fecha.trim(),
+  );
   if (!m) return null;
   const mes = MESES_EN[m[1].toLowerCase()];
   if (!mes) return null;

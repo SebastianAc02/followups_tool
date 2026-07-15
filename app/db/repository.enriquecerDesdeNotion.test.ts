@@ -129,6 +129,33 @@ test('sobrescribe varios campos a la vez y loguea uno por campo cambiado', () =>
   ]);
 });
 
+// A (2026-07-15): esta es la unica escritura de proximo_follow_up_fecha que llega sin
+// pasar por parse_fecha (los scripts .py de sync SI parsean). El export de Notion trae
+// la fecha en formato humano ('July 14, 2026', a veces con hora: 'June 23, 2026 5:00 AM
+// (GMT-5)'), y colaDelDia compara esa columna como texto -- una fecha humana nunca entra
+// a la cola. Cerrar el borde aca evita que el proximo sync revida las 65 filas que el
+// normalizador (scripts/normalizar-follow-up-fecha.ts) ya limpio.
+test('normaliza fechaProximoPaso de formato humano a ISO antes de escribir', () => {
+  seedEmpresa('fecha-humana-1', {});
+
+  enriquecerDesdeNotion('fecha-humana-1', { fechaProximoPaso: 'July 14, 2026' }, 1);
+  assert.equal(leerEmpresa('fecha-humana-1')?.proximo_follow_up_fecha, '2026-07-14');
+});
+
+test('normaliza fechaProximoPaso con hora y zona horaria pegadas', () => {
+  seedEmpresa('fecha-humana-2', {});
+
+  enriquecerDesdeNotion('fecha-humana-2', { fechaProximoPaso: 'June 23, 2026 5:00 AM (GMT-5)' }, 1);
+  assert.equal(leerEmpresa('fecha-humana-2')?.proximo_follow_up_fecha, '2026-06-23');
+});
+
+test('fechaProximoPaso que no se puede parsear no se escribe (no inventa una fecha)', () => {
+  seedEmpresa('fecha-basura-1', { proximo_follow_up_fecha: '2026-06-01' });
+
+  enriquecerDesdeNotion('fecha-basura-1', { fechaProximoPaso: '~a fin de mes' }, 1);
+  assert.equal(leerEmpresa('fecha-basura-1')?.proximo_follow_up_fecha, '2026-06-01');
+});
+
 test('no loguea cambio cuando el valor de Notion es igual al que ya hay', () => {
   seedEmpresa('same-1', { owner: 'Thomas Schumacher' });
 

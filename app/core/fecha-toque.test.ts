@@ -18,6 +18,15 @@ test('parsearFechaTextoEn entiende el formato del seed de Notion', () => {
   assert.equal(parsearFechaTextoEn('Junio 18, 2026'), null);
 });
 
+// Sexto formato, encontrado en empresa.proximo_follow_up_fecha (no en toque.fecha): Notion
+// exporta la hora cuando el follow-up la tiene ('July 14, 2026 3:30 AM (GMT-5)'). Es el
+// mismo dato que 'July 14, 2026' con hora pegada; la hora se descarta, solo importa el dia.
+test('parsearFechaTextoEn entiende la hora y zona horaria pegadas (proximo_follow_up_fecha)', () => {
+  assert.equal(parsearFechaTextoEn('July 14, 2026 3:30 AM (GMT-5)'), '2026-07-14');
+  assert.equal(parsearFechaTextoEn('June 23, 2026 5:00 AM (GMT-5)'), '2026-06-23');
+  assert.equal(parsearFechaTextoEn('June 23, 2026 12:00 PM (GMT-5)'), '2026-06-23');
+});
+
 // Quinto formato, encontrado corriendo el normalizador contra las 241 filas reales de
 // isps.db (no salio de los tests): fechas escritas a mano en Notion, dia primero y mes
 // abreviado en español. Eran 8 toques con fecha real yendose a "sin fecha".
