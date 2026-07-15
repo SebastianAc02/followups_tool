@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { crearEvolutionAdapter } from "../adapters/evolution";
+import { marcarCaidaSiNoExiste } from "./recuperacion-linea";
 import {
   crearLineaWhatsapp,
   actualizarEstadoLineaWhatsapp,
@@ -112,6 +113,10 @@ export async function desconectarLineaAction(
     revalidatePath("/conectores");
     return { ok: true };
   } catch (e) {
+    // A (2026-07-15): un 404 "instance does not exist" SI es informacion cierta -- la
+    // linea ya no existe del lado de Evolution, la fila no puede seguir diciendo 'activa'.
+    marcarCaidaSiNoExiste(id, e);
+    revalidatePath("/conectores");
     return { ok: false, error: e instanceof Error ? e.message : "Error desconectando en Evolution." };
   }
 }
@@ -149,6 +154,8 @@ export async function probarLineaAction(
     );
     return { ok: true, mensajeId: resultado.proveedorMensajeId };
   } catch (e) {
+    marcarCaidaSiNoExiste(id, e);
+    revalidatePath("/conectores");
     return { ok: false, error: e instanceof Error ? e.message : "Error enviando el mensaje de prueba." };
   }
 }
