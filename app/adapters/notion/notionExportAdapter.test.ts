@@ -1,6 +1,7 @@
-// Fixture chico en __fixtures__: 2 .md por-pagina (ACUAVALLE con subcarpeta, Jigartel
-// sin subcarpeta) + 1 CSV recortado del export real (_all.csv) con BOM y campos con
-// coma entre comillas. SIN MD SAS solo esta en el CSV para probar pageId=null.
+// Fixture chico en __fixtures__: 3 .md por-pagina (ACUAVALLE con subcarpeta, Jigartel
+// sin subcarpeta, SPACOM con seccion "## Toques" + link a una subpagina de reunion) +
+// 1 CSV recortado del export real (_all.csv) con BOM y campos con coma entre comillas.
+// SIN MD SAS solo esta en el CSV para probar pageId=null.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +17,7 @@ test('lee el export por-pagina + CSV y devuelve una empresa por fila del CSV', (
   const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
   const empresas = adapter.leerEmpresas();
 
-  assert.equal(empresas.length, 3);
+  assert.equal(empresas.length, 4);
 });
 
 test('enlaza pageId desde el nombre de archivo .md y detecta la subcarpeta', () => {
@@ -138,4 +139,64 @@ test('cae a "Buying Comittee *.csv" (sin _all) cuando no existe la variante _all
   } finally {
     fs.rmSync(dirTemp, { recursive: true, force: true });
   }
+});
+
+// T14: seccion "## Toques" del .md por-pagina, con resolucion del link a la subpagina
+// de reunion (SPACOM tiene 2 filas: Llamada sin transcript, Reunion con link a tl;dv).
+test('lee la seccion Toques y resuelve el link de reunion a la URL real de tl;dv', () => {
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
+  const empresas = adapter.leerEmpresas();
+
+  const spacom = empresas.find((e) => e.nombre === 'SPACOM');
+  assert.ok(spacom);
+  assert.equal(spacom!.toques.length, 2);
+
+  assert.deepEqual(spacom!.toques[0], {
+    fechaRaw: '2026-06-26',
+    canal: 'llamada',
+    quePaso: 'Conectamos con Efraín. Quedó reunión hoy a las 2 PM.',
+    transcriptUrl: null,
+    transcriptTexto: 'Granola (pendiente de sync)',
+  });
+  assert.deepEqual(spacom!.toques[1], {
+    fechaRaw: '2026-06-26',
+    canal: 'reunion',
+    quePaso: 'Se tuvo la reunión. Queda en hold.',
+    transcriptUrl: 'https://tldv.io/app/meetings/6a3ecd8ca18bfe001262ff22',
+    transcriptTexto: null,
+  });
+});
+
+// Bug real encontrado corriendo T14 contra el export real: macOS escribe los nombres
+// de archivo con tilde en NFD (descompuesto), el CSV los trae en NFC (compuesto) --
+// mismo texto, bytes distintos. Sin normalizar, el match fallaba en silencio (pageId
+// null, subcarpeta null, toques []) para cualquier empresa con tilde en el nombre.
+test('enlaza pageId aunque el nombre de archivo este en NFD y el CSV en NFC', () => {
+  const dirTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'notion-export-nfd-'));
+  try {
+    const nombreNfd = 'FIX COMUNICACIÓN'.normalize('NFD'); // "O" + acento combinante
+    const nombreNfc = 'FIX COMUNICACIÓN'.normalize('NFC'); // "Ó" compuesto, un solo codepoint
+    assert.notEqual(nombreNfd, nombreNfc, 'la fixture debe usar bytes distintos para el mismo texto');
+
+    fs.writeFileSync(path.join(dirTemp, `${nombreNfd} 33333333333333333333333333333333.md`), '# placeholder');
+    fs.writeFileSync(
+      path.join(dirTemp, 'pipeline_all.csv'),
+      `Empresa,Industria,Estado,Contacto Principal,Cargo Contacto,Teléfono,Email,Usuarios Estimados,Pasarela Actual,CRM / Software,Owner,Próximo Paso,Fecha Próximo Paso\n${nombreNfc},ISP,Lead,,,,,,,,,,,\n`,
+    );
+
+    const adapter = crearNotionExportAdapter(dirTemp, path.join(dirTemp, 'pipeline_all.csv'));
+    const [fila] = adapter.leerEmpresas();
+    assert.equal(fila.pageId, '33333333333333333333333333333333');
+  } finally {
+    fs.rmSync(dirTemp, { recursive: true, force: true });
+  }
+});
+
+test('empresa sin seccion Toques trae la lista vacia', () => {
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
+  const empresas = adapter.leerEmpresas();
+
+  const acuavalle = empresas.find((e) => e.nombre === 'ACUAVALLE');
+  assert.ok(acuavalle);
+  assert.deepEqual(acuavalle!.toques, []);
 });

@@ -68,6 +68,7 @@ import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
 import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
 import { clasificarCargo } from '../core/reconciliacion/clasificarCargo';
+import type { AccionImportacionToque, ToqueDbExistente } from '../core/reconciliacion/toquesNotion';
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
@@ -5184,6 +5185,74 @@ export function enriquecerDesdeNotion(
           detalle: c.detalle,
         })
         .run();
+    }
+  });
+}
+
+// T14: legacy toques desde la seccion "## Toques" del export de Notion (ver
+// app/core/reconciliacion/toquesNotion.ts). Idempotencia: si esta empresa ya tiene
+// algun toque con fuente='notion_toques' se asume que esta corrida ya se aplico y no
+// se hace nada -- evita duplicar en un segundo `node scripts/importar_toques_legacy.ts`.
+export function empresaYaTieneToquesNotionImportados(idEmpresa: string): boolean {
+  const fila = db
+    .select({ n: sql<number>`count(*)` })
+    .from(toque)
+    .where(and(eq(toque.idEmpresa, idEmpresa), eq(toque.fuente, 'notion_toques')))
+    .get();
+  return (fila?.n ?? 0) > 0;
+}
+
+export function toquesExistentesParaImportarLegacy(idEmpresa: string): ToqueDbExistente[] {
+  return db
+    .select({ idToque: toque.idToque, quePaso: toque.quePaso, fuente: toque.fuente })
+    .from(toque)
+    .where(eq(toque.idEmpresa, idEmpresa))
+    .orderBy(toque.idToque)
+    .all();
+}
+
+// Aplica el plan de planificarImportacionToques ya calculado por el caller (el script
+// hace el match empresa Notion <-> empresa DB y arma el plan; esta funcion solo
+// escribe). 'actualizar' enriquece el placeholder del baseline EN EL MISMO REGISTRO
+// (no duplica el evento); 'insertar' crea un toque nuevo para una fila que el baseline
+// nunca sembro. transcriptTexto (p.ej. "Resumen en Granola", sin URL real) se guarda en
+// que_paso como nota final -- no hay columna de nota de transcript aparte.
+export function aplicarImportacionToquesLegacy(idEmpresa: string, idOrganizacion: number, acciones: AccionImportacionToque[]): void {
+  const ahora = new Date().toISOString();
+
+  db.transaction((tx) => {
+    for (const a of acciones) {
+      const quePasoFinal = a.fila.transcriptTexto
+        ? `${a.fila.quePaso} (${a.fila.transcriptTexto})`
+        : a.fila.quePaso;
+
+      if (a.accion === 'actualizar') {
+        tx.update(toque)
+          .set({
+            fecha: a.fila.fechaRaw,
+            canal: a.fila.canal ?? undefined,
+            quePaso: quePasoFinal,
+            transcriptUrl: a.fila.transcriptUrl,
+            transcriptProveedor: a.fila.transcriptUrl ? 'tldv' : null,
+            fuente: 'notion_toques',
+          })
+          .where(eq(toque.idToque, a.idToque))
+          .run();
+      } else {
+        tx.insert(toque)
+          .values({
+            idEmpresa,
+            fecha: a.fila.fechaRaw,
+            canal: a.fila.canal,
+            quePaso: quePasoFinal,
+            transcriptUrl: a.fila.transcriptUrl,
+            transcriptProveedor: a.fila.transcriptUrl ? 'tldv' : null,
+            fuente: 'notion_toques',
+            idOrganizacion,
+            createdAt: ahora,
+          })
+          .run();
+      }
     }
   });
 }

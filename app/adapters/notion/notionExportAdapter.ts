@@ -3,6 +3,7 @@
 // tocar el core: el core de reconciliacion solo conoce NotionEmpresaExport.
 import fs from 'node:fs';
 import path from 'node:path';
+import { normalizarCanalToqueNotion, parsearTranscriptCeldaNotion, type ToqueNotionResuelto } from '../../core/reconciliacion/toquesNotion.ts';
 
 export interface NotionBuyingComitteeContacto {
   nombre: string;
@@ -11,6 +12,13 @@ export interface NotionBuyingComitteeContacto {
   correo: string;
   linkedin: string;
 }
+
+// T14: una fila de la seccion "## Toques" de la pagina por-empresa, ya resuelta
+// (transcriptUrl viene de leer la subpagina local del link y sacar la URL real de
+// tl;dv de adentro; transcriptTexto es la nota libre cuando NO habia link, p.ej.
+// "Resumen en Granola", que nunca se sincronizo). Mismo tipo que usa el planificador
+// del core (toquesNotion.ts): el adapter no inventa su propia forma.
+export type NotionToqueExport = ToqueNotionResuelto;
 
 export interface NotionEmpresaExport {
   pageId: string | null;
@@ -32,6 +40,9 @@ export interface NotionEmpresaExport {
   // empresa (NO dentro de una sub-subcarpeta "Buying Comittee/", esa solo trae paginas
   // .md por-persona que no se leen aqui). [] si no hay subcarpeta o no hay CSV.
   buyingComittee: NotionBuyingComitteeContacto[];
+  // T14: filas de la seccion "## Toques" del .md por-pagina (no del CSV, ese no la
+  // trae). [] si la pagina no tiene esa seccion.
+  toques: NotionToqueExport[];
 }
 
 export interface NotionExportAdapter {
@@ -129,19 +140,78 @@ function leerBuyingComittee(subcarpeta: string | null): NotionBuyingComitteeCont
   }));
 }
 
-function mapaPageIdsYSubcarpetas(dirExport: string): Map<string, { pageId: string; subcarpeta: string | null }> {
+// Saca la primera URL http(s) de un texto -- se usa para leer la subpagina de reunion
+// (tl;dv) y encontrar la URL real de la transcripcion, que el link markdown de la
+// tabla de Toques NO trae directo (apunta a un .md local del export, no a la web).
+const RE_PRIMERA_URL = /https?:\/\/[^\s)\]]+/;
+
+function resolverUrlTranscript(dirExport: string, rutaRelativa: string): string | null {
+  const rutaAbsoluta = path.join(dirExport, rutaRelativa);
+  let contenido: string;
+  try {
+    contenido = fs.readFileSync(rutaAbsoluta, 'utf-8');
+  } catch {
+    return null;
+  }
+  return contenido.match(RE_PRIMERA_URL)?.[0] ?? null;
+}
+
+// Parsea las filas de una tabla markdown "| a | b | c |" dentro de la seccion "##
+// Toques": junta la fila de encabezado + separador (se descartan por posicion, no por
+// contenido -- el texto de encabezado no importa) y devuelve las filas de datos como
+// arreglos de celdas ya recortadas.
+function filasTablaToques(contenido: string): string[][] {
+  const inicioSeccion = contenido.indexOf('## Toques');
+  if (inicioSeccion === -1) return [];
+  const finSeccion = contenido.indexOf('\n## ', inicioSeccion + 1);
+  const seccion = finSeccion === -1 ? contenido.slice(inicioSeccion) : contenido.slice(inicioSeccion, finSeccion);
+
+  const lineasTabla = seccion.split('\n').filter((l) => l.trim().startsWith('|'));
+  // lineasTabla[0] = encabezado, [1] = separador "| --- | --- |...", el resto son datos.
+  return lineasTabla.slice(2).map((linea) =>
+    linea.split('|').slice(1, -1).map((celda) => celda.trim()),
+  );
+}
+
+function leerToques(dirExport: string, rutaArchivoPagina: string): NotionToqueExport[] {
+  const contenido = fs.readFileSync(rutaArchivoPagina, 'utf-8');
+  const filas = filasTablaToques(contenido);
+
+  return filas.map(([fechaRaw, canalRaw, quePaso, , transcriptCelda]): NotionToqueExport => {
+    const transcript = parsearTranscriptCeldaNotion(transcriptCelda ?? '');
+    return {
+      fechaRaw: fechaRaw ?? '',
+      canal: normalizarCanalToqueNotion(canalRaw ?? ''),
+      quePaso: quePaso ?? '',
+      transcriptUrl: transcript.tipo === 'link' ? resolverUrlTranscript(dirExport, transcript.rutaRelativa) : null,
+      transcriptTexto: transcript.tipo === 'texto' ? transcript.texto : null,
+    };
+  });
+}
+
+function mapaPageIdsYSubcarpetas(dirExport: string): Map<string, { pageId: string; subcarpeta: string | null; rutaArchivo: string }> {
   const entradas = fs.readdirSync(dirExport, { withFileTypes: true });
   const carpetas = new Set(entradas.filter((e) => e.isDirectory()).map((e) => e.name));
-  const mapa = new Map<string, { pageId: string; subcarpeta: string | null }>();
+  const mapa = new Map<string, { pageId: string; subcarpeta: string | null; rutaArchivo: string }>();
   for (const entrada of entradas) {
     if (!entrada.isFile()) continue;
     const match = entrada.name.match(RE_ARCHIVO_PAGINA);
     if (!match) continue;
     const [, nombre, pageId] = match;
+    // macOS normaliza los nombres de archivo con tilde a NFD (descompuesto: "O" +
+    // acento combinante) al escribirlos a disco; el CSV los trae en NFC (compuesto,
+    // un solo codepoint). Mismo texto, bytes distintos -- sin normalizar, el lookup
+    // por nombre de mas abajo fallaba en silencio para cualquier empresa con tilde en
+    // el nombre de archivo (encontrado corriendo T14 real: FIX COMUNICACIÓN y VISIÓN
+    // SATELITAL quedaban sin pageId/subcarpeta/toques pese a tener .md real). La
+    // llave del mapa se normaliza; las operaciones de filesystem (carpetas.has,
+    // path.join) siguen usando el nombre TAL COMO esta en disco.
+    const nombreClave = nombre.normalize('NFC');
     const tieneSubcarpeta = carpetas.has(nombre);
-    mapa.set(nombre, {
+    mapa.set(nombreClave, {
       pageId,
       subcarpeta: tieneSubcarpeta ? path.join(dirExport, nombre) : null,
+      rutaArchivo: path.join(dirExport, entrada.name),
     });
   }
   return mapa;
@@ -157,8 +227,9 @@ export function crearNotionExportAdapter(dirExport: string, csvPath: string): No
 
       return filas.map((fila): NotionEmpresaExport => {
         const nombre = fila['Empresa'] ?? '';
-        const pagina = porPagina.get(nombre);
+        const pagina = porPagina.get(nombre.normalize('NFC'));
         const subcarpeta = pagina?.subcarpeta ?? null;
+        const toques = pagina ? leerToques(dirExport, pagina.rutaArchivo) : [];
         return {
           pageId: pagina?.pageId ?? null,
           nombre,
@@ -176,6 +247,7 @@ export function crearNotionExportAdapter(dirExport: string, csvPath: string): No
           fechaProximoPaso: fila['Fecha Próximo Paso'] ?? '',
           subcarpeta,
           buyingComittee: leerBuyingComittee(subcarpeta),
+          toques,
         };
       });
     },
