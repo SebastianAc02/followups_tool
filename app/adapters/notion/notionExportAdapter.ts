@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { normalizarCanalToqueNotion, parsearTranscriptCeldaNotion, type ToqueNotionResuelto } from '../../core/reconciliacion/toquesNotion.ts';
+import { normalizarRazonSocial } from '../../core/reconciliacion/normalizarRazonSocial.ts';
 
 export interface NotionBuyingComitteeContacto {
   nombre: string;
@@ -145,8 +146,8 @@ function leerBuyingComittee(subcarpeta: string | null): NotionBuyingComitteeCont
 // tabla de Toques NO trae directo (apunta a un .md local del export, no a la web).
 const RE_PRIMERA_URL = /https?:\/\/[^\s)\]]+/;
 
-function resolverUrlTranscript(dirExport: string, rutaRelativa: string): string | null {
-  const rutaAbsoluta = path.join(dirExport, rutaRelativa);
+function resolverUrlTranscript(dirBase: string, rutaRelativa: string): string | null {
+  const rutaAbsoluta = path.join(dirBase, rutaRelativa);
   let contenido: string;
   try {
     contenido = fs.readFileSync(rutaAbsoluta, 'utf-8');
@@ -157,25 +158,63 @@ function resolverUrlTranscript(dirExport: string, rutaRelativa: string): string 
 }
 
 // Parsea las filas de una tabla markdown "| a | b | c |" dentro de la seccion "##
-// Toques": junta la fila de encabezado + separador (se descartan por posicion, no por
-// contenido -- el texto de encabezado no importa) y devuelve las filas de datos como
-// arreglos de celdas ya recortadas.
-function filasTablaToques(contenido: string): string[][] {
-  const inicioSeccion = contenido.indexOf('## Toques');
-  if (inicioSeccion === -1) return [];
-  const finSeccion = contenido.indexOf('\n## ', inicioSeccion + 1);
-  const seccion = finSeccion === -1 ? contenido.slice(inicioSeccion) : contenido.slice(inicioSeccion, finSeccion);
+// Marca la tabla de toques por su PROPIO encabezado ("| Fecha | Canal | ..."), no por
+// un heading "## Toques" -- el export real tiene AL MENOS 3 plantillas distintas: tabla
+// embebida bajo "## Toques" en la pagina principal, o en una subpagina separada
+// (nombrada "Toques" o "Toques hechos", a veces con sufijo "— Empresa"; ni el nombre de
+// archivo ni un heading fijo son confiables, encontrado auditando el export completo).
+// La tabla en si (4 o 5 columnas: Fecha/Canal/Que paso/Respondio[/Transcript], la
+// columna Transcript es opcional en varias paginas viejas) es la unica señal estable.
+const RE_ENCABEZADO_TOQUES = /\|\s*Fecha\s*\|\s*Canal\s*\|/;
 
-  const lineasTabla = seccion.split('\n').filter((l) => l.trim().startsWith('|'));
-  // lineasTabla[0] = encabezado, [1] = separador "| --- | --- |...", el resto son datos.
-  return lineasTabla.slice(2).map((linea) =>
-    linea.split('|').slice(1, -1).map((celda) => celda.trim()),
-  );
+function filasTablaToques(contenido: string): string[][] {
+  const lineas = contenido.split('\n');
+  const idxEncabezado = lineas.findIndex((l) => RE_ENCABEZADO_TOQUES.test(l));
+  if (idxEncabezado === -1) return [];
+
+  // Filas de datos: siguen inmediatamente al separador "| --- | --- | ...", hasta la
+  // primera linea que ya no empiece por "|".
+  const filas: string[][] = [];
+  for (let i = idxEncabezado + 2; i < lineas.length; i++) {
+    const linea = lineas[i];
+    if (!linea.trim().startsWith('|')) break;
+    filas.push(linea.split('|').slice(1, -1).map((celda) => celda.trim()));
+  }
+  return filas;
 }
 
-function leerToques(dirExport: string, rutaArchivoPagina: string): NotionToqueExport[] {
-  const contenido = fs.readFileSync(rutaArchivoPagina, 'utf-8');
+// Busca, en los .md de primer nivel de la subcarpeta de la empresa, el que contiene la
+// tabla de toques (la subpagina "Toques"/"Toques hechos"). No baja mas de un nivel: la
+// tabla nunca vive mas anidada que eso en el export auditado.
+function buscarArchivoToquesEnSubcarpeta(subcarpeta: string): string | null {
+  let entradas: string[];
+  try {
+    entradas = fs.readdirSync(subcarpeta).filter((n) => n.endsWith('.md'));
+  } catch {
+    return null;
+  }
+  for (const nombre of entradas) {
+    const ruta = path.join(subcarpeta, nombre);
+    if (RE_ENCABEZADO_TOQUES.test(fs.readFileSync(ruta, 'utf-8'))) return ruta;
+  }
+  return null;
+}
+
+function leerToques(rutaArchivoPagina: string, subcarpeta: string | null): NotionToqueExport[] {
+  let rutaConTabla = rutaArchivoPagina;
+  let contenido = fs.readFileSync(rutaArchivoPagina, 'utf-8');
+  if (!RE_ENCABEZADO_TOQUES.test(contenido) && subcarpeta) {
+    const encontrado = buscarArchivoToquesEnSubcarpeta(subcarpeta);
+    if (!encontrado) return [];
+    rutaConTabla = encontrado;
+    contenido = fs.readFileSync(encontrado, 'utf-8');
+  }
+
   const filas = filasTablaToques(contenido);
+  // Los links de la celda Transcript son relativos al directorio del archivo que
+  // CONTIENE la tabla, no al export raiz: la subpagina "Toques" de DIGITAL COAST
+  // enlaza "Toques/Resumen Granola...md" relativo a su propia carpeta.
+  const dirBase = path.dirname(rutaConTabla);
 
   return filas.map(([fechaRaw, canalRaw, quePaso, , transcriptCelda]): NotionToqueExport => {
     const transcript = parsearTranscriptCeldaNotion(transcriptCelda ?? '');
@@ -183,16 +222,34 @@ function leerToques(dirExport: string, rutaArchivoPagina: string): NotionToqueEx
       fechaRaw: fechaRaw ?? '',
       canal: normalizarCanalToqueNotion(canalRaw ?? ''),
       quePaso: quePaso ?? '',
-      transcriptUrl: transcript.tipo === 'link' ? resolverUrlTranscript(dirExport, transcript.rutaRelativa) : null,
+      transcriptUrl: transcript.tipo === 'link' ? resolverUrlTranscript(dirBase, transcript.rutaRelativa) : null,
       transcriptTexto: transcript.tipo === 'texto' ? transcript.texto : null,
     };
   });
 }
 
-function mapaPageIdsYSubcarpetas(dirExport: string): Map<string, { pageId: string; subcarpeta: string | null; rutaArchivo: string }> {
+interface PaginaNotion {
+  pageId: string;
+  subcarpeta: string | null;
+  rutaArchivo: string;
+}
+
+interface IndicePaginas {
+  porNombreExacto: Map<string, PaginaNotion>;
+  // Fallback cuando el nombre del CSV y el del archivo son el MISMO texto pero con
+  // puntuacion/espaciado distinto ("INTERCARIBE TV S.A.S." en el CSV vs "INTERCARIBE
+  // TV S A S" en el nombre de archivo -- Notion genera el nombre de archivo quitando
+  // puntuacion, el CSV no). normalizarRazonSocial ya resuelve esto (quita puntuacion +
+  // sufijos legales); se usa SOLO si el match exacto (con NFC) fallo, y SOLO si hay un
+  // unico candidato -- si hay mas de uno, mejor no enlazar que adivinar mal.
+  porRazonSocialNormalizada: Map<string, PaginaNotion[]>;
+}
+
+function mapaPageIdsYSubcarpetas(dirExport: string): IndicePaginas {
   const entradas = fs.readdirSync(dirExport, { withFileTypes: true });
   const carpetas = new Set(entradas.filter((e) => e.isDirectory()).map((e) => e.name));
-  const mapa = new Map<string, { pageId: string; subcarpeta: string | null; rutaArchivo: string }>();
+  const porNombreExacto = new Map<string, PaginaNotion>();
+  const porRazonSocialNormalizada = new Map<string, PaginaNotion[]>();
   for (const entrada of entradas) {
     if (!entrada.isFile()) continue;
     const match = entrada.name.match(RE_ARCHIVO_PAGINA);
@@ -208,13 +265,17 @@ function mapaPageIdsYSubcarpetas(dirExport: string): Map<string, { pageId: strin
     // path.join) siguen usando el nombre TAL COMO esta en disco.
     const nombreClave = nombre.normalize('NFC');
     const tieneSubcarpeta = carpetas.has(nombre);
-    mapa.set(nombreClave, {
+    const pagina: PaginaNotion = {
       pageId,
       subcarpeta: tieneSubcarpeta ? path.join(dirExport, nombre) : null,
       rutaArchivo: path.join(dirExport, entrada.name),
-    });
+    };
+    porNombreExacto.set(nombreClave, pagina);
+    const key = normalizarRazonSocial(nombreClave);
+    if (!porRazonSocialNormalizada.has(key)) porRazonSocialNormalizada.set(key, []);
+    porRazonSocialNormalizada.get(key)!.push(pagina);
   }
-  return mapa;
+  return { porNombreExacto, porRazonSocialNormalizada };
 }
 
 // csvPath es una ruta independiente (no se une a dirExport): en el export real el CSV
@@ -226,10 +287,18 @@ export function crearNotionExportAdapter(dirExport: string, csvPath: string): No
       const porPagina = mapaPageIdsYSubcarpetas(dirExport);
 
       return filas.map((fila): NotionEmpresaExport => {
-        const nombre = fila['Empresa'] ?? '';
-        const pagina = porPagina.get(nombre.normalize('NFC'));
+        // trim(): el CSV trae espacios de sobra en algunos nombres ("Vanet ( Zona wifi ) ",
+        // "Fibernet ingenieria ") que el nombre de archivo nunca tiene -- sin recortar,
+        // ni el match exacto ni el normalizado los encontraban.
+        const nombre = (fila['Empresa'] ?? '').trim();
+        const nombreClave = nombre.normalize('NFC');
+        let pagina = porPagina.porNombreExacto.get(nombreClave);
+        if (!pagina) {
+          const candidatos = porPagina.porRazonSocialNormalizada.get(normalizarRazonSocial(nombreClave));
+          if (candidatos?.length === 1) pagina = candidatos[0];
+        }
         const subcarpeta = pagina?.subcarpeta ?? null;
-        const toques = pagina ? leerToques(dirExport, pagina.rutaArchivo) : [];
+        const toques = pagina ? leerToques(pagina.rutaArchivo, subcarpeta) : [];
         return {
           pageId: pagina?.pageId ?? null,
           nombre,

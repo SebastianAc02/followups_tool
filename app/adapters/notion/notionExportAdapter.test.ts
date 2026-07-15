@@ -17,7 +17,7 @@ test('lee el export por-pagina + CSV y devuelve una empresa por fila del CSV', (
   const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
   const empresas = adapter.leerEmpresas();
 
-  assert.equal(empresas.length, 4);
+  assert.equal(empresas.length, 5);
 });
 
 test('enlaza pageId desde el nombre de archivo .md y detecta la subcarpeta', () => {
@@ -199,4 +199,86 @@ test('empresa sin seccion Toques trae la lista vacia', () => {
   const acuavalle = empresas.find((e) => e.nombre === 'ACUAVALLE');
   assert.ok(acuavalle);
   assert.deepEqual(acuavalle!.toques, []);
+});
+
+// El export real tiene la tabla de toques en una subpagina separada bastante mas
+// seguido que embebida en la pagina principal (~30 de 37 empresas auditadas): la
+// pagina principal solo enlaza a "Toques hechos" (o "Toques"), sin heading "## Toques"
+// propio. CABLENET SAS replica esa forma, incluyendo una tabla sin columna Transcript
+// en la primera fila y un link relativo A LA SUBCARPETA (no al export raiz) en la
+// segunda.
+test('encuentra la tabla en una subpagina "Toques hechos" cuando la pagina principal no la trae embebida', () => {
+  const adapter = crearNotionExportAdapter(dirFixtures, path.join(dirFixtures, 'pipeline_all.csv'));
+  const empresas = adapter.leerEmpresas();
+
+  const cablenet = empresas.find((e) => e.nombre === 'CABLENET SAS');
+  assert.ok(cablenet);
+  assert.equal(cablenet!.toques.length, 2);
+  assert.deepEqual(cablenet!.toques[0], {
+    fechaRaw: '2026-06-19',
+    canal: 'llamada',
+    quePaso: 'No contestó',
+    transcriptUrl: null,
+    transcriptTexto: null,
+  });
+  assert.equal(cablenet!.toques[1].canal, null, 'canal compuesto "Llamada + WhatsApp" no se adivina');
+  assert.equal(cablenet!.toques[1].transcriptUrl, 'https://notes.granola.ai/d/abc123');
+});
+
+// Bugs reales encontrados en la corrida completa contra el export (no en el fixture
+// original, que solo tenia nombres ya limpios): el CSV trae espacios de sobra en
+// algunos nombres ("Vanet ( Zona wifi ) ") y puntuacion distinta a la del nombre de
+// archivo para otros ("INTERCARIBE TV S.A.S." en el CSV vs "INTERCARIBE TV S A S" en
+// el archivo -- Notion genera el nombre de archivo sin puntuacion).
+test('recorta espacios de sobra del nombre del CSV antes de enlazar con el archivo', () => {
+  const dirTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'notion-export-trim-'));
+  try {
+    fs.writeFileSync(path.join(dirTemp, 'VANET 55555555555555555555555555555555.md'), '# placeholder');
+    fs.writeFileSync(
+      path.join(dirTemp, 'pipeline_all.csv'),
+      'Empresa,Industria,Estado,Contacto Principal,Cargo Contacto,Teléfono,Email,Usuarios Estimados,Pasarela Actual,CRM / Software,Owner,Próximo Paso,Fecha Próximo Paso\n"VANET ",ISP,Lead,,,,,,,,,,,\n',
+    );
+
+    const adapter = crearNotionExportAdapter(dirTemp, path.join(dirTemp, 'pipeline_all.csv'));
+    const [fila] = adapter.leerEmpresas();
+    assert.equal(fila.nombre, 'VANET');
+    assert.equal(fila.pageId, '55555555555555555555555555555555');
+  } finally {
+    fs.rmSync(dirTemp, { recursive: true, force: true });
+  }
+});
+
+test('enlaza por razon social normalizada cuando la puntuacion del CSV difiere de la del archivo', () => {
+  const dirTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'notion-export-razonsocial-'));
+  try {
+    fs.writeFileSync(path.join(dirTemp, 'INTERCARIBE TV S A S 66666666666666666666666666666666.md'), '# placeholder');
+    fs.writeFileSync(
+      path.join(dirTemp, 'pipeline_all.csv'),
+      'Empresa,Industria,Estado,Contacto Principal,Cargo Contacto,Teléfono,Email,Usuarios Estimados,Pasarela Actual,CRM / Software,Owner,Próximo Paso,Fecha Próximo Paso\nINTERCARIBE TV S.A.S.,ISP,Lead,,,,,,,,,,,\n',
+    );
+
+    const adapter = crearNotionExportAdapter(dirTemp, path.join(dirTemp, 'pipeline_all.csv'));
+    const [fila] = adapter.leerEmpresas();
+    assert.equal(fila.pageId, '66666666666666666666666666666666');
+  } finally {
+    fs.rmSync(dirTemp, { recursive: true, force: true });
+  }
+});
+
+test('el fallback por razon social NO enlaza cuando hay mas de un candidato (mejor no enlazar que adivinar mal)', () => {
+  const dirTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'notion-export-ambiguo-'));
+  try {
+    fs.writeFileSync(path.join(dirTemp, 'ACME S A S 77777777777777777777777777777777.md'), '# placeholder');
+    fs.writeFileSync(path.join(dirTemp, 'ACME SAS 88888888888888888888888888888888.md'), '# placeholder');
+    fs.writeFileSync(
+      path.join(dirTemp, 'pipeline_all.csv'),
+      'Empresa,Industria,Estado,Contacto Principal,Cargo Contacto,Teléfono,Email,Usuarios Estimados,Pasarela Actual,CRM / Software,Owner,Próximo Paso,Fecha Próximo Paso\nACME S.A.S.,ISP,Lead,,,,,,,,,,,\n',
+    );
+
+    const adapter = crearNotionExportAdapter(dirTemp, path.join(dirTemp, 'pipeline_all.csv'));
+    const [fila] = adapter.leerEmpresas();
+    assert.equal(fila.pageId, null);
+  } finally {
+    fs.rmSync(dirTemp, { recursive: true, force: true });
+  }
 });
