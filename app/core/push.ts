@@ -13,6 +13,13 @@ export type FilaPasoInscripcion = {
   destinatario: DestinatarioEnvio;
   paso: PasoEnvio;
   intentos: number;
+  // Gmail Etapa 2 (2026-07-15): opcionales, solo poblados por
+  // pasoInscripcionesPendientes('correo', ...) -- whatsapp/llamada no los necesitan.
+  // Los usa registro-envio.ts (agruparPendientesCorreo) para resolver el adaptador de
+  // CADA fila sin que push.ts tenga que saber que Gmail existe.
+  owner?: string | null;
+  idOrganizacion?: number;
+  aprobadaEnvioGmail?: boolean;
 };
 
 export type PushDeps = {
@@ -40,8 +47,15 @@ export function calcularProximoIntentoPush(intentos: number, ahora: Date): Date 
   return new Date(ahora.getTime() + minutos * 60_000);
 }
 
-export async function pushPendientes(deps: PushDeps, envio: CanalEntrega, ahora: Date = new Date()): Promise<void> {
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function pushPendientes(deps: PushDeps, envio: CanalEntrega, ahora: Date = new Date(), throttleMs: number = 0): Promise<void> {
+  let primero = true;
   for (const fila of deps.pendientes()) {
+    if (!primero && throttleMs > 0) await esperar(throttleMs);
+    primero = false;
     try {
       deps.marcarEnviando(fila.idPasoInscripcion);
       const resultado = await envio.enviarPaso(fila.proveedorCampanaId, fila.destinatario, fila.paso);

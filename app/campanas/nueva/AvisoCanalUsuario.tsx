@@ -3,10 +3,17 @@ import { CANALES, type Canal } from '../../db/validation';
 
 const NOMBRE_CANAL: Record<Canal, string> = { correo: 'Correo', whatsapp: 'WhatsApp', llamada: 'Llamada' };
 
-export function AvisoCanalUsuario({ tieneLineaWhatsappActiva }: { tieneLineaWhatsappActiva: boolean }) {
-  const bloqueados = CANALES.map((canal) => ({ canal, veredicto: readinessCanalUsuario(canal, tieneLineaWhatsappActiva) })).filter(
-    (x) => !x.veredicto.listo,
-  );
+export function AvisoCanalUsuario({
+  tieneLineaWhatsappActiva,
+  tieneGmailVerificado,
+}: {
+  tieneLineaWhatsappActiva: boolean;
+  tieneGmailVerificado: boolean;
+}) {
+  const bloqueados = CANALES.map((canal) => ({
+    canal,
+    veredicto: readinessCanalUsuario(canal, tieneLineaWhatsappActiva, tieneGmailVerificado),
+  })).filter((x) => !x.veredicto.listo);
   if (bloqueados.length === 0) return null;
 
   return (

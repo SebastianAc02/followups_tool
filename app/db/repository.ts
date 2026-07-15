@@ -3520,6 +3520,71 @@ export function lineaWhatsappActivaDeOwner(owner: string | null, idOrganizacion:
   return linea?.referenciaProveedor ? { referenciaProveedor: linea.referenciaProveedor } : null;
 }
 
+// Gmail Etapa 2 (2026-07-15): mismo mapeo owner_canonico -> id_user que ya usa
+// lineaWhatsappActivaDeOwner para whatsapp, generalizado para correo. Funcion propia
+// (no reusa la de whatsapp) para no tocar codigo de whatsapp ya aprobado -- la
+// duplicacion es 6 lineas, el riesgo de romper whatsapp no vale la pena ahorrarselas.
+export function idUsuarioDeOwner(owner: string | null, idOrganizacion: number): string | null {
+  if (!owner) return null;
+  const miembro = db
+    .select({ idUser: organizacionMiembro.idUser })
+    .from(organizacionMiembro)
+    .where(and(eq(organizacionMiembro.ownerCanonico, owner), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
+    .get();
+  return miembro?.idUser ?? null;
+}
+
+// "Verdadero-Configurado" (spec Etapa 2): tiene credencial Y la ultima verificacion
+// real dio 'ok'. Mismo criterio que ya usa GmailConector.tsx en la UI
+// (estado.ultimoResultado === 'ok') -- no un estado nuevo, solo lo expone al backend.
+export function gmailVerificadoDe(idUsuario: string): boolean {
+  const e = estadoConector('gmail', idUsuario);
+  return e.tieneCredencial && e.ultimoResultado === 'ok';
+}
+
+export function marcarCampanaAprobadaGmail(idCampana: number): void {
+  db.update(campana).set({ aprobadaEnvioGmail: 1, updatedAt: new Date().toISOString() }).where(eq(campana.idCampana, idCampana)).run();
+}
+
+// Tope diario por CUENTA de Gmail (no por campana -- una cuenta puede mandar correo
+// de varias campanas del mismo dueno el mismo dia, el limite es de la cuenta real).
+// Cuenta pasos 'enviada' con proveedor='gmail' de campanas cuyo owner resuelve a este
+// idUsuario, con fecha_enviada de hoy. hoy en formato YYYY-MM-DD (mismo criterio que
+// el resto del repository, ver kpisPipeline.entrandoHoy).
+//
+// Fix (2026-07-15, code review): mismo bug ya encontrado antes en
+// lineaWhatsappActivaDeOwner (ver comentario alli, lineas ~3490-3496) --
+// organizacion_miembro es multi-org, la llave real es (id_organizacion, owner_canonico),
+// no owner_canonico solo. Sin filtrar tambien campana.idOrganizacion aqui, un
+// owner_canonico que colisionara entre dos orgs sumaria envios de AMBAS, inflando el
+// conteo contra el tope diario de una organizacion con los envios de otra.
+export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: string): number {
+  const miembro = db
+    .select({ owner: organizacionMiembro.ownerCanonico })
+    .from(organizacionMiembro)
+    .where(and(eq(organizacionMiembro.idUser, idUsuario), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!miembro?.owner) return 0;
+
+  const fila = db
+    .select({ n: sql<number>`count(*)` })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(
+      and(
+        eq(pasoInscripcion.proveedor, 'gmail'),
+        eq(pasoInscripcion.estado, 'enviada'),
+        eq(campana.owner, miembro.owner),
+        eq(campana.idOrganizacion, idOrganizacion),
+        sql`substr(${pasoInscripcion.fechaEnviada}, 1, 10) = ${hoy}`,
+      ),
+    )
+    .get();
+  return fila?.n ?? 0;
+}
+
 // Tarea 8 (D6, plan-whatsapp-adapter.md): CRUD real de lineas, faltaba entero -- hasta
 // ahora solo existia la lectura angosta de arriba para el goteo. `idUsuario: null` =
 // linea de POOL (compartida, la administra el admin); no-null = linea PERSONAL de ESE
@@ -3711,6 +3776,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       proveedorCampanaId: campana.proveedorCampanaId,
       owner: campana.owner,
       idOrganizacion: campana.idOrganizacion,
+      aprobadaEnvioGmail: campana.aprobadaEnvioGmail,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
@@ -3730,6 +3796,9 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
       paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
       intentos: f.intentos,
+      owner: f.owner,
+      idOrganizacion: f.idOrganizacion,
+      aprobadaEnvioGmail: f.aprobadaEnvioGmail === 1,
     }));
   }
 

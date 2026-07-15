@@ -1,4 +1,4 @@
-import { listarSegmentos, lineasWhatsappDeUsuario, valoresDistintosCampo } from '../../db/repository';
+import { gmailVerificadoDe, listarSegmentos, lineasWhatsappDeUsuario, valoresDistintosCampo } from '../../db/repository';
 import { requireSession } from '../../lib/session';
 import { AppShell } from '../../ui/shell/AppShell';
 import { AvisoCanalUsuario } from './AvisoCanalUsuario';
@@ -27,6 +27,7 @@ export default async function NuevaCampana({
     rol: valoresDistintosCampo('rol', sesion.idOrganizacion),
   };
   const tieneLineaWhatsappActiva = lineasWhatsappDeUsuario(sesion.id).some((l) => l.estado === 'activa');
+  const tieneGmailVerificado = gmailVerificadoDe(sesion.id);
 
   // Tarjeta "Sin cadencia" del hub (/campanas, SegmentoSueltoCard) trae de vuelta un
   // segmento que ya se guardo pero nunca llego a Cadencia -- ?segmento=<id> retoma
@@ -42,7 +43,7 @@ export default async function NuevaCampana({
 
   return (
     <AppShell>
-      <AvisoCanalUsuario tieneLineaWhatsappActiva={tieneLineaWhatsappActiva} />
+      <AvisoCanalUsuario tieneLineaWhatsappActiva={tieneLineaWhatsappActiva} tieneGmailVerificado={tieneGmailVerificado} />
       <NuevaCampanaFlujo
         segmentosIniciales={segmentos}
         opciones={opciones}

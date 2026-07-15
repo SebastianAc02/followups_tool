@@ -16,13 +16,15 @@ import {
   materializarPasosDebidos,
   archivarCampanasCompletadas,
   registrarRespuestaDetectada,
+  leerConfiguracionAdmin,
+  enviosGmailHoy,
 } from '../db/repository';
 import { drenarOutbox } from '../core/outbox';
 import { pushPendientes } from '../core/push';
 import { pollTracking } from '../core/tracking';
 import type { ConfigCalendario } from '../core/motor-cadencia';
 import { crearNotionAdapter } from '../adapters/notion';
-import { crearRegistroEnvio, crearRegistroEntrega } from '../adapters/registro-envio';
+import { crearRegistroEnvio, crearRegistroEntrega, agruparPendientesCorreo } from '../adapters/registro-envio';
 import type { Canal } from '../db/validation';
 
 // Calendario de la agenda real (sesion 2026-07-08, materializador): sin fin de semana
@@ -103,6 +105,56 @@ async function tareaPush(canal: Canal, envio: ReturnType<typeof crearRegistroEnt
   );
 }
 
+// Gmail Etapa 2 (2026-07-15): correo YA NO es "un proveedor, una llamada a
+// pushPendientes" (a diferencia de whatsapp/llamada, que siguen usando tareaPush tal
+// cual) -- puede haber un grupo por cada dueno con Gmail propio + un grupo Apollo que
+// junta a todos los que caen a fallback. agruparPendientesCorreo ya resolvio y agrupo;
+// esta funcion solo itera, aplicando tope diario + throttle SOLO a los grupos Gmail
+// (Apollo no tiene esos limites, los maneja Apollo del otro lado).
+const GMAIL_TOPE_DIARIO_DEFAULT = 300; // conservador a proposito, no el limite oficial de Workspace (~2000)
+const GMAIL_THROTTLE_MS_DEFAULT = 3000;
+
+function configGmailNumero(clave: string, porDefecto: number): number {
+  const val = leerConfiguracionAdmin(clave);
+  const n = val ? Number(val) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : porDefecto;
+}
+
+export async function tareaPushCorreo(): Promise<void> {
+  const ahora = new Date();
+  const topeDiario = configGmailNumero('gmail_tope_diario', GMAIL_TOPE_DIARIO_DEFAULT);
+  const throttleMs = configGmailNumero('gmail_throttle_ms', GMAIL_THROTTLE_MS_DEFAULT);
+
+  for (const grupo of agruparPendientesCorreo(ahora.toISOString())) {
+    let filas = grupo.filas;
+    let throttle = 0;
+
+    if (grupo.idUsuarioGmail) {
+      // Tope diario es POR CUENTA de Gmail (no por campana): si ya mando 250 de un
+      // tope de 300, le quedan 50 en este ciclo -- no es todo-o-nada, las filas que
+      // no alcanzan quedan 'pendiente' para el siguiente ciclo del worker (mismo
+      // mecanismo de reintento que ya existe, no se pierden ni marcan fallo).
+      const yaEnviados = enviosGmailHoy(grupo.idUsuarioGmail, filas[0]?.idOrganizacion ?? 0, ahora.toISOString().slice(0, 10));
+      const restante = topeDiario - yaEnviados;
+      if (restante <= 0) continue; // tope alcanzado, este grupo no manda nada este ciclo
+      filas = filas.slice(0, restante);
+      throttle = throttleMs;
+    }
+
+    await pushPendientes(
+      {
+        pendientes: () => filas,
+        marcarEnviando: marcarPasoInscripcionEnviando,
+        marcarEnviada: marcarPasoInscripcionEnviada,
+        marcarFallo: marcarPasoInscripcionFallo,
+      },
+      grupo.adaptador,
+      ahora,
+      throttle,
+    );
+  }
+}
+
 // V5.5: poll de tracking + reply detection. Solo tiene sentido para el proveedor de
 // correo hoy (es el unico con tracking real, ver experimento-apollo.md); si el dia de
 // manana un proveedor de whatsapp tambien expone tracking, esto se vuelve un loop por
@@ -135,7 +187,11 @@ export async function materializarYEmpujarAhora(): Promise<void> {
   await tareaMaterializar();
   const registro = crearRegistroEntrega();
   for (const canal of Object.keys(registro) as Canal[]) {
-    await tareaPush(canal, registro[canal]);
+    if (canal === 'correo') {
+      await tareaPushCorreo();
+    } else {
+      await tareaPush(canal, registro[canal]);
+    }
   }
 }
 
@@ -147,7 +203,7 @@ const HEARTBEAT_POR_CANAL: Partial<Record<Canal, string>> = { correo: 'apollo' }
 
 function tareasPush(registro: ReturnType<typeof crearRegistroEntrega>): Tarea[] {
   return (Object.keys(registro) as Canal[])
-    .filter((canal) => registro[canal] !== null)
+    .filter((canal) => canal !== 'correo' && registro[canal] !== null)
     .map((canal) => ({
       nombre: `push:${canal}`,
       proveedorHeartbeat: HEARTBEAT_POR_CANAL[canal] ?? canal,
@@ -161,6 +217,7 @@ function construirTareas(): Tarea[] {
   return [
     { nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox },
     { nombre: 'materializar', proveedorHeartbeat: 'materializador', ejecutar: tareaMaterializar },
+    { nombre: 'push:correo', proveedorHeartbeat: 'apollo', ejecutar: tareaPushCorreo },
     ...tareasPush(registroEntrega),
     { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: () => tareaTracking(registroCompleto.correo) },
     { nombre: 'archivar-campanas', proveedorHeartbeat: 'archivador', ejecutar: () => tareaArchivarCampanas(registroCompleto.correo) },

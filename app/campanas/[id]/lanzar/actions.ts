@@ -14,6 +14,8 @@ import {
   lineaWhatsappActiva,
   lineasWhatsappDeUsuario,
   fijarOwnerCampana,
+  gmailVerificadoDe,
+  marcarCampanaAprobadaGmail,
   type CampanaParaLanzar,
   type ConfigLanzamientoInput,
   type ResultadoInscripcion,
@@ -83,8 +85,9 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
     // esta listo, no se inscribe nada.
     const canales = canalesDeCadencia(camp.idCadencia);
     const tieneLineaWhatsapp = lineasWhatsappDeUsuario(sesion.id).some((l) => l.estado === 'activa');
+    const tieneGmailVerificado = gmailVerificadoDe(sesion.id);
     for (const canal of canales) {
-      const veredicto = readinessCanalUsuario(canal, tieneLineaWhatsapp);
+      const veredicto = readinessCanalUsuario(canal, tieneLineaWhatsapp, tieneGmailVerificado);
       if (!veredicto.listo) return { ok: false, error: veredicto.motivo };
     }
 
@@ -99,36 +102,50 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
     let avisoSecuenciaExterna: string | undefined;
     try {
       const camp = campanaParaLanzar(idCampana, sesion.idOrganizacion);
-      // Sesion 2026-07-09: la secuencia externa es, por definicion, el track de
-      // correo de la cadencia -- se resuelve por el registro (registro-envio.ts), no
-      // por Apollo directo. Si "correo" no tiene proveedor registrado (no deberia
-      // pasar hoy, es el unico canal automatico), se avisa igual que cualquier otro
-      // fallo en vez de asumir que Apollo siempre esta ahi.
-      const adapter = crearRegistroEnvio().correo;
-      // Sesion 2026-07-10 (bug real: 422 al lanzar una cadencia SIN correo): Apollo es
-      // el motor SOLO del track de correo. pasosParaSincronizarCopy filtra canal='correo',
-      // asi que una cadencia de puro whatsapp/llamada devuelve []. Antes se creaba igual
-      // una secuencia VACIA en Apollo y se intentaba aprobarla -> Apollo responde 422
-      // (no aprueba una secuencia sin pasos). Ahora Apollo solo se toca si de verdad hay
-      // correo que mandar; una cadencia sin correo ni siquiera crea secuencia externa.
       const pasos = camp ? pasosParaSincronizarCopy(camp.idCadencia) : [];
-      if (camp && adapter && pasos.length > 0) {
-        const proveedorCampanaId = await adapter.crearCampanaExterna(camp.nombre);
-        guardarProveedorCampanaId(idCampana, proveedorCampanaId, sesion.idOrganizacion);
 
-        // Subir el copy aqui mismo es lo que hace que abrir la secuencia en Apollo ya
-        // muestre los pasos reales de la cadencia, no una secuencia en blanco.
-        const sincronizados = await adapter.sincronizarCopy(proveedorCampanaId, pasos);
-        guardarSincronizacionCopy(sincronizados);
+      if (camp && pasos.length > 0) {
+        if (tieneGmailVerificado) {
+          // Gmail Etapa 2: no hay secuencia externa que crear (Gmail no implementa
+          // MotorSecuencia). El id sintetico sigue siendo el correlator que necesita
+          // el tracking (pixel/link/respuestas), aunque no venga de Apollo. El click
+          // de "Lanzar hoy" ES la aprobacion explicita -- misma convencion real que ya
+          // usa Apollo (aprobarSecuencia se llama automatico aca mismo, sin un boton
+          // separado), no la de un spec que describia un flujo que nunca se construyo.
+          guardarProveedorCampanaId(idCampana, `gmail-camp-${idCampana}`, sesion.idOrganizacion);
+          marcarCampanaAprobadaGmail(idCampana);
+        } else {
+          // Nota: con el gate actual (readinessCanalUsuario bloquea correo sin Gmail
+          // antes de llegar aca), esta rama es inalcanzable para lanzamientos nuevos --
+          // se deja como defensa en profundidad, no como codigo muerto a limpiar, por si
+          // el gate cambia.
+          //
+          // Sesion 2026-07-09: la secuencia externa es, por definicion, el track de
+          // correo de la cadencia -- se resuelve por el registro (registro-envio.ts), no
+          // por Apollo directo. Si "correo" no tiene proveedor registrado (no deberia
+          // pasar hoy, es el unico canal automatico), se avisa igual que cualquier otro
+          // fallo en vez de asumir que Apollo siempre esta ahi.
+          const adapter = crearRegistroEnvio().correo;
+          if (adapter) {
+            const proveedorCampanaId = await adapter.crearCampanaExterna(camp.nombre);
+            guardarProveedorCampanaId(idCampana, proveedorCampanaId, sesion.idOrganizacion);
 
-        // Sin approve la secuencia queda creada y con copy pero Apollo NUNCA manda el
-        // correo real -- approve es lo que dispara el envio (idempotente del lado de Apollo).
-        await adapter.aprobarSecuencia(proveedorCampanaId);
+            // Subir el copy aqui mismo es lo que hace que abrir la secuencia en Apollo ya
+            // muestre los pasos reales de la cadencia, no una secuencia en blanco.
+            const sincronizados = await adapter.sincronizarCopy(proveedorCampanaId, pasos);
+            guardarSincronizacionCopy(sincronizados);
+
+            // Sin approve la secuencia queda creada y con copy pero Apollo NUNCA manda el
+            // correo real -- approve es lo que dispara el envio (idempotente del lado de Apollo).
+            await adapter.aprobarSecuencia(proveedorCampanaId);
+          }
+        }
       }
     } catch (e) {
-      avisoSecuenciaExterna = `la campaña se lanzó pero no se pudo crear/sincronizar la secuencia en Apollo: ${
-        e instanceof Error ? e.message : String(e)
-      }`;
+      const detalle = e instanceof Error ? e.message : String(e);
+      avisoSecuenciaExterna = tieneGmailVerificado
+        ? `la campaña se lanzó pero no se pudo dejar lista para Gmail: ${detalle}`
+        : `la campaña se lanzó pero no se pudo crear/sincronizar la secuencia en Apollo: ${detalle}`;
     }
 
     // Sesion 2026-07-10: sin esto, el paso del dia 0 espera hasta 5 minutos (el

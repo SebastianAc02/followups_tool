@@ -216,7 +216,8 @@ export function crearDbPrueba() {
       id_organizacion INTEGER NOT NULL DEFAULT 1,
       proveedor_campana_id TEXT,
       created_at TEXT,
-      updated_at TEXT
+      updated_at TEXT,
+      aprobada_envio_gmail INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE inscripcion (
