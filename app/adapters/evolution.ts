@@ -326,3 +326,21 @@ export function parsearMensajeEntrante(payload: unknown): MensajeEntrante | null
 
   return { referenciaProveedor, telefono, texto, mensajeId, fecha };
 }
+
+export type AcuseLectura = { proveedorMensajeId: string; tipo: 'visto'; referenciaProveedor: string };
+
+// messages.update trae acuses de estado. Solo nos interesa READ (leido); DELIVERY_ACK
+// (entregado) se ignora -- el usuario pidio "alguien lo vio", no "llego". Señal no
+// confiable a proposito: si la persona desactivo las confirmaciones de lectura, READ
+// nunca llega. Correlaciona por key.id (el mismo proveedorMensajeId que guarda enviarPaso).
+export function parsearAcuseLectura(payload: unknown): AcuseLectura | null {
+  const p = asRecord(payload);
+  if (!p || p.event !== 'messages.update') return null;
+  const data = asRecord(p.data);
+  const key = data ? asRecord(data.key) : null;
+  if (!data || !key) return null;
+  if (asString(data.status) !== 'READ') return null;
+  const mensajeId = asString(key.id);
+  if (!mensajeId) return null;
+  return { proveedorMensajeId: mensajeId, tipo: 'visto', referenciaProveedor: asString(p.instance) ?? '' };
+}

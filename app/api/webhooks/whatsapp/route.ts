@@ -10,9 +10,10 @@ import {
   pausarInscripcion,
   registrarToqueEntrante,
   registrarRespuestaDetectada,
+  guardarVistoWhatsapp,
 } from '../../../db/repository';
 import { crearRegistroEnvio } from '../../../adapters/registro-envio';
-import { parsearMensajeEntrante } from '../../../adapters/evolution';
+import { parsearMensajeEntrante, parsearAcuseLectura } from '../../../adapters/evolution';
 import {
   procesarRespuestaEntrante,
   resolverPorUltimos10,
@@ -33,6 +34,21 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json({ ok: true, ignorado: 'body no-json' }, { status: 200 });
+  }
+
+  // Acuse de lectura (visto): se resuelve antes del parseo de respuesta entrante --
+  // 'messages.update' nunca pasa el filtro de parsearMensajeEntrante (solo mira
+  // 'messages.upsert'), asi que no hay conflicto entre los dos caminos.
+  //
+  // LIMITACION CONOCIDA: este webhook no pasa por requireSession, asi que
+  // guardarVistoWhatsapp escribe siempre en isps.db (la real), nunca en pruebas.db. En
+  // modo prueba el "vio el WhatsApp" no se vera aca -- la señal confiable de la demo es
+  // la apertura de correo (Task 6). Cerrarlo del todo exige que el webhook sepa a que
+  // linea/base pertenece el mensaje, trabajo aparte.
+  const acuse = parsearAcuseLectura(body);
+  if (acuse) {
+    guardarVistoWhatsapp(acuse.proveedorMensajeId);
+    return NextResponse.json({ ok: true, visto: true }, { status: 200 });
   }
 
   // Parseo en el adaptador: null = no es una respuesta entrante que nos interese (otro

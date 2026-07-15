@@ -4231,6 +4231,26 @@ export function resolverDestinatarioPorEmail(proveedorCampanaId: string, email: 
 
 // Idempotente (search-first, mismo idioma que crearPasoInscripcionPendiente): el
 // indice unico de proveedor_evento_id (V5.1) es el respaldo final ante una carrera.
+// Visto de WhatsApp: cruza el key.id del acuse con paso_inscripcion.proveedor_mensaje_id
+// (lo que guardo enviarPaso al mandar). Si no hay paso con ese id, es un mensaje que no
+// mandamos nosotros por cadencia -- se ignora. Idempotente por proveedor_evento_id.
+export function guardarVistoWhatsapp(proveedorMensajeId: string): 'insertado' | 'ignorado' | 'duplicado' {
+  const paso = db
+    .select({ id: pasoInscripcion.idPasoInscripcion })
+    .from(pasoInscripcion)
+    .where(eq(pasoInscripcion.proveedorMensajeId, proveedorMensajeId))
+    .get();
+  if (!paso) return 'ignorado';
+
+  const eventoId = `visto:${proveedorMensajeId}`;
+  const existente = db.select({ id: eventoTracking.idEvento }).from(eventoTracking).where(eq(eventoTracking.proveedorEventoId, eventoId)).get();
+  if (existente) return 'duplicado';
+
+  const ahora = new Date().toISOString();
+  db.insert(eventoTracking).values({ idPasoInscripcion: paso.id, tipo: 'visto', canal: 'whatsapp', proveedorEventoId: eventoId, fechaEvento: ahora, createdAt: ahora }).run();
+  return 'insertado';
+}
+
 export function guardarEventoTracking(idPasoInscripcion: number, evento: EventoProveedor): 'insertado' | 'duplicado' {
   const existente = db
     .select({ id: eventoTracking.idEvento })
