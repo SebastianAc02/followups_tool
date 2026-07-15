@@ -44,20 +44,22 @@ test('actualizarEstadoNotion: no registra si la etapa no cambia', () => {
 
 test('embudoPipeline: agrupa por estado_notion, scoped a la organizacion, null aparte', () => {
   const raw = new Database(dbPath);
+  // notion_page_id: EN_PIPELINE (Task 7) exige pagina de Notion o al menos un toque para
+  // que una fila cuente como trabajo real; estos fixtures simulan cuentas ya sincronizadas.
   const ins = raw.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id)
-     VALUES (?, 'nit', ?, ?, 'activo', ?, ?)`,
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, notion_page_id)
+     VALUES (?, 'nit', ?, ?, 'activo', ?, ?, ?)`,
   );
   // Nombres de estado distintos a los usados en los tests de actualizarEstadoNotion
   // (arriba en este mismo archivo): la db de prueba es compartida entre todos los
   // tests del archivo (mismo dbPath, mismo modulo db singleton), asi que 'lead'/'e2'
   // ya tiene una fila viva de un test anterior. Usar 'lead_pipeline' evita el choque
   // sin depender del orden de ejecucion de los tests.
-  ins.run('c1', 'c1', 'c1', 'lead_pipeline', 1);
-  ins.run('c2', 'c2', 'c2', 'lead_pipeline', 1);
-  ins.run('c3', 'c3', 'c3', 'on_hold_pipeline', 1);
-  ins.run('c4', 'c4', 'c4', null, 1);
-  ins.run('c5', 'c5', 'c5', 'lead_pipeline', 2); // otra organizacion: NO debe contar
+  ins.run('c1', 'c1', 'c1', 'lead_pipeline', 1, 'ntn-c1');
+  ins.run('c2', 'c2', 'c2', 'lead_pipeline', 1, 'ntn-c2');
+  ins.run('c3', 'c3', 'c3', 'on_hold_pipeline', 1, 'ntn-c3');
+  ins.run('c4', 'c4', 'c4', null, 1, 'ntn-c4');
+  ins.run('c5', 'c5', 'c5', 'lead_pipeline', 2, 'ntn-c5'); // otra organizacion: NO debe contar
   raw.close();
 
   const conteos = embudoPipeline(1);
@@ -72,13 +74,13 @@ test('embudoPipeline: agrupa por estado_notion, scoped a la organizacion, null a
 test('embudoPipeline: suma usuarios_efectivos por etapa (empresa_usuarios es 1:1)', () => {
   const raw = new Database(dbPath);
   raw.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id)
-     VALUES (?, 'nit', ?, ?, 'activo', ?, 1)`,
-  ).run('u1', 'u1', 'u1', 'oportunidad');
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, notion_page_id)
+     VALUES (?, 'nit', ?, ?, 'activo', ?, 1, ?)`,
+  ).run('u1', 'u1', 'u1', 'oportunidad', 'ntn-u1');
   raw.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id)
-     VALUES (?, 'nit', ?, ?, 'activo', ?, 1)`,
-  ).run('u2', 'u2', 'u2', 'oportunidad');
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, notion_page_id)
+     VALUES (?, 'nit', ?, ?, 'activo', ?, 1, ?)`,
+  ).run('u2', 'u2', 'u2', 'oportunidad', 'ntn-u2');
   raw.prepare(`INSERT INTO empresa_usuarios (id_empresa, usuarios_estimados, usuarios_efectivos) VALUES (?, ?, ?)`).run('u1', 100, 80);
   raw.prepare(`INSERT INTO empresa_usuarios (id_empresa, usuarios_estimados, usuarios_efectivos) VALUES (?, ?, ?)`).run('u2', 50, 40);
   raw.close();
@@ -92,12 +94,12 @@ test('embudoPipeline: suma usuarios_efectivos por etapa (empresa_usuarios es 1:1
 test('embudoPipeline: filtro por owner cuenta solo las empresas de ese owner', () => {
   const raw = new Database(dbPath);
   const ins = raw.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, owner)
-     VALUES (?, 'nit', ?, ?, 'activo', ?, 1, ?)`,
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, owner, notion_page_id)
+     VALUES (?, 'nit', ?, ?, 'activo', ?, 1, ?, ?)`,
   );
-  ins.run('o1', 'o1', 'o1', 'owner_pipeline', 'sebastian');
-  ins.run('o2', 'o2', 'o2', 'owner_pipeline', 'sebastian');
-  ins.run('o3', 'o3', 'o3', 'owner_pipeline', 'camilo');
+  ins.run('o1', 'o1', 'o1', 'owner_pipeline', 'sebastian', 'ntn-o1');
+  ins.run('o2', 'o2', 'o2', 'owner_pipeline', 'sebastian', 'ntn-o2');
+  ins.run('o3', 'o3', 'o3', 'owner_pipeline', 'camilo', 'ntn-o3');
   raw.close();
 
   const conteos = embudoPipeline(1, { owner: 'sebastian' });
@@ -142,13 +144,13 @@ test('historialEtapasEmpresa: devuelve etapa actual + transiciones ordenadas', (
 test('empresasDeEtapa: lista empresas de una etapa, scoped a organizacion y owner', () => {
   const raw = new Database(dbPath);
   const ins = raw.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, owner)
-     VALUES (?, 'nit', ?, ?, 'activo', ?, ?, ?)`,
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, owner, notion_page_id)
+     VALUES (?, 'nit', ?, ?, 'activo', ?, ?, ?, ?)`,
   );
-  ins.run('de1', 'Zeta SAS', 'zeta', 'lead_detalle', 1, 'ana');
-  ins.run('de2', 'Alfa SAS', 'alfa', 'lead_detalle', 1, 'zoe');
-  ins.run('de3', 'Beta SAS', 'beta', 'contacto_iniciado', 1, 'ana'); // otra etapa: no debe salir
-  ins.run('de4', 'Gama SAS', 'gama', 'lead_detalle', 2, 'ana'); // otra organizacion: no debe salir
+  ins.run('de1', 'Zeta SAS', 'zeta', 'lead_detalle', 1, 'ana', 'ntn-de1');
+  ins.run('de2', 'Alfa SAS', 'alfa', 'lead_detalle', 1, 'zoe', 'ntn-de2');
+  ins.run('de3', 'Beta SAS', 'beta', 'contacto_iniciado', 1, 'ana', 'ntn-de3'); // otra etapa: no debe salir
+  ins.run('de4', 'Gama SAS', 'gama', 'lead_detalle', 2, 'ana', 'ntn-de4'); // otra organizacion: no debe salir
   raw.close();
 
   const empresas = empresasDeEtapa('lead_detalle', 1);
@@ -165,8 +167,8 @@ test('empresasDeEtapa: CLAVE_SIN_ETAPA lista las empresas con estado_notion null
   const raw = new Database(dbPath);
   raw
     .prepare(
-      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id)
-       VALUES ('de5', 'de5', 'Sin Etapa SAS', 'sinetapa', 'activo', NULL, 1)`,
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, organizacion_activa_id, notion_page_id)
+       VALUES ('de5', 'de5', 'Sin Etapa SAS', 'sinetapa', 'activo', NULL, 1, 'ntn-de5')`,
     )
     .run();
   raw.close();

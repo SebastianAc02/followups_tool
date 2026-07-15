@@ -21,12 +21,17 @@ function raw() {
 
 function seedPar(idVivo: string, idFundido: string, estado: string, fecha: string | null) {
   const db = raw();
-  for (const [id, operaBajo] of [[idVivo, null], [idFundido, idVivo]] as const) {
+  // notion_page_id solo en la viva: EN_PIPELINE (Task 7) exige pagina de Notion o un
+  // toque para contar como trabajo real; la fundida no la necesita, ya la saca EMPRESA_VIVA.
+  for (const [id, operaBajo, pageId] of [
+    [idVivo, null, `ntn-${idVivo}`],
+    [idFundido, idVivo, null],
+  ] as const) {
     db.prepare(
       `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial,
-                            estado_notion, proximo_follow_up_fecha, owner, opera_bajo_id, organizacion_activa_id)
-       VALUES (?, 'nit', 'Global IP', 'global ip', 'lead', ?, ?, 'Sebastian Acosta Molina', ?, 1)`,
-    ).run(id, estado, fecha, operaBajo);
+                            estado_notion, proximo_follow_up_fecha, owner, opera_bajo_id, organizacion_activa_id, notion_page_id)
+       VALUES (?, 'nit', 'Global IP', 'global ip', 'lead', ?, ?, 'Sebastian Acosta Molina', ?, 1, ?)`,
+    ).run(id, estado, fecha, operaBajo, pageId);
   }
   db.close();
 }

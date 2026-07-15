@@ -16,6 +16,13 @@ export const empresa = sqliteTable('empresa', {
   // fusion: si esta seteado, esta fila es un duplicado absorbido por otra empresa
   // (el sobreviviente), no se borra pero deja de ser una identidad activa.
   operaBajoId: text('opera_bajo_id'),
+  // Task 12 (plan 2026-07-15-embudo-real-y-registro): satelite_de, DISTINTA de
+  // operaBajoId. operaBajoId = identidad muerta (absorbida, fundida, sin deal propio).
+  // idEmpresaMatriz = ambas filas siguen vivas, cada una con su propio deal, pero
+  // relacionadas para que el matcher deje de confundirlas (ej. EMCALI de Thomas es
+  // satelite de Emcali (ISP) de Felipe: dos paginas reales de Notion, misma empresa
+  // matriz, deals separados).
+  idEmpresaMatriz: text('id_empresa_matriz'),
   ciudadPrincipal: text('ciudad_principal'),
   departamento: text('departamento'),
   esCliente: integer('es_cliente').notNull().default(0),
@@ -111,6 +118,20 @@ export const empresaAlias = sqliteTable('empresa_alias', {
   alias: text('alias').notNull(),
   fuente: text('fuente').notNull(),
   confianza: text('confianza').notNull().default('alta'),
+  createdAt: text('created_at'),
+});
+
+// Task 12: complemento de empresaAlias. empresaAlias solo guarda los SI ("estos dos
+// nombres son la misma empresa"); esta tabla guarda los TRES veredictos posibles
+// (mismo/distinto/satelite_de) para que un par ya refutado por Sebastian no se vuelva a
+// proponer en cada corrida del matcher/diff. decidido_por siempre humano, nunca inferido.
+export const identidadDecision = sqliteTable('identidad_decision', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  a: text('a').notNull(),
+  b: text('b').notNull(),
+  veredicto: text('veredicto').notNull(), // 'mismo' | 'distinto' | 'satelite_de'
+  decididoPor: text('decidido_por').notNull(),
+  nota: text('nota'),
   createdAt: text('created_at'),
 });
 

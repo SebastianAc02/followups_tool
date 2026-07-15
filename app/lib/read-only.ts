@@ -8,9 +8,15 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // concurrentes: cada una necesita su propio valor, sin pisarse.
 const store = new AsyncLocalStorage<boolean>();
 
-// enterWith (no run): requireSession no envuelve el resto de la request en un callback,
-// solo setea el valor "de aqui en adelante" en el mismo contexto async. Verificado que
-// propaga a traves del await de requireSession hasta las escrituras posteriores.
+// enterWith (no run): requireSession no envuelve el resto de la request en un callback
+// (haria falta reescribir cada action/page para pasar su cuerpo como callback), solo
+// setea el valor "de aqui en adelante" en el mismo contexto async. Verificado en
+// read-only.test.ts con tests que cruzan await de verdad y con dos requests concurrentes
+// (visitante + normal) via Promise.all: hoy aisla correctamente. La fuga al contexto raiz
+// y la perdida tras el await que describia la Task 3 del plan 2026-07-15 se intento
+// reproducir (script standalone, 3 escenarios crecientes de realismo incluyendo un
+// http.createServer real) y NO se reprodujo -- sigue sin evidencia. Si algun test de
+// read-only.test.ts empieza a fallar, esa es la señal real para migrar a run().
 export function marcarSoloLectura(valor: boolean): void {
   store.enterWith(valor);
 }

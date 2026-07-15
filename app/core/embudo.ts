@@ -5,10 +5,16 @@
 // las bandas (misma decision que el Home: 1437 nulls se comerian la barra).
 import { BANDAS_EMBUDO, ETAPA_GANADA, ETAPA_ONHOLD, FUNNEL_ETAPAS } from '../db/funnel';
 
+export type ConteoPorCategoria = { total: number; usuarios: number | null };
+
 export type ConteoEtapa = {
   estado: string; // valor de estado_notion, o '__sin_etapa__' para null
   total: number;
   usuarios: number | null; // suma de usuarios_efectivos, null si no hay dato
+  // Task 6: corte ISP vs ESP. 'esp' agrupa carrier/utility/telco_grande/extranjero/
+  // no_isp/sae_plus -- el segmento de Thomas. Los usuarios de cada bucket NUNCA se
+  // suman al total del otro (asi ENEL no infla el numero de ISP).
+  porCategoria?: { isp: ConteoPorCategoria; esp: ConteoPorCategoria };
 };
 
 export type BandaEmbudo = {
@@ -18,6 +24,7 @@ export type BandaEmbudo = {
   total: number;
   usuarios: number | null;
   conversionDesdeAnterior: number | null; // % vs la banda anterior; null en la primera
+  porCategoria?: { isp: ConteoPorCategoria; esp: ConteoPorCategoria };
 };
 
 export type ResultadoEmbudo = {
@@ -51,6 +58,7 @@ export function construirEmbudo(conteos: ConteoEtapa[]): Embudo {
       total: actual.total,
       usuarios: actual.usuarios,
       conversionDesdeAnterior: i === 0 ? null : conversionDesdeAnterior,
+      porCategoria: actual.porCategoria,
     };
   });
 

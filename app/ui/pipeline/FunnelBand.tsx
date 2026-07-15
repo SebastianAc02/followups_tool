@@ -38,6 +38,15 @@ export function FunnelBand({
           {banda.usuarios !== null && (
             <div className="mono text-[11px] text-ink/70">{banda.usuarios.toLocaleString('es-CO')} usuarios</div>
           )}
+          {banda.porCategoria && (banda.porCategoria.isp.total > 0 || banda.porCategoria.esp.total > 0) && (
+            <div className="mono text-[10px] text-ink/60 mt-0.5">
+              ISP {banda.porCategoria.isp.total}
+              {banda.porCategoria.isp.usuarios !== null ? ` (${banda.porCategoria.isp.usuarios.toLocaleString('es-CO')}u)` : ''}
+              {' · '}
+              ESP {banda.porCategoria.esp.total}
+              {banda.porCategoria.esp.usuarios !== null ? ` (${banda.porCategoria.esp.usuarios.toLocaleString('es-CO')}u)` : ''}
+            </div>
+          )}
         </div>
       </button>
     </div>

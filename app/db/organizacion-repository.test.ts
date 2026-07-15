@@ -13,6 +13,7 @@ import {
   crearMiembroYSetOwner,
   organizacionVisitantesIdOCrear,
   crearMiembroVisitante,
+  borrarUsuario,
   dbDePrueba,
 } from './organizacion-repository.ts';
 
@@ -145,6 +146,31 @@ test('crearMiembroYSetOwner falla si otro usuario ya reclamo ese owner (carrera)
   const raw = new Database(dbPath);
   const otro = raw.prepare(`SELECT owner FROM user WHERE id = ?`).get('otro-user') as any;
   assert.equal(otro, undefined, 'el reclamo fallido no debe tocar la tabla user para el segundo usuario');
+  raw.close();
+});
+
+test('borrarUsuario elimina la fila de user (compensacion del registro no atomico)', () => {
+  const db = dbDePrueba(dbPath);
+  borrarUsuario('user-nuevo', db);
+
+  const raw = new Database(dbPath);
+  const fila = raw.prepare(`SELECT id FROM user WHERE id = ?`).get('user-nuevo');
+  assert.equal(fila, undefined, 'el usuario huerfano no debe quedar en la tabla user');
+  raw.close();
+});
+
+test('crearMiembroYSetOwner que falla + borrarUsuario deja la tabla user sin huerfanos (Task 1)', () => {
+  const db = dbDePrueba(dbPath);
+  // 'Sebastian Acosta Molina' ya esta reclamado por 'user-sebastian' (beforeEach): este
+  // reclamo debe fallar, replicando la carrera que hoy entierra al usuario.
+  const creado = crearMiembroYSetOwner(1, 'Sebastian Acosta Molina', 'Sebastian Acosta Molina', 'user-nuevo', db);
+  assert.equal(creado, false);
+
+  borrarUsuario('user-nuevo', db);
+
+  const raw = new Database(dbPath);
+  const fila = raw.prepare(`SELECT id FROM user WHERE id = ?`).get('user-nuevo');
+  assert.equal(fila, undefined, 'sin la compensacion este usuario quedaria autenticado y sin organizacion para siempre');
   raw.close();
 });
 

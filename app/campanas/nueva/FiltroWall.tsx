@@ -21,6 +21,7 @@ const LABELS: Record<string, string> = {
   usuarios: 'Usuarios',
   prioridad: 'Prioridad',
   personas: 'Personas en la cuenta',
+  en_notion: 'En Notion',
 };
 
 function valorTexto(c: Condicion): string {
@@ -36,9 +37,9 @@ function valorTexto(c: Condicion): string {
     case 'menor_que':
       return `< ${c.valor.toLocaleString('es-CO')}`;
     case 'es_null':
-      return 'sin valor';
+      return c.campo === 'en_notion' ? 'no' : 'sin valor';
     case 'no_null':
-      return 'con valor';
+      return c.campo === 'en_notion' ? 'sí' : 'con valor';
   }
 }
 
@@ -81,6 +82,12 @@ export function FiltroWall({
     set([...condiciones, { campo, op: 'entre', desde: 0, hasta: campo === 'usuarios' ? 10000 : 9 }]);
     setEditando(condiciones.length);
   }
+  // Task 15: en_notion es booleano (notion_page_id null o no) -- no encaja en el
+  // patron "en/no_en contra una lista de valores" de CAMPOS_TEXTO (no hay una lista de
+  // page_ids que elegir), asi que se agrega ya resuelto en vez de dejarlo a medio editar.
+  function agregarEnNotion(enNotion: boolean) {
+    set([...condiciones, { campo: 'en_notion', op: enNotion ? 'no_null' : 'es_null' }]);
+  }
   function actualizar(i: number, c: Condicion) {
     set(condiciones.map((prev, j) => (j === i ? c : prev)));
   }
@@ -92,6 +99,7 @@ export function FiltroWall({
   const camposUsados = new Set(condiciones.map((c) => c.campo));
   const textoDisponible = CAMPOS_TEXTO.filter((c) => !camposUsados.has(c));
   const rangoDisponible = CAMPOS_RANGO.filter((c) => !camposUsados.has(c));
+  const enNotionDisponible = !camposUsados.has('en_notion');
 
   return (
     <div className="min-h-0 min-w-0 overflow-y-auto border-r border-line px-[18px] py-5">
@@ -207,9 +215,27 @@ export function FiltroWall({
         ))}
       </div>
 
-      {(textoDisponible.length > 0 || rangoDisponible.length > 0) && (
+      {(textoDisponible.length > 0 || rangoDisponible.length > 0 || enNotionDisponible) && (
         <div className="mt-[18px] flex flex-col gap-[11px] border-t border-line pt-4">
           <div className="text-[12px] text-faint">Añadir filtro manual</div>
+          {enNotionDisponible && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => agregarEnNotion(false)}
+                className="flex-1 rounded-lg border border-dashed border-line-strong px-[11px] py-2 text-center text-[12px] text-ink-soft hover:border-accent/40 hover:text-ink"
+              >
+                Fuera de Notion
+              </button>
+              <button
+                type="button"
+                onClick={() => agregarEnNotion(true)}
+                className="flex-1 rounded-lg border border-dashed border-line-strong px-[11px] py-2 text-center text-[12px] text-ink-soft hover:border-accent/40 hover:text-ink"
+              >
+                En Notion
+              </button>
+            </div>
+          )}
           {textoDisponible.map((c) => (
             <button
               key={c}

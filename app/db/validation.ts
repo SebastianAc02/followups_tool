@@ -114,6 +114,10 @@ export const CAMPOS_SEGMENTO = [
   'owner',
   'usuarios', // empresa_usuarios.usuarios_estimados (via LEFT JOIN)
   'rol', // contacto.cargo_categoria: la empresa tiene >=1 contacto con ese rol (EXISTS)
+  // Task 15: empresa.notion_page_id. es_null = nunca entro al CRM (lead muerto que la
+  // Task 7 ya saca del embudo); no_null = si esta en Notion. Segmentacion, no embudo:
+  // aca es donde vive filtrar "cazar leads que nunca entraron al CRM" (causa raiz 1).
+  'en_notion',
 ] as const;
 export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
 

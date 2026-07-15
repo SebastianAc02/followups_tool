@@ -106,20 +106,40 @@ export function CopilotoPanel({ estadoActual, total, onResultado }: Props) {
       </div>
 
       <div className="shrink-0 border-t border-line p-[14px_18px]">
-        <div className="flex items-center gap-2 rounded-[10px] border border-line-strong bg-surface px-3 py-[10px]">
-          <span className="text-[14px] text-accent">✦</span>
-          <input
+        <div className="flex items-end gap-2 rounded-[10px] border border-line-strong bg-surface px-3 py-[10px]">
+          <span className="text-[14px] text-accent pb-[3px]">✦</span>
+          <textarea
             value={frase}
             onChange={(e) => setFrase(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && traducir()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                traducir();
+              }
+            }}
             placeholder="Afina el segmento..."
-            className="flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-faint"
+            rows={1}
+            // Crece con el contenido (Task 14): antes era una sola linea y no se
+            // alcanzaba a leer lo que uno escribia. Se resetea a rows=1 (scrollHeight
+            // minimo) antes de medir, si no la altura solo puede subir, nunca bajar
+            // cuando se borra texto.
+            ref={(el) => {
+              if (!el) return;
+              el.style.height = 'auto';
+              el.style.height = `${el.scrollHeight}px`;
+            }}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              el.style.height = 'auto';
+              el.style.height = `${el.scrollHeight}px`;
+            }}
+            className="flex-1 resize-none bg-transparent text-[13px] text-ink outline-none placeholder:text-faint leading-[1.4] max-h-40 overflow-y-auto"
           />
           <button
             type="button"
             onClick={traducir}
             disabled={!frase.trim() || pendiente}
-            className="rounded-full bg-accent px-3 py-1 text-[12px] font-semibold text-bg disabled:opacity-50"
+            className="rounded-full bg-accent px-3 py-1 text-[12px] font-semibold text-bg disabled:opacity-50 shrink-0"
           >
             {pendiente ? '…' : 'Traducir'}
           </button>

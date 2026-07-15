@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { auth } from '../lib/auth';
-import { crearMiembroYSetOwner, crearMiembroVisitante } from '../db/organizacion-repository';
+import { crearMiembroYSetOwner, crearMiembroVisitante, borrarUsuario } from '../db/organizacion-repository';
 import { OWNERS_ONEPAY } from './owners';
 
 // V6: id 1 = Onepay, sembrada por scripts/seed_organizacion.ts. Una sola organizacion por
@@ -39,15 +39,25 @@ export async function registrarUsuarioAction(input: unknown): Promise<RegistroRe
   }
 
   if (datos.tipo === 'visitante') {
-    crearMiembroVisitante(datos.nombreVisitante, userId);
-    return { ok: true };
+    try {
+      crearMiembroVisitante(datos.nombreVisitante, userId);
+      return { ok: true };
+    } catch (e) {
+      // signUpEmail ya dejo al usuario autenticado antes de esto. Si la membresia truena,
+      // sin esta compensacion quedaria sin organizacion para siempre: requireSession lo
+      // entierra con un throw y el correo ya usado bloquea reintentar.
+      console.error('registrarUsuarioAction: fallo crearMiembroVisitante, revirtiendo usuario', e);
+      borrarUsuario(userId);
+      return { ok: false, error: 'No se pudo completar el registro. Intenta de nuevo.' };
+    }
   }
 
   const creado = crearMiembroYSetOwner(ID_ORGANIZACION_ONEPAY, datos.ownerElegido, datos.ownerElegido, userId);
   if (!creado) {
-    // El nombre ya esta reclamado (los 4 reales ya se registraron, por ejemplo). La cuenta
-    // ya existe sin owner: session-user.ts cae al name (cola vacia, no crash), y sin
-    // membresia requireSession la rechaza -- no queda en un estado a medias silencioso.
+    // El nombre ya esta reclamado (los 4 reales ya se registraron, por ejemplo). Ademas de
+    // rechazar, borramos el usuario recien creado: si no, queda autenticado sin membresia
+    // y requireSession lo entierra (500 permanente, sin poder reintentar con ese correo).
+    borrarUsuario(userId);
     return {
       ok: false,
       error: 'Ese nombre ya tiene una cuenta. Si eres tú y perdiste el acceso, habla con Sebastián.',

@@ -178,6 +178,17 @@ export function crearMiembroVisitante(nombreVisitante: string, idUsuario: string
   });
 }
 
+// Compensacion del registro no atomico (Task 1, plan 2026-07-15-embudo-real-y-registro):
+// signUpEmail (better-auth) y la creacion de membresia son dos escrituras separadas, no
+// una transaccion unica -- better-auth es dueno de su propia escritura a `user` y no se
+// puede meter dentro de nuestra tx de Drizzle. Si el paso de membresia falla o revienta
+// DESPUES de que el usuario ya existe, este usuario queda autenticado y sin organizacion:
+// requireSession lo entierra con un throw (500 permanente) y no puede reintentar porque
+// el correo ya esta tomado. Borrarlo aqui deja el correo libre para un segundo intento.
+export function borrarUsuario(idUsuario: string, db: DbInstancia = dbSingleton): void {
+  db.delete(user).where(eq(user.id, idUsuario)).run();
+}
+
 // Helper solo para tests: crea una instancia Drizzle apuntando a un archivo de prueba, con
 // el MISMO shape de schema que el singleton real (schema + authSchema) para que el tipo
 // DbInstancia calce sin castear.

@@ -6,6 +6,9 @@
 //   --experimental-loader ./scripts/resolve-ts-ext.mjs scripts/verificar_invariantes.ts
 
 import Database from 'better-sqlite3';
+import { crearNotionExportAdapter } from '../app/adapters/notion/notionExportAdapter.ts';
+import { mapearEstadoNotion } from '../app/core/reconciliacion/mapeoEstados.ts';
+import { embudoPipeline } from '../app/db/repository.ts';
 
 const DB_PATH = process.env.ISPS_DB_PATH ?? '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db';
 const db = new Database(DB_PATH, { readonly: true });
@@ -17,12 +20,39 @@ function n(sql: string): number {
   return (db.prepare(sql).get() as { n: number }).n;
 }
 
+// Task 8 (plan 2026-07-15-embudo-real-y-registro): el criterio de aceptacion de Sebastian
+// (el embudo cuadra con el CSV de Notion, no con lo que la query cuente) convertido en
+// codigo. Mismo CSV y adaptador que scripts/diff_notion_db.ts (herramienta real del
+// repo, no un match por nombre ad-hoc -- ver memoria verificar-contra-conteo-manual).
+const DIR_NOTION_CSV = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline';
+const NOTION_CSV = DIR_NOTION_CSV + ' f5e2be53a1514d42ac6db30fd7c5202a_all.csv';
+
+function conteoNotionPorEstado(): Record<string, number> {
+  const out: Record<string, number> = {};
+  const empresas = crearNotionExportAdapter(DIR_NOTION_CSV, NOTION_CSV).leerEmpresas().filter((e) => e.nombre.trim());
+  for (const e of empresas) {
+    let estado: string;
+    try {
+      estado = mapearEstadoNotion(e.estado.trim());
+    } catch {
+      continue; // estado vacio o fuera de vocabulario: no comparable (igual que diff_notion_db.ts)
+    }
+    out[estado] = (out[estado] ?? 0) + 1;
+  }
+  return out;
+}
+
 const checks: { id: string; desc: string; valor: number; meta: number }[] = [
   {
     id: 'A',
     desc: 'filas fundidas (opera_bajo_id) todavia en la organizacion',
     valor: n('select count(*) n from empresa where opera_bajo_id is not null and organizacion_activa_id=1'),
-    meta: 23, // no baja: la fila sigue en la DB a proposito (auditoria). Lo que cambia es que la UI ya no la lee.
+    // Ya no es un contador fijo: Bloque 3 (2026-07-15) probo que puede subir (Task 10
+    // funde EMCALI) o bajar (Task 9 deshace CELSIA; luego se revirtio TAMBIEN el merge de
+    // EMCALI-Thomas al descubrir que era satelite_de, no fundida -- ver identidad_decision).
+    // Informativo: cada cambio debe tener su fila en sync_cambios o identidad_decision,
+    // pero el numero en si ya no es un blanco fijo.
+    meta: -1,
   },
   {
     id: 'C',
@@ -82,6 +112,22 @@ const checks: { id: string; desc: string; valor: number; meta: number }[] = [
     meta: -1, // informativo: baja a 0 visible cuando L se arregla (dejan de estar ocultos).
   },
 ];
+
+{
+  const notionPorEstado = conteoNotionPorEstado();
+  const dbPorEstado = Object.fromEntries(embudoPipeline(1).map((c) => [c.estado, c.total]));
+  const estados = new Set([...Object.keys(notionPorEstado), ...Object.keys(dbPorEstado)]);
+  const diffs = [...estados]
+    .map((estado) => ({ estado, notion: notionPorEstado[estado] ?? 0, db: dbPorEstado[estado] ?? 0 }))
+    .filter((d) => d.notion !== d.db);
+
+  checks.push({
+    id: 'M',
+    desc: `embudo cuadra con el CSV de Notion, por estado${diffs.length ? ' -- ' + diffs.map((d) => `${d.estado}: notion=${d.notion} db=${d.db}`).join(', ') : ''}`,
+    valor: diffs.length,
+    meta: 0,
+  });
+}
 
 console.log(`Invariantes contra ${DB_PATH} (${HOY})\n`);
 let fallidos = 0;

@@ -48,6 +48,7 @@ import {
   organizacionMiembro,
   empresaClasificacion,
   empresaCategoriaView,
+  identidadDecision,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -204,6 +205,14 @@ const ultimoResultadoNoLlego = sql`COALESCE((SELECT ${toque.resultado} FROM ${to
 // toques (T4 ya los movio). Cualquier query que liste o cuente empresas debe incluir
 // este predicado; no hacerlo fue el bug de 'Global IP' duplicado.
 const EMPRESA_VIVA = isNull(empresa.operaBajoId);
+
+// EN_PIPELINE (Task 7, plan 2026-07-15-embudo-real-y-registro): una empresa esta en el
+// pipeline si de verdad se trabajo -- llego por Notion (notion_page_id) o tiene al menos
+// un toque. Sin esto, 44 cuentas con estado_notion pero CERO toques y fuera de Notion
+// (su estado viene del seed del 30-jun, no de trabajo real) inflaban el embudo: 95
+// firma_pago en vez de 80, 34 contacto_iniciado en vez de 15. Al primer toque entran
+// solas (el EXISTS se vuelve true), sin backfill manual.
+const EN_PIPELINE = sql`(${empresa.notionPageId} IS NOT NULL OR EXISTS (SELECT 1 FROM ${toque} WHERE ${toque.idEmpresa} = ${empresa.idEmpresa}))`;
 
 export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacion: number) {
   const condiciones = [
@@ -1331,6 +1340,7 @@ const COLUMNA_SEGMENTO: Record<Exclude<CampoSegmento, 'rol'>, { col: SQLiteColum
   departamento: { col: empresa.departamento, numerico: false },
   owner: { col: empresa.owner, numerico: false },
   usuarios: { col: empresaUsuarios.usuariosEstimados, numerico: true },
+  en_notion: { col: empresa.notionPageId, numerico: false },
 };
 
 // Coerce los valores de una condicion a numero cuando el campo es numerico (prioridad,
@@ -4644,7 +4654,7 @@ export function embudoPipeline(
   filtros?: { owner?: string; idCampana?: string },
 ): ConteoEtapa[] {
   const estadoExpr = sql<string>`coalesce(${empresa.estadoNotion}, ${CLAVE_SIN_ETAPA})`;
-  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA];
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE];
   if (filtros?.owner) {
     condiciones.push(eq(empresa.owner, filtros.owner));
   }
@@ -4654,29 +4664,44 @@ export function embudoPipeline(
     );
   }
 
+  // Task 6: corte ISP vs ESP (Sebastian, 2026-07-15 -- "cuanta plata me esta entrando por
+  // ESPs y cuanta por ISP"). categoriaBucket colapsa las 6 categorias de la vista a 2:
+  // 'isp' es el producto ISP normal; todo lo demas (carrier/utility/telco_grande/
+  // extranjero/no_isp/sae_plus) es 'esp' -- el segmento de Thomas. Los usuarios se suman
+  // POR bucket, nunca en un total unico: asi ENEL (millones de suscriptores electricos)
+  // no infla el numero de ISP (causa raiz 1 del plan).
+  const categoriaBucketExpr = sql<string>`case when ${empresaCategoriaView.categoria} = 'isp' then 'isp' else 'esp' end`;
+
   const filas = db
     .select({
       estado: estadoExpr,
+      categoriaBucket: categoriaBucketExpr,
       total: sql<number>`count(*)`,
       usuarios: sql<number | null>`sum(${empresaUsuarios.usuariosEfectivos})`,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    // D (2026-07-15): la categoria real sale de la vista, no de empresa.categoria (la
-    // columna cruda no conoce los vetos de empresa_clasificacion). atacable=1 = ISP
-    // genuino: deja fuera carrier, utility, no_isp, telco_grande, extranjero y sae_plus.
-    // Sin esto el embudo contaba a Claro, Tigo, WOM y los acueductos, y sumaba sus
-    // millones de suscriptores al total de usuarios.
     .innerJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
-    .where(and(...condiciones, eq(empresaCategoriaView.atacable, 1)))
-    .groupBy(estadoExpr)
+    .where(and(...condiciones))
+    .groupBy(estadoExpr, categoriaBucketExpr)
     .all();
 
-  return filas.map((f) => ({
-    estado: f.estado,
-    total: Number(f.total),
-    usuarios: f.usuarios === null ? null : Number(f.usuarios),
-  }));
+  const porEstado = new Map<string, ConteoEtapa>();
+  for (const f of filas) {
+    const total = Number(f.total);
+    const usuarios = f.usuarios === null ? null : Number(f.usuarios);
+    const bucket = f.categoriaBucket === 'isp' ? 'isp' : 'esp';
+
+    let fila = porEstado.get(f.estado);
+    if (!fila) {
+      fila = { estado: f.estado, total: 0, usuarios: null, porCategoria: { isp: { total: 0, usuarios: null }, esp: { total: 0, usuarios: null } } };
+      porEstado.set(f.estado, fila);
+    }
+    fila.total += total;
+    fila.usuarios = fila.usuarios === null && usuarios === null ? null : (fila.usuarios ?? 0) + (usuarios ?? 0);
+    fila.porCategoria![bucket] = { total, usuarios };
+  }
+  return [...porEstado.values()];
 }
 
 // Owners distintos con al menos una empresa en la organizacion (para el chip de
@@ -4711,6 +4736,7 @@ export function empresasDeEtapa(
   const condiciones = [
     eq(empresa.organizacionActivaId, idOrganizacion),
     estado === CLAVE_SIN_ETAPA ? isNull(empresa.estadoNotion) : eq(empresa.estadoNotion, estado),
+    EN_PIPELINE,
   ];
   if (filtros?.owner) {
     condiciones.push(eq(empresa.owner, filtros.owner));
@@ -4987,6 +5013,47 @@ export function fundirEmpresas(idSobrevive: string, idsAbsorbidos: string[], nom
       .where(eq(empresa.idEmpresa, idSobrevive))
       .run();
   });
+}
+
+export type VeredictoIdentidad = 'mismo' | 'distinto' | 'satelite_de';
+
+// Task 12: complemento de fundirEmpresas/empresaAlias. Un veredicto 'distinto' o
+// 'satelite_de' NO tiene un flujo de datos propio (a diferencia de 'mismo', que dispara
+// fundirEmpresas) -- solo se registra para que diff_notion_db.ts / el matcher dejen de
+// re-proponer un par que Sebastian ya resolvio. decididoPor siempre humano.
+export function registrarDecisionIdentidad(
+  a: string,
+  b: string,
+  veredicto: VeredictoIdentidad,
+  decididoPor: string,
+  nota?: string,
+): void {
+  db.insert(identidadDecision)
+    .values({ a, b, veredicto, decididoPor, nota: nota ?? null, createdAt: new Date().toISOString() })
+    .run();
+}
+
+// Busca una decision ya tomada para el par (a,b) SIN importar el orden -- el mismo par
+// puede llegar como (a,b) o (b,a) segun quien lo presente (Notion vs DB).
+export function decisionIdentidadDelPar(a: string, b: string): VeredictoIdentidad | null {
+  const fila = db
+    .select({ veredicto: identidadDecision.veredicto })
+    .from(identidadDecision)
+    .where(
+      sql`(${identidadDecision.a} = ${a} AND ${identidadDecision.b} = ${b}) OR (${identidadDecision.a} = ${b} AND ${identidadDecision.b} = ${a})`,
+    )
+    .get();
+  return (fila?.veredicto as VeredictoIdentidad | undefined) ?? null;
+}
+
+// Marca idEmpresa como satelite de idEmpresaMatriz: a diferencia de fundirEmpresas,
+// ambas filas quedan VIVAS (cada una con su propio deal) -- solo se anota la relacion
+// para que la UI la pueda mostrar y el matcher deje de confundirlas.
+export function marcarSatelite(idEmpresa_: string, idEmpresaMatriz: string): void {
+  db.update(empresa)
+    .set({ idEmpresaMatriz, updatedAt: new Date().toISOString() })
+    .where(eq(empresa.idEmpresa, idEmpresa_))
+    .run();
 }
 
 // T5: enlaza el page_id de Notion a una empresa ya existente en la DB. Idempotente

@@ -23,6 +23,7 @@ export function crearDbPrueba() {
       nombre_normalizado TEXT NOT NULL,
       nombre_legal TEXT,
       opera_bajo_id TEXT,
+      id_empresa_matriz TEXT,
       ciudad_principal TEXT,
       departamento TEXT,
       es_cliente INTEGER NOT NULL DEFAULT 0,
@@ -138,6 +139,16 @@ export function crearDbPrueba() {
       valor TEXT NOT NULL,
       actualizado_por TEXT,
       updated_at TEXT
+    );
+
+    CREATE TABLE identidad_decision (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      a TEXT NOT NULL,
+      b TEXT NOT NULL,
+      veredicto TEXT NOT NULL CHECK (veredicto IN ('mismo','distinto','satelite_de')),
+      decidido_por TEXT NOT NULL,
+      nota TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE empresa_alias (
