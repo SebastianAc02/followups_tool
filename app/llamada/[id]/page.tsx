@@ -108,7 +108,6 @@ export default async function Llamada({
                 usuarios: ctx.emp.usuarios ?? null,
                 crm: ctx.emp.crm ?? null,
                 pasarela: ctx.emp.pasarela ?? null,
-                recaudo: null,
               })}
             />
           )}

@@ -1,15 +1,17 @@
-// Dominio del Toque 1: qué de la calificación "imprescindible" ya tengo y qué me toca
-// preguntar en la llamada. Lógica pura (sin DB): el server component le pasa los valores
-// crudos de la cuenta y recibe la tabla lista para pintar. "recaudo" no es columna de
-// empresa todavía (ver Tarea 2, decisión de esquema): entra como imprescindible del guion
-// de frío aunque hoy siempre llegue vacío.
-export type CampoCalificacion = 'usuarios' | 'crm' | 'pasarela' | 'recaudo';
+// Dominio del Toque 1: qué de los datos duros de la cuenta ya tengo y qué me toca sacar en la
+// llamada. Lógica pura (sin DB): el server component le pasa los valores crudos y recibe la
+// tabla lista para pintar.
+//
+// "Cómo hacen el recaudo" NO vive acá (2026-07-15). Es un fact dentro de notas_discovery, no un
+// campo hermano de estos tres: se dicta y la IA lo extrae, no se teclea en una casilla. Estos
+// tres son los imprescindibles que el protocolo del CRM nombra y los únicos con columna propia
+// en empresa, que es lo que les permite apagarse cuando ya los sé.
+export type CampoCalificacion = 'usuarios' | 'crm' | 'pasarela';
 
 export const CAMPOS_CALIFICACION: { campo: CampoCalificacion; label: string }[] = [
   { campo: 'usuarios', label: 'Número de usuarios' },
   { campo: 'pasarela', label: 'Pasarela actual' },
   { campo: 'crm', label: 'CRM / Software' },
-  { campo: 'recaudo', label: 'Cómo hacen el recaudo' },
 ];
 
 export type ItemCalificacion = {
@@ -25,7 +27,6 @@ type Entrada = {
   usuarios: number | null;
   crm: string | null;
   pasarela: string | null;
-  recaudo: string | null;
 };
 
 function formatear(campo: CampoCalificacion, valor: number | string | null): string | null {

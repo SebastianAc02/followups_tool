@@ -9,14 +9,14 @@ import { actualizarCampoCalificacionAction } from "./actions";
 // me toca preguntar en la llamada. La logica de que cuenta como "tengo" vive en
 // app/core/calificacion.ts (dominio puro) -- este componente solo pinta el resultado.
 //
-// Items PREGUNTAR editables inline (2026-07-08): usuarios/crm/pasarela SI tienen donde
-// guardarse (columnas reales, ver actualizarCampoCalificacion en el repository), asi que
-// un click abre un cajon de texto ahi mismo -- sin pasar por el formulario de Registrar
-// toque, porque este dato no depende de haber calificado un resultado de llamada.
-// "Cómo hacen el recaudo" se queda sin click a proposito -- no tiene columna en empresa
-// todavia (decision de esquema aparte, ver docs/superpowers/specs): prometer un click
-// que no guarda nada seria peor que dejarlo como esta.
-const CAMPOS_CON_INPUT = new Set<CampoCalificacion>(["usuarios", "crm", "pasarela"]);
+// Items PREGUNTAR editables inline (2026-07-08): los tres tienen donde guardarse (columnas
+// reales, ver actualizarCampoCalificacion en el repository), asi que un click abre un cajon de
+// texto ahi mismo -- sin pasar por el formulario de Registrar toque, porque este dato no depende
+// de haber calificado un resultado de llamada.
+//
+// Ya no hay Set de excepciones (2026-07-15): existia solo para dejar "Cómo hacen el recaudo" sin
+// click, porque no tenia columna donde caer. Ese campo se fue a notas_discovery, asi que TODOS
+// los campos que quedan son editables y la rama muerta del ternario sobra.
 
 export function CalificacionChecklist({ idEmpresa, calificacion }: { idEmpresa: string; calificacion: Calificacion }) {
   const router = useRouter();
@@ -70,7 +70,7 @@ export function CalificacionChecklist({ idEmpresa, calificacion }: { idEmpresa: 
               <span className="flex-1 text-[12.5px] text-muted">{item.label}</span>
               <span className="font-toque-mono text-[13px] font-semibold text-ink">{item.valor}</span>
             </div>
-          ) : CAMPOS_CON_INPUT.has(item.campo) && editando === item.campo ? (
+          ) : editando === item.campo ? (
             <div key={item.campo} className="flex flex-col gap-1.5 rounded-lg border border-dashed border-pending bg-pending-soft px-3 py-2">
               <span className="text-[12.5px] font-semibold text-pending">{item.label}</span>
               <div className="flex items-center gap-1.5">
@@ -106,7 +106,7 @@ export function CalificacionChecklist({ idEmpresa, calificacion }: { idEmpresa: 
               </div>
               {error && <p className="text-[11px] text-overdue">{error}</p>}
             </div>
-          ) : CAMPOS_CON_INPUT.has(item.campo) ? (
+          ) : (
             <button
               type="button"
               key={item.campo}
@@ -118,15 +118,6 @@ export function CalificacionChecklist({ idEmpresa, calificacion }: { idEmpresa: 
               <span className="flex-1 text-[12.5px] font-semibold text-pending">{item.label}</span>
               <span className="font-toque-mono text-[9px] font-semibold text-pending">PREGUNTAR</span>
             </button>
-          ) : (
-            <div
-              key={item.campo}
-              className="flex items-center gap-2 rounded-lg border border-dashed border-pending bg-pending-soft px-3 py-2"
-            >
-              <span className="h-4 w-4 shrink-0 rounded-full border border-pending" aria-hidden="true" />
-              <span className="flex-1 text-[12.5px] font-semibold text-pending">{item.label}</span>
-              <span className="font-toque-mono text-[9px] font-semibold text-pending">PREGUNTAR</span>
-            </div>
           ),
         )}
       </div>
