@@ -1,7 +1,14 @@
 'use server';
 
-import { previsualizarInscripcionCampana, type FilaPreviewInscripcion } from '../../../db/repository';
-import { requireSession } from '../../../lib/session';
+import { revalidatePath } from 'next/cache';
+import {
+  previsualizarInscripcionCampana,
+  sacarInscripcionDeCampana,
+  datosSecuenciaExterna,
+  type FilaPreviewInscripcion,
+} from '../../../db/repository';
+import { requireSession, requireEscritura } from '../../../lib/session';
+import { crearRegistroEnvio } from '../../../adapters/registro-envio';
 
 // Fase 6 (V4 Destinatarios): action de solo lectura, sin escribir nada -- el preview
 // que ve Sebastian en pantalla es de usar y tirar. inscribirCampana (Repository)
@@ -19,4 +26,23 @@ export async function previsualizarInscripcionAction(idCampana: number): Promise
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'No se pudo calcular el preview de inscripción' };
   }
+}
+
+// Baja manual: corta local SIEMPRE (pausa la inscripcion) y ademas saca de la secuencia
+// externa de Apollo si aplica. Mismo aislamiento que llego-respuesta.ts: si Apollo falla,
+// el corte local ya quedo hecho, no se revierte.
+export async function sacarContactoDeCampanaAction(idInscripcion: number, idCampana: number): Promise<void> {
+  await requireEscritura();
+  sacarInscripcionDeCampana(idInscripcion);
+
+  const datos = datosSecuenciaExterna(idInscripcion);
+  const correo = crearRegistroEnvio().correo;
+  if (datos?.proveedorCampanaId && datos.email && correo) {
+    try {
+      await correo.sacarDestinatario(datos.proveedorCampanaId, datos.email);
+    } catch {
+      // Apollo caido no revierte el corte local (mismo criterio que el worker).
+    }
+  }
+  revalidatePath(`/campanas/${idCampana}/destinatarios`);
 }

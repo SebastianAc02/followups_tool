@@ -4264,6 +4264,29 @@ export function pausarInscripcion(idInscripcion: number, motivo: string) {
     .run();
 }
 
+// Baja manual de una empresa de una campaña viva (Sebastian saca a Felipe/Camilo antes
+// de que les llegue el siguiente paso). Reusa el mismo corte que la respuesta automatica:
+// pausada sale sola de agendaEnSeco (solo lee estado='activa'). El corte de la secuencia
+// externa en Apollo lo hace la action (necesita async + el adaptador), no esta funcion.
+export function sacarInscripcionDeCampana(idInscripcion: number) {
+  pausarInscripcion(idInscripcion, 'baja manual desde destinatarios');
+}
+
+// Datos para cortar la secuencia externa (Apollo) de una inscripcion puntual: el
+// proveedorCampanaId (id de Apollo) y el email del destinatario. Gemelo puntual de
+// inscripcionesActivasDeEmpresa, pero por inscripcion en vez de por empresa.
+export function datosSecuenciaExterna(idInscripcion: number): { proveedorCampanaId: string | null; email: string | null } | null {
+  const fila = db
+    .select({ proveedorCampanaId: campana.proveedorCampanaId, email: contacto.email })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(destinatario, eq(destinatario.idInscripcion, inscripcion.idInscripcion))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .where(eq(inscripcion.idInscripcion, idInscripcion))
+    .get();
+  return fila ?? null;
+}
+
 export function marcarDestinatarioSalio(idDestinatario: number) {
   db.update(destinatario).set({ estado: 'salio' }).where(eq(destinatario.idDestinatario, idDestinatario)).run();
 }

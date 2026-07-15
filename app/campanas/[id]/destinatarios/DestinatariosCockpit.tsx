@@ -111,7 +111,7 @@ export function DestinatariosCockpit({
       </header>
 
       {inscritasReales ? (
-        <InscritasTable inscritas={inscritasReales} mostrarCampana={false} />
+        <InscritasTable inscritas={inscritasReales} mostrarCampana={false} idCampana={campana.idCampana} />
       ) : (
         <>
           {conAjuste.length > 0 || bloqueadas.length > 0 ? (
