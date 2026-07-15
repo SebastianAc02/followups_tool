@@ -476,6 +476,10 @@ export function getCuenta(id: string, idOrganizacion: number) {
       resultado: toque.resultado,
       quePaso: toque.quePaso,
       transcriptId: toque.transcriptId,
+      // La UI separa historial importado de Notion vs toques hechos EN la herramienta
+      // (esToqueDeLaHerramienta en core/fecha-toque.ts). Es la columna, no el formato
+      // de la fecha, la que sabe de donde salio cada toque.
+      fuente: toque.fuente,
     })
     .from(toque)
     .where(and(eq(toque.idEmpresa, id), eq(toque.idOrganizacion, idOrganizacion)))
@@ -676,8 +680,14 @@ export type ContadoresHoy = {
 
 // Contadores del día (F0.3 mínimo): toques de HOY de un owner, por canal y por resultado.
 // Solo lectura. El toque no tiene owner directo, se filtra vía JOIN a empresa.owner (mismo
-// filtro que colaDelDia). `toque.fecha` es un datetime ISO completo, se compara solo la
-// parte de fecha con substr(fecha, 1, 10).
+// filtro que colaDelDia).
+//
+// `toque.fecha` esta CANONIZADA a 'YYYY-MM-DD' o ISO completo, asi que substr(fecha, 1, 10)
+// es seguro. No siempre lo fue: hasta el 2026-07-15 convivian 5 formatos (incluido
+// 'June 18, 2026' y '24-jun 2026' del import de Notion) y este substr no los entendia --
+// no lanzaba, solo no contaba, y 67 toques de historial importado nunca aparecieron en los
+// contadores. Se canonizo el dato con scripts/normalizar-fechas-toque.ts. Todo escritor
+// nuevo DEBE mantener la invariante: ver app/core/fecha-toque.ts.
 export function contadoresHoy(hoy: string, owner: string | undefined, idOrganizacion: number): ContadoresHoy {
   const condiciones = [
     eq(toque.idOrganizacion, idOrganizacion),

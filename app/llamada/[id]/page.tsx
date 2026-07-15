@@ -52,6 +52,10 @@ export default async function Llamada({
 
   const vista = decidirVista(ctx, sp);
 
+  // El dia se resuelve UNA vez aca (server) y baja como prop: el riel de toques marca
+  // "hoy"/"ayer" contra este valor. Mismo criterio que /cola y /panel.
+  const hoy = new Date().toISOString().slice(0, 10);
+
   // Tarea 7: receipt post-submit. registrarToqueAction redirige aca con ?vista=confirmacion
   // tras guardar -- esto SOLO lee lo que ya se persistio (nada de sync nuevo). El resumen de
   // Granola no se cachea hoy en `toque` (solo el puntero transcriptId/Url si ya se confirmo
@@ -98,6 +102,7 @@ export default async function Llamada({
             <LlamadaCard
               ctx={ctx}
               urlNotion={urlNotionDe(ctx)}
+              hoy={hoy}
               idPasoInscripcion={ctx.idPasoInscripcionActivo}
               calificacion={calificar({
                 usuarios: ctx.emp.usuarios ?? null,
@@ -124,7 +129,7 @@ export default async function Llamada({
       <SidebarFrame>
         <div className="wrap">
           <BackLink href="/cola" label="Cola" />
-          <ToqueShell ctx={ctx} urlNotion={urlNotionDe(ctx)} canal="correo">
+          <ToqueShell ctx={ctx} urlNotion={urlNotionDe(ctx)} hoy={hoy} canal="correo">
             <EditorCorreo
               ctx={ctx}
               idEmpresa={ctx.emp.id}
@@ -143,7 +148,7 @@ export default async function Llamada({
     <SidebarFrame>
       <div className="wrap">
         <BackLink href="/cola" label="Cola" />
-        <ToqueShell ctx={ctx} urlNotion={urlNotionDe(ctx)} canal="whatsapp">
+        <ToqueShell ctx={ctx} urlNotion={urlNotionDe(ctx)} hoy={hoy} canal="whatsapp">
           <EditorWhatsapp
             ctx={ctx}
             idEmpresa={ctx.emp.id}

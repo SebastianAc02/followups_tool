@@ -45,9 +45,12 @@ export function LlamadaCard({
   urlNotion,
   idPasoInscripcion,
   calificacion,
+  hoy,
 }: {
   ctx: ContextoToque;
   urlNotion: string | null;
+  // 'YYYY-MM-DD' del server, para el riel de toques (ver SecuenciaRail).
+  hoy: string;
   // paso_inscripcion pendiente de HOY si esta llamada viene de una cadencia (Tarea 12,
   // mismo patron que EditorCorreo/EditorWhatsapp) -- lo necesita CapturaLlamada para
   // cerrar el paso cuando el owner guarda el toque real. null en un toque suelto.
@@ -93,7 +96,7 @@ export function LlamadaCard({
 
       {/* Two-column body */}
       <div className="flex flex-col md:grid md:grid-cols-[192px_1fr]">
-        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} estado={emp?.estado} />
+        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} estado={emp?.estado} hoy={hoy} />
 
         <PreguntarProvider>
           <div className="flex flex-col gap-4 p-5">

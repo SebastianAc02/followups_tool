@@ -14,27 +14,27 @@ export function marcarModoPrueba(valor: boolean): void {
   store.enterWith(valor);
 }
 
-// Sin default a proposito: si nadie declaro el modo, esto revienta en vez de adivinar.
+// Default REAL: sin marca, esta request va contra isps.db.
 //
-// Las dos alternativas eran elegir un default con `??`, y las dos fallan en silencio:
-// `?? false` (real) hace que una request que perdio su marca escriba en isps.db y le
-// mande correo real a un ISP; `?? true` (prueba) hace que cualquier script que no marque
-// el ALS escriba en la base equivocada sin que nadie se entere. Las dos compran comodidad
-// hoy a cambio de un fallo mudo despues, y en este repo eso ya salio caro dos veces
-// (listarCampanas() sin filtro de organizacion, contadoresHoy perdiendo 70 filas).
+// Aca hubo un throw ("declara el modo o reviento") y se probo en vivo: NO funciona en este
+// programa. Dos razones, las dos verificadas el 2026-07-15:
+//   1. No hay UN arranque donde declarar. Un servidor Next tiene decenas de entradas que no
+//      pasan por requireSession -- webhook de Evolution, pixel y clics de Apollo, callback
+//      de Gmail, el worker -- y RSC ademas renderiza componentes en paralelo. El throw
+//      reventaba la pagina en el navegador.
+//   2. Peor: era decorativo. marcarModoPrueba() usa enterWith, y cualquier modulo que la
+//      llame a nivel de modulo marca el CONTEXTO RAIZ del proceso; de ahi en adelante
+//      getStore() ya nunca da undefined para nadie y el throw no puede dispararse. O sea
+//      el default terminaba siendo false igual, pero por accidente.
 //
-// El precio del throw es tocar una vez las 9 entradas que no pasan por requireSession
-// (los scripts de scripts/*.ts): cada una declara su modo con marcarModoPrueba(false).
-// A cambio, un script nuevo que se olvide revienta en su primer acceso a la DB, no tres
-// semanas despues con datos mezclados.
+// `false` y no `true` porque es el comportamiento que el repo siempre tuvo: todo va a la
+// real salvo que alguien pida lo contrario. Y las entradas sin sesion (webhook, pixel,
+// worker) pertenecen a la base de verdad, asi que caer a real es lo correcto para ellas.
+//
+// Lo que protege de verdad NO es este default, es que requireSession marque el modo en
+// TODA request con sesion (app/lib/session.ts) y que el ALS no se filtre entre requests
+// concurrentes -- eso lo cubre el test de app/db/modo-prueba-proxy.test.ts. Si ese test se
+// pone rojo, el modo prueba miente y hay que migrar a run().
 export function esModoPrueba(): boolean {
-  const marca = store.getStore();
-  if (marca === undefined) {
-    throw new Error(
-      'Contexto sin modo declarado: llama marcarModoPrueba(false) al arrancar (los scripts) ' +
-        'o entra por requireSession() (las requests). No hay default: elegir uno a ciegas ' +
-        'escribe en la base equivocada en silencio.',
-    );
-  }
-  return marca;
+  return store.getStore() === true;
 }

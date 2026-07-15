@@ -20,13 +20,17 @@ export function FunnelCanvas({ embudo, owner, campana }: { embudo: Embudo; owner
       <div className="rounded-2xl border border-line-card bg-pipeline-card overflow-hidden">
         <div className="flex flex-wrap gap-3 px-4 py-3 border-b border-line">
           {FUNNEL_ETAPAS.map((e) => (
-            <span key={e.estado} className="flex items-center gap-1.5 text-[12px] text-muted">
+            <span key={e.estado} className="flex items-center gap-1.5 text-[12.5px] text-ink-soft">
               <span className={`w-2.5 h-2.5 rounded-sm ${e.colorClass}`} />
               {e.label}
             </span>
           ))}
         </div>
-        <div className="max-w-xl mx-auto px-6 py-8">
+        {/* max-w-xl (576px) dejaba la banda mas angosta en ~69px utiles y los numeros se
+            cortaban. 4xl (896px) + el taper repartido de FunnelBand dan aire real. Se
+            angosta a 2xl solo cuando el panel lateral de etapa esta abierto y comparte
+            el ancho. */}
+        <div className={cn('mx-auto px-6 py-8', etapaSeleccionada ? 'max-w-2xl' : 'max-w-4xl')}>
           <div className="flex flex-col">
             {embudo.bandas.map((b, i) => (
               <FunnelBand

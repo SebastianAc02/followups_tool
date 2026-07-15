@@ -1,14 +1,10 @@
 // El invariante que de verdad importa: en modo prueba, isps.db no recibe NI UNA escritura.
-//
-// El caso "sin modo declarado" NO se prueba aca: necesita un proceso sin marca, y el
-// setup global (scripts/test-setup.ts) ya marco modo real. Vive en
-// app/db/aislado/modo-prueba-throw.test.ts, que corre con `npm run test:aislado`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sql } from 'drizzle-orm';
 import { db, dbReal, dbPruebas } from './index.ts';
 import { organizacion } from './schema.ts';
-import { marcarModoPrueba } from '../lib/modo-prueba.ts';
+import { marcarModoPrueba, esModoPrueba } from '../lib/modo-prueba.ts';
 import { marcarSoloLectura } from '../lib/read-only.ts';
 
 // :memory: nace sin esquema (ver dos-conexiones.test.ts): la tabla se crea en las dos.
@@ -21,6 +17,16 @@ const DDL_ORGANIZACION = sql`
 `;
 dbReal.run(DDL_ORGANIZACION);
 dbPruebas.run(DDL_ORGANIZACION);
+
+// Va PRIMERO: es el unico test que puede observar el contexto sin marcar (enterWith marca
+// el contexto raiz para siempre, asi que en cuanto otro test llame marcarModoPrueba ya no
+// hay vuelta a undefined). Fija la decision del 2026-07-15: sin marca se va a la REAL, no
+// se lanza. Hubo un throw aca y reventaba paginas en el navegador -- Next tiene decenas de
+// entradas sin requireSession (webhook, pixel, callback, worker) y no hay UN arranque donde
+// declarar. Si alguien quiere volver al throw, que lo pruebe en el navegador primero.
+test('sin marca, la base por defecto es la REAL (no lanza)', () => {
+  assert.equal(esModoPrueba(), false);
+});
 
 test('en modo prueba, db escribe en pruebas.db y NO toca la real', () => {
   marcarSoloLectura(false);

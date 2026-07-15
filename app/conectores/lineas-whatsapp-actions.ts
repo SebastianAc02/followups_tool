@@ -61,31 +61,59 @@ function puedeTocarLinea(idUsuario: string | null, sesion: { id: string; admin: 
   return idUsuario === sesion.id || sesion.admin;
 }
 
+// Mismo contrato que ResultadoConexion/ResultadoPrueba: un error de Evolution vuelve
+// como DATO para que la UI lo pinte, nunca como excepcion suelta. Sin esto, un tropiezo
+// del proveedor sube hasta Next y mata la pagina entera -- pasado real: un 404 de
+// /instance/logout dejo /conectores en "This page couldn't load" (2026-07-15, VPS).
+export type ResultadoAccion = { ok: true } | { ok: false; error: string };
+
 // Verifica el estado real contra Evolution (no el guardado en la fila) y lo persiste.
 // Quien llama decide cuando (boton "Ya vinculé, verificar" mientras aparea, refresco
 // manual despues) -- no hay polling automatico en v1.
-export async function verificarEstadoLineaAction(formData: FormData) {
+export async function verificarEstadoLineaAction(
+  _previo: ResultadoAccion | null,
+  formData: FormData,
+): Promise<ResultadoAccion> {
   const sesion = await requireSession();
   const id = Number(formData.get("id"));
   const linea = lineaWhatsappPorId(id);
-  if (!linea || !linea.referenciaProveedor || !puedeTocarLinea(linea.idUsuario, sesion)) return;
+  if (!linea || !linea.referenciaProveedor || !puedeTocarLinea(linea.idUsuario, sesion)) {
+    return { ok: false, error: "No podés tocar esta línea." };
+  }
 
-  const adapter = crearEvolutionAdapter();
-  const estado = await adapter.estadoConexion(linea.referenciaProveedor);
-  conEscritura(() => actualizarEstadoLineaWhatsapp(id, estado));
-  revalidatePath("/conectores");
+  try {
+    const adapter = crearEvolutionAdapter();
+    const estado = await adapter.estadoConexion(linea.referenciaProveedor);
+    conEscritura(() => actualizarEstadoLineaWhatsapp(id, estado));
+    revalidatePath("/conectores");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Error consultando el estado en Evolution." };
+  }
 }
 
-export async function desconectarLineaAction(formData: FormData) {
+export async function desconectarLineaAction(
+  _previo: ResultadoAccion | null,
+  formData: FormData,
+): Promise<ResultadoAccion> {
   const sesion = await requireSession();
   const id = Number(formData.get("id"));
   const linea = lineaWhatsappPorId(id);
-  if (!linea || !linea.referenciaProveedor || !puedeTocarLinea(linea.idUsuario, sesion)) return;
+  if (!linea || !linea.referenciaProveedor || !puedeTocarLinea(linea.idUsuario, sesion)) {
+    return { ok: false, error: "No podés tocar esta línea." };
+  }
 
-  const adapter = crearEvolutionAdapter();
-  await adapter.desconectar(linea.referenciaProveedor);
-  conEscritura(() => actualizarEstadoLineaWhatsapp(id, "caida"));
-  revalidatePath("/conectores");
+  try {
+    const adapter = crearEvolutionAdapter();
+    await adapter.desconectar(linea.referenciaProveedor);
+    // Solo se marca 'caida' si Evolution confirmo el cierre: si la llamada trueno, no
+    // sabemos en que estado quedo la linea y mentir en la fila es peor que no tocarla.
+    conEscritura(() => actualizarEstadoLineaWhatsapp(id, "caida"));
+    revalidatePath("/conectores");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Error desconectando en Evolution." };
+  }
 }
 
 export type ResultadoPrueba = { ok: true; mensajeId: string } | { ok: false; error: string };

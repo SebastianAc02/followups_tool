@@ -45,9 +45,12 @@ export function ToqueShell({
   urlNotion,
   canal,
   children,
+  hoy,
 }: {
   ctx: ContextoToque;
   urlNotion: string | null;
+  // 'YYYY-MM-DD' del server, para el riel de toques (ver SecuenciaRail).
+  hoy: string;
   canal: "whatsapp" | "correo";
   children: ReactNode;
 }) {
@@ -93,7 +96,7 @@ export function ToqueShell({
 
       {/* Two-column body: riel de secuencia + cuerpo del canal */}
       <div className="flex flex-col md:grid md:grid-cols-[192px_1fr]">
-        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} estado={emp?.estado} />
+        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} estado={emp?.estado} hoy={hoy} />
 
         <div className="flex flex-col gap-4 p-5">
           {/* Accion sugerida del canal (mismo lugar que "Llamar a X" en la llamada) */}

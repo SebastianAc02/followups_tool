@@ -50,7 +50,16 @@ export function construirEmbudo(conteos: ConteoEtapa[]): Embudo {
   const bandas: BandaEmbudo[] = BANDAS_EMBUDO.map((etapa, i) => {
     const actual = get(etapa.estado);
     const anterior = i === 0 ? null : get(BANDAS_EMBUDO[i - 1].estado).total;
-    const conversionDesdeAnterior = anterior === null || anterior === 0 ? (i === 0 ? null : 0) : Math.round((actual.total / anterior) * 100);
+    // Una banda mas grande que la anterior no "convirtio" el 1100%: son cuentas que saltaron
+    // etapas (el pipeline se mueve a mano en Notion). Reportar una tasa ahi es inventar una
+    // lectura que el dato no soporta, asi que se calla el chip -- null ya significa "no
+    // pintar" para FunnelBand.
+    const conversionDesdeAnterior =
+      anterior === null || anterior === 0
+        ? (i === 0 ? null : 0)
+        : actual.total >= anterior
+          ? null
+          : Math.round((actual.total / anterior) * 100);
     return {
       estado: etapa.estado,
       label: etapa.label,

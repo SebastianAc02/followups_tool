@@ -1,6 +1,7 @@
 import type { PasoSecuencia, ContextoToque } from "../../db/repository";
 import { CANAL_LABEL, type Canal } from "../../ui/canal-tag.variants.ts";
 import { cn } from "../../ui/cn";
+import { etiquetaFechaToque, esToqueDeLaHerramienta } from "../../core/fecha-toque";
 
 // Riel vertical de la secuencia del Toque 1 (specimen "Onepay Llamada Toque 1"): un nodo
 // por paso de la cadencia (hecho/activo/pendiente) + el objetivo del paso activo al fondo.
@@ -49,10 +50,15 @@ export function SecuenciaRail({
   objetivo,
   toques,
   estado,
+  hoy,
 }: {
   pasos: PasoSecuencia[];
   objetivo: string | null;
   toques?: ContextoToque["toques"];
+  // 'YYYY-MM-DD' resuelto en el server. El riel no calcula "hoy" por su cuenta: si lo
+  // hiciera en el cliente, el dia dependeria del reloj del navegador y "hoy" podria
+  // discrepar de lo que la cola ya decidio en el servidor.
+  hoy: string;
   // Estado de la empresa (empresa.estado_notion): decide si se muestra el banner de
   // "historial incompleto" cuando no hay secuencia activa (2026-07-14). 'lead' es la
   // unica etapa donde la herramienta sabe con certeza que el ciclo de vida esta
@@ -65,7 +71,10 @@ export function SecuenciaRail({
         SECUENCIA · {pasos.length} DÍAS
       </div>
 
-      <div className="max-h-[196px] overflow-y-auto px-4 pb-2">
+      {/* flex-1 + min-h-0 en vez de max-h fija: el historial se estira hasta donde llegue
+          la columna (el OBJETIVO sigue anclado abajo con mt-auto) y solo hace scroll si
+          de verdad se pasa. Con max-h-[196px] se cortaba aunque sobrara espacio. */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-2">
         {pasos.length === 0 ? (
           <div className="pl-1">
             <p className="text-xs text-muted">Sin secuencia activa · llamada suelta</p>
@@ -77,11 +86,40 @@ export function SecuenciaRail({
             )}
             {toques && toques.length > 0 && (
               <ul className="mt-3 flex flex-col gap-2">
-                {toques.map((t) => (
-                  <li key={t.idToque} className="text-[11px] leading-snug text-faint">
-                    <span className="font-toque-mono">{t.fecha}</span> · {canalLegible(t.canal)} · {t.resultado ?? "sin resultado"}
-                  </li>
-                ))}
+                {/* Jerarquia: la fecha manda (ink / ink-soft) y el detalle acompaña
+                    (ink-soft / muted). Lo "previo" se distingue por la etiqueta, NO por
+                    apagarlo hasta que no se lea: un toque viejo sigue siendo historial
+                    que Sebastian necesita leer en la llamada. */}
+                {toques.map((t) => {
+                  const enLaHerramienta = esToqueDeLaHerramienta(t.fuente);
+                  return (
+                    <li
+                      key={t.idToque}
+                      className={cn(
+                        "text-[11.5px] leading-snug",
+                        enLaHerramienta ? "text-ink-soft" : "text-muted",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "font-toque-mono font-semibold",
+                          enLaHerramienta ? "text-ink" : "text-ink-soft",
+                        )}
+                      >
+                        {etiquetaFechaToque(t.fecha, hoy)}
+                      </span>{" "}
+                      · {canalLegible(t.canal)} · {t.resultado ?? "sin resultado"}
+                      {!enLaHerramienta && (
+                        <span
+                          className="ml-1 rounded border border-line px-1 font-toque-mono text-[9px] uppercase tracking-wide text-muted"
+                          title="Toque anterior a la herramienta, importado de Notion"
+                        >
+                          previo
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

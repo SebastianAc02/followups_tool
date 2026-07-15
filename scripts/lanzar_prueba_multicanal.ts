@@ -24,13 +24,6 @@ import {
 } from '../app/db/repository.ts';
 import { crearRegistroEnvio } from '../app/adapters/registro-envio.ts';
 import type { Canal } from '../app/db/validation.ts';
-
-import { marcarModoPrueba } from '../app/lib/modo-prueba.ts';
-
-// Los scripts no pasan por requireSession(), asi que declaran su modo a mano: sin esto
-// el primer acceso a la DB lanza (modo-prueba.ts no tiene default a proposito).
-marcarModoPrueba(false);
-
 const dbPath = process.env.ISPS_DB_PATH;
 if (!dbPath) {
   throw new Error('ISPS_DB_PATH es obligatorio (para la prueba real, apunta a ../isps.db).');

@@ -18,6 +18,33 @@ function credencial(): string {
   return key;
 }
 
+// Decision de Sebastian (2026-07-15): antes que una linea sorda, ninguna. Una instancia
+// creada sin webhook manda y aparea bien -- se ve verde en /conectores -- pero no recibe
+// nada, y la cadencia le sigue escribiendo a quien ya contesto. Eso rompe el requisito
+// duro del plan (MESSAGES_UPSERT corta la cadencia) EN SILENCIO, asi que se prefiere
+// fallar ruidoso al primer intento antes que dejar la linea muda en produccion.
+//
+// El token va aparte (no embebido en WHATSAPP_WEBHOOK_URL) para que exista UNA sola copia
+// del secreto: con dos, rotarlo en un lado y olvidar el otro deja la ruta respondiendo 401
+// y la linea sorda por la puerta de atras. Es opcional porque la ruta solo lo EXIGE si
+// esta seteado (dev local procesa sin token); si existe, se manda siempre.
+type WebhookCreacion = { url: string; byEvents: boolean; base64: boolean; events: string[] };
+function webhookDeCreacion(): WebhookCreacion {
+  const url = process.env.WHATSAPP_WEBHOOK_URL;
+  if (!url) {
+    throw new Error(
+      'Falta WHATSAPP_WEBHOOK_URL: sin webhook la linea no recibiria respuestas y la cadencia le seguiria escribiendo a quien ya contesto. No se crea la linea.',
+    );
+  }
+  const token = process.env.WHATSAPP_WEBHOOK_TOKEN;
+  return {
+    url: token ? `${url}?token=${encodeURIComponent(token)}` : url,
+    byEvents: false,
+    base64: false,
+    events: ['MESSAGES_UPSERT'],
+  };
+}
+
 async function llamarEvolution<T>(path: string, apiKey: string, init: RequestInit = {}): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -57,7 +84,14 @@ async function llamarEvolution<T>(path: string, apiKey: string, init: RequestIni
 // oficial de vinculacion por camara. El pairing-code es hoy el UNICO metodo que
 // aparea de verdad, por eso iniciarConexion lo pide por defecto (ver mas abajo).
 type ConectarRespuesta = { base64?: string; pairingCode?: string | null; count?: number };
-type FetchInstanceRespuesta = { connectionStatus?: string }[];
+type FetchInstanceRespuesta = { name?: string; connectionStatus?: string }[];
+// Forma real de POST /instance/create, capturada en vivo contra el Evolution del VPS
+// (2026-07-15, instancia temporal creada y borrada para esto): 201 con
+// {instance:{instanceName,instanceId,status:'connecting'}, hash, webhook:{}, settings,
+// qrcode:{pairingCode,code,base64,count}}. OJO: aca el pairing-code viene ANIDADO en
+// `qrcode`, mientras que /instance/connect lo devuelve en la RAIZ -- no son la misma
+// forma, y confundirlas devuelve undefined en silencio.
+type CrearRespuesta = { qrcode?: { pairingCode?: string | null } };
 // Forma de EXITO de POST /message/sendText, CONFIRMADA en vivo (2026-07-09, linea real
 // ya conectada por pairing-code): { key: { id }, status: 'PENDING', ... }. key.id es
 // el id de mensaje real de WhatsApp (ya no es hipotesis).
@@ -126,8 +160,42 @@ export function crearEvolutionAdapter(): CanalEntrega & ConexionLinea {
     // La rama de QR queda escrita y accesible (norma extend-only, D-algo del plan: no
     // se borra codigo que funciona), por si WhatsApp reabre el flujo o para debug
     // manual -- ver iniciarConexionPorQr mas abajo, no se llama desde aca.
+    // Evolution tiene DOS pasos (crear la instancia, despues aparearla) que el puerto no
+    // conoce ni debe conocer: `iniciarConexion` sigue siendo "dame un codigo para aparear
+    // esta linea" y el adaptador se encarga del ciclo de vida del proveedor. Meterlo aca
+    // (en vez de un metodo `crearLinea` en ConexionLinea) es lo que mantiene el puerto
+    // neutral: Meta Cloud API no tiene concepto de "crear instancia", y ahi este paso
+    // simplemente no existe.
+    //
+    // Se PREGUNTA primero (fetchInstances) en vez de tirar connect y crear al ver un 404:
+    // asi no se usa una excepcion como control de flujo ni hay que adivinar el status
+    // hurgando el texto del Error. Cuesta un GET extra; a cambio, el que lee sabe lo que
+    // pasa sin conocer los codigos HTTP de Evolution.
     async iniciarConexion(referenciaProveedor: string, numero: string): Promise<InicioConexion> {
       const apiKey = credencial();
+      const instancias = await llamarEvolution<FetchInstanceRespuesta>('/instance/fetchInstances', apiKey);
+      const existe = instancias.some((i) => i.name === referenciaProveedor);
+
+      if (!existe) {
+        // Se resuelve ANTES del create a proposito: si falta la config, tiene que tronar
+        // sin haber creado nada. Al reves dejaria en Evolution justo la instancia sorda
+        // que esto existe para evitar.
+        const webhook = webhookDeCreacion();
+        const creada = await llamarEvolution<CrearRespuesta>('/instance/create', apiKey, {
+          method: 'POST',
+          body: JSON.stringify({
+            instanceName: referenciaProveedor,
+            number: numero,
+            qrcode: true,
+            integration: 'WHATSAPP-BAILEYS',
+            webhook,
+          }),
+        });
+        const codigo = creada.qrcode?.pairingCode;
+        if (!codigo) throw new Error(`Evolution creo ${referenciaProveedor} pero no devolvio pairing-code`);
+        return { tipo: 'codigo', formato: 'pairing', data: codigo };
+      }
+
       const query = new URLSearchParams({ number: numero });
       const data = await llamarEvolution<ConectarRespuesta>(
         `/instance/connect/${referenciaProveedor}?${query}`,

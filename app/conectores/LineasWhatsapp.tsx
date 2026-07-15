@@ -11,6 +11,7 @@ import {
   desconectarLineaAction,
   probarLineaAction,
   verificarMensajeRecibidoAction,
+  type ResultadoAccion,
   type ResultadoConexion,
   type ResultadoPrueba,
   type ResultadoRecepcion,
@@ -148,6 +149,19 @@ function ProbarConexionDialog({ linea, onCerrar }: { linea: LineaWhatsappRow; on
 
 function LineaRow({ linea }: { linea: LineaWhatsappRow }) {
   const [probando, setProbando] = useState(false);
+  // useActionState en vez de <form action={accionCruda}>: las dos acciones hablan con
+  // Evolution, y un proveedor caido tiene que caber en esta fila como texto rojo, no
+  // tumbar /conectores entera. Un estado por boton para que el error salga al lado del
+  // que lo produjo.
+  const [resVerificar, accionVerificar, verificando] = useActionState<ResultadoAccion | null, FormData>(
+    verificarEstadoLineaAction,
+    null,
+  );
+  const [resDesconectar, accionDesconectar, desconectando] = useActionState<ResultadoAccion | null, FormData>(
+    desconectarLineaAction,
+    null,
+  );
+  const error = [resVerificar, resDesconectar].find((r) => r && !r.ok);
   const sev = SEV_LINEA[linea.estado as keyof typeof SEV_LINEA] ?? "faint";
   const label = LABEL_LINEA[linea.estado as keyof typeof LABEL_LINEA] ?? linea.estado;
 
@@ -171,19 +185,26 @@ function LineaRow({ linea }: { linea: LineaWhatsappRow }) {
             Probar conexión
           </Button>
         )}
-        <form action={verificarEstadoLineaAction}>
+        <form action={accionVerificar}>
           <input type="hidden" name="id" value={linea.id} />
-          <Button type="submit" variant="quiet">
-            Verificar estado
+          <Button type="submit" variant="quiet" disabled={verificando}>
+            {verificando ? "Verificando..." : "Verificar estado"}
           </Button>
         </form>
-        <form action={desconectarLineaAction}>
+        <form action={accionDesconectar}>
           <input type="hidden" name="id" value={linea.id} />
-          <Button type="submit" variant="quiet" className="text-overdue/80 hover:text-overdue">
-            Desconectar
+          <Button
+            type="submit"
+            variant="quiet"
+            disabled={desconectando}
+            className="text-overdue/80 hover:text-overdue"
+          >
+            {desconectando ? "Desconectando..." : "Desconectar"}
           </Button>
         </form>
       </div>
+
+      {error && !error.ok && <p className="mt-2 text-xs text-overdue">{error.error}</p>}
 
       {probando && <ProbarConexionDialog linea={linea} onCerrar={() => setProbando(false)} />}
     </div>

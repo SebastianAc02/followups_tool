@@ -11,10 +11,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { crearDbPrueba, borrarDbPrueba } from '../db/test-helpers.ts';
 
+import { marcarModoPrueba } from '../lib/modo-prueba.ts';
+
+// Estos tests no son sobre el modo prueba: declaran real y se olvidan del tema. Sin
+// esto, el Proxy del db lanza al no saber contra que base va (modo-prueba.ts no tiene
+// default a proposito).
+marcarModoPrueba(false);
+
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 process.env.FOLLOWUPS_CRYPTO_KEY = Buffer.alloc(32, 5).toString('base64');
 process.env.EVOLUTION_API_BASE_URL = 'http://localhost:8080';
+// Sin esto iniciarConexion se niega a crear (decision de Sebastian 2026-07-15: una linea
+// que no recibe respuestas es peor que ninguna). El test de "falta la variable" la borra
+// y la restaura.
+process.env.WHATSAPP_WEBHOOK_URL = 'http://followups-web:3000/api/webhooks/whatsapp';
+process.env.WHATSAPP_WEBHOOK_TOKEN = 'tok_test';
 
 const { guardarCredencialConector } = await import('../db/repository.ts');
 const { crearEvolutionAdapter, iniciarConexionPorQr } = await import('./evolution.ts');
@@ -132,6 +144,11 @@ test('iniciarConexion pide el numero por query y devuelve el pairing-code (metod
     globalThis,
     'fetch',
     fetchFalso((path) => {
+      // iniciarConexion pregunta primero si la instancia existe; aca ya existe, asi que
+      // el camino es connect (crear-si-falta se prueba en su propio test, mas abajo).
+      if (path === '/instance/fetchInstances') {
+        return { status: 200, body: [{ name: 'prueba', connectionStatus: 'close' }] };
+      }
       assert.strictEqual(path, '/instance/connect/prueba?number=573001234567');
       // Shape real capturado en vivo (2026-07-09, con ?number=): pairingCode ya no es
       // null. code/base64/count vienen igual, pero el metodo default ignora base64.
@@ -214,6 +231,145 @@ test('un 500 de Evolution (instancia sin conectar) truena con el status y el bod
     () => adapter.enviarPaso('prueba', { email: null, telefono: '570000000000', nombre: null, empresa: null, cargo: null }, { asunto: null, cuerpo: 'x', canal: 'whatsapp' }),
     /Evolution respondio 500/,
   );
+});
+
+// Formas capturadas EN VIVO contra el Evolution del VPS (2026-07-15, instancia
+// temporal 'zz-tmp-claude' creada y borrada para esto). Ojo al detalle que la doc no
+// dice: `create` devuelve el pairing-code ANIDADO en `qrcode.pairingCode`, mientras
+// que `connect` lo devuelve en la RAIZ. No son la misma forma.
+const CREATE_201 = {
+  instance: {
+    instanceName: 'wa-573105182997',
+    instanceId: '3ea66446-1f8a-4fc5-b7e6-0127d0b0c1e9',
+    integration: 'WHATSAPP-BAILEYS',
+    status: 'connecting',
+  },
+  hash: '2671E60F-23C2-49A8-980E-B0CF9E7514EF',
+  webhook: {},
+  qrcode: { pairingCode: 'NZCYJA56', code: '2@pRkQ...', base64: 'data:image/png;base64,iVBOR', count: 1 },
+};
+
+test('iniciarConexion crea la instancia cuando Evolution todavia no la tiene, y devuelve el pairing-code del create', async (t) => {
+  guardarCredencialConector('whatsapp', 'evolution_test_key');
+  const llamadas: string[] = [];
+  let cuerpoCreate: unknown = null;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push(`${init.method ?? 'GET'} ${path.split('?')[0]}`);
+      if (path === '/instance/fetchInstances') return { status: 200, body: [] };
+      if (path === '/instance/create') {
+        cuerpoCreate = JSON.parse(init.body as string);
+        return { status: 201, body: CREATE_201 };
+      }
+      return { status: 404, body: { status: 404, error: 'Not Found', response: { message: ['llamada inesperada'] } } };
+    }),
+  );
+
+  const adapter = crearEvolutionAdapter();
+  const inicio = await adapter.iniciarConexion('wa-573105182997', '573105182997');
+
+  assert.deepEqual(inicio, { tipo: 'codigo', formato: 'pairing', data: 'NZCYJA56' });
+  assert.deepEqual(llamadas, ['GET /instance/fetchInstances', 'POST /instance/create']);
+  // Forma del bloque `webhook` capturada en vivo (2026-07-15, instancia temporal contra
+  // el Evolution del VPS): se manda {url, byEvents, base64, events}. OJO: la respuesta
+  // del create NO devuelve `events` ni `enabled` (solo webhookUrl/webhookByEvents/
+  // webhookBase64), pero GET /webhook/find/<instancia> prueba que SI persisten. No se
+  // puede usar la respuesta del create para confirmar que los eventos quedaron.
+  assert.deepEqual(cuerpoCreate, {
+    instanceName: 'wa-573105182997',
+    number: '573105182997',
+    qrcode: true,
+    integration: 'WHATSAPP-BAILEYS',
+    webhook: {
+      url: 'http://followups-web:3000/api/webhooks/whatsapp?token=tok_test',
+      byEvents: false,
+      base64: false,
+      events: ['MESSAGES_UPSERT'],
+    },
+  });
+});
+
+// Decision de Sebastian (2026-07-15): antes que una linea sorda, ninguna. Una instancia
+// sin webhook manda y aparea bien, se ve verde, y la cadencia le sigue escribiendo a
+// quien ya contesto -- rompe el requisito duro del plan EN SILENCIO. Se prefiere fallar
+// ruidoso al primer intento. Lo critico del test es la segunda assertion: tiene que
+// tirar ANTES de crear, o dejaria en Evolution justo la instancia sorda que evita.
+test('iniciarConexion se niega a crear una linea sorda si falta WHATSAPP_WEBHOOK_URL', async (t) => {
+  guardarCredencialConector('whatsapp', 'evolution_test_key');
+  const previo = process.env.WHATSAPP_WEBHOOK_URL;
+  delete process.env.WHATSAPP_WEBHOOK_URL;
+  t.after(() => {
+    process.env.WHATSAPP_WEBHOOK_URL = previo;
+  });
+
+  const llamadas: string[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push(`${init.method ?? 'GET'} ${path.split('?')[0]}`);
+      if (path === '/instance/fetchInstances') return { status: 200, body: [] };
+      return { status: 201, body: CREATE_201 };
+    }),
+  );
+
+  const adapter = crearEvolutionAdapter();
+  await assert.rejects(() => adapter.iniciarConexion('wa-573105182997', '573105182997'), /WHATSAPP_WEBHOOK_URL/);
+  assert.ok(!llamadas.includes('POST /instance/create'), `no debio crear nada, llamo: ${llamadas.join(', ')}`);
+});
+
+// Contraparte del de arriba: el token es OPCIONAL a proposito, porque la ruta
+// (app/api/webhooks/whatsapp/route.ts) solo lo EXIGE si esta seteado -- sin el, dev local
+// procesa igual. Si estuviera seteado y no lo mandaramos, la ruta responderia 401 y la
+// linea quedaria sorda igual, asi que cuando existe se manda si o si.
+test('iniciarConexion registra el webhook sin ?token= cuando no hay WHATSAPP_WEBHOOK_TOKEN (dev local)', async (t) => {
+  guardarCredencialConector('whatsapp', 'evolution_test_key');
+  const previo = process.env.WHATSAPP_WEBHOOK_TOKEN;
+  delete process.env.WHATSAPP_WEBHOOK_TOKEN;
+  t.after(() => {
+    process.env.WHATSAPP_WEBHOOK_TOKEN = previo;
+  });
+
+  let cuerpoCreate: { webhook?: { url?: string } } | null = null;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      if (path === '/instance/fetchInstances') return { status: 200, body: [] };
+      cuerpoCreate = JSON.parse(init.body as string);
+      return { status: 201, body: CREATE_201 };
+    }),
+  );
+
+  const adapter = crearEvolutionAdapter();
+  await adapter.iniciarConexion('wa-573105182997', '573105182997');
+
+  assert.strictEqual(cuerpoCreate!.webhook!.url, 'http://followups-web:3000/api/webhooks/whatsapp');
+});
+
+test('iniciarConexion NO recrea una instancia que ya existe: pide connect y regenera el pairing-code', async (t) => {
+  guardarCredencialConector('whatsapp', 'evolution_test_key');
+  const llamadas: string[] = [];
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((path, init) => {
+      llamadas.push(`${init.method ?? 'GET'} ${path.split('?')[0]}`);
+      if (path === '/instance/fetchInstances') {
+        return { status: 200, body: [{ name: 'wa-573105182997', connectionStatus: 'close' }] };
+      }
+      // connect devuelve el pairingCode en la RAIZ (forma vieja, ya capturada en Fase 0)
+      return { status: 200, body: { pairingCode: 'OTRO1234', base64: 'data:image/png;base64,x', count: 1 } };
+    }),
+  );
+
+  const adapter = crearEvolutionAdapter();
+  const inicio = await adapter.iniciarConexion('wa-573105182997', '573105182997');
+
+  assert.deepEqual(inicio, { tipo: 'codigo', formato: 'pairing', data: 'OTRO1234' });
+  assert.deepEqual(llamadas, ['GET /instance/fetchInstances', 'GET /instance/connect/wa-573105182997']);
 });
 
 test.after(() => borrarDbPrueba(dbPath));
