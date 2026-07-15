@@ -115,6 +115,11 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
           guardarProveedorCampanaId(idCampana, `gmail-camp-${idCampana}`, sesion.idOrganizacion);
           marcarCampanaAprobadaGmail(idCampana);
         } else {
+          // Nota: con el gate actual (readinessCanalUsuario bloquea correo sin Gmail
+          // antes de llegar aca), esta rama es inalcanzable para lanzamientos nuevos --
+          // se deja como defensa en profundidad, no como codigo muerto a limpiar, por si
+          // el gate cambia.
+          //
           // Sesion 2026-07-09: la secuencia externa es, por definicion, el track de
           // correo de la cadencia -- se resuelve por el registro (registro-envio.ts), no
           // por Apollo directo. Si "correo" no tiene proveedor registrado (no deberia
@@ -137,9 +142,10 @@ export async function lanzarCampanaAction(idCampana: number, config: ConfigLanza
         }
       }
     } catch (e) {
-      avisoSecuenciaExterna = `la campaña se lanzó pero no se pudo crear/sincronizar la secuencia en Apollo: ${
-        e instanceof Error ? e.message : String(e)
-      }`;
+      const detalle = e instanceof Error ? e.message : String(e);
+      avisoSecuenciaExterna = tieneGmailVerificado
+        ? `la campaña se lanzó pero no se pudo dejar lista para Gmail: ${detalle}`
+        : `la campaña se lanzó pero no se pudo crear/sincronizar la secuencia en Apollo: ${detalle}`;
     }
 
     // Sesion 2026-07-10: sin esto, el paso del dia 0 espera hasta 5 minutos (el
