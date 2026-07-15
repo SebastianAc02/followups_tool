@@ -343,6 +343,22 @@ export const eventoTracking = sqliteTable('evento_tracking', {
   createdAt: text('created_at'),
 });
 
+// notificacion_respuesta (append-only, V6.1): una fila por CADA respuesta detectada,
+// sin importar el canal (correo via Apollo tracking, whatsapp via webhook Evolution).
+// vistaEn null = todavia no se abrio la ficha de esa empresa desde que llego. Alimenta
+// el destaque "Respondio" de /cola y /seguimiento -- ver core/tracking.ts y
+// core/llego-respuesta.ts (el unico punto de notificacion, en los dos lugares donde
+// ya se pausa la inscripcion por respuesta).
+export const notificacionRespuesta = sqliteTable('notificacion_respuesta', {
+  idNotificacion: integer('id_notificacion').primaryKey({ autoIncrement: true }),
+  idInscripcion: integer('id_inscripcion').notNull(),
+  idEmpresa: text('id_empresa').notNull(),
+  canal: text('canal').notNull(),
+  detectadaEn: text('detectada_en').notNull(),
+  vistaEn: text('vista_en'),
+  createdAt: text('created_at'),
+});
+
 export const organizacion = sqliteTable('organizacion', {
   idOrganizacion: integer('id_organizacion').primaryKey({ autoIncrement: true }),
   nombre: text('nombre').notNull(),
