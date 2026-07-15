@@ -3,6 +3,9 @@ import type { Canal } from '../db/validation';
 import { CANALES_AUTOMATICOS } from '../db/validation';
 import { crearApolloAdapter } from './apollo';
 import { crearEvolutionAdapter } from './evolution';
+import { crearGmailAdapter } from './gmail';
+import { gmailVerificadoDe, idUsuarioDeOwner, pasoInscripcionesPendientes } from '../db/repository';
+import type { FilaPasoInscripcion } from '../core/push';
 
 // Registro canal -> proveedor real (sesion 2026-07-09, pedido explicito de Sebastian:
 // SOLID, cada canal cambia de proveedor sin tocar el core). Este es el UNICO lugar del
@@ -49,3 +52,63 @@ export function crearRegistroEntrega(): Record<Canal, CanalEntrega | null> {
 // donde ya se esta importando crearRegistroEnvio); la fuente real vive en db/validation.ts,
 // ver el comentario ahi para el motivo de la direccion de dependencia.
 export { CANALES_AUTOMATICOS };
+
+// Gmail Etapa 2 (2026-07-15): resuelve el adaptador de CORREO para un dueno puntual.
+// Gmail verificado -> Gmail propio; sin Gmail o dueno null (campana vieja) -> Apollo,
+// mismo fallback que ya describe el spec. Solo CanalEntrega (enviar) -- push.ts nunca
+// necesita crearCampanaExterna/sincronizarCopy/aprobarSecuencia de correo, eso lo
+// sigue resolviendo crearRegistroEnvio() (arriba) para quien de verdad lo necesita
+// (campanas/actions.ts, tareaTracking).
+export function resolverAdaptadorCorreo(idUsuarioDueno: string | null): CanalEntrega {
+  if (idUsuarioDueno && gmailVerificadoDe(idUsuarioDueno)) return crearGmailAdapter(idUsuarioDueno);
+  return crearApolloAdapter();
+}
+
+export type GrupoPendientesCorreo = { adaptador: CanalEntrega; idUsuarioGmail: string | null; filas: FilaPasoInscripcion[] };
+
+export type DepsAgruparCorreo = {
+  pendientes: (ahora: string) => FilaPasoInscripcion[];
+  idUsuarioDeOwner: (owner: string | null, idOrganizacion: number) => string | null;
+  gmailVerificado: (idUsuario: string) => boolean;
+  crearGmail: (idUsuario: string) => CanalEntrega;
+  crearApollo: () => CanalEntrega;
+};
+
+const depsAgruparCorreoReales: DepsAgruparCorreo = {
+  pendientes: (ahora) => pasoInscripcionesPendientes('correo', ahora),
+  idUsuarioDeOwner,
+  gmailVerificado: gmailVerificadoDe,
+  crearGmail: crearGmailAdapter,
+  crearApollo: crearApolloAdapter,
+};
+
+// Agrupa las filas de correo pendientes por ADAPTADOR RESUELTO (una entrada por Gmail
+// de un dueno distinto + una entrada "apollo" que junta a todos los que caen a
+// fallback), no por campana -- dos campanas del mismo dueno con Gmail comparten un
+// solo grupo/una sola llamada a pushPendientes. El gate de aprobacion (piece 4 del
+// spec) vive aca: una fila cuyo dueno resuelve a Gmail pero aprobadaEnvioGmail=false
+// se descarta ENTERA (no sale, ni por Gmail ni por Apollo -- si el dueno tiene Gmail,
+// Apollo no es un fallback valido para SU secuencia, ver decision del plan).
+export function agruparPendientesCorreo(ahora: string = new Date().toISOString(), deps: DepsAgruparCorreo = depsAgruparCorreoReales): GrupoPendientesCorreo[] {
+  const filas = deps.pendientes(ahora);
+  const grupos = new Map<string, GrupoPendientesCorreo>();
+
+  for (const f of filas) {
+    const idUsuario = deps.idUsuarioDeOwner(f.owner ?? null, f.idOrganizacion ?? 0);
+    const esGmail = idUsuario ? deps.gmailVerificado(idUsuario) : false;
+
+    if (esGmail && !f.aprobadaEnvioGmail) continue; // gate: sin aprobar, esta fila no sale
+
+    const key = esGmail ? `gmail:${idUsuario}` : 'apollo';
+    if (!grupos.has(key)) {
+      grupos.set(key, {
+        adaptador: esGmail ? deps.crearGmail(idUsuario!) : deps.crearApollo(),
+        idUsuarioGmail: esGmail ? idUsuario! : null,
+        filas: [],
+      });
+    }
+    grupos.get(key)!.filas.push(f);
+  }
+
+  return [...grupos.values()];
+}
