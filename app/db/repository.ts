@@ -447,6 +447,8 @@ export function getCuenta(id: string, idOrganizacion: number) {
       usuarios: empresaUsuarios.usuariosEfectivos,
       notionPageId: empresa.notionPageId,
       pbxForma: empresa.pbxForma,
+      notasDiscovery: empresa.notasDiscovery,
+      brief: empresa.brief,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
@@ -476,6 +478,8 @@ export function getCuenta(id: string, idOrganizacion: number) {
       resultado: toque.resultado,
       quePaso: toque.quePaso,
       transcriptId: toque.transcriptId,
+      transcriptUrl: toque.transcriptUrl,
+      resumen: toque.resumen,
       // La UI separa historial importado de Notion vs toques hechos EN la herramienta
       // (esToqueDeLaHerramienta en core/fecha-toque.ts). Es la columna, no el formato
       // de la fecha, la que sabe de donde salio cada toque.
@@ -484,7 +488,11 @@ export function getCuenta(id: string, idOrganizacion: number) {
     .from(toque)
     .where(and(eq(toque.idEmpresa, id), eq(toque.idOrganizacion, idOrganizacion)))
     .orderBy(desc(toque.idToque))
-    .limit(5)
+    // Limite 20 (antes 5, subido con el historial expandible de 2026-07-15): 5 alcanzaba cuando
+    // la ficha solo pintaba "ultimo toque", pero un historial completo que corta en 5 sin decirlo
+    // mentiria en una cuenta trabajada. 20 cubre las cuentas reales mas tocadas sin traer el
+    // historial entero a memoria en cada render.
+    .limit(20)
     .all();
 
   return { emp, contactos, toques };
@@ -670,6 +678,78 @@ export function actualizarCampoCalificacion(
     .set({ ...sets, updatedAt: sql`datetime('now')` })
     .where(eq(empresa.idEmpresa, idEmpresa))
     .run();
+}
+
+// Lo que ya sabemos de la cuenta, para darselo a fusionarDiscovery/hidratarBrief como punto de
+// partida. Devuelve strings vacios (no null) porque el core trabaja con strings.
+//
+// A diferencia de guardarDiscovery, esta NO lanza cuando la empresa es de otra organizacion:
+// devuelve vacio. Es una lectura para armar un borrador, y un throw aca reventaria la ficha
+// entera; devolver vacio no filtra el dato ajeno y deja la UI en pie.
+export function leerDiscovery(idEmpresa: string, idOrganizacion: number): { notas: string; brief: string } {
+  const fila = db
+    .select({
+      notas: empresa.notasDiscovery,
+      brief: empresa.brief,
+      organizacionActivaId: empresa.organizacionActivaId,
+    })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!fila || fila.organizacionActivaId !== idOrganizacion) return { notas: '', brief: '' };
+  return { notas: fila.notas ?? '', brief: fila.brief ?? '' };
+}
+
+// Escribe la version que el owner ya aprobo. NO encola al outbox: eso lo hace el caller, en la
+// misma transaccion que el toque (patron Outbox, ver CLAUDE.md).
+//
+// Chequea organizacion y LANZA, igual que actualizarCampoCalificacion: una escritura silenciosa
+// a la cuenta de otra organizacion es justo el bug que hay que evitar.
+export function guardarDiscovery(
+  idEmpresa: string,
+  datos: { notas: string; brief: string },
+  idOrganizacion: number,
+): void {
+  const emp = db
+    .select({ organizacionActivaId: empresa.organizacionActivaId })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!emp) throw new Error(`Empresa ${idEmpresa} no existe`);
+  if (emp.organizacionActivaId !== idOrganizacion) {
+    throw new Error(`La empresa ${idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+  }
+
+  db.update(empresa)
+    .set({ notasDiscovery: datos.notas, brief: datos.brief, updatedAt: sql`datetime('now')` })
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .run();
+}
+
+// transcriptResumen es opcional a proposito: en un toque dictado no hay Granola, y al regenerar
+// el `resumen` con un prompt nuevo no se debe perder el insumo ya cacheado.
+export function guardarResumenToque(
+  idToque: number,
+  datos: { resumen: string; transcriptResumen?: string | null },
+): void {
+  db.update(toque)
+    .set({
+      resumen: datos.resumen,
+      ...(datos.transcriptResumen !== undefined ? { transcriptResumen: datos.transcriptResumen } : {}),
+    })
+    .where(eq(toque.idToque, idToque))
+    .run();
+}
+
+// El insumo cacheado de Granola para este toque, o vacio si el toque fue dictado (sin grabacion)
+// o si la grabacion no se ha confirmado todavia.
+export function leerTranscriptResumen(idToque: number): string {
+  const fila = db
+    .select({ transcriptResumen: toque.transcriptResumen })
+    .from(toque)
+    .where(eq(toque.idToque, idToque))
+    .get();
+  return fila?.transcriptResumen ?? '';
 }
 
 export type ContadoresHoy = {
