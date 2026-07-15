@@ -1,4 +1,15 @@
 """
+OBSOLETO PARA ESTADOS (2026-07-15) -- NO correr para sincronizar estado_notion.
+Su ESTADO_MAP quedo desactualizado frente a la decision cerrada del Spec 1 (T9,
+app/core/reconciliacion/mapeoEstados.ts): aca 'Firma Pendiente'->enviar_contrato y
+'Contrato Firmado'->firma_pago, pero la decision vigente es que AMBOS van a
+cierre_documentacion. El sync de estados por el camino auditado ahora es
+scripts/sync_estados_notion.ts (T10, match por page_id + actualizarEstadoNotion +
+historial). Este script todavia se conserva SOLO porque tambien tocaba
+estado_comercial (deriva del funnel), owner, proximo_paso y fecha_proximo_paso, que
+el stack .ts aun no corre completo (T12 existe pero sin script orquestador). Cuando
+ese orquestador exista, retirar este archivo entero.
+
 Sync del ESTADO DEL PIPELINE desde el export CSV de Notion hacia isps.db.
 
 Direccion Notion -> DB (re-seed de estado comercial). Es la inversa del sync de

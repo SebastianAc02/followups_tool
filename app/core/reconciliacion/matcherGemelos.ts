@@ -4,12 +4,7 @@
 // pares antes de fundir, ver T3/T4). Los tipos de entrada son subconjuntos minimos
 // a proposito: este archivo no importa NotionEmpresaExport del adapter.
 
-// Mismo criterio de sufijo legal que scripts/sync_notion_estado.py (norm()), para que
-// el resultado de este matcher y el del script de estado no diverjan en como leen el
-// mismo nombre de empresa.
-const SUFIJOS_LEGALES = new Set([
-  'sas', 'sa', 's', 'a', 'ltda', 'eu', 'esp', 'de', 'del', 'la', 'el', 'zomac', 'bic', 'y', 'e',
-]);
+import { tokensRazonSocial } from './normalizarRazonSocial.ts';
 
 const UMBRAL_MINIMO_DEFAULT = 0.5;
 // Por debajo de 1.0 (exacto), solo una similitud de texto casi identica (typo, no
@@ -37,16 +32,6 @@ export interface ParCandidato {
   nombreNotion: string;
   score: number;
   camposEnConflicto: string[];
-}
-
-function normalizarTokens(nombre: string): string[] {
-  const sinAcentos = nombre
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '');
-  const soloAlfanumerico = sinAcentos.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
-  return soloAlfanumerico
-    .split(' ')
-    .filter((t) => t.length > 0 && !SUFIJOS_LEGALES.has(t));
 }
 
 function jaccard(a: string[], b: string[]): number {
@@ -105,9 +90,9 @@ export function encontrarGemelos(
   const pares: ParCandidato[] = [];
 
   for (const db of empresasDb) {
-    const tokensDb = normalizarTokens(db.nombre);
+    const tokensDb = tokensRazonSocial(db.nombre);
     for (const notion of empresasNotion) {
-      const tokensNotion = normalizarTokens(notion.nombre);
+      const tokensNotion = tokensRazonSocial(notion.nombre);
       const score = calcularScore(tokensDb, tokensNotion);
       if (score < umbralMinimo) continue;
 

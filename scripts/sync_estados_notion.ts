@@ -17,26 +17,11 @@ import { db, schema } from '../app/db/index.ts';
 import { actualizarEstadoNotion } from '../app/db/repository.ts';
 import { crearNotionExportAdapter } from '../app/adapters/notion/notionExportAdapter.ts';
 import { mapearEstadoNotion } from '../app/core/reconciliacion/mapeoEstados.ts';
+import { normalizarRazonSocial } from '../app/core/reconciliacion/normalizarRazonSocial.ts';
 
 const DIR_EXPORT_NOTION = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline';
 const CSV_PATH = '/Users/sebastianacostamolina/Arc/Private & Shared 7/🔥 Sales Pipeline f5e2be53a1514d42ac6db30fd7c5202a_all.csv';
 const ID_ORGANIZACION = 1;
-
-// Mismo criterio de normalizacion que enlazar_page_ids.ts (sufijos legales fuera,
-// sin acentos, sin puntuacion) para no divergir en como dos scripts del mismo
-// pipeline leen el mismo nombre.
-const SUFIJOS_LEGALES = new Set([
-  'sas', 'sa', 's', 'a', 'ltda', 'eu', 'esp', 'de', 'del', 'la', 'el', 'zomac', 'bic', 'y', 'e',
-]);
-
-function normalizar(nombre: string): string {
-  const sinAcentos = nombre.normalize('NFKD').replace(/[̀-ͯ]/g, '');
-  const soloAlfanumerico = sinAcentos.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
-  return soloAlfanumerico
-    .split(' ')
-    .filter((t) => t.length > 0 && !SUFIJOS_LEGALES.has(t))
-    .join(' ');
-}
 
 interface EmpresaDb {
   idEmpresa: string;
@@ -64,7 +49,7 @@ function main() {
   const porNombreNormalizado = new Map<string, EmpresaDb[]>();
   for (const e of activas) {
     if (e.notionPageId) porPageId.set(e.notionPageId, e);
-    const key = normalizar(e.nombreOficial);
+    const key = normalizarRazonSocial(e.nombreOficial);
     if (!porNombreNormalizado.has(key)) porNombreNormalizado.set(key, []);
     porNombreNormalizado.get(key)!.push(e);
   }
@@ -106,7 +91,7 @@ function main() {
       empresaDb = porPageId.get(notionEmpresa.pageId);
     }
     if (!empresaDb) {
-      const key = normalizar(notionEmpresa.nombre);
+      const key = normalizarRazonSocial(notionEmpresa.nombre);
       const candidatos = porNombreNormalizado.get(key);
       if (!candidatos || candidatos.length === 0) {
         sinMatchDb.push(notionEmpresa.nombre);
