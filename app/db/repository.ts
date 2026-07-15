@@ -45,6 +45,7 @@ import {
   lineaWhatsapp,
   empresaEstadoHistorial,
   organizacionMiembro,
+  empresaClasificacion,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -4819,5 +4820,25 @@ export function enlazarPageId(idEmpresa: string, pageId: string): void {
   db.update(empresa)
     .set({ notionPageId: pageId, updatedAt: new Date().toISOString() })
     .where(eq(empresa.idEmpresa, idEmpresa))
+    .run();
+}
+
+// T7: escribe el veto de Notion en empresa_clasificacion. "El no gana" es union, nunca
+// resta: el upsert solo toca el UNA columna de flag pedida (mas fuente/actualizadoEn),
+// dejando intactos los demas flags que ya tenga la fila (p. ej. es_carrier puesto por
+// una clasificacion previa del lado DB). Idempotente por PK (id_empresa): dos llamadas
+// con el mismo flag dejan la misma fila, sin duplicar ni resetear nada.
+export function marcarVetoNotion(idEmpresa: string, flag: 'es_utility_no_isp' | 'es_no_isp_confirmado'): void {
+  const ahora = new Date().toISOString();
+  // Mapa explicito snake_case (nombre real del flag, vocabulario de vetoCategoria) ->
+  // campo Drizzle (camelCase): evita una clave computada `[flag]` que no coincide con
+  // los nombres de columna que Drizzle espera en values()/set().
+  const campo = flag === 'es_utility_no_isp' ? 'esUtilityNoIsp' : 'esNoIspConfirmado';
+  db.insert(empresaClasificacion)
+    .values({ idEmpresa, [campo]: 1, fuente: 'notion', actualizadoEn: ahora })
+    .onConflictDoUpdate({
+      target: empresaClasificacion.idEmpresa,
+      set: { [campo]: 1, fuente: 'notion', actualizadoEn: ahora },
+    })
     .run();
 }

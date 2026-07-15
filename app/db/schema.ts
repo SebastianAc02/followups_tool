@@ -444,3 +444,22 @@ export const empresaEstadoHistorial = sqliteTable('empresa_estado_historial', {
   fecha: text('fecha').notNull(), // ISO, cuando ocurrio la transicion
   idOrganizacion: integer('id_organizacion').notNull().default(1),
 });
+
+// Fase 2 reconciliacion Notion (T7): clasificacion "el no gana" -- una empresa sale
+// del balde 'isp' si CUALQUIER flag aqui esta en 1 (DB o Notion, union nunca resta).
+// Una fila por empresa (PK = id_empresa). La vista empresa_categoria (ya existe en
+// isps.db, no se toca aca) lee esta tabla y decide la categoria final. `fuente`
+// registra quien escribio por ultima vez (no es un flag de veto en si mismo).
+export const empresaClasificacion = sqliteTable('empresa_clasificacion', {
+  idEmpresa: text('id_empresa').primaryKey(),
+  esCarrier: integer('es_carrier').notNull().default(0),
+  esCorporativoGrande: integer('es_corporativo_grande').notNull().default(0),
+  esUtilityNoIsp: integer('es_utility_no_isp').notNull().default(0),
+  esExtranjero: integer('es_extranjero').notNull().default(0),
+  esNoIspConfirmado: integer('es_no_isp_confirmado').notNull().default(0),
+  alianzaSaePlus: integer('alianza_sae_plus').notNull().default(0),
+  motivo: text('motivo'),
+  fuente: text('fuente'),
+  actualizadoEn: text('actualizado_en').notNull(),
+  actualizadoPor: text('actualizado_por'),
+});

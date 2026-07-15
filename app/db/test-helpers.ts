@@ -348,6 +348,40 @@ export function crearDbPrueba() {
       fecha TEXT NOT NULL,
       id_organizacion INTEGER NOT NULL DEFAULT 1
     );
+
+    CREATE TABLE empresa_clasificacion (
+      id_empresa TEXT PRIMARY KEY REFERENCES empresa(id_empresa) ON DELETE CASCADE,
+      es_carrier INTEGER NOT NULL DEFAULT 0,
+      es_corporativo_grande INTEGER NOT NULL DEFAULT 0,
+      es_utility_no_isp INTEGER NOT NULL DEFAULT 0,
+      es_extranjero INTEGER NOT NULL DEFAULT 0,
+      es_no_isp_confirmado INTEGER NOT NULL DEFAULT 0,
+      alianza_sae_plus INTEGER NOT NULL DEFAULT 0,
+      motivo TEXT,
+      fuente TEXT,
+      actualizado_en TEXT NOT NULL DEFAULT (datetime('now')),
+      actualizado_por TEXT
+    );
+
+    CREATE VIEW empresa_categoria AS
+        SELECT e.id_empresa, e.nombre_oficial,
+            CASE
+                WHEN c.alianza_sae_plus      = 1 THEN 'sae_plus'
+                WHEN c.es_corporativo_grande = 1 THEN 'telco_grande'
+                WHEN c.es_carrier            = 1 THEN 'carrier'
+                WHEN c.es_utility_no_isp     = 1 THEN 'utility'
+                WHEN c.es_extranjero         = 1 THEN 'extranjero'
+                WHEN c.es_no_isp_confirmado  = 1 THEN 'no_isp'
+                ELSE 'isp'
+            END AS categoria,
+            CASE
+                WHEN c.id_empresa IS NULL THEN 1
+                WHEN (c.alianza_sae_plus + c.es_corporativo_grande + c.es_carrier
+                      + c.es_utility_no_isp + c.es_extranjero + c.es_no_isp_confirmado) = 0 THEN 1
+                ELSE 0
+            END AS atacable
+        FROM empresa e
+        LEFT JOIN empresa_clasificacion c ON c.id_empresa = e.id_empresa;
   `);
 
   sqlite.close();
