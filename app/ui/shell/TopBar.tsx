@@ -2,8 +2,9 @@
 // se pasa ya formateada desde AppShell (server) para no meter una isla cliente de reloj.
 import type { Perfil } from '../../core/perfil';
 import { PerfilMenu } from './PerfilMenu';
+import { ModoPruebaToggle } from './ModoPruebaToggle';
 
-export function TopBar({ fecha, perfil }: { fecha: string; perfil: Perfil }) {
+export function TopBar({ fecha, perfil, modoPrueba }: { fecha: string; perfil: Perfil; modoPrueba: boolean }) {
   return (
     <div className="relative z-10 flex flex-none items-center gap-4 border-b border-card-hover px-[30px] py-3.5">
       <div className="flex max-w-[420px] flex-1 items-center gap-2.5 rounded-[11px] border border-line-card bg-card px-[13px] py-[9px]">
@@ -17,9 +18,12 @@ export function TopBar({ fecha, perfil }: { fecha: string; perfil: Perfil }) {
         </span>
       </div>
 
-      <div className="ml-auto flex items-center gap-2 text-[12.5px] text-muted">
-        <span className="h-[7px] w-[7px] rounded-full bg-done animate-[pulseLive_2s_ease-in-out_infinite]" />
-        En vivo
+      <div className="ml-auto flex items-center gap-3">
+        <ModoPruebaToggle activo={modoPrueba} />
+        <div className="flex items-center gap-2 text-[12.5px] text-muted">
+          <span className="h-[7px] w-[7px] rounded-full bg-done animate-[pulseLive_2s_ease-in-out_infinite]" />
+          En vivo
+        </div>
       </div>
       <span className="text-[12.5px] text-faint">{fecha}</span>
       <PerfilMenu perfil={perfil} />

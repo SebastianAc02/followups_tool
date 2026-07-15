@@ -5,6 +5,7 @@ import { colaDelDia, colaLeads, listarCampanas, estadoConector, contarPorEstado,
 import { ESTADOS_ACTIVOS } from '../../db/funnel';
 import { OWNER_COLA_SPLIT } from '../../cola/agenda.ts';
 import { requireSession } from '../../lib/session';
+import { leerCookieModoPrueba } from '../../lib/cookie-modo';
 import { cargarPerfil } from '../../lib/perfil';
 import { Sidebar, type ConectorEstado } from './Sidebar';
 import { TopBar } from './TopBar';
@@ -72,6 +73,9 @@ export async function datosSidebar() {
 export async function AppShell({ children }: { children: ReactNode }) {
   const [{ usuario, items, conectores }, perfil] = await Promise.all([datosSidebar(), cargarPerfil()]);
   const ahora = new Date();
+  // La cookie y no esModoPrueba(): el ALS ya lo marco requireSession (dentro de
+  // datosSidebar), pero leer la cookie deja explicito de donde sale el estado del banner.
+  const modoPrueba = await leerCookieModoPrueba();
 
   return (
     <div className="flex h-screen overflow-hidden bg-shell font-body text-ink">
@@ -79,7 +83,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
       <div className="relative flex min-w-0 flex-1 flex-col bg-shell">
         {/* glow ambiental (arbitrary Tailwind, no CSS) */}
         <div className="pointer-events-none absolute -top-[140px] left-[40%] h-[340px] w-[520px] bg-[radial-gradient(closest-side,rgba(139,124,255,0.16),transparent)]" />
-        <TopBar fecha={fechaCorta(ahora)} perfil={perfil} />
+        <TopBar fecha={fechaCorta(ahora)} perfil={perfil} modoPrueba={modoPrueba} />
         <div className="relative z-[1] flex-1 overflow-auto px-6 pb-10 pt-6 lg:px-8 lg:pt-8">{children}</div>
       </div>
     </div>
