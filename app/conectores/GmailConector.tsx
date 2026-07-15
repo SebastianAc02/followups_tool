@@ -33,9 +33,27 @@ export function GmailConector({ estado, emailConectado }: { estado: EstadoConect
 
   if (verificado) {
     return (
-      <p className="text-sm text-muted">
-        Conectado como <strong className="text-ink">{emailConectado ?? 'tu cuenta'}</strong>.
-      </p>
+      <div className="max-w-sm">
+        <p className="text-sm text-muted">
+          Conectado como <strong className="text-ink">{emailConectado ?? 'tu cuenta'}</strong>.
+        </p>
+        {/* Mismo criterio que "Probar conexion" de WhatsApp: un conector verificado hace
+            meses puede estar muerto (token revocado, cuota). Poder mandarse un correo de
+            prueba sin desconectar y rehacer el OAuth es la unica forma de saberlo. */}
+        <div className="mt-2">
+          <form action={accionReenviar}>
+            <Button type="submit" variant="quiet" disabled={reenviando}>
+              {reenviando ? "Enviando..." : "Enviar correo de prueba"}
+            </Button>
+          </form>
+        </div>
+        {resultadoReenvio?.ok && (
+          <p className="mt-2 text-xs text-done">Mandado a {emailConectado ?? 'tu cuenta'}. Revisa tu bandeja.</p>
+        )}
+        {resultadoReenvio && !resultadoReenvio.ok && (
+          <p className="mt-2 text-xs text-overdue">{resultadoReenvio.error}</p>
+        )}
+      </div>
     );
   }
 
