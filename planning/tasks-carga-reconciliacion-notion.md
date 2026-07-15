@@ -20,7 +20,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
 
 ## Fase 0: Deduplicación (revisión humana, Notion gana comercial)
 
-- [ ] **T1 · NotionAdapter: leer el export por-página.**
+- [x] **T1 · NotionAdapter: leer el export por-página.**
   Crear: `app/adapters/notion/notionExportAdapter.ts` (puerto de lectura).
   Test: `app/adapters/notion/notionExportAdapter.test.ts` con un fixture chico
   (2-3 `.md` + un CSV recortado en `app/adapters/notion/__fixtures__/`).
