@@ -31,7 +31,7 @@ independiente y se puede hacer en cualquier momento (con cuidado de concurrencia
   con `utf-8-sig` equivalente / quitar `﻿`).
   Lista cuando: el adapter devuelve la lista parseada del fixture, con prueba.
 
-- [ ] **T2 · Core: matcher de gemelos (función pura, sin fundir).**
+- [x] **T2 · Core: matcher de gemelos (función pura, sin fundir).**
   Crear: `app/core/reconciliacion/matcherGemelos.ts` + test.
   Recibe empresas Notion (T1) y empresas DB (nombre, id, tipo NIT vs sintético), devuelve
   pares candidatos con `score` (nombre normalizado exacto = 1.0; token overlap / distancia
