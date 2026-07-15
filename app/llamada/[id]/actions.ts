@@ -15,7 +15,12 @@ import {
   lineaWhatsappActiva,
   guardarProximoPasoPBX,
   graduarDePBX,
+  leerDiscovery,
+  guardarDiscovery,
+  leerTranscriptResumen,
 } from "../../db/repository";
+import { fusionarDiscovery, hidratarBrief } from "../../core/fusionar";
+import { pedirBorradores } from "../../core/borradores";
 import { crearRegistroEnvio } from "../../adapters/registro-envio";
 import { registrarToqueSchema } from "../../db/validation";
 import type { CampoCalificacion } from "../../core/calificacion";
@@ -72,6 +77,16 @@ export async function registrarToqueAction(formData: FormData) {
   });
 
   registrarToque(parsed, idOrganizacion);
+
+  // El discovery de la cuenta: la version FUSIONADA que el owner acaba de revisar en el
+  // borrador, no lo que escupio la IA sola. Si los campos no vienen (un toque registrado sin
+  // pasar por "Estructurar con IA"), no se toca nada: un form sin esos inputs no puede borrar
+  // tres meses de facts.
+  const notasDiscovery = String(formData.get("notasDiscovery") ?? "").trim();
+  const brief = String(formData.get("brief") ?? "").trim();
+  if (notasDiscovery || brief) {
+    guardarDiscovery(idEmpresa, { notas: notasDiscovery, brief }, idOrganizacion);
+  }
 
   // Sesion 2026-07-09: si este toque cierra el paso activo de una cadencia (llamada
   // con paso_inscripcion pendiente), el paso se marca 'enviada' aca -- el toque YA
@@ -143,13 +158,61 @@ export async function confirmarGrabacionAction(idEmpresa: string, idToque: numbe
   revalidatePath(`/llamada/${idEmpresa}`);
 }
 
-// Tarea 5b: solo PROPONE un borrador estructurado a partir del dictado (texto pegado,
-// nunca audio). No escribe nada -- el owner corrige el borrador en CapturaLlamada y
-// recien registrarToqueAction (submit del form) persiste.
-export async function estructurarDictadoAction(dictado: string): Promise<ToqueEstructurado> {
+// El borrador que ve el owner: lo estructurado de ESTA llamada, mas la propuesta de como queda
+// el discovery acumulado de la cuenta si lo aprueba.
+export type BorradorConFusion = ToqueEstructurado & { notasFusionadas: string; briefHidratado: string };
+
+// Tarea 5b: solo PROPONE un borrador estructurado a partir del dictado (texto pegado, nunca
+// audio). No escribe nada -- el owner corrige el borrador en CapturaLlamada y recien
+// registrarToqueAction (submit del form) persiste.
+//
+// Tres pasos con la IA, no uno: extraer, fusionar los facts con lo que ya sabiamos, e hidratar
+// el brief. Un solo prompt que hiciera las tres cosas las haria las tres mal, y no se podria
+// testear la fusion sin testear la extraccion. Fusionar e hidratar solo dependen de extraer, no
+// la una de la otra, asi que van en paralelo: la latencia es extraer + max(fusionar, hidratar),
+// no la suma.
+export async function estructurarDictadoAction(idEmpresa: string, dictado: string): Promise<BorradorConFusion> {
   await requireEscritura();
+  const { idOrganizacion } = await requireSession();
   const ia = crearClaudeAdapter();
-  return estructurarToque(dictado, ia);
+
+  const estructurado = await estructurarToque(dictado, ia);
+  const actual = leerDiscovery(idEmpresa, idOrganizacion);
+
+  const [notasFusionadas, briefHidratado] = await Promise.all([
+    fusionarDiscovery(actual.notas, estructurado.notasDiscovery, ia),
+    hidratarBrief(actual.brief, estructurado.brief, ia),
+  ]);
+
+  return { ...estructurado, notasFusionadas, briefHidratado };
+}
+
+// El gemelo de estructurarDictadoAction para el camino de Granola: mismo borrador, misma fusion,
+// mismo schema. La diferencia es de donde sale el insumo (el resumen cacheado de la grabacion en
+// vez del dictado del owner).
+//
+// Esta action es la que revive pedirBorradores(), que estuvo escrita y sin un solo caller desde
+// que se creo: le faltaban el insumo (transcript_resumen) y el destino (notas_discovery, brief).
+export async function borradorDesdeGrabacionAction(
+  idEmpresa: string,
+  idToque: number,
+): Promise<BorradorConFusion | null> {
+  await requireEscritura();
+  const { idOrganizacion } = await requireSession();
+
+  const resumenCacheado = leerTranscriptResumen(idToque);
+  if (!resumenCacheado.trim()) return null; // toque dictado, o grabacion sin confirmar
+
+  const ia = crearClaudeAdapter();
+  const estructurado = await pedirBorradores(resumenCacheado, ia);
+  const actual = leerDiscovery(idEmpresa, idOrganizacion);
+
+  const [notasFusionadas, briefHidratado] = await Promise.all([
+    fusionarDiscovery(actual.notas, estructurado.notasDiscovery, ia),
+    hidratarBrief(actual.brief, estructurado.brief, ia),
+  ]);
+
+  return { ...estructurado, notasFusionadas, briefHidratado };
 }
 
 // EditorCorreo/EditorWhatsapp llaman esto al darle "Enviar" en el cockpit.

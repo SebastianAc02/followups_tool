@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { registrarToqueAction, estructurarDictadoAction } from "./actions";
+import { registrarToqueAction, estructurarDictadoAction, type BorradorConFusion } from "./actions";
 import { RESULTADO_LABELS, RESULTADOS, RESULTADOS_CONTESTO, type Resultado } from "../../db/validation";
 import { plusDias } from "../../lib/date-utils";
 import type { ToqueEstructurado } from "../../core/estructurar-toque";
@@ -49,7 +49,7 @@ export default function CapturaLlamada({
   const [fecha, setFecha] = useState(plusDias(3));
   const [dictado, setDictado] = useState("");
   const [estructurando, setEstructurando] = useState(false);
-  const [borrador, setBorrador] = useState<ToqueEstructurado | null>(null);
+  const [borrador, setBorrador] = useState<BorradorConFusion | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const yaTengo = new Set(
@@ -67,7 +67,7 @@ export default function CapturaLlamada({
     setEstructurando(true);
     setError(null);
     try {
-      const r = await estructurarDictadoAction(dictado);
+      const r = await estructurarDictadoAction(idEmpresa, dictado);
       setBorrador(r);
       if (r.resultado) setOutcome(r.resultado);
       if (r.proximoFollowUp) setFecha(r.proximoFollowUp);
@@ -202,6 +202,39 @@ export default function CapturaLlamada({
                 className={`${inputClase} resize-none`}
               />
             </label>
+          )}
+
+          {/* Solo cuando la IA ya propuso una fusion: estos dos campos REEMPLAZAN el discovery de
+              la cuenta al guardar, asi que no se muestran vacios. Un textarea vacio enviado por
+              accidente borraria facts que costaron llamadas; sin los inputs, registrarToqueAction
+              no toca nada. */}
+          {borrador && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">
+                  Discovery de la cuenta
+                </span>
+                <textarea
+                  name="notasDiscovery"
+                  rows={5}
+                  defaultValue={borrador.notasFusionadas}
+                  className={`${inputClase} resize-none`}
+                />
+                <span className="text-[10px] text-muted">
+                  Los facts de la cuenta, con lo de esta llamada ya fusionado. Reemplaza lo que había.
+                </span>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Brief</span>
+                <textarea
+                  name="brief"
+                  rows={4}
+                  defaultValue={borrador.briefHidratado}
+                  className={`${inputClase} resize-none`}
+                />
+              </label>
+            </>
           )}
 
           {outcome === "contesto_no" && (
