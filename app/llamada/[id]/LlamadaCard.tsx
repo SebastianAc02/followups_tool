@@ -2,7 +2,7 @@ import type { ContextoToque } from "../../db/repository";
 import type { Calificacion } from "../../core/calificacion";
 import { Pill, pillParaEstado } from "../../ui/Pill";
 import { SecuenciaRail } from "./SecuenciaRail";
-import { CalificacionChecklist } from "./CalificacionChecklist";
+import { PanelCuenta } from "./PanelCuenta";
 import { RegistrarToqueToggle } from "./RegistrarToqueToggle";
 import { PreguntarProvider } from "./PreguntarContext";
 
@@ -130,7 +130,13 @@ export function LlamadaCard({
               </div>
             </div>
 
-            <CalificacionChecklist idEmpresa={emp?.id ?? ""} calificacion={calificacion} />
+            <PanelCuenta
+              idEmpresa={emp?.id ?? ""}
+              calificacion={calificacion}
+              notasDiscovery={emp?.notasDiscovery ?? null}
+              toques={toques}
+              hoy={hoy}
+            />
 
             {/* Bottom action row */}
             <div className="mt-auto flex flex-col gap-4 border-t border-line pt-4">
