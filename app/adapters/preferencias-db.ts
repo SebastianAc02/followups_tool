@@ -1,7 +1,8 @@
 import type { LeerPreferencias, GuardarPreferencias } from '../core/ports/preferencias';
 import { PREFERENCIAS_DEFAULT, type Preferencias, type PreferenciasParciales } from '../core/perfil';
 import { leerPreferencia, guardarPreferencia } from '../db/preferencias-repository';
-import { db as dbSingleton } from '../db/index';
+// dbReal: tus preferencias son tuyas, iguales en los dos modos (ver app/lib/auth.ts).
+import { dbReal as dbSingleton } from '../db/index';
 
 type DbInstancia = typeof dbSingleton;
 

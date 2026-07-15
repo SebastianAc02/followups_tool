@@ -1,7 +1,9 @@
 import { eq, and, isNull, isNotNull, notInArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
-import { db as dbSingleton } from './index';
+// dbReal: la membresia es identidad, no negocio. requireSession la lee ANTES de marcar
+// el modo, asi que si conmutara el login reventaria en toda request.
+import { dbReal as dbSingleton } from './index';
 import * as schema from './schema';
 import * as authSchema from './auth-schema';
 

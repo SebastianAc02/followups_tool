@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
-import { db as dbSingleton } from './index';
+// dbReal: el layout de tu cockpit es config tuya, no negocio (ver auth.ts).
+import { dbReal as dbSingleton } from './index';
 import * as schema from './schema';
 
 const { panelTablero } = schema;

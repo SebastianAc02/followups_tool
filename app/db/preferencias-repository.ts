@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
-import { db as dbSingleton } from './index';
+// dbReal: tus preferencias son tuyas, iguales en los dos modos (ver auth.ts).
+import { dbReal as dbSingleton } from './index';
 import * as schema from './schema';
 import type { PreferenciasParciales } from '../core/perfil';
 

@@ -1,11 +1,14 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { db } from '../db/index';
+import { dbReal } from '../db/index';
 
 // Adaptador de auth (B3). El core no importa este archivo: la identidad entra a la app
 // solo como datos planos (email, owner, admin) via app/lib/session.ts.
 export const auth = betterAuth({
-  database: drizzleAdapter(db, { provider: 'sqlite' }),
+  // dbReal y no db: tu sesion es la misma en modo prueba y en modo real. Si auth
+  // conmutara, activar el modo prueba buscaria tu sesion en pruebas.db (donde no existe)
+  // y te sacaria a /login, y loguearte ahi crearia una cuenta duplicada.
+  database: drizzleAdapter(dbReal, { provider: 'sqlite' }),
   emailAndPassword: {
     enabled: true,
     // Reabierto (2026-07-14) con un diseno distinto al original: /register ya no deriva
