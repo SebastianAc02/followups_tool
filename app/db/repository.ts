@@ -4661,7 +4661,13 @@ export function embudoPipeline(
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(and(...condiciones))
+    // D (2026-07-15): la categoria real sale de la vista, no de empresa.categoria (la
+    // columna cruda no conoce los vetos de empresa_clasificacion). atacable=1 = ISP
+    // genuino: deja fuera carrier, utility, no_isp, telco_grande, extranjero y sae_plus.
+    // Sin esto el embudo contaba a Claro, Tigo, WOM y los acueductos, y sumaba sus
+    // millones de suscriptores al total de usuarios.
+    .innerJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
+    .where(and(...condiciones, eq(empresaCategoriaView.atacable, 1)))
     .groupBy(estadoExpr)
     .all();
 
