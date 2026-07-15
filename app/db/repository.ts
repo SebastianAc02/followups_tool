@@ -61,7 +61,7 @@ import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
-import { estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
+import { aplicaBuclePBX, estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
@@ -4475,7 +4475,7 @@ export function getContextoToque(id: string, idOrganizacion: number): ContextoTo
   }));
   const contactoOficina = contactos.find((c) => c.esKeyDecisionMaker !== 1 && c.telefono);
   let pbx: PbxContexto | null = null;
-  if (estaEnPBX(contactosPBX)) {
+  if (aplicaBuclePBX(emp?.estado ?? null, contactosPBX)) {
     const intentos = intentosPBX(id, idOrganizacion);
     pbx = {
       forma: emp?.pbxForma ?? null,
@@ -4765,6 +4765,7 @@ export function empresasEnPBX(idOrganizacion: number): FilaPBX[] {
     .select({
       id: empresa.idEmpresa,
       nombre: empresa.nombreOficial,
+      estadoNotion: empresa.estadoNotion,
       proximoPaso: empresa.proximoPaso,
       proximoCanal: empresa.proximoCanal,
       proximoFollowUpFecha: empresa.proximoFollowUpFecha,
@@ -4796,7 +4797,7 @@ export function empresasEnPBX(idOrganizacion: number): FilaPBX[] {
   }
 
   return empresas
-    .filter((e) => estaEnPBX(contactosPorEmpresa.get(e.id) ?? []))
+    .filter((e) => aplicaBuclePBX(e.estadoNotion, contactosPorEmpresa.get(e.id) ?? []))
     .map((e) => ({
       ...e,
       tieneNumeroConmutador: tieneNumeroPorEmpresa.get(e.id) ?? false,

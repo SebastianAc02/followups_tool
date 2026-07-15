@@ -39,6 +39,20 @@ export function estaEnPBX(contactos: ContactoPBX[]): boolean {
   return canalesDisponiblesKDM(contactos).size === 0;
 }
 
+// Etapas donde el bucle PBX tiene sentido: la cuenta esta FRIA y el objetivo es
+// conseguir al decisor. null/'' = sin estado (nunca se trabajo).
+const ETAPAS_FRIAS: ReadonlySet<string> = new Set(['lead', '']);
+
+// Gate de etapa (I, decision de Sebastian 2026-07-15): un deal que ya arranco NO entra
+// al bucle aunque le falte el KDM marcado. El bucle REEMPLAZA la ficha comercial en la
+// UI, asi que dejarlo ganar sobre un deal en curso tapa el trabajo real -- pasaba con
+// 123 deals, 46 de ellos clientes que ya habian firmado y pagado. Si a un deal en marcha
+// le falta el decisor, eso se resuelve en su ficha, no mandandolo al bucle de frios.
+export function aplicaBuclePBX(estadoNotion: string | null, contactos: ContactoPBX[]): boolean {
+  if (!ETAPAS_FRIAS.has(estadoNotion ?? '')) return false;
+  return estaEnPBX(contactos);
+}
+
 // Resultado ABIERTO de un toque PBX. `clase` es el mapeo a vocabulario (lo pone la IA
 // o Sebastian a mano); `nota` es el texto libre; `datoConseguido` marca si se obtuvo
 // metodo directo del KDM (dispara graduar).

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { canalesDisponiblesKDM, estaEnPBX, proponerSiguientePaso, sugerirEscalar } from './pbx.ts';
+import { aplicaBuclePBX, canalesDisponiblesKDM, estaEnPBX, proponerSiguientePaso, sugerirEscalar, type ContactoPBX } from './pbx.ts';
 
 test('canalesDisponiblesKDM ignora contactos que no son KDM', () => {
   const disponibles = canalesDisponiblesKDM([
@@ -113,4 +113,30 @@ test('sugerirEscalar: 3 intentos combinados sugiere escalar', () => {
 
 test('sugerirEscalar: menos de 3 intentos no sugiere escalar', () => {
   assert.equal(sugerirEscalar({ llamadas: 1, correos: 0 }), false);
+});
+
+// I (2026-07-15): el bucle PBX es para conseguir el decisor de una cuenta FRIA. Antes de
+// este gate, getContextoToque solo miraba si habia KDM alcanzable y NUNCA el estado del
+// deal: 123 deals en marcha veian PBX en vez de su ficha, entre ellos 46 que ya eran
+// clientes (firma_pago). El deal en marcha manda sobre el bucle.
+const SIN_CONTACTOS: ContactoPBX[] = [];
+
+test('un lead sin KDM alcanzable si entra al bucle', () => {
+  assert.equal(aplicaBuclePBX('lead', SIN_CONTACTOS), true);
+});
+
+test('una cuenta sin estado sin KDM alcanzable si entra al bucle', () => {
+  assert.equal(aplicaBuclePBX(null, SIN_CONTACTOS), true);
+  assert.equal(aplicaBuclePBX('', SIN_CONTACTOS), true);
+});
+
+test('un deal en marcha NUNCA entra al bucle, aunque le falte el KDM', () => {
+  for (const etapa of ['contacto_iniciado', 'oportunidad', 'enviar_contrato', 'cierre_documentacion', 'firma_pago']) {
+    assert.equal(aplicaBuclePBX(etapa, SIN_CONTACTOS), false, `${etapa} no debe ver PBX`);
+  }
+});
+
+test('un lead CON KDM alcanzable no entra al bucle (el bucle ya no tiene nada que buscar)', () => {
+  const conKdm: ContactoPBX[] = [{ esKeyDecisionMaker: true, telefono: '3001112233', email: null }];
+  assert.equal(aplicaBuclePBX('lead', conKdm), false);
 });
