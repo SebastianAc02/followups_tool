@@ -74,7 +74,7 @@ test('marcarOutboxFallido con proximoIntento futuro mantiene la fila pendiente p
   assert.strictEqual(pendientesFuturo.length, 1);
 });
 
-test('escribirTranscriptCompleto encola notasDiscovery en outbox', () => {
+test('escribirTranscriptCompleto cachea el resumen de Granola como transcript_resumen', () => {
   seedEmpresa('emp-transcript', 'page-transcript');
   const raw = new Database(dbPath);
   raw
@@ -91,9 +91,41 @@ test('escribirTranscriptCompleto encola notasDiscovery en outbox', () => {
     url: null,
   });
 
-  const pendientes = outboxPendientes().filter((p) => p.payload.notionPageId === 'page-transcript');
-  assert.strictEqual(pendientes.length, 1);
-  assert.strictEqual(pendientes[0].payload.notasDiscovery, 'resumen de la llamada');
+  const raw2 = new Database(dbPath);
+  const fila = raw2.prepare('SELECT transcript_resumen FROM toque WHERE id_toque = 100').get() as any;
+  raw2.close();
+  assert.strictEqual(fila.transcript_resumen, 'resumen de la llamada');
+});
+
+// Reemplaza a 'escribirTranscriptCompleto encola notasDiscovery en outbox' (2026-07-15): ese
+// test codificaba el bug. El resumen crudo de Granola es narracion, no facts, y encolarlo como
+// notasDiscovery ademas pisaba lo que hubiera en Notion. Los facts salen ahora de la fusion
+// aprobada por el owner.
+test('escribirTranscriptCompleto NO encola notasDiscovery: el resumen crudo no son facts', () => {
+  seedEmpresa('emp-transcript-2', 'page-transcript-2');
+  const raw = new Database(dbPath);
+  raw
+    .prepare(`INSERT INTO toque (id_toque, id_empresa, fecha, canal, resultado, fuente) VALUES (101, 'emp-transcript-2', '2026-07-04T10:00:00.000Z', 'llamada', 'contesto_reunion', 'cockpit')`)
+    .run();
+  raw.close();
+
+  escribirTranscriptCompleto(101, {
+    proveedor: 'granola',
+    transcriptId: 't-y',
+    titulo: 'y',
+    fecha: '2026-07-04T10:00:00.000Z',
+    resumen: 'resumen de la llamada',
+    url: null,
+  });
+
+  const conNotas = outboxPendientes()
+    .filter((p) => p.payload.notionPageId === 'page-transcript-2')
+    .filter((p) => p.payload.notasDiscovery !== undefined);
+  assert.strictEqual(
+    conNotas.length,
+    0,
+    'las Notas Discovery solo salen de la fusion que el owner aprueba, nunca del resumen crudo',
+  );
 });
 
 test.after(() => borrarDbPrueba(dbPath));

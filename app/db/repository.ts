@@ -1085,17 +1085,20 @@ export function escribirTranscriptCompleto(idToque: number, sesion: SesionTransc
         transcriptId: sesion.transcriptId,
         transcriptUrl: sesion.url,
         quePaso: sesion.resumen,
+        // El insumo crudo de Granola, cacheado (2026-07-15). Es lo que pide el CLAUDE.md
+        // ("arma el toque + puntero + resumen cacheado") y lo que le da de comer a
+        // pedirBorradores sin volver a pegarle a Granola con credencial.
+        transcriptResumen: sesion.resumen,
       })
       .where(eq(toque.idToque, idToque))
       .run();
 
-    // V3.7: el resumen confirmado sube a Notion (Notas Discovery) en la misma
-    // transaccion. Solo aca, no en escribirTranscriptSoloPuntero: esa rama nunca
-    // toca quePaso (V3.6), asi que no hay resumen nuevo que sincronizar.
-    if (sesion.resumen) {
-      const t = tx.select({ idEmpresa: toque.idEmpresa }).from(toque).where(eq(toque.idToque, idToque)).get();
-      if (t) encolarOutboxNotion(tx, t.idEmpresa, { notasDiscovery: sesion.resumen });
-    }
+    // Las Notas Discovery NO se encolan aca (2026-07-15). Antes esto mandaba `sesion.resumen`
+    // como notasDiscovery: narracion de Granola metida donde van facts crudos, y ademas pisando
+    // lo que hubiera en Notion, porque sin columna local no habia con que acumular.
+    //
+    // Los facts salen ahora de la fusion que el owner aprueba (fusionarDiscovery -> borrador ->
+    // registrarToqueAction), y esa es la unica que llega al outbox.
   });
 }
 
