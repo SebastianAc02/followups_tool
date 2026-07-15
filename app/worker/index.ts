@@ -15,6 +15,7 @@ import {
   quedanDestinatariosActivos,
   materializarPasosDebidos,
   archivarCampanasCompletadas,
+  registrarRespuestaDetectada,
 } from '../db/repository';
 import { drenarOutbox } from '../core/outbox';
 import { pushPendientes } from '../core/push';
@@ -117,6 +118,7 @@ async function tareaTracking(envioCorreo: ReturnType<typeof crearRegistroEnvio>[
       pausarInscripcion,
       marcarDestinatarioSalio,
       quedanDestinatariosActivos,
+      registrarRespuestaDetectada,
     },
     envioCorreo,
   );
