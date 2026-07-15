@@ -36,16 +36,24 @@
 
 **El diff definitivo (`scripts/diff_notion_db.ts`, usa el adapter arreglado + page_id normalizado, salida completa en `planning/deriva-notion-db.txt`):** de 486 filas comparables de Notion, **461 están alineadas (95%)**. Los 25 casos restantes, clasificados:
 
-- **O — pares gemelos (criterio humano en Notion, luego enlace manual una vez):** 5 detectados directo (Comunicaciones Wifi, Wicom, Wireless/S3Wireless, Visión Satelital, ESSA×2) + ~7 gemelas ocultas donde la página nueva no está enlazada y la vieja sí (Colombiatel, Intercom de nariño, Sistemas Palacios, naamiku.net, NOVACOM, SuperCable BQLLA, Digital DOT, Caldas Data, INTTEL GO) + 2 páginas que apuntan a filas YA FUNDIDAS en la DB (CELSIA, Fibermax — la fusión T4 las resolvió del lado DB, pero Notion aún tiene viva la página gemela).
-- **N — genuinamente nuevas (crear fila):** ClonAI, Insumos y desechables, Delta ISP CRM, GASES DEL ORIENTE, Anta(verificar).
+- **O — CANDIDATOS a gemelo (SOLO decisión humana, nunca automático):** 5 detectados directo (Comunicaciones Wifi, Wicom, Wireless/S3Wireless, Visión Satelital, ESSA×2) + candidatos ocultos (Colombiatel, naamiku.net, NOVACOM, Digital DOT, Caldas Data, INTTEL GO) + 2 páginas que apuntan a filas YA FUNDIDAS en la DB (CELSIA, Fibermax). **Lección del 2026-07-15:** la IA propuso "Sistemas Palacios = SP SISTEMAS PALACIOS" e "Intercom de nariño = INTERCOMM DE NARIÑO" y Sebastián refutó AMBOS — son empresas distintas. Y "SuperCable BQLLA" no es duplicado sino SATÉLITE (SuperCable Barranquilla, empresa relacionada pero distinta de la matriz). El emparejamiento por similitud de nombre es una hipótesis, no un hecho: **cada par se presenta a Sebastián de a uno y él decide** (mismo flujo que aprobó los 21 grupos del dedup T3/T4).
+- **N — genuinamente nuevas (crear fila, con su aprobación):** ClonAI, Insumos y desechables, Delta ISP CRM, GASES DEL ORIENTE, Anta(verificar), **Sistemas Palacios, Intercom de nariño** (refutados como gemelos → son cuentas nuevas), y las que resulten "distinto" en la revisión de los candidatos O.
 - **P — deriva bidireccional:** Mundo Cams (DB `contacto_iniciado`, Notion `Lead`) y COMFIBRA (DB `reunion_agendada`/Felipe, Notion `Lead`/Sebastián — puede ser también un cruce de link COMFIBRA vs COMFIBRA X). El cockpit va ADELANTE de Notion: "Notion sobrescribe" (decisión T10) es correcta para el seed, pero destruye trabajo nuevo del cockpit. **Decisión pendiente de Sebastián.**
 - **Owner sin llenar (M puro):** Integrados y Conecttic PTX — Notion dice Felipe, DB vacío; el enriquecimiento no los alcanzó. El re-run con el fix los llena.
 
-**Prueba de aceptación verificada contra el tablero de Sebastián (Owner=Sebastian en Notion: on_hold 92, lead 16, cierre 3, contrato firmado 1):**
-- on_hold: DB 89 + 3 gemelas ocultas suyas (Intercom de nariño, Sistemas Palacios, naamiku) = **92 ✓**
-- lead: DB 17 − Wicom (gemela, real on_hold) − SP SISTEMAS y INTERCOMM (en Notion no tienen owner; el owner "Sebastián" de la DB vino de una página gemela) + Mundo Cams + COMFIBRA (P) = **16 ✓**
-- cierre_documentacion: DB 4 = 3 Cierre/Doc + 1 Contrato Firmado (el enum colapsa ambos, `mapeoEstados`) ✓
-- contacto_iniciado: DB 1 (Mundo Cams, caso P) − 1 = **0 ✓**
+**Prueba de aceptación (números dictados por Sebastián, 2026-07-15 — criterio duro de la Task 11):**
+
+| Etapa | Sebastián | Felipe |
+|---|---|---|
+| on_hold | **92** | **38** |
+| lead | **16** | **4** |
+| contacto_iniciado | **0** | **11** |
+| reunion_agendada | 0 | 0 |
+| oportunidad | 0 | **2** |
+| cierre_documentacion | **3 + 1 Contrato Firmado = 4 en DB** (el enum colapsa, `mapeoEstados`) | **6** |
+| enviar_contrato | 0 | **1** |
+
+Nota: la DB llega a esos números por la SUMA de fixes — M (alcanzar filas), N (crear las que faltan, con aprobación), O (resolver gemelos, con aprobación), P (regla de deriva). No cuadrarán hasta que las decisiones humanas pendientes se tomen; el diff (`scripts/diff_notion_db.ts`) es la herramienta para medir cuánto falta en cada corrida.
 
 **LA CAUSA RAÍZ DE FONDO (principio de Sebastián, verificado):** *"si esto ocurre, se resuelve una sola vez manual y queda para siempre."* El mecanismo para eso YA EXISTE — `empresa_alias` tiene registradas desde MAYO las dos variantes de nombre de Cable Cauca apuntando a la fila correcta, y `notion_page_id` es la llave durable — pero **los scripts de sync ignoran ambos**: re-derivan el match desde el nombre crudo en cada corrida. Regla para todo el código nuevo de este plan: **(1) una fila con `page_id` enlazado NUNCA se re-matchea por nombre; (2) el fallback por nombre consulta `empresa_alias` antes que la razón social; (3) toda resolución manual escribe su alias.** Cable Cauca quedó resuelto así el 2026-07-15 (página vacía borrada en Notion por Sebastián, fila 815001640 alineada a `oportunidad`/"Cable Cauca-Home TV", export limpiado, auditado en `sync_cambios`).
 
@@ -1810,9 +1818,49 @@ lo que cambio es que ninguna vista las lee."
 | H, J, K | — | ❌ producto nuevo, requieren brainstorming |
 
 **Decisiones humanas pendientes que este plan NO resuelve solo (revisar con Sebastián antes o durante la Task 11):**
-1. **Los ~14 pares gemelos de O** — cuál página sobrevive en cada par (como hizo con Cable Cauca). Lista completa en `planning/deriva-notion-db.txt`.
+1. **Los candidatos a gemelo de O** — de a uno, Sebastián decide: mismo / distinto / satélite. Lista completa en `planning/deriva-notion-db.txt`. Ya refutados: Sistemas Palacios, Intercom de nariño (distintos); SuperCable BQLLA (satélite).
 2. **La regla de P** — propuesta: el estado más AVANZADO gana entre cockpit y Notion mientras no exista el outbox DB→Notion; cuando el outbox corra, el cockpit es la fuente y Notion se actualiza solo.
-3. **Las ~5 empresas nuevas de N** — confirmar que son cuentas reales a crear (ClonAI e "Insumos y desechables" parecen clientes de Thomas fuera del rubro ISP).
+3. **Las empresas nuevas de N** — confirmar que son cuentas reales a crear (ClonAI e "Insumos y desechables" parecen clientes de Thomas fuera del rubro ISP).
+
+---
+
+## Propuesta: registro de decisiones de identidad (para la sesión de ejecución)
+
+**El problema de fondo que Sebastián señaló:** en Notion los nombres son de trabajo, no razones sociales verificadas ("SuperCable BQLLA" = la satélite de Barranquilla de SuperCable; "Hola - X" = cuentas del canal Hola). La DB sí tiene identidad verificada (NIT). Cruzar los dos mundos por similitud de nombre siempre va a producir hipótesis — y una hipótesis mal aplicada corrompe datos (la IA ya emparejó mal 2 de 3 hoy).
+
+**La idea — una tabla `identidad_decision`, el complemento de `empresa_alias`:**
+
+```sql
+CREATE TABLE identidad_decision (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  a TEXT NOT NULL,              -- id_empresa o page_id de Notion (lado A)
+  b TEXT NOT NULL,              -- id_empresa o page_id de Notion (lado B)
+  veredicto TEXT NOT NULL CHECK (veredicto IN ('mismo','distinto','satelite_de')),
+  decidido_por TEXT NOT NULL,   -- siempre un humano
+  nota TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+Hoy `empresa_alias` guarda los SÍ ("estos dos nombres son la misma empresa") pero no hay dónde guardar los NO ni los "relacionado pero distinto". Consecuencia: el matcher re-propone los mismos pares refutados en cada corrida (Tricom/Wiicom, FXN/SUN y todos los "Rechazados" del dedup T3 viven solo en un markdown que ningún script lee). Con la tabla:
+
+- **`mismo`** → dispara el flujo Cable Cauca (fusión/enlace + alias). Una vez.
+- **`distinto`** → el matcher y el diff NUNCA vuelven a proponer ese par. Una vez.
+- **`satelite_de`** → ambas filas viven, con `b` marcada como satélite de `a` (columna `id_empresa_matriz` en `empresa`, distinta de `opera_bajo_id` que significa "identidad muerta"). La UI puede mostrar "satélite de SuperCable"; los conteos comerciales las tratan como cuentas separadas (cada una tiene su propio deal), pero la relación queda visible y el matcher deja de confundirlas.
+
+El flujo operativo: `diff_notion_db.ts` produce candidatos → se le presentan a Sebastián de a uno (mismo/distinto/satélite) → cada respuesta se escribe UNA vez en `identidad_decision` → ninguna corrida futura vuelve a preguntar lo ya decidido. Es el mismo principio de `empresa_alias` ("resolver una vez, para siempre") extendido a los tres veredictos posibles, no solo al SÍ.
+
+---
+
+## Handoff para la próxima sesión
+
+**Estado al cierre del 2026-07-15:**
+- `main` local y `origin/main` al día hasta el commit del diff (`b039a98`). T14 (toques legacy) completo y aplicado a la DB real: 37/37 empresas, 76 toques.
+- **Este plan (12 tareas) está listo para ejecutar.** Empezar por Task 1 (baseline de invariantes) y seguir en orden. Las tareas son independientes del módulo de pruebas.
+- Cable Cauca ya resuelto a mano (no re-hacer): página borrada en Notion, fila `815001640` alineada, export limpio.
+- **Decisiones ya tomadas por Sebastián:** E=borrar dummies; B=filtro duro por owner; F=preguntar ahora, OR después; I=PBX solo lead/sin-estado; G=KDM por procedencia (Notion ⇒ decisor); pruebas=base de datos APARTE (no flag, no org).
+- **Decisiones pendientes:** los candidatos O de a uno; la regla P; las nuevas N; y aprobar la propuesta `identidad_decision` de arriba.
+- **Después de la reparación:** diseñar el módulo `/pruebas` (brainstorming quedó a medias — decisión tomada: DB de prueba aparte; contactos reales: correos sdacostam@eafit.edu.co / felipe@onepay.la / sacostamolin@gmail.com, WhatsApps 3215924704 Isa / 3112469262 Felipe / 3102186819 Camilo / +12368895214 Sebas; cadencia de 3 correos; adelantar días; bloquear contactos tras el primer envío; tracking de aperturas y respuestas en ambos canales; sin-contacto ⇒ no entra a campaña ⇒ PBX). Y los productos nuevos H (ficha PBX muestra el lead + toques viejos en color), J (toques on-the-fly), K (cadencias PBX como campaña aparte).
 
 **Consistencia de tipos entre tareas:**
 - `esKdmDesdeNotion({ esPrincipal, cargo })` — definida en Task 4, usada en Task 5. ✅
