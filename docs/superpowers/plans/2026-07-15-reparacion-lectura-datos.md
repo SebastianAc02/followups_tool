@@ -29,24 +29,27 @@
 | **G** | KDM nunca marcado | `upsertContactoNotion` no setea `es_key_decision_maker` | **120 empresas** (94 por principal + 5 por cargo) |
 | **I** | PBX secuestra deals en marcha | `getContextoToque` nunca mira `estado_notion` | **123 deals** (46 ya clientes) |
 | **L** | `/seguimiento` oculta deals activos | Cutoff `proximo_follow_up_fecha <= hoy` + `IS NOT NULL` | **~90% de los deals activos** |
-| **M** | Los scripts de sync no normalizan el `page_id` | 213 empresas tienen el page_id CON guiones (enlace por MCP) y los scripts comparan el string crudo | **85 filas de Notion que solo enlazan con el fix** |
-| **N** | Empresas nuevas en Notion sin fila en la DB | El seed fue del 30-jun; Notion siguió creciendo. Ningún script CREA empresas nuevas, solo actualiza las que ya existen | **17 empresas** (SuperCable BQLLA, Delta ISP CRM, GASES DEL ORIENTE, ESSA…) |
-| **O** | Filas enlazadas a la página equivocada de Notion | Notion tiene 2 páginas para el mismo negocio con nombres distintos; la fila quedó con el page_id de una y el estado de la otra | Confirmado en Cable Cauca; universo acotado (dato de origen, no de la herramienta) |
+| **M** | Los scripts de sync re-derivan el match por nombre e ignoran las llaves durables | El page_id con guiones no cruza (213 filas) y `empresa_alias` — el mecanismo de "resolver una vez, para siempre" que EXISTE desde mayo — nunca se consulta | 85 filas inalcanzables para los scripts (el dato de la mayoría igual está bien; el daño real son las derivas de abajo) |
+| **N** | El sync ACTUALIZA pero nunca CREA ni ENLAZA páginas nuevas | El seed fue una foto del 30-jun; Notion siguió vivo | **~5 empresas genuinamente nuevas** sin fila |
+| **O** | Notion tiene 2 páginas para el mismo negocio | Páginas viejas formales vs páginas de trabajo nuevas ("Hola - X", nombres cortos) | **~14 pares gemelos**; 1 ya resuelto a mano (Cable Cauca, 2026-07-15) |
+| **P** | Deriva bidireccional real | El cockpit avanzó una cuenta y Notion no se enteró (el outbox DB→Notion no corre aún) | 2 casos (Mundo Cams, COMFIBRA); falta la REGLA de quién gana |
 
-**Medición del delta de Felipe (la que destapó "Notion dice 20, la DB dice 17"):** los 3 casos rotos resultaron ser **un ejemplar de cada bug distinto**, y NINGUNO es lo que dije al principio ("sync_estados no lo alineó"). El diagnóstico real:
+**El diff definitivo (`scripts/diff_notion_db.ts`, usa el adapter arreglado + page_id normalizado, salida completa en `planning/deriva-notion-db.txt`):** de 486 filas comparables de Notion, **461 están alineadas (95%)**. Los 25 casos restantes, clasificados:
 
-| Cuenta | Notion | DB | Causa raíz REAL |
-|---|---|---|---|
-| INTERCARIBE TV S.A.S. | Contacto Iniciado | (sin enlace) | **M** — page_id con guiones + nombre `S.A.S.` vs `S A S`. El fix lo resuelve. |
-| SuperCable BQLLA | Cierre/Doc. | (no existe) | **N** — página creada después del seed. La DB no tiene la fila; hay que CREARLA. |
-| Cable Cauca-Home TV | oportunidad | `lead` | **O** — la fila `815001640` tiene el page_id de la página *Home TV* (Oportunidad, Felipe) pero el estado quedó en `lead` de la página gemela *COMUNICACIONES*. Dos páginas de Notion para un negocio; `sync_estados` lo empeoraría (el nombre colisiona con la página Lead). Requiere criterio humano. |
+- **O — pares gemelos (criterio humano en Notion, luego enlace manual una vez):** 5 detectados directo (Comunicaciones Wifi, Wicom, Wireless/S3Wireless, Visión Satelital, ESSA×2) + ~7 gemelas ocultas donde la página nueva no está enlazada y la vieja sí (Colombiatel, Intercom de nariño, Sistemas Palacios, naamiku.net, NOVACOM, SuperCable BQLLA, Digital DOT, Caldas Data, INTTEL GO) + 2 páginas que apuntan a filas YA FUNDIDAS en la DB (CELSIA, Fibermax — la fusión T4 las resolvió del lado DB, pero Notion aún tiene viva la página gemela).
+- **N — genuinamente nuevas (crear fila):** ClonAI, Insumos y desechables, Delta ISP CRM, GASES DEL ORIENTE, Anta(verificar).
+- **P — deriva bidireccional:** Mundo Cams (DB `contacto_iniciado`, Notion `Lead`) y COMFIBRA (DB `reunion_agendada`/Felipe, Notion `Lead`/Sebastián — puede ser también un cruce de link COMFIBRA vs COMFIBRA X). El cockpit va ADELANTE de Notion: "Notion sobrescribe" (decisión T10) es correcta para el seed, pero destruye trabajo nuevo del cockpit. **Decisión pendiente de Sebastián.**
+- **Owner sin llenar (M puro):** Integrados y Conecttic PTX — Notion dice Felipe, DB vacío; el enriquecimiento no los alcanzó. El re-run con el fix los llena.
 
-**Alcance medido de cada uno (números verificados, ya no estimados):**
-- **M:** de 487 filas de Notion, 385 enlazan hoy y con el fix; **85 SOLO enlazan con el fix** (page_id normalizado + fallback razón social). `importar_toques_legacy.ts` (T14) ya tiene el fix — por eso llegó a 37/37; los otros 3 scripts no.
-- **N:** **20 páginas .md** del export no tienen fila en la DB; 17 de ellas son empresas reales de Notion que el seed del 30-jun no alcanzó (el resto son "Untitled" y ruido). Este es el bug que de verdad hace que "no estemos imitando a Notion": el sync ACTUALIZA, nunca CREA.
-- **O:** solo **1 grupo** de nombre exactamente repetido con estados distintos en Notion (ESSA). Cable Cauca no se detecta por nombre (los dos nombres son distintos aunque sea el mismo negocio) → es criterio humano, no automatizable con seguridad.
+**Prueba de aceptación verificada contra el tablero de Sebastián (Owner=Sebastian en Notion: on_hold 92, lead 16, cierre 3, contrato firmado 1):**
+- on_hold: DB 89 + 3 gemelas ocultas suyas (Intercom de nariño, Sistemas Palacios, naamiku) = **92 ✓**
+- lead: DB 17 − Wicom (gemela, real on_hold) − SP SISTEMAS y INTERCOMM (en Notion no tienen owner; el owner "Sebastián" de la DB vino de una página gemela) + Mundo Cams + COMFIBRA (P) = **16 ✓**
+- cierre_documentacion: DB 4 = 3 Cierre/Doc + 1 Contrato Firmado (el enum colapsa ambos, `mapeoEstados`) ✓
+- contacto_iniciado: DB 1 (Mundo Cams, caso P) − 1 = **0 ✓**
 
-Corrección de honestidad: en el commit anterior del plan escribí "122 filas sin enlazar" para M — ese número salió de una búsqueda ingenua por nombre y estaba inflado. El real es 85 (M) + 17 (N).
+**LA CAUSA RAÍZ DE FONDO (principio de Sebastián, verificado):** *"si esto ocurre, se resuelve una sola vez manual y queda para siempre."* El mecanismo para eso YA EXISTE — `empresa_alias` tiene registradas desde MAYO las dos variantes de nombre de Cable Cauca apuntando a la fila correcta, y `notion_page_id` es la llave durable — pero **los scripts de sync ignoran ambos**: re-derivan el match desde el nombre crudo en cada corrida. Regla para todo el código nuevo de este plan: **(1) una fila con `page_id` enlazado NUNCA se re-matchea por nombre; (2) el fallback por nombre consulta `empresa_alias` antes que la razón social; (3) toda resolución manual escribe su alias.** Cable Cauca quedó resuelto así el 2026-07-15 (página vacía borrada en Notion por Sebastián, fila 815001640 alineada a `oportunidad`/"Cable Cauca-Home TV", export limpiado, auditado en `sync_cambios`).
+
+Corrección de honestidad (tercera del día): "122 sin enlazar" y "17 nuevas" estaban inflados por diagnósticos por nombre. Los números de arriba salen del diff con el adapter real y quedaron reproducibles en `scripts/diff_notion_db.ts`.
 
 **Medición de L (la que destapó "Felipe tiene muchas más que solo 3"):**
 
@@ -1463,7 +1466,9 @@ como tarea aparte."
 
 ## Task 10b: (M) Helper de match Notion↔DB compartido, y los 3 scripts lo usan
 
-Los scripts `enlazar_page_ids.ts`, `sync_estados_notion.ts` y `enriquecer_desde_notion.ts` corrieron ANTES de los fixes de matching de T14 (NFC/NFD, razón social, page_id con guiones) y cada uno tiene su propia copia de la lógica de match. Resultado medido: **122 filas de Notion sin enlazar, 6 estados derivados**. `importar_toques_legacy.ts` ya tiene los fixes (por eso llegó a 37/37); la solución es extraer ESE criterio a un helper único y cablearlo en los tres rezagados. Sin esto, re-correr los scripts en Task 11 no arregla nada.
+Los scripts `enlazar_page_ids.ts`, `sync_estados_notion.ts` y `enriquecer_desde_notion.ts` corrieron ANTES de los fixes de matching de T14 (NFC/NFD, razón social, page_id con guiones) y cada uno tiene su propia copia de la lógica de match. Resultado medido con el diff definitivo: **85 filas inalcanzables para los scripts**. `importar_toques_legacy.ts` ya tiene los fixes (por eso llegó a 37/37); la solución es extraer ESE criterio a un helper único y cablearlo en los tres rezagados. Sin esto, re-correr los scripts en Task 11 no arregla nada.
+
+**Regla de la causa raíz (Sebastián, 2026-07-15), que este helper DEBE cumplir:** (1) una fila con `page_id` ya enlazado nunca se re-matchea por nombre — el page_id es la llave eterna; (2) el fallback por nombre consulta `empresa_alias` (donde las resoluciones manuales viven desde mayo) ANTES que la razón social normalizada; (3) ambiguo = null, nunca adivinar. Al implementar, extender `construirIndiceEmpresasDb` para recibir también las filas de `empresa_alias` (`select id_empresa, alias from empresa_alias`) e indexarlas con `normalizarRazonSocial(alias)` como llave, con prioridad sobre el índice por nombre oficial.
 
 **Files:**
 - Create: `app/core/reconciliacion/matchNotion.ts`
@@ -1798,8 +1803,16 @@ lo que cambio es que ninguna vista las lee."
 | G — KDM nunca marcado | 4 + 5 + 11 | ✅ core + repo + re-corrida |
 | I — PBX secuestra deals | 7 | ✅ gate de etapa |
 | L — seguimiento oculta activos | 8 | ✅ cutoff eliminado |
-| M — scripts de sync sin normalizar page_id | 10b + 11 | ✅ helper único + re-corrida en orden |
+| M — scripts ignoran page_id/alias | 10b + 11 | ✅ helper único (page_id eterno + alias) + re-corrida |
+| N — sync nunca crea | 11 (paso nuevo) | ⚠️ lista de ~5 nuevas para crear con aprobación de Sebastián |
+| O — páginas gemelas en Notion | — | ⚠️ **decisión humana**: ~14 pares listados en `planning/deriva-notion-db.txt`; el flujo probado es el de Cable Cauca (Sebastián borra la gemela en Notion → fix manual de una vez → alias queda) |
+| P — deriva bidireccional | — | ⚠️ **decisión pendiente**: quién gana cuando el cockpit avanzó y Notion no (Mundo Cams, COMFIBRA) |
 | H, J, K | — | ❌ producto nuevo, requieren brainstorming |
+
+**Decisiones humanas pendientes que este plan NO resuelve solo (revisar con Sebastián antes o durante la Task 11):**
+1. **Los ~14 pares gemelos de O** — cuál página sobrevive en cada par (como hizo con Cable Cauca). Lista completa en `planning/deriva-notion-db.txt`.
+2. **La regla de P** — propuesta: el estado más AVANZADO gana entre cockpit y Notion mientras no exista el outbox DB→Notion; cuando el outbox corra, el cockpit es la fuente y Notion se actualiza solo.
+3. **Las ~5 empresas nuevas de N** — confirmar que son cuentas reales a crear (ClonAI e "Insumos y desechables" parecen clientes de Thomas fuera del rubro ISP).
 
 **Consistencia de tipos entre tareas:**
 - `esKdmDesdeNotion({ esPrincipal, cargo })` — definida en Task 4, usada en Task 5. ✅

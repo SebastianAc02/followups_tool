@@ -1,0 +1,55 @@
+filas Notion comparables: 486 (0 con estado fuera de vocabulario)
+  OK (enlazada, estado y owner alineados): 461
+  ESTADO_DERIVADO: 6
+  OWNER_DERIVADO : 3
+  SIN_FILA (bug N): 17
+  DUP_NOTION (bug O, 2+ paginas -> misma fila DB): 5
+
+== ESTADO_DERIVADO ==
+  Hola - Comunicaciones Wifi             Notion=firma_pago           DB=lead                 owner=- (900676962)
+  Wicom                                  Notion=on_hold              DB=lead                 owner=Sebastian Acosta Molina (900356400)
+  WIRELESS COLOMBIA S.A.S.               Notion=firma_pago           DB=lead                 owner=Camilo fonseca (900482761)
+  COMFIBRA                               Notion=lead                 DB=reunion_agendada     owner=Sebastian Acosta Molina (901387189)
+  Mundo Cams SAS                         Notion=lead                 DB=contacto_iniciado    owner=Sebastian Acosta Molina (901178084)
+  ESSA                                   Notion=lead                 DB=oportunidad          owner=- (9990000147)
+
+== OWNER_DERIVADO ==
+  Integrados                             Notion=Felipe Castro              DB=(vacio) (901593819)
+  Conecttic PTX                          Notion=Felipe Castro              DB=(vacio) (900389021)
+  COMFIBRA                               Notion=Sebastian Acosta Molina    DB=Felipe Castro (901387189)
+
+== SIN_FILA (crear, bug N) ==
+  Colombiatel                                On Hold                  Felipe Castro
+  Intercom  de nariño                        On Hold                  Sebastian Acosta Molina
+  Anta                                       Firma y Pago Realizado   -
+  Digital DOT                                On Hold                  Felipe Castro
+  Sistemas Palacios                          On Hold                  Sebastian Acosta Molina
+  CABLE Y TELECOMUNICACIONES CABLETELCO      Lead                     -
+  INTTEL GO SAS                              Lead                     -
+  Caldas Data Company LTDA                   Lead                     -
+  NOVACOM TIC S.A.S                          Lead                     -
+  http://naamiku.net SAS                     On Hold                  Sebastian Acosta Molina
+  CELSIA                                     Oportunidad              Thomas Schumacher
+  Insumos y desechables                      Firma y Pago Realizado   Thomas Schumacher
+  ClonAI                                     Firma y Pago Realizado   Thomas Schumacher
+  Fibermax                                   Firma y Pago Realizado   -
+  Delta ISP CRM                              Oportunidad              -
+  SuperCable BQLLA                           Cierre/Documentación     Felipe Castro
+  GASES DEL ORIENTE                          Oportunidad              Thomas Schumacher
+
+== DUP_NOTION (decidir cual sobrevive, tipo Cable Cauca) ==
+  fila DB 900676962 "COMUNICACIONES WIFI COLOMBIA S.A.S." (estado=lead) recibe 2 paginas:
+     - "Hola - Comunicaciones Wifi" estado=Firma y Pago Realizado owner=- [via page_id]
+     - "COMUNICACIONES WIFI COLOMBIA S.A.S" estado=Lead owner=- [via nombre]
+  fila DB 900356400 "SERVICIOS PROFESIONALES WICOM S.A.S" (estado=lead) recibe 2 paginas:
+     - "Wicom" estado=On Hold owner=Sebastian Acosta Molina [via page_id]
+     - "SERVICIOS PROFESIONALES WICOM S.A.S." estado=Lead owner=- [via nombre]
+  fila DB 900482761 "S3WIRELESS COLOMBIA S.A" (estado=lead) recibe 2 paginas:
+     - "WIRELESS COLOMBIA S.A.S." estado=Firma y Pago Realizado owner=Camilo fonseca [via page_id]
+     - "S3WIRELESS COLOMBIA S.A" estado=Lead owner=- [via nombre]
+  fila DB 830136839 "VISION SATELITAL COMUNICACIONES S.A.S." (estado=lead) recibe 2 paginas:
+     - "VISION SATELITAL COMUNICACIONES S.A.S." estado=Lead owner=- [via nombre]
+     - "VISIÓN SATELITAL" estado=Lead owner=Sebastian Acosta Molina [via page_id]
+  fila DB 9990000147 "ESSA" (estado=oportunidad) recibe 2 paginas:
+     - "ESSA" estado=Oportunidad owner=Thomas Schumacher [via page_id]
+     - "ESSA" estado=Lead owner=- [via page_id]
