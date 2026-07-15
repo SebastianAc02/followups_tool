@@ -29,17 +29,24 @@
 | **G** | KDM nunca marcado | `upsertContactoNotion` no setea `es_key_decision_maker` | **120 empresas** (94 por principal + 5 por cargo) |
 | **I** | PBX secuestra deals en marcha | `getContextoToque` nunca mira `estado_notion` | **123 deals** (46 ya clientes) |
 | **L** | `/seguimiento` oculta deals activos | Cutoff `proximo_follow_up_fecha <= hoy` + `IS NOT NULL` | **~90% de los deals activos** |
-| **M** | Los scripts de sync no normalizan el `page_id` | 213 empresas tienen el page_id CON guiones (enlace por MCP) y los scripts comparan el string crudo | **122 filas de Notion sin enlazar, 6 estados derivados** |
+| **M** | Los scripts de sync no normalizan el `page_id` | 213 empresas tienen el page_id CON guiones (enlace por MCP) y los scripts comparan el string crudo | **85 filas de Notion que solo enlazan con el fix** |
+| **N** | Empresas nuevas en Notion sin fila en la DB | El seed fue del 30-jun; Notion siguió creciendo. Ningún script CREA empresas nuevas, solo actualiza las que ya existen | **17 empresas** (SuperCable BQLLA, Delta ISP CRM, GASES DEL ORIENTE, ESSA…) |
+| **O** | Filas enlazadas a la página equivocada de Notion | Notion tiene 2 páginas para el mismo negocio con nombres distintos; la fila quedó con el page_id de una y el estado de la otra | Confirmado en Cable Cauca; universo acotado (dato de origen, no de la herramienta) |
 
-**Medición de M (la que destapó "Felipe deberia tener exactamente 20"):** de los 20 deals en marcha que Notion le da a Felipe, la DB solo tiene 17 bien. Los 3 rotos son un caso de cada causa:
+**Medición del delta de Felipe (la que destapó "Notion dice 20, la DB dice 17"):** los 3 casos rotos resultaron ser **un ejemplar de cada bug distinto**, y NINGUNO es lo que dije al principio ("sync_estados no lo alineó"). El diagnóstico real:
 
-| Cuenta | Notion | DB | Causa |
+| Cuenta | Notion | DB | Causa raíz REAL |
 |---|---|---|---|
-| Cable Cauca-Home TV | oportunidad | `lead` | Estado derivado: `sync_estados_notion` no lo alineó |
-| INTERCARIBE TV S.A.S. | Contacto Iniciado | (sin enlace) | Nombre CSV `S.A.S.` vs archivo `S A S` |
-| SuperCable BQLLA | Cierre/Doc. | (sin enlace) | `page_id` no enlazado |
+| INTERCARIBE TV S.A.S. | Contacto Iniciado | (sin enlace) | **M** — page_id con guiones + nombre `S.A.S.` vs `S A S`. El fix lo resuelve. |
+| SuperCable BQLLA | Cierre/Doc. | (no existe) | **N** — página creada después del seed. La DB no tiene la fila; hay que CREARLA. |
+| Cable Cauca-Home TV | oportunidad | `lead` | **O** — la fila `815001640` tiene el page_id de la página *Home TV* (Oportunidad, Felipe) pero el estado quedó en `lead` de la página gemela *COMUNICACIONES*. Dos páginas de Notion para un negocio; `sync_estados` lo empeoraría (el nombre colisiona con la página Lead). Requiere criterio humano. |
 
-`importar_toques_legacy.ts` (T14) ya normaliza el page_id y ya usa el adapter con los fixes de NFC/NFD y de razón social — por eso llegó a 37/37. Los otros tres scripts corrieron ANTES de esos fixes y sin la normalización del page_id, así que su cobertura quedó incompleta. **Este es el bug que hace que "no estemos imitando bien a Notion".**
+**Alcance medido de cada uno (números verificados, ya no estimados):**
+- **M:** de 487 filas de Notion, 385 enlazan hoy y con el fix; **85 SOLO enlazan con el fix** (page_id normalizado + fallback razón social). `importar_toques_legacy.ts` (T14) ya tiene el fix — por eso llegó a 37/37; los otros 3 scripts no.
+- **N:** **20 páginas .md** del export no tienen fila en la DB; 17 de ellas son empresas reales de Notion que el seed del 30-jun no alcanzó (el resto son "Untitled" y ruido). Este es el bug que de verdad hace que "no estemos imitando a Notion": el sync ACTUALIZA, nunca CREA.
+- **O:** solo **1 grupo** de nombre exactamente repetido con estados distintos en Notion (ESSA). Cable Cauca no se detecta por nombre (los dos nombres son distintos aunque sea el mismo negocio) → es criterio humano, no automatizable con seguridad.
+
+Corrección de honestidad: en el commit anterior del plan escribí "122 filas sin enlazar" para M — ese número salió de una búsqueda ingenua por nombre y estaba inflado. El real es 85 (M) + 17 (N).
 
 **Medición de L (la que destapó "Felipe tiene muchas más que solo 3"):**
 
