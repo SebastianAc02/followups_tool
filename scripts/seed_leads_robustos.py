@@ -30,10 +30,21 @@ filtro por owner de /cola tambien.
 
 Idempotente: si ya existen empresas con el prefijo, no duplica.
 """
+import os
 import random
 import sqlite3
 
-DB_PATH = "/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db"
+# 2026-07-15: este script sembro 43 empresas de prueba en la base REAL de produccion y
+# hubo que borrarlas a mano (ver scripts/borrar_dummies.py). Nunca mas por defecto: la
+# ruta ahora es obligatoria y explicita por env var, para que sembrar sobre una copia
+# sea el camino facil y sembrar sobre la real sea una decision consciente.
+DB_PATH = os.environ.get("ISPS_DB_PATH")
+if not DB_PATH:
+    raise SystemExit(
+        "Falta ISPS_DB_PATH. Sembra sobre una COPIA, no sobre isps.db real:\n"
+        "  sqlite3 ../isps.db \".backup '/tmp/isps-prueba.db'\"\n"
+        "  ISPS_DB_PATH=/tmp/isps-prueba.db python3 scripts/seed_leads_robustos.py"
+    )
 PREFIJO_ID = "99992"
 CATEGORIA = "creditos"
 
