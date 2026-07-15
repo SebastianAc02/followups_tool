@@ -196,9 +196,19 @@ const ultimoResultadoNoLlego = sql`COALESCE((SELECT ${toque.resultado} FROM ${to
 // owner opcional (2026-07-14, modo visitante): con owner filtra la cola de ese owner;
 // sin owner (undefined) trae la cola de TODA la organizacion (todos los owners), que es
 // lo que ve un visitante. Mismo patron que contarPorEstado.
+// Predicado transversal (A, 2026-07-15): una empresa "viva" es la que NO fue absorbida
+// por una fusion de duplicados. fundirEmpresas (T4) marca la absorbida con
+// opera_bajo_id apuntando al sobreviviente en vez de borrarla, a proposito: preserva la
+// auditoria y los alias. Pero para TODA vista de la app esa fila es una identidad
+// muerta -- duplica al sobreviviente con el mismo nombre y estado, pero sin contactos ni
+// toques (T4 ya los movio). Cualquier query que liste o cuente empresas debe incluir
+// este predicado; no hacerlo fue el bug de 'Global IP' duplicado.
+const EMPRESA_VIVA = isNull(empresa.operaBajoId);
+
 export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacion: number) {
   const condiciones = [
     eq(empresa.organizacionActivaId, idOrganizacion),
+    EMPRESA_VIVA,
     isNotNull(empresa.proximoFollowUpFecha),
     lte(empresa.proximoFollowUpFecha, hoy),
     // Excluye on_hold (durmiente, "dijeron que no") y firma_pago (ya cliente): no son
@@ -233,6 +243,7 @@ export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
         eq(empresa.owner, owner),
         eq(empresa.estadoNotion, 'lead'),
         isNotNull(empresa.proximoFollowUpFecha),
@@ -258,6 +269,7 @@ export function colaCierres(owner: string, idOrganizacion: number) {
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
         eq(empresa.owner, owner),
         inArray(empresa.estadoNotion, [...ESTADOS_CALIENTES]),
         // La reunion_agendada con no-show pendiente se muestra en Reagendar, no aqui.
@@ -283,6 +295,7 @@ export function colaReagendar(hoy: string, owner: string, idOrganizacion: number
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
         eq(empresa.owner, owner),
         eq(empresa.estadoNotion, 'reunion_agendada'),
         ultimoResultadoNoLlego,
@@ -307,6 +320,7 @@ export function colaContactoIniciadoSinSeguimiento(owner: string, idOrganizacion
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
         eq(empresa.owner, owner),
         eq(empresa.estadoNotion, 'contacto_iniciado'),
         isNull(empresa.proximoFollowUpFecha),
@@ -355,6 +369,7 @@ export function pipelineSinCadencia(idOrganizacion: number, hoy: string): FilaPi
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
         isNotNull(empresa.proximoFollowUpFecha),
         // Cutoff de fecha: solo vencidos o de hoy (mismo criterio que la cola). Si algun dia se
         // quieren ver tambien follow-ups a futuro en Seguimiento, se quita esta linea.
@@ -1410,7 +1425,7 @@ export function empresasDeSegmento(def: DefinicionSegmento, idOrganizacion: numb
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
     .leftJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
-    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA))
     .$dynamic();
 
   if (val.orden) {
@@ -1434,7 +1449,7 @@ export function contarSegmento(def: DefinicionSegmento, idOrganizacion: number):
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
     .leftJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
-    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA))
     .get();
   return fila?.n ?? 0;
 }
@@ -3070,7 +3085,7 @@ export type FilaPipelineGlobal = {
 // que arranco. `etapa` se deja en la fila (dato real, por si sirve como badge por fila mas
 // adelante) pero el AGRUPADOR del overview pasa a ser `diaSecuencia`, sin FUNNEL_ETAPAS.
 export function pipelineGlobal(idOrganizacion: number, hoy: string, idCampana?: number): FilaPipelineGlobal[] {
-  const condiciones = [eq(campana.idOrganizacion, idOrganizacion), eq(inscripcion.estado, 'activa')];
+  const condiciones = [eq(campana.idOrganizacion, idOrganizacion), eq(inscripcion.estado, 'activa'), EMPRESA_VIVA];
   if (idCampana != null) condiciones.push(eq(inscripcion.idCampana, idCampana));
 
   // `inscripcion.paso_actual` NUNCA se actualiza despues del insert (queda en 0 para
@@ -4617,7 +4632,7 @@ export function embudoPipeline(
   filtros?: { owner?: string; idCampana?: string },
 ): ConteoEtapa[] {
   const estadoExpr = sql<string>`coalesce(${empresa.estadoNotion}, ${CLAVE_SIN_ETAPA})`;
-  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion)];
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA];
   if (filtros?.owner) {
     condiciones.push(eq(empresa.owner, filtros.owner));
   }
@@ -4756,7 +4771,7 @@ export function empresasEnPBX(idOrganizacion: number): FilaPBX[] {
       pbxForma: empresa.pbxForma,
     })
     .from(empresa)
-    .where(eq(empresa.organizacionActivaId, idOrganizacion))
+    .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA))
     .all();
   if (empresas.length === 0) return [];
 
