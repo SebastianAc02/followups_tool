@@ -33,3 +33,23 @@ test('Otro, Educacion y Pasarela vetan como no-isp confirmado', () => {
   assert.equal(vetoCategoria('Educación'), 'es_no_isp_confirmado');
   assert.equal(vetoCategoria('Pasarela'), 'es_no_isp_confirmado');
 });
+
+// Bug real (2026-07-15): el CSV de Notion trae 'Energia' SIN tilde (21 empresas: ENEL,
+// AFINIA, CELSIA...), el Set tenia 'Energía' CON tilde. Set.has() fallaba en silencio y
+// esas empresas quedaban como ISP, metiendo millones de suscriptores electricos al
+// embudo. Se normaliza a ambos lados: ni el acento ni el casing deciden el veto.
+test('Energia sin tilde (como viene del CSV real) tambien veta como utility', () => {
+  assert.equal(vetoCategoria('Energia'), 'es_utility_no_isp');
+  assert.equal(vetoCategoria('Energía'), 'es_utility_no_isp');
+});
+
+test('Educacion sin tilde tambien veta como no-ISP', () => {
+  assert.equal(vetoCategoria('Educacion'), 'es_no_isp_confirmado');
+  assert.equal(vetoCategoria('Educación'), 'es_no_isp_confirmado');
+});
+
+test('el veto no depende del casing ni de espacios de sobra', () => {
+  assert.equal(vetoCategoria('  ENERGIA  '), 'es_utility_no_isp');
+  assert.equal(vetoCategoria('agua'), 'es_utility_no_isp');
+  assert.equal(vetoCategoria('TELECOM'), 'es_no_isp_confirmado');
+});
