@@ -11,6 +11,7 @@ import { cn } from '../cn';
 import { CanalTag, type Canal } from '../CanalTag';
 import { FUNNEL_ETAPAS, ETAPA_GANADA, ETAPA_ONHOLD } from '../../db/funnel';
 import type { HistorialEtapas } from '../../db/repository';
+import { calcularDuracionPorEtapa } from '../../core/tiempoEnEtapa';
 
 const MS_POR_DIA = 1000 * 60 * 60 * 24;
 
@@ -285,37 +286,38 @@ export function DetallePanel({
                           }}
                           aria-hidden="true"
                         />
-                        {timelineEtapas.transiciones.map((t, i) => {
-                          const primero = timelineEtapas.transiciones[0];
-                          const siguiente = timelineEtapas.transiciones[i + 1];
-                          const esUltimo = !siguiente;
-                          const esCierre = esUltimo && (t.estado === ETAPA_GANADA || t.estado === ETAPA_ONHOLD);
+                        {(() => {
+                          // calcularDuracionPorEtapa (core, probado) hace el emparejamiento de
+                          // ventanas -- la UI solo pinta, ya no recalcula fechas a mano.
+                          const ventanas = calcularDuracionPorEtapa(timelineEtapas, new Date().toISOString());
+                          const inicioCiclo = new Date(ventanas[0].fechaInicio).getTime();
 
-                          const desde = new Date(t.fecha).getTime();
-                          const hasta = siguiente ? new Date(siguiente.fecha).getTime() : Date.now();
-                          const dias = Math.round((hasta - desde) / MS_POR_DIA);
-                          const diasCiclo = Math.round((desde - new Date(primero.fecha).getTime()) / MS_POR_DIA);
+                          return ventanas.map((v, i) => {
+                            const esUltimo = v.fechaFin === null;
+                            const esCierre = esUltimo && (v.estado === ETAPA_GANADA || v.estado === ETAPA_ONHOLD);
+                            const diasCiclo = Math.round((new Date(v.fechaInicio).getTime() - inicioCiclo) / MS_POR_DIA);
 
-                          return (
-                            <div key={`${t.estado}-${t.fecha}-${i}`} className="relative pb-4 pl-7 last:pb-0">
-                              <span
-                                className={cn(
-                                  'absolute left-0 top-0.5 w-3.5 h-3.5 rounded-full border-2 border-shell flex-shrink-0',
-                                  colorEtapa(t.estado),
-                                  t.estado === ETAPA_GANADA && esUltimo && 'ring-2 ring-check/30',
-                                )}
-                                aria-hidden="true"
-                              />
-                              <div className="text-[13px] font-semibold text-ink">{labelEtapa(t.estado)}</div>
-                              <div className="mono text-[11px] text-muted mt-0.5">{t.fecha}</div>
-                              <div className={cn('mono text-[11px] font-medium mt-0.5', colorEtapaTexto(t.estado))}>
-                                {esCierre
-                                  ? `${t.estado === ETAPA_GANADA ? 'Ganado' : 'On hold'} · ciclo total ${diasCiclo} ${diasCiclo === 1 ? 'día' : 'días'}`
-                                  : `${dias} ${dias === 1 ? 'día' : 'días'} en etapa${esUltimo ? ' (hasta hoy)' : ''}`}
+                            return (
+                              <div key={`${v.estado}-${v.fechaInicio}-${i}`} className="relative pb-4 pl-7 last:pb-0">
+                                <span
+                                  className={cn(
+                                    'absolute left-0 top-0.5 w-3.5 h-3.5 rounded-full border-2 border-shell flex-shrink-0',
+                                    colorEtapa(v.estado),
+                                    v.estado === ETAPA_GANADA && esUltimo && 'ring-2 ring-check/30',
+                                  )}
+                                  aria-hidden="true"
+                                />
+                                <div className="text-[13px] font-semibold text-ink">{labelEtapa(v.estado)}</div>
+                                <div className="mono text-[11px] text-muted mt-0.5">{v.fechaInicio}</div>
+                                <div className={cn('mono text-[11px] font-medium mt-0.5', colorEtapaTexto(v.estado))}>
+                                  {esCierre
+                                    ? `${v.estado === ETAPA_GANADA ? 'Ganado' : 'On hold'} · ciclo total ${diasCiclo} ${diasCiclo === 1 ? 'día' : 'días'}`
+                                    : `${v.dias} ${v.dias === 1 ? 'día' : 'días'} en etapa${esUltimo ? ' (hasta hoy)' : ''}`}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          });
+                        })()}
                       </div>
                     )}
                   </section>
