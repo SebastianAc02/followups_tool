@@ -4,6 +4,8 @@ import { auth } from './auth';
 import { usuarioDeSesion, type UsuarioSesion } from './session-user';
 import { organizacionDeUsuario } from '../db/organizacion-repository';
 import { marcarSoloLectura, ErrorSoloLectura } from './read-only';
+import { marcarModoPrueba } from './modo-prueba';
+import { leerCookieModoPrueba } from './cookie-modo';
 import { resolverMembresia } from './resolucion-sesion';
 
 // Gate de sesion (V2.2): toda pagina y todo server action lo llaman primero.
@@ -11,6 +13,12 @@ import { resolverMembresia } from './resolucion-sesion';
 export async function requireSession(): Promise<UsuarioSesion> {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect('/login');
+
+  // El modo se marca ANTES del primer acceso a `db` conmutable. getSession (arriba) y
+  // organizacionDeUsuario (abajo) leen dbReal fijo, asi que no dependen de esta marca --
+  // pero cualquier query de negocio de esta request si. esModoPrueba() no tiene default:
+  // sin esta linea, toda pagina lanzaria.
+  marcarModoPrueba(await leerCookieModoPrueba());
 
   // Multi-organizacion (Parte 1): todo usuario que completo el registro (reclamo un
   // owner_canonico) tiene una fila en organizacion_miembro. Si no la tiene -- un usuario
