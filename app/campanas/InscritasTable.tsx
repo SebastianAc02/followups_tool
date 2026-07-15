@@ -12,6 +12,11 @@ export type InscritaHubVM = {
   ultimoToque: string | null;
 };
 
+// Mismo shape que aperturasPorCampana() en db/repository.ts. Tipo duplicado (no
+// importado desde ahi) para no acoplar InscritasTable al modulo del repository --
+// esta tabla ya es puramente de presentacion.
+export type AperturaVM = { idInscripcion: number; abrio: boolean; hizoClic: boolean; vioWhatsapp: boolean };
+
 const ESTADO_TONE = {
   activa: 'hot',
   bloqueada: 'cold',
@@ -38,11 +43,14 @@ export function InscritasTable({
   inscritas,
   mostrarCampana = true,
   idCampana,
+  aperturas,
 }: {
   inscritas: InscritaHubVM[];
   mostrarCampana?: boolean;
   idCampana?: number;
+  aperturas?: AperturaVM[];
 }) {
+  const aperturaPorInscripcion = new Map((aperturas ?? []).map((a) => [a.idInscripcion, a]));
   return (
     <div className="mt-8">
       <SectionLabel className="mb-3">Empresas inscritas</SectionLabel>
@@ -58,6 +66,7 @@ export function InscritasTable({
                 <th className="px-5 py-3 font-normal">Canal</th>
                 <th className="px-5 py-3 font-normal">Último toque</th>
                 <th className="px-5 py-3 font-normal">Estado</th>
+                {aperturas != null && <th className="px-5 py-3 font-normal">Visto</th>}
                 {idCampana != null && <th className="px-5 py-3 font-normal"></th>}
               </tr>
             </thead>
@@ -75,6 +84,22 @@ export function InscritasTable({
                       {ESTADO_LABEL[f.estado] ?? f.estado}
                     </Pill>
                   </td>
+                  {aperturas != null && (
+                    <td className="px-5 py-3.5">
+                      <div className="flex gap-1.5">
+                        {aperturaPorInscripcion.get(f.id)?.abrio && (
+                          <Pill tone="hot">Abrió</Pill>
+                        )}
+                        {aperturaPorInscripcion.get(f.id)?.hizoClic && (
+                          <Pill tone="hot">Clic</Pill>
+                        )}
+                        {aperturaPorInscripcion.get(f.id)?.vioWhatsapp && (
+                          <Pill tone="hot">Vio WhatsApp</Pill>
+                        )}
+                        {!aperturaPorInscripcion.get(f.id) && <span className="text-faint">—</span>}
+                      </div>
+                    </td>
+                  )}
                   {idCampana != null && (
                     <td className="px-5 py-3.5">
                       {f.estado === 'activa' && <BotonSacar idInscripcion={f.id} idCampana={idCampana} />}

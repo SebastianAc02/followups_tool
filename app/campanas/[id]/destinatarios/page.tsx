@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { campanaParaPreview, previsualizarInscripcionCampana, listarInscritasHub } from '../../../db/repository';
+import { campanaParaPreview, previsualizarInscripcionCampana, listarInscritasHub, aperturasPorCampana } from '../../../db/repository';
 import { requireSession } from '../../../lib/session';
 import { AppShell } from '../../../ui/shell/AppShell';
 import { CampanaSubNav } from '../CampanaSubNav';
@@ -34,6 +34,7 @@ export default async function DestinatariosCampana({ params }: { params: Promise
   const filas = previsualizarInscripcionCampana(idCampana, sesion.idOrganizacion) ?? [];
   const esBorrador = camp.estado === 'borrador';
   const inscritasReales = esBorrador ? null : listarInscritasHub(idCampana);
+  const aperturas = esBorrador ? [] : aperturasPorCampana(idCampana);
 
   return (
     <AppShell>
@@ -42,7 +43,7 @@ export default async function DestinatariosCampana({ params }: { params: Promise
       ) : (
         <CampanaSubNav items={subNavItemsCampana(camp.idCampana, camp.idCadencia)} />
       )}
-      <DestinatariosCockpit campana={camp} filasIniciales={filas} inscritasReales={inscritasReales} />
+      <DestinatariosCockpit campana={camp} filasIniciales={filas} inscritasReales={inscritasReales} aperturas={aperturas} />
     </AppShell>
   );
 }

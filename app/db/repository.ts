@@ -4268,6 +4268,36 @@ export function pausarInscripcion(idInscripcion: number, motivo: string) {
 // de que les llegue el siguiente paso). Reusa el mismo corte que la respuesta automatica:
 // pausada sale sola de agendaEnSeco (solo lee estado='activa'). El corte de la secuencia
 // externa en Apollo lo hace la action (necesita async + el adaptador), no esta funcion.
+// Aperturas y clics por inscripcion de una campana. Lee las filas 'abierto'/'clic' de
+// evento_tracking que hoy se guardan (pixel propio en /api/track/open y /click) pero
+// nadie leia -- metricasHub solo mira 'enviado' y 'respondio'. Una fila por inscripcion
+// con al menos un evento de apertura/clic/visto, para pintar "Abrio"/"Vio WhatsApp" en
+// Destinatarios. 'visto' (acuse de lectura de WhatsApp) se suma aca desde el dia uno
+// aunque solo lo escriba guardarVistoWhatsapp -- un solo lugar que leer, no dos.
+export function aperturasPorCampana(idCampana: number): { idInscripcion: number; abrio: boolean; hizoClic: boolean; vioWhatsapp: boolean }[] {
+  const filas = db
+    .select({
+      idInscripcion: destinatario.idInscripcion,
+      tipo: eventoTracking.tipo,
+    })
+    .from(eventoTracking)
+    .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .where(and(eq(inscripcion.idCampana, idCampana), inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto'])))
+    .all();
+
+  const porInscripcion = new Map<number, { abrio: boolean; hizoClic: boolean; vioWhatsapp: boolean }>();
+  for (const f of filas) {
+    const prev = porInscripcion.get(f.idInscripcion) ?? { abrio: false, hizoClic: false, vioWhatsapp: false };
+    if (f.tipo === 'abierto') prev.abrio = true;
+    if (f.tipo === 'clic') prev.hizoClic = true;
+    if (f.tipo === 'visto') prev.vioWhatsapp = true;
+    porInscripcion.set(f.idInscripcion, prev);
+  }
+  return [...porInscripcion.entries()].map(([idInscripcion, v]) => ({ idInscripcion, ...v }));
+}
+
 export function sacarInscripcionDeCampana(idInscripcion: number) {
   pausarInscripcion(idInscripcion, 'baja manual desde destinatarios');
 }

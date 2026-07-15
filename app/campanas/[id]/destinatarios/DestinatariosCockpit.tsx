@@ -36,14 +36,18 @@ const CANAL_BG_CLASS: Record<Canal, string> = {
   whatsapp: 'bg-canal-whatsapp/10',
 };
 
+export type AperturaVM = { idInscripcion: number; abrio: boolean; hizoClic: boolean; vioWhatsapp: boolean };
+
 export function DestinatariosCockpit({
   campana,
   filasIniciales,
   inscritasReales,
+  aperturas,
 }: {
   campana: CampanaParaPreview;
   filasIniciales: FilaPreviewInscripcion[];
   inscritasReales: InscritaHubVM[] | null;
+  aperturas: AperturaVM[];
 }) {
   const [filas, setFilas] = useState(filasIniciales);
   const [error, setError] = useState('');
@@ -111,7 +115,7 @@ export function DestinatariosCockpit({
       </header>
 
       {inscritasReales ? (
-        <InscritasTable inscritas={inscritasReales} mostrarCampana={false} idCampana={campana.idCampana} />
+        <InscritasTable inscritas={inscritasReales} mostrarCampana={false} idCampana={campana.idCampana} aperturas={aperturas} />
       ) : (
         <>
           {conAjuste.length > 0 || bloqueadas.length > 0 ? (
