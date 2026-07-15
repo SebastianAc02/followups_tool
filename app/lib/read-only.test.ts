@@ -3,13 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { marcarSoloLectura, esSoloLectura, conEscritura, ErrorSoloLectura } from './read-only.ts';
-import { marcarModoPrueba } from './modo-prueba.ts';
 import { db } from '../db/index.ts';
 import { organizacion } from '../db/schema.ts';
-
-// Este test es sobre el candado solo-lectura, no sobre el modo prueba: declara real y se
-// olvida del tema. Sin esto, el Proxy del db lanza al no saber contra que base va.
-marcarModoPrueba(false);
 
 test('esSoloLectura refleja la marca de la request', () => {
   marcarSoloLectura(true);
