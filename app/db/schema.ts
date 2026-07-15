@@ -65,8 +65,16 @@ export const contacto = sqliteTable('contacto', {
 
 export const empresaUsuarios = sqliteTable('empresa_usuarios', {
   idEmpresa: text('id_empresa').primaryKey(),
+  usuariosReales: real('usuarios_reales'),
+  usuariosRealesFuente: text('usuarios_reales_fuente'),
   usuariosEstimados: real('usuarios_estimados'),
+  usuariosEstFuente: text('usuarios_est_fuente'),
+  // Columna GENERATED ALWAYS ... STORED en isps.db real (COALESCE(reales, estimados)):
+  // se lee, nunca se escribe. Mapeada como real plano de solo-lectura; jamas debe ir en
+  // un values()/set() (SQLite rechaza escribir una columna generada).
   usuariosEfectivos: real('usuarios_efectivos'),
+  actualizadoEn: text('actualizado_en'),
+  actualizadoPor: text('actualizado_por'),
 });
 
 export const toque = sqliteTable('toque', {

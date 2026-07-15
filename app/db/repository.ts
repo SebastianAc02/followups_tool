@@ -4931,3 +4931,124 @@ export function upsertContactoNotion(idEmpresa: string, contactos: ContactoNotio
     }
   });
 }
+
+export interface EnriquecerNotionInput {
+  pasarela?: string;
+  crm?: string;
+  owner?: string;
+  proximoPaso?: string;
+  fechaProximoPaso?: string;
+  usuariosEstimados?: string | number;
+}
+
+// El CSV de Notion trae "Usuarios Estimados" como texto con separador de miles ("5,000",
+// "240,000"). Se quita la coma y se parsea a numero. Blanco o no-numerico ("N/A") -> null,
+// que el caller interpreta como "Notion no trae dato" y no escribe (no destructivo).
+function parseUsuariosNotion(v: string | number | undefined): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const limpio = v.replace(/,/g, '').trim();
+  if (limpio === '') return null;
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : null;
+}
+
+// T12: enriquece los campos comerciales de una empresa desde Notion (Fase 4). Politica de
+// escritura: "Notion sobrescribe, pero SOLO donde Notion trae dato" (mismo criterio no
+// destructivo que scripts/sync_notion_estado.py). Si el CSV viene vacio para un campo, NO
+// se pisa lo que ya hay en la DB -- ~89% de las empresas no tienen owner en Notion, blanquear
+// el de la DB seria una perdida real. Cada campo que SI cambia deja el valor anterior en
+// sync_cambios (reversible). Un campo cuyo valor nuevo == el actual no se toca ni se loguea
+// (idempotente al re-correr). Todo en una transaccion (empresa + empresa_usuarios + auditoria
+// atomicos), mismo patron que fundirEmpresas/actualizarEstadoNotion.
+export function enriquecerDesdeNotion(
+  idEmpresa: string,
+  datos: EnriquecerNotionInput,
+  idOrganizacion: number,
+): void {
+  const ahora = new Date().toISOString();
+
+  db.transaction((tx) => {
+    const emp = tx
+      .select({
+        pasarelaActual: empresa.pasarelaActual,
+        crmSoftware: empresa.crmSoftware,
+        owner: empresa.owner,
+        proximoPaso: empresa.proximoPaso,
+        proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      })
+      .from(empresa)
+      .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+      .get();
+    if (!emp) return; // no existe o vive en otra organizacion: no toca nada
+
+    // Campos de texto de empresa que Notion sobrescribe. `snake` es el nombre real de la
+    // columna (lo que va en la accion de sync_cambios); `col` es la key de Drizzle para el
+    // set(). owner se pasa tal cual (Notion es la fuente canonica de su casing, no se normaliza).
+    const camposTexto = [
+      { entrada: datos.pasarela, col: 'pasarelaActual' as const, snake: 'pasarela_actual', actual: emp.pasarelaActual },
+      { entrada: datos.crm, col: 'crmSoftware' as const, snake: 'crm_software', actual: emp.crmSoftware },
+      { entrada: datos.owner, col: 'owner' as const, snake: 'owner', actual: emp.owner },
+      { entrada: datos.proximoPaso, col: 'proximoPaso' as const, snake: 'proximo_paso', actual: emp.proximoPaso },
+      { entrada: datos.fechaProximoPaso, col: 'proximoFollowUpFecha' as const, snake: 'proximo_follow_up_fecha', actual: emp.proximoFollowUpFecha },
+    ];
+
+    const sets: Record<string, unknown> = {};
+    const cambios: { entidad: string; accion: string; detalle: string }[] = [];
+
+    for (const c of camposTexto) {
+      if (c.entrada == null) continue; // Notion no trae el campo
+      const nuevo = c.entrada.trim();
+      if (nuevo === '') continue; // Notion lo trae vacio: no destructivo, se deja el de la DB
+      if (nuevo === (c.actual ?? '')) continue; // mismo valor: no hay cambio real que loguear
+      sets[c.col] = nuevo;
+      cambios.push({ entidad: 'empresa', accion: `sobrescribir:${c.snake}`, detalle: `anterior=${c.actual ?? ''}` });
+    }
+
+    if (Object.keys(sets).length > 0) {
+      sets.updatedAt = ahora;
+      tx.update(empresa)
+        .set(sets)
+        .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+        .run();
+    }
+
+    // Usuarios estimados -> empresa_usuarios (upsert por id_empresa). usuarios_efectivos es
+    // columna generada (COALESCE(reales, estimados)): NO se escribe, se recalcula sola. Solo
+    // se tocan usuarios_estimados + usuarios_est_fuente='notion' + actualizado_en; usuarios_reales
+    // y su fuente quedan intactos si ya existian.
+    const usuariosNuevo = parseUsuariosNotion(datos.usuariosEstimados);
+    if (usuariosNuevo != null) {
+      const usuActual = tx
+        .select({ usuariosEstimados: empresaUsuarios.usuariosEstimados })
+        .from(empresaUsuarios)
+        .where(eq(empresaUsuarios.idEmpresa, idEmpresa))
+        .get();
+      const anterior = usuActual?.usuariosEstimados ?? null;
+      if (anterior !== usuariosNuevo) {
+        tx.insert(empresaUsuarios)
+          .values({ idEmpresa, usuariosEstimados: usuariosNuevo, usuariosEstFuente: 'notion', actualizadoEn: ahora })
+          .onConflictDoUpdate({
+            target: empresaUsuarios.idEmpresa,
+            set: { usuariosEstimados: usuariosNuevo, usuariosEstFuente: 'notion', actualizadoEn: ahora },
+          })
+          .run();
+        cambios.push({ entidad: 'empresa_usuarios', accion: 'sobrescribir:usuarios_estimados', detalle: `anterior=${anterior ?? ''}` });
+      }
+    }
+
+    for (const c of cambios) {
+      tx.insert(syncCambios)
+        .values({
+          fecha: ahora,
+          corrida: 'enriquecimiento_notion',
+          fuente: 'notion',
+          entidad: c.entidad,
+          idRegistro: idEmpresa,
+          accion: c.accion,
+          detalle: c.detalle,
+        })
+        .run();
+    }
+  });
+}

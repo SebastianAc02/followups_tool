@@ -84,8 +84,18 @@ export function crearDbPrueba() {
 
     CREATE TABLE empresa_usuarios (
       id_empresa TEXT PRIMARY KEY,
+      usuarios_reales REAL,
+      usuarios_reales_fuente TEXT,
       usuarios_estimados REAL,
-      usuarios_efectivos REAL
+      usuarios_est_fuente TEXT,
+      -- En isps.db real esta columna es GENERATED ALWAYS ... STORED. En el harness de
+      -- pruebas se deja como REAL plano a proposito: otros tests (repository.embudo.test.ts)
+      -- insertan usuarios_efectivos con un valor distinto de usuarios_estimados para probar
+      -- la suma del embudo, cosa que una columna generada rechazaria. El recalculo automatico
+      -- lo cubre la DB real, no se asegura aca.
+      usuarios_efectivos REAL,
+      actualizado_en TEXT,
+      actualizado_por TEXT
     );
 
     CREATE TABLE sync_cambios (
