@@ -16,8 +16,7 @@ const fusionSchema = z.object({ notas: z.string() });
 // llamada nueva es recuperable (esta en el toque), perder tres meses de discovery no lo es.
 const PISO_ENCOGIMIENTO = 0.5;
 
-// PENDIENTE DE REVISION DE SEBASTIÁN (2026-07-15). Este prompt era su hueco de diseño: lo
-// escribio la IA porque el pidio no parar. Las tres decisiones que tomo, y que el puede botar:
+// Revisado por Sebastián (2026-07-15). Tres decisiones de dominio, confirmadas:
 //
 //   1. Contradiccion -> gana el fact nuevo, y se dice que cambio ("bajaron de 8 a 5 personas").
 //      Descartado guardar los dos con fecha: sin fecha no se sabe cual es cual, y con fecha las
