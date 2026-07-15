@@ -34,7 +34,7 @@ function raw() {
 function seedEmpresa(id: string, categoria: string, opts: { email?: string; telefono?: string } = {}) {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria)
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, ciudad_principal)
      VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?)`,
   ).run(id, id, id.toLowerCase(), categoria);
   db.prepare(
@@ -80,7 +80,7 @@ function marcarTodoEnviado(idCampana: number, fecha: string) {
 test('archiva una campana de un solo paso en cuanto ese paso se envia', () => {
   seedEmpresa('e-arch-1', 'arch-cat-1', { email: 'a@x.com' });
   const idCadencia = crearCadencia({ nombre: 'C arch 1', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' }] });
-  const idSeg = guardarSegmento({ nombre: 'arch-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['arch-cat-1'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'arch-seg-1', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['arch-cat-1'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp arch 1', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1);
   fijarAnchors(['e-arch-1'], '2026-07-01');
@@ -104,7 +104,7 @@ test('no archiva si todavia hay un paso pendiente de la cadencia', () => {
       { orden: 2, diaOffset: 3, canal: 'llamada', objetivo: 'seguimiento', esManual: true },
     ],
   });
-  const idSeg = guardarSegmento({ nombre: 'arch-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['arch-cat-2'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'arch-seg-2', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['arch-cat-2'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp arch 2', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1);
   fijarAnchors(['e-arch-2'], '2026-07-01');
@@ -119,7 +119,7 @@ test('ignora las inscripciones bloqueadas: archiva aunque una quede atascada sin
   seedEmpresa('e-arch-3a', 'arch-cat-3', { email: 'c@x.com' });
   seedEmpresa('e-arch-3b', 'arch-cat-3'); // sin email ni telefono -> bloqueada
   const idCadencia = crearCadencia({ nombre: 'C arch 3', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' }] });
-  const idSeg = guardarSegmento({ nombre: 'arch-seg-3', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['arch-cat-3'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'arch-seg-3', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['arch-cat-3'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp arch 3', idCadencia, idSegmento: idSeg }, 1);
   const res = inscribirCampana(idCampana, 1);
   assert.equal(res.bloqueadas, 1, 'e-arch-3b entra bloqueada (sin email)');
@@ -134,7 +134,7 @@ test('ignora las inscripciones bloqueadas: archiva aunque una quede atascada sin
 
 test('no archiva una campana recien lanzada sin ninguna inscripcion todavia', () => {
   const idCadencia = crearCadencia({ nombre: 'C arch 4', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' }] });
-  const idSeg = guardarSegmento({ nombre: 'arch-seg-4', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['arch-cat-4-sin-match'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'arch-seg-4', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['arch-cat-4-sin-match'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp arch 4', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1); // 0 empresas matchean el segmento -> 0 inscripciones
 

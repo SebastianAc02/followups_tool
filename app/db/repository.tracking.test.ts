@@ -35,7 +35,7 @@ function raw() {
 function seedEmpresa(id: string, categoria: string, contactos: { email: string; principal?: boolean }[]) {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria)
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, ciudad_principal)
      VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?)`,
   ).run(id, id, id.toLowerCase(), categoria);
   for (const c of contactos) {
@@ -63,7 +63,7 @@ function idsPasoYVersion(idCadencia: number) {
 seedEmpresa('e-track-1', 'track-cat-1', [{ email: 'ana@empresa.com', principal: true }]);
 
 const idCadencia = crearCadencia({ nombre: 'C track', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola', cuerpo: 'x' }] });
-const idSegmento = guardarSegmento({ nombre: 'track-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['track-cat-1'] }] } }, 1);
+const idSegmento = guardarSegmento({ nombre: 'track-seg', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['track-cat-1'] }] } }, 1);
 const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
 
 const idCampana = crearCampana({ nombre: 'Camp track', idCadencia, idSegmento }, 1);

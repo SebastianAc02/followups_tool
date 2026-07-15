@@ -39,7 +39,7 @@ function raw() {
 function seedEmpresa(id: string, email: string, categoria: string, cargo: string | null = null) {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria)
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, ciudad_principal)
      VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?)`,
   ).run(id, id, id.toLowerCase(), categoria);
   db.prepare(
@@ -80,8 +80,8 @@ seedEmpresa('e-push-1', 'ana@empresa.com', 'push-cat-1', 'Gerente Comercial');
 seedEmpresa('e-push-2', 'sin-secuencia@empresa.com', 'push-cat-2');
 
 const idCadencia = crearCadencia({ nombre: 'C push', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola', cuerpo: 'cuerpo' }] });
-const idSegmento1 = guardarSegmento({ nombre: 'push-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['push-cat-1'] }] } }, 1);
-const idSegmento2 = guardarSegmento({ nombre: 'push-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['push-cat-2'] }] } }, 1);
+const idSegmento1 = guardarSegmento({ nombre: 'push-seg-1', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['push-cat-1'] }] } }, 1);
+const idSegmento2 = guardarSegmento({ nombre: 'push-seg-2', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['push-cat-2'] }] } }, 1);
 const { idPaso, idVersion } = idsPasoYVersion(idCadencia);
 
 const idCampanaConSecuencia = crearCampana({ nombre: 'Camp con secuencia', idCadencia, idSegmento: idSegmento1 }, 1);
@@ -233,7 +233,7 @@ test('pasoInscripcionesPendientes solo trae filas del canal pedido, y whatsapp r
 // idempotente que los tests de arriba ya crearon para e-push-1.
 seedEmpresa('e-envio-wa', 'wa@empresa.com', 'envio-wa-cat', 'Gerente Comercial');
 const idCadWa = crearCadencia({ nombre: 'C wa', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', cuerpo: 'Hola [nombre]' }] });
-const idSegWa = guardarSegmento({ nombre: 'envio-wa-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['envio-wa-cat'] }] } }, 1);
+const idSegWa = guardarSegmento({ nombre: 'envio-wa-seg', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['envio-wa-cat'] }] } }, 1);
 const idCampWa = crearCampana({ nombre: 'Camp wa', idCadencia: idCadWa, idSegmento: idSegWa }, 1);
 fijarProveedorCampanaId(idCampWa, 'seq-wa');
 inscribirCampana(idCampWa, 1);
@@ -286,8 +286,8 @@ test('pasoInscripcionesPendientes: whatsapp rutea por la linea PROPIA del dueno 
   seedEmpresa('e-owner-b', 'b@empresa.com', 'owner-cat-b');
 
   const idCadOwners = crearCadencia({ nombre: 'C owners', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', cuerpo: 'hola' }] });
-  const idSegA = guardarSegmento({ nombre: 'owner-seg-a', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['owner-cat-a'] }] } }, 1);
-  const idSegB = guardarSegmento({ nombre: 'owner-seg-b', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['owner-cat-b'] }] } }, 1);
+  const idSegA = guardarSegmento({ nombre: 'owner-seg-a', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['owner-cat-a'] }] } }, 1);
+  const idSegB = guardarSegmento({ nombre: 'owner-seg-b', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['owner-cat-b'] }] } }, 1);
 
   const idCampA = crearCampana({ nombre: 'Camp Owner Uno', idCadencia: idCadOwners, idSegmento: idSegA, owner: 'Owner Uno' }, 1);
   inscribirCampana(idCampA, 1);
@@ -320,7 +320,7 @@ test('pasoInscripcionesPendientes: campana cuyo dueno NO tiene linea activa se s
 
   seedEmpresa('e-sin-linea', 'sinlinea@empresa.com', 'owner-cat-sin-linea');
   const idCadSinLinea = crearCadencia({ nombre: 'C sin linea', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', cuerpo: 'hola' }] });
-  const idSegSinLinea = guardarSegmento({ nombre: 'owner-seg-sin-linea', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['owner-cat-sin-linea'] }] } }, 1);
+  const idSegSinLinea = guardarSegmento({ nombre: 'owner-seg-sin-linea', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['owner-cat-sin-linea'] }] } }, 1);
   const idCampSinLinea = crearCampana({ nombre: 'Camp sin linea', idCadencia: idCadSinLinea, idSegmento: idSegSinLinea, owner: 'Owner Sin Linea' }, 1);
   inscribirCampana(idCampSinLinea, 1);
 

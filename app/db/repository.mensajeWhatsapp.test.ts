@@ -29,7 +29,7 @@ function raw() {
 {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria, organizacion_activa_id)
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, ciudad_principal, organizacion_activa_id)
      VALUES ('emp-wa','nit','Emp WA','emp wa','activo','on_hold','wa-cat',1)`,
   ).run();
   db.prepare(
@@ -41,7 +41,7 @@ function raw() {
 
 const idCadencia = crearCadencia({ nombre: 'C wa', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola', cuerpo: 'x' }] });
 const idSegmento = guardarSegmento(
-  { nombre: 'wa-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['wa-cat'] }] } },
+  { nombre: 'wa-seg', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['wa-cat'] }] } },
   1,
 );
 const idCampana = crearCampana({ nombre: 'Camp wa', idCadencia, idSegmento }, 1);

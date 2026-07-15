@@ -33,7 +33,7 @@ function raw() {
 function seedEmpresa(id: string, categoria: string, email: string) {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria)
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, ciudad_principal)
      VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?)`,
   ).run(id, id, id.toLowerCase(), categoria);
   db.prepare(
@@ -66,7 +66,7 @@ const idCadencia = crearCadencia({
     { orden: 2, diaOffset: 3, canal: 'correo', asunto: 'Seguimiento', cuerpo: 'x' },
   ],
 });
-const idSegmento = guardarSegmento({ nombre: 'manual-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-1'] }] } }, 1);
+const idSegmento = guardarSegmento({ nombre: 'manual-seg', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['manual-cat-1'] }] } }, 1);
 
 const idCampana = crearCampana({ nombre: 'Camp manual', idCadencia, idSegmento }, 1);
 fijarProveedorCampanaId(idCampana, 'seq-manual-1');
@@ -133,7 +133,7 @@ const idCadencia2 = crearCadencia({
   nombre: 'C manual con copy',
   pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', asunto: 'Hola [nombre]', cuerpo: 'Cuerpo [nombre].', esManual: true }],
 });
-const idSegmento2 = guardarSegmento({ nombre: 'manual-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['manual-cat-2'] }] } }, 1);
+const idSegmento2 = guardarSegmento({ nombre: 'manual-seg-2', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['manual-cat-2'] }] } }, 1);
 const idCampana2 = crearCampana({ nombre: 'Camp manual 2', idCadencia: idCadencia2, idSegmento: idSegmento2 }, 1);
 inscribirCampana(idCampana2, 1);
 const idInscripcion2 = historialInscripciones('e-manual-2').find((i) => i.estado === 'activa')!.id;

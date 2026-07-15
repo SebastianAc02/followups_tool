@@ -30,7 +30,7 @@ function raw() {
 function seedEmpresa(id: string, categoria: string, email: string) {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria)
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, ciudad_principal)
      VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?)`,
   ).run(id, id, id.toLowerCase(), categoria);
   db.prepare(
@@ -63,8 +63,8 @@ const idCadencia = crearCadencia({
     { orden: 2, diaOffset: 0, canal: 'llamada', objetivo: 'Tier 1', esManual: true },
   ],
 });
-const idSeg1 = guardarSegmento({ nombre: 'cola-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-1'] }] } }, 1);
-const idSeg2 = guardarSegmento({ nombre: 'cola-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-2'] }] } }, 1);
+const idSeg1 = guardarSegmento({ nombre: 'cola-seg-1', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['cola-cat-1'] }] } }, 1);
+const idSeg2 = guardarSegmento({ nombre: 'cola-seg-2', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['cola-cat-2'] }] } }, 1);
 
 const idCampanaAuto = crearCampana({ nombre: 'Camp auto', idCadencia, idSegmento: idSeg1 }, 1);
 inscribirCampana(idCampanaAuto, 1);
@@ -140,7 +140,7 @@ const idCadenciaCopy = crearCadencia({
     },
   ],
 });
-const idSegCopy = guardarSegmento({ nombre: 'cola-seg-copy', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-3'] }] } }, 1);
+const idSegCopy = guardarSegmento({ nombre: 'cola-seg-copy', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['cola-cat-3'] }] } }, 1);
 const idCampanaCopy = crearCampana({ nombre: 'Camp copy', idCadencia: idCadenciaCopy, idSegmento: idSegCopy, modo: 'batch' }, 1);
 inscribirCampana(idCampanaCopy, 1);
 const idInscCopy = historialInscripciones('e-cola-3').find((i) => i.estado === 'activa')!.id;
@@ -173,7 +173,7 @@ const idCadenciaHist = crearCadencia({
     { orden: 3, diaOffset: 7, canal: 'correo', cuerpo: 'p3', esManual: true },
   ],
 });
-const idSegHist = guardarSegmento({ nombre: 'cola-seg-hist', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-4'] }] } }, 1);
+const idSegHist = guardarSegmento({ nombre: 'cola-seg-hist', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['cola-cat-4'] }] } }, 1);
 const idCampanaHist = crearCampana({ nombre: 'Camp hist', idCadencia: idCadenciaHist, idSegmento: idSegHist }, 1);
 inscribirCampana(idCampanaHist, 1);
 const idInscHist = historialInscripciones('e-cola-4').find((i) => i.estado === 'activa')!.id;
@@ -214,7 +214,7 @@ function fijarEstadoInscripcionCola(idInscripcion: number, estado: string) {
 
 seedEmpresa('e-cola-cancel', 'cola-cat-cancel', 'cancel@empresa.com');
 const idCadCancel = crearCadencia({ nombre: 'C cancel', pasos: [{ orden: 1, diaOffset: 0, canal: 'llamada', objetivo: 'Tier 1', esManual: true }] });
-const idSegCancel = guardarSegmento({ nombre: 'cola-seg-cancel', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['cola-cat-cancel'] }] } }, 1);
+const idSegCancel = guardarSegmento({ nombre: 'cola-seg-cancel', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['cola-cat-cancel'] }] } }, 1);
 const idCampCancel = crearCampana({ nombre: 'Camp cancel', idCadencia: idCadCancel, idSegmento: idSegCancel }, 1);
 inscribirCampana(idCampCancel, 1);
 const idInscCancel = historialInscripciones('e-cola-cancel').find((i) => i.estado === 'activa')!.id;

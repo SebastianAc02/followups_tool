@@ -32,7 +32,7 @@ function raw() {
 function seedEmpresa(id: string, categoria: string, opts: { email?: string; telefono?: string } = {}) {
   const db = raw();
   db.prepare(
-    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria)
+    `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, ciudad_principal)
      VALUES (?, 'nit', ?, ?, 'activo', 'on_hold', ?)`,
   ).run(id, id, id.toLowerCase(), categoria);
   db.prepare(
@@ -61,7 +61,7 @@ test('primera pasada materializa el paso del dia 0 como pendiente', () => {
       { orden: 2, diaOffset: 3, canal: 'llamada', objetivo: 'seguimiento', esManual: true },
     ],
   });
-  const idSeg = guardarSegmento({ nombre: 'mat-seg-1', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-1'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'mat-seg-1', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['mat-cat-1'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp mat 1', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1);
   const insc = inscripcionActivaDe('e-mat-1');
@@ -84,7 +84,7 @@ test('no avanza al paso 2 hasta que el paso 1 este ejecutado (enviada), y no dup
       { orden: 2, diaOffset: 3, canal: 'llamada', objetivo: 'seguimiento', esManual: true },
     ],
   });
-  const idSeg = guardarSegmento({ nombre: 'mat-seg-2', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-2'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'mat-seg-2', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['mat-cat-2'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp mat 2', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1);
   const insc = inscripcionActivaDe('e-mat-2');
@@ -117,7 +117,7 @@ test('sin telefono, el paso de llamada se omite (regla cola) y no bloquea el pas
       { orden: 2, diaOffset: 1, canal: 'correo', cuerpo: 'p2' },
     ],
   });
-  const idSeg = guardarSegmento({ nombre: 'mat-seg-3', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-3'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'mat-seg-3', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['mat-cat-3'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp mat 3', idCadencia, idSegmento: idSeg, reglaFaltante: 'cola' }, 1);
   inscribirCampana(idCampana, 1);
   const insc = inscripcionActivaDe('e-mat-3');
@@ -139,7 +139,7 @@ test('sin telefono, el paso de llamada se omite (regla cola) y no bloquea el pas
 test('empresa bloqueada (sin destinatario, ningun contacto con email) no revienta el barrido', () => {
   seedEmpresa('e-mat-4', 'mat-cat-4', {}); // sin email ni telefono
   const idCadencia = crearCadencia({ nombre: 'C mat 4', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' }] });
-  const idSeg = guardarSegmento({ nombre: 'mat-seg-4', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['mat-cat-4'] }] } }, 1);
+  const idSeg = guardarSegmento({ nombre: 'mat-seg-4', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['mat-cat-4'] }] } }, 1);
   const idCampana = crearCampana({ nombre: 'Camp mat 4', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1);
 

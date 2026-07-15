@@ -46,6 +46,7 @@ import {
   empresaEstadoHistorial,
   organizacionMiembro,
   empresaClasificacion,
+  empresaCategoriaView,
 } from './schema';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
@@ -396,7 +397,7 @@ export function getCuenta(id: string, idOrganizacion: number) {
       crm: empresa.crmSoftware,
       pasarela: empresa.pasarelaActual,
       owner: empresa.owner,
-      categoria: empresa.categoria,
+      categoria: empresaCategoriaView.categoria,
       proximoPaso: empresa.proximoPaso,
       fecha: empresa.proximoFollowUpFecha,
       usuarios: empresaUsuarios.usuariosEfectivos,
@@ -405,6 +406,7 @@ export function getCuenta(id: string, idOrganizacion: number) {
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
     .where(eq(empresa.idEmpresa, id))
     .get();
 
@@ -1286,7 +1288,7 @@ export function getCadencia(idCadencia: number) {
 // en condicionRol, nunca por este mapa.
 const COLUMNA_SEGMENTO: Record<Exclude<CampoSegmento, 'rol'>, { col: SQLiteColumn; numerico: boolean }> = {
   estado: { col: empresa.estadoNotion, numerico: false },
-  categoria: { col: empresa.categoria, numerico: false },
+  categoria: { col: empresaCategoriaView.categoria, numerico: false },
   estado_comercial: { col: empresa.estadoComercial, numerico: false },
   prioridad: { col: empresa.prioridadComercial, numerico: true },
   es_cliente: { col: empresa.esCliente, numerico: true },
@@ -1392,12 +1394,13 @@ export function empresasDeSegmento(def: DefinicionSegmento, idOrganizacion: numb
       id: empresa.idEmpresa,
       nombre: empresa.nombreOficial,
       estado: empresa.estadoNotion,
-      categoria: empresa.categoria,
+      categoria: empresaCategoriaView.categoria,
       usuarios: empresaUsuarios.usuariosEstimados,
       ciudad: empresa.ciudadPrincipal,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
     .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .$dynamic();
 
@@ -1421,6 +1424,7 @@ export function contarSegmento(def: DefinicionSegmento, idOrganizacion: number):
     .select({ n: sql<number>`count(*)` })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
     .where(and(compilarSegmento(val), eq(empresa.organizacionActivaId, idOrganizacion)))
     .get();
   return fila?.n ?? 0;
@@ -1534,6 +1538,7 @@ export function valoresDistintosCampo(campo: CampoSegmento, idOrganizacion: numb
   const filas = db
     .selectDistinct({ v: col })
     .from(empresa)
+    .leftJoin(empresaCategoriaView, eq(empresaCategoriaView.idEmpresa, empresa.idEmpresa))
     .where(and(isNotNull(col), eq(empresa.organizacionActivaId, idOrganizacion)))
     .orderBy(col)
     .all();

@@ -35,7 +35,11 @@ function seed() {
     `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial, estado_notion, categoria, prioridad_comercial, es_cliente)
      VALUES (?, 'nit', ?, ?, 'activo', ?, ?, ?, ?)`,
   );
-  // 3 on_hold isp, 1 on_hold utility, 2 oportunidad isp, 1 sin estado
+  // 3 on_hold isp, 1 on_hold utility, 2 oportunidad isp, 1 sin estado.
+  // empresa.categoria (columna plana) queda seteada igual que antes, pero ya NO es
+  // la fuente de verdad (T8): el filtro/dropdown de 'categoria' lee de la vista
+  // empresa_categoria, que deriva de empresa_clasificacion. e4 necesita su fila ahi
+  // (es_utility_no_isp=1) para que la vista tambien la marque 'utility'.
   ins.run('e1', 'Alfa', 'alfa', 'on_hold', 'isp', 1, 0);
   ins.run('e2', 'Beta', 'beta', 'on_hold', 'isp', 5, 0);
   ins.run('e3', 'Gamma', 'gamma', 'on_hold', 'isp', 5, 1);
@@ -43,6 +47,9 @@ function seed() {
   ins.run('e5', 'Epsilon', 'epsilon', 'oportunidad', 'isp', 9, 0);
   ins.run('e6', 'Zeta', 'zeta', 'oportunidad', 'isp', 4, 0);
   ins.run('e7', 'Eta', 'eta', null, 'isp', null, 0);
+  raw
+    .prepare(`INSERT INTO empresa_clasificacion (id_empresa, es_utility_no_isp) VALUES ('e4', 1)`)
+    .run();
   raw.close();
 }
 seed();

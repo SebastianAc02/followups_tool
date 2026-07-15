@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, sqliteView, text, integer, real } from 'drizzle-orm/sqlite-core';
 
 // Refleja las tablas que YA existen en isps.db (no se crean aquí). Solo las que usa el cockpit.
 
@@ -463,3 +463,15 @@ export const empresaClasificacion = sqliteTable('empresa_clasificacion', {
   actualizadoEn: text('actualizado_en').notNull(),
   actualizadoPor: text('actualizado_por'),
 });
+
+// Fase 2 reconciliacion Notion (T8): vista SQL YA existente en isps.db (no se crea
+// migracion para esto, .existing() le dice a drizzle-kit que no la incluya en un
+// futuro `generate`). Deriva la categoria real desde empresa_clasificacion via CASE;
+// la app lee categoria de aca, nunca de la columna plana empresa.categoria (stale,
+// solo ~8% de las filas se clasifico ahi alguna vez).
+export const empresaCategoriaView = sqliteView('empresa_categoria', {
+  idEmpresa: text('id_empresa').primaryKey(),
+  nombreOficial: text('nombre_oficial'),
+  categoria: text('categoria'),
+  atacable: integer('atacable'),
+}).existing();
