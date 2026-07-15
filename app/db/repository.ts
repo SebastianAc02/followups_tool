@@ -3775,6 +3775,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       proveedorCampanaId: campana.proveedorCampanaId,
       owner: campana.owner,
       idOrganizacion: campana.idOrganizacion,
+      aprobadaEnvioGmail: campana.aprobadaEnvioGmail,
     })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
@@ -3794,6 +3795,9 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
       paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
       intentos: f.intentos,
+      owner: f.owner,
+      idOrganizacion: f.idOrganizacion,
+      aprobadaEnvioGmail: f.aprobadaEnvioGmail === 1,
     }));
   }
 

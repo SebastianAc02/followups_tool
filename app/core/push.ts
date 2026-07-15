@@ -13,6 +13,13 @@ export type FilaPasoInscripcion = {
   destinatario: DestinatarioEnvio;
   paso: PasoEnvio;
   intentos: number;
+  // Gmail Etapa 2 (2026-07-15): opcionales, solo poblados por
+  // pasoInscripcionesPendientes('correo', ...) -- whatsapp/llamada no los necesitan.
+  // Los usa registro-envio.ts (agruparPendientesCorreo) para resolver el adaptador de
+  // CADA fila sin que push.ts tenga que saber que Gmail existe.
+  owner?: string | null;
+  idOrganizacion?: number;
+  aprobadaEnvioGmail?: boolean;
 };
 
 export type PushDeps = {
