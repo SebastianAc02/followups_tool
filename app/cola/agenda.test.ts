@@ -10,6 +10,8 @@ import {
   bucketDeEtapa,
   unificarCola,
   aplicarFiltrosUnificados,
+  pendientesDeHoy,
+  vencidasDeHoy,
   type FilaAgenda,
   type FilaCola,
   type Bucket,
@@ -179,4 +181,46 @@ test('filaConVencimiento sin respuestaPendiente en el origen lo deja undefined',
   };
   const f = filaConVencimiento(c, '2026-07-14', false);
   assert.strictEqual(f.respuestaPendiente, undefined);
+});
+
+// Las tarjetas de /cola contaban `cola.length`, que en el split es SOLO colaLeads: las
+// cadencias, los cierres y los reagendar nunca entraron al numero aunque si salieran en la
+// lista de abajo. No se noto por años porque colaLeads traia 15 leads y la tarjeta siempre
+// mostraba algo; al vaciar los leads (regla del 2026-07-15: un lead dormido no es un toque)
+// la tarjeta quedo en 0 con un WhatsApp listado abajo. El contador nunca midio lo que su
+// etiqueta promete.
+//
+// Regla (Sebastian, 2026-07-15): "Pendientes" = lo que requiere accion HOY, o sea lo vencido
+// o de hoy, venga de donde venga. Un cierre SIN fecha esta en la lista pero no es trabajo de
+// hoy: no cuenta.
+test('pendientesDeHoy: cuenta todo lo vencido o de hoy, sin importar el bucket', () => {
+  const filas: FilaColaConBucket[] = [
+    filaConBucket('lead-hoy', '2026-07-14', 'lead'),
+    filaConBucket('cadencia-hoy', '2026-07-14', 'lead'),
+    filaConBucket('reagendar-vencido', '2026-07-10', 'reagendar'),
+    filaConBucket('cierre-vencido', '2026-07-12', 'cierre'),
+  ];
+  assert.equal(pendientesDeHoy(filas, '2026-07-14'), 4);
+});
+
+test('pendientesDeHoy: un cierre SIN fecha no es trabajo de hoy', () => {
+  const filas: FilaColaConBucket[] = [
+    filaConBucket('cierre-sin-fecha', null, 'cierre'),
+    filaConBucket('lead-hoy', '2026-07-14', 'lead'),
+  ];
+  assert.equal(pendientesDeHoy(filas, '2026-07-14'), 1);
+});
+
+test('pendientesDeHoy: lo del futuro todavia no toca', () => {
+  const filas: FilaColaConBucket[] = [filaConBucket('manana', '2026-07-15', 'lead')];
+  assert.equal(pendientesDeHoy(filas, '2026-07-14'), 0);
+});
+
+test('vencidasDeHoy: solo lo que ya se paso de fecha, no lo de hoy', () => {
+  const filas: FilaColaConBucket[] = [
+    filaConBucket('vencido', '2026-07-10', 'lead'),
+    filaConBucket('hoy', '2026-07-14', 'lead'),
+    filaConBucket('sin-fecha', null, 'cierre'),
+  ];
+  assert.equal(vencidasDeHoy(filas, '2026-07-14'), 1);
 });

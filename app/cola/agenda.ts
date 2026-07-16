@@ -179,6 +179,27 @@ export function unificarCola(filas: FilaColaConBucket[], hoy: string): FilaUnifi
   return ordenadas.map((c, i) => filaUnificada(c, hoy, i === 0));
 }
 
+// Las tarjetas de /cola: cuentan sobre las MISMAS filas que se listan abajo, no sobre una
+// de las cuatro fuentes. Antes leian `cola.length` (solo colaLeads), asi que las cadencias,
+// los cierres y los reagendar nunca entraban al numero aunque salieran listados. Nadie lo
+// noto mientras colaLeads traia 15 leads y la tarjeta mostraba algo; al vaciar los leads
+// (regla del 2026-07-15: un lead dormido no es un toque) la tarjeta quedo en 0 con un
+// WhatsApp listado abajo, y quedo claro que el contador nunca midio su propia etiqueta.
+//
+// "Pendiente" = tiene fecha y ya llego (vencida o de hoy). Un cierre SIN fecha aparece en la
+// lista -- una cuenta en negociacion es trabajo real -- pero no es trabajo de HOY, y esa es
+// la pregunta que responde esta tarjeta. Por eso el numero puede ser menor que las filas
+// listadas, a proposito.
+export function pendientesDeHoy(filas: FilaColaConBucket[], hoy: string): number {
+  return filas.filter((f) => f.fecha != null && f.fecha <= hoy).length;
+}
+
+// Subconjunto de pendientesDeHoy: solo lo que ya se paso de fecha. Lo de hoy todavia no
+// esta vencido.
+export function vencidasDeHoy(filas: FilaColaConBucket[], hoy: string): number {
+  return filas.filter((f) => f.fecha != null && f.fecha < hoy).length;
+}
+
 export type FiltrosUnificados = {
   bucket: Bucket | "todos";
   campana: string | "todas";

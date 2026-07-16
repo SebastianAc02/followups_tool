@@ -21,9 +21,10 @@ import { ContactoIniciadoSinSeguimiento } from "./ContactoIniciadoSinSeguimiento
 import { contarCerradas } from "./stats";
 import {
   filaConVencimiento,
-  diasVencido,
   unificarCola,
   bucketDeEtapa,
+  pendientesDeHoy,
+  vencidasDeHoy,
   OWNER_COLA_SPLIT,
   type FilaAgenda,
   type FilaColaConBucket,
@@ -39,7 +40,6 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const hoy = new Date().toISOString().slice(0, 10);
   const splitActivo = owner === OWNER_COLA_SPLIT;
   const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
-  const vencidos = cola.filter((c) => (c.fecha ?? "") < hoy).length;
   const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
   const reagendar = splitActivo ? colaReagendar(hoy, owner, usuario.idOrganizacion) : [];
   // Seccion "Contacto iniciado sin seguimiento" (2026-07-14): para CUALQUIER owner, no
@@ -96,8 +96,22 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
 
   const filasUnificadas = splitActivo ? unificarCola(filasParaUnificar, hoy) : [];
 
-  const actual = cola[0];
-  const diasActual = actual ? diasVencido(actual.fecha!, hoy) : 0;
+  // Las tarjetas cuentan sobre las MISMAS filas que se listan abajo. En el split eso son las
+  // 4 fuentes juntas (leads/cierres/reagendar/cadencias); fuera del split, colaDelDia ya es
+  // la lista entera. Antes contaban `cola.length` -- solo colaLeads -- asi que un WhatsApp de
+  // cadencia salia listado con la tarjeta en 0 (2026-07-15).
+  const filasParaContar: FilaColaConBucket[] = splitActivo
+    ? filasParaUnificar
+    : cola.map((c): FilaColaConBucket => ({ ...c, bucket: 'lead' }));
+  const pendientes = pendientesDeHoy(filasParaContar, hoy);
+  const vencidos = vencidasDeHoy(filasParaContar, hoy);
+
+  // La barra "AHORA" sale de la lista unificada, no de cola[0]: con 0 leads y un WhatsApp
+  // debido, cola[0] era undefined y la barra desaparecia aunque hubiera trabajo. unificarCola
+  // ya ordena por urgencia, asi que su primera fila ES el siguiente toque -- y ya trae sev y
+  // severidadTexto resueltos (incluido el "sin fecha" de un cierre, que el calculo viejo de
+  // dias no sabia expresar).
+  const actual = splitActivo ? filasUnificadas[0] : cola[0] ? filaConVencimiento(cola[0], hoy, true) : undefined;
 
   const cerradas = contarCerradas(contadores);
 
@@ -109,7 +123,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
       </div>
 
       <div className="mb-8 grid grid-cols-3 gap-4">
-        <StatCard label="Pendientes" valor={cola.length} sub="en cola" />
+        <StatCard label="Pendientes" valor={pendientes} sub="hoy o vencido" />
         <StatCard label="Cerradas" valor={cerradas} sub="hoy" tone="done" subTone="done" />
         <StatCard
           label="Vencidas"
@@ -129,8 +143,8 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
           cargo={actual.cargo}
           canal={actual.canal}
           estado={actual.estado}
-          sev={diasActual > 0 ? "overdue" : "today"}
-          severidadTexto={diasActual > 0 ? `vencido ${diasActual}d` : "hoy"}
+          sev={actual.sev}
+          severidadTexto={actual.severidadTexto}
         />
       )}
 
