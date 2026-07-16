@@ -138,10 +138,16 @@ test('colaReagendar: reunion_agendada cuyo ultimo toque fue no_llego, vencido o 
   assert.deepEqual(ids, ['r1', 'r2']);
 });
 
-test('colaDelDia: excluye on_hold y firma_pago; conserva otros estados y estado null', () => {
+// Regla (Sebastian, 2026-07-15): 'lead' es un contacto DORMIDO, igual que on_hold -- no es
+// trabajo del dia y no le sale a NADIE en Toques. Que tenga toques previos no lo despierta:
+// un on_hold reactivado tambien los tiene y tampoco cuenta. Antes 'lead' entraba aca (d1) y
+// esta es la cola de Thomas, Felipe y Camilo (los que no son OWNER_COLA_SPLIT); la de
+// Sebastian usa colaLeads, que ya exige secuencia. Un lead en campaña sale por el bucket de
+// cadencias, que es su superficie propia.
+test('colaDelDia: excluye lead, on_hold y firma_pago; conserva otros estados y estado null', () => {
   // Organizacion 4, aislada de los demas tests de este archivo. Todas vencidas o de hoy,
   // asi que todas calificarian por fecha -- el filtro que se prueba es el de estado.
-  seedEmpresa('d1', OWNER, 'lead', '2026-07-10', 4); // lead: entra
+  seedEmpresa('d1', OWNER, 'lead', '2026-07-10', 4); // dormido: NO entra
   seedEmpresa('d2', OWNER, 'on_hold', '2026-07-10', 4); // durmiente: NO entra
   seedEmpresa('d3', OWNER, 'firma_pago', '2026-07-10', 4); // ya cliente: NO entra
   seedEmpresa('d4', OWNER, 'contacto_iniciado', '2026-07-10', 4); // otro estado: entra
@@ -149,7 +155,7 @@ test('colaDelDia: excluye on_hold y firma_pago; conserva otros estados y estado 
 
   const r = colaDelDia('2026-07-14', OWNER, 4);
   const ids = r.map((f) => f.id).sort();
-  assert.deepEqual(ids, ['d1', 'd4', 'd5']);
+  assert.deepEqual(ids, ['d4', 'd5']);
 });
 
 test('colaLeads/colaCierres/colaReagendar: campana viene poblada solo si hay inscripcion activa', () => {

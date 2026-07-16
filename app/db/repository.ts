@@ -221,11 +221,21 @@ export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacio
     EMPRESA_VIVA,
     isNotNull(empresa.proximoFollowUpFecha),
     lte(empresa.proximoFollowUpFecha, hoy),
-    // Excluye on_hold (durmiente, "dijeron que no") y firma_pago (ya cliente): no son
-    // trabajo del dia, se filtraban en pipelineSinCadencia pero se colaban aca. El
-    // COALESCE(...,'') importa: estado_notion puede ser NULL, y "NULL NOT IN (...)" es NULL
-    // (ni true) en SQL -- sin el, una empresa con estado null quedaria excluida por error.
-    sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago')`,
+    // Estados que NO son trabajo del dia: on_hold (durmiente, "dijeron que no"), firma_pago
+    // (ya cliente) y lead. El COALESCE(...,'') importa: estado_notion puede ser NULL, y
+    // "NULL NOT IN (...)" es NULL (ni true) en SQL -- sin el, una empresa con estado null
+    // quedaria excluida por error.
+    //
+    // 'lead' entro aca el 2026-07-15 (regla de Sebastian): un lead es un contacto DORMIDO,
+    // exactamente como on_hold. Que tenga toques previos no lo despierta -- un on_hold
+    // reactivado tambien los tiene y tampoco cuenta. Un lead solo es trabajo cuando esta en
+    // una secuencia, y ahi sale por el bucket de cadencias (agendaHoyCadencias), que es su
+    // superficie propia; o cuando avanza a contacto_iniciado, y ahi ya no es lead.
+    //
+    // Nadie lo habia notado porque un bug lo tapaba: hasta el fix de fechas (c9dc96d) los
+    // leads traian la fecha en formato humano de Notion ('June 12, 2026') y lte() compara
+    // TEXTO -- 'J' > '2' en ASCII, asi que jamas entraban. Al normalizarlas se destaparon.
+    sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago', 'lead')`,
   ];
   if (owner) condiciones.push(eq(empresa.owner, owner));
   return db

@@ -37,7 +37,11 @@ function seedPar(idVivo: string, idFundido: string, estado: string, fecha: strin
 }
 
 test('colaDelDia no muestra la fila fundida', () => {
-  seedPar('viva-cola', 'fundida-cola', 'lead', '2026-07-01');
+  // contacto_iniciado y no 'lead': aca se prueba EMPRESA_VIVA (la fundida no sale), no el
+  // filtro de estado. Desde 2026-07-15 colaDelDia excluye 'lead' (contacto dormido), asi que
+  // con lead ninguna de las dos saldria y el test pasaria por la razon equivocada. Mismo
+  // estado que usa el test hermano de seguimiento, mas abajo.
+  seedPar('viva-cola', 'fundida-cola', 'contacto_iniciado', '2026-07-01');
   const filas = colaDelDia('2026-07-15', 'Sebastian Acosta Molina', 1);
   const ids = filas.map((f: { id: string }) => f.id);
   assert.ok(ids.includes('viva-cola'), 'la viva si sale');
