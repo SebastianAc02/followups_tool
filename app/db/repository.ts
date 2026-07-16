@@ -4337,6 +4337,94 @@ export function aperturasPorCampana(idCampana: number): { idInscripcion: number;
   return [...porInscripcion.entries()].map(([idInscripcion, v]) => ({ idInscripcion, ...v }));
 }
 
+export type FilaActividad = {
+  idPasoInscripcion: number;
+  empresa: string;
+  contacto: string | null;
+  email: string | null;
+  orden: number;
+  canal: string;
+  estado: string;
+  proveedor: string | null;
+  fecha: string | null;
+  abrio: boolean;
+  hizoClic: boolean;
+  vioWhatsapp: boolean;
+  respondio: boolean;
+  reboto: boolean;
+};
+
+// "Que se mando y que paso con cada cosa": una fila por ENVIO (paso_inscripcion), con sus
+// señales cruzadas de evento_tracking. Es la pregunta que la app no sabia responder.
+//
+// El hueco nunca fue de captura: evento_tracking ya guardaba los 6 tipos
+// (enviado/abierto/clic/respondio/rebota/visto) desde el pixel propio, el poll de
+// Apollo/Gmail y el webhook de Evolution. Era de LECTURA -- metricasHub era la unica
+// funcion que tocaba la tabla y solo miraba 'enviado' y 'respondio'; los otros 4 se
+// escribian y se morian ahi.
+//
+// Incluye los pasos 'pendiente'/'fallo', no solo los enviados: "esto viene ahora" y "esto
+// se cayo" son parte de la respuesta. Dos queries y el cruce en TS (mismo criterio que
+// aperturasPorCampana): a la escala de una campaña son decenas de filas.
+export function actividadDeCampana(idCampana: number): FilaActividad[] {
+  const envios = db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      empresa: empresa.nombreOficial,
+      contacto: contacto.nombre,
+      email: contacto.email,
+      orden: pasoCadencia.orden,
+      canal: pasoInscripcion.canal,
+      estado: pasoInscripcion.estado,
+      proveedor: pasoInscripcion.proveedor,
+      fechaEnviada: pasoInscripcion.fechaEnviada,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .where(eq(inscripcion.idCampana, idCampana))
+    .orderBy(pasoCadencia.orden, pasoInscripcion.idPasoInscripcion)
+    .all();
+  if (envios.length === 0) return [];
+
+  const ids = envios.map((e) => e.idPasoInscripcion);
+  const eventos = db
+    .select({ idPasoInscripcion: eventoTracking.idPasoInscripcion, tipo: eventoTracking.tipo })
+    .from(eventoTracking)
+    .where(inArray(eventoTracking.idPasoInscripcion, ids))
+    .all();
+
+  const porPaso = new Map<number, Set<string>>();
+  for (const ev of eventos) {
+    if (!porPaso.has(ev.idPasoInscripcion)) porPaso.set(ev.idPasoInscripcion, new Set());
+    porPaso.get(ev.idPasoInscripcion)!.add(ev.tipo);
+  }
+
+  return envios.map((e) => {
+    const tipos = porPaso.get(e.idPasoInscripcion) ?? new Set<string>();
+    return {
+      idPasoInscripcion: e.idPasoInscripcion,
+      empresa: e.empresa,
+      contacto: e.contacto,
+      email: e.email,
+      orden: e.orden,
+      canal: e.canal,
+      estado: e.estado,
+      proveedor: e.proveedor,
+      fecha: e.fechaEnviada ?? e.fechaProgramada,
+      abrio: tipos.has('abierto'),
+      hizoClic: tipos.has('clic'),
+      vioWhatsapp: tipos.has('visto'),
+      respondio: tipos.has('respondio'),
+      reboto: tipos.has('rebota'),
+    };
+  });
+}
+
 export function sacarInscripcionDeCampana(idInscripcion: number) {
   pausarInscripcion(idInscripcion, 'baja manual desde destinatarios');
 }

@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation';
-import { campanaResumen, metricasHub } from '../../db/repository';
+import { campanaResumen, metricasHub, actividadDeCampana } from '../../db/repository';
 import { requireSession } from '../../lib/session';
 import { AppShell } from '../../ui/shell/AppShell';
 import { Pill } from '../../ui/Pill';
@@ -8,6 +8,7 @@ import { CampanaSubNav } from './CampanaSubNav';
 import { subNavItemsCampana } from './subnav-items';
 import { CicloVidaControles } from './CicloVidaControles';
 import { SincronizarCopiaControl } from './SincronizarCopiaControl';
+import { TablaActividad } from './TablaActividad';
 
 const ESTADO_TONE = {
   activa: 'hot',
@@ -39,6 +40,7 @@ export default async function CampanaResumenPage({ params }: { params: Promise<{
   if (!camp) notFound();
 
   const metricas = metricasHub(idCampana);
+  const actividad = actividadDeCampana(idCampana);
   const tasaPct = Math.round(metricas.tasaRespuesta * 100);
   const tone = ESTADO_TONE[camp.estado as keyof typeof ESTADO_TONE] ?? 'cold';
   const label = ESTADO_LABEL[camp.estado] ?? camp.estado;
@@ -77,6 +79,8 @@ export default async function CampanaResumenPage({ params }: { params: Promise<{
           tone={metricas.bloqueadasEsperandoRegla > 0 ? 'overdue' : 'neutral'}
         />
       </div>
+
+      <TablaActividad filas={actividad} />
 
       <div className="rounded-2xl border border-line bg-card p-5">
         <h3 className="mb-3 font-serif text-lg text-ink">Errores e incidentes recientes</h3>
