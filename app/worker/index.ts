@@ -23,8 +23,10 @@ import { drenarOutbox } from '../core/outbox';
 import { pushPendientes } from '../core/push';
 import { pollTracking } from '../core/tracking';
 import type { ConfigCalendario } from '../core/motor-cadencia';
+import { dentroDeVentana, esperaEntreMensajes, VENTANA_DEFAULT, ESPACIADO_WHATSAPP_DEFAULT } from '../core/ventana-envio';
 import { crearNotionAdapter } from '../adapters/notion';
 import { crearRegistroEnvio, crearRegistroEntrega, agruparPendientesCorreo } from '../adapters/registro-envio';
+import { hoy } from '../lib/reloj';
 import type { Canal } from '../db/validation';
 
 // Calendario de la agenda real (sesion 2026-07-08, materializador): sin fin de semana
@@ -57,9 +59,16 @@ async function tareaOutbox(): Promise<void> {
 // planning/experimento-apollo.md, Hallazgo real #4). Corre primero en el ciclo (antes
 // de tareaPush) para que el correo recien materializado alcance a salir en la misma
 // pasada, mismo catch-up-first que el resto del worker.
+// hoy() y no new Date(): esta funcion la llama el worker (proceso aparte, sin sesion, donde
+// hoy() es la fecha real y punto) PERO tambien materializarYEmpujarAhora, que corre DENTRO
+// del request de "Siguiente dia" y de lanzarCampanaAction. En ese caso hay que respetar el
+// reloj de demo, o el boton miente: el banner dice "Dia simulado: +1" porque las paginas si
+// leen hoy(), mientras el materializador calculaba contra la fecha real y no encontraba
+// nada debido. Sintoma exacto (2026-07-15): avanzar el dia no hacia nada, el paso 2 nunca
+// se materializaba. offsetActual() ya se defiende solo -- devuelve 0 si no hay modo prueba,
+// asi que el worker sigue viendo la fecha real sin cambiar nada.
 async function tareaMaterializar(): Promise<void> {
-  const hoy = new Date().toISOString().slice(0, 10);
-  materializarPasosDebidos(hoy, CONFIG_CALENDARIO_DEFAULT);
+  materializarPasosDebidos(hoy(), CONFIG_CALENDARIO_DEFAULT);
 }
 
 // Auto-archivo (sesion 2026-07-10): distinto de "Cancelar" (cancelarCampanaAction,
@@ -92,8 +101,53 @@ async function tareaArchivarCampanas(envioCorreo: ReturnType<typeof crearRegistr
 // esta funcion NO sabe que Apollo existe. push.ts tampoco. Recibe el canal y el
 // adaptador ya resueltos; agregar un proveedor nuevo (WhatsApp real, por ejemplo) es
 // sumarlo al registro y nada mas cambia aca.
-async function tareaPush(canal: Canal, envio: ReturnType<typeof crearRegistroEntrega>[Canal]): Promise<void> {
+// 'worker'  = ciclo automatico y desatendido (nadie espera la respuesta).
+// 'manual'  = lo disparo un humano a proposito ("Lanzar hoy" / "Siguiente dia", via
+//             materializarYEmpujarAhora) y hay un request esperando del otro lado.
+//
+// Cambian dos cosas (2026-07-16), y las dos por una razon concreta:
+//  - VENTANA horaria: solo en 'worker'. Si Sebastian aprieta lanzar a las 11pm, sabe que son
+//    las 11pm; bloquearlo en silencio seria peor que el problema que la ventana resuelve, y
+//    romperia la demo. El riesgo real es el goteo masivo desatendido, no un click explicito.
+//  - ESPACIADO: en 'worker' es el jitter completo (45-90s), que es lo que de verdad protege
+//    la linea del ban. En 'manual' seria inaceptable: 30 empresas x 60s = 30 minutos con el
+//    request colgado. Ahi se usa un espaciado corto y fijo (el mismo 3s que Gmail ya usaba),
+//    que protege algo sin tumbar la pantalla. El grueso del envio de una campana igual sale
+//    por el worker (el goteo reparte las empresas por dia), asi que el jitter largo cubre el
+//    caso que importa.
+type ModoPush = 'worker' | 'manual';
+const ESPACIADO_MANUAL_MS = 3000;
+
+async function tareaPush(
+  canal: Canal,
+  envio: ReturnType<typeof crearRegistroEntrega>[Canal],
+  modo: ModoPush = 'worker',
+): Promise<void> {
   if (!envio) return; // canal sin proveedor automatico (llamada/whatsapp hoy): nada que empujar
+
+  // Antes esto empujaba TODO lo debido de una, a cualquier hora: 30 WhatsApps en un minuto
+  // por la misma linea es patron de bot y WhatsApp banea la linea (se cae el canal entero,
+  // no se recupera). Lo que no se manda ahora queda 'pendiente' y sale en el proximo ciclo
+  // del worker -- mismo mecanismo que ya usa el tope diario de Gmail, no se pierde ni se
+  // marca fallo.
+  //
+  // Solo aplica a whatsapp: correo va por tareaPushCorreo, y llamada no tiene proveedor.
+  const ahora = new Date();
+  if (canal === 'whatsapp' && modo === 'worker') {
+    const veredicto = dentroDeVentana(ahora, VENTANA_DEFAULT);
+    if (!veredicto.puede) {
+      console.log(`[push:whatsapp] no se manda nada este ciclo: ${veredicto.motivo}`);
+      return;
+    }
+  }
+
+  const espaciado =
+    canal !== 'whatsapp'
+      ? 0
+      : modo === 'worker'
+        ? () => esperaEntreMensajes(ESPACIADO_WHATSAPP_DEFAULT) // jitter, no intervalo fijo
+        : ESPACIADO_MANUAL_MS;
+
   await pushPendientes(
     {
       pendientes: () => pasoInscripcionesPendientes(canal),
@@ -102,6 +156,8 @@ async function tareaPush(canal: Canal, envio: ReturnType<typeof crearRegistroEnt
       marcarFallo: marcarPasoInscripcionFallo,
     },
     envio,
+    ahora,
+    espaciado,
   );
 }
 
@@ -120,8 +176,21 @@ function configGmailNumero(clave: string, porDefecto: number): number {
   return Number.isFinite(n) && n > 0 ? n : porDefecto;
 }
 
-export async function tareaPushCorreo(): Promise<void> {
+export async function tareaPushCorreo(modo: ModoPush = 'worker'): Promise<void> {
   const ahora = new Date();
+
+  // Misma ventana horaria que WhatsApp (2026-07-16), y con la misma excepcion para el
+  // empuje manual (ver el comentario de tareaPush): un correo comercial a las 2am no solo
+  // no sirve, quema la cuenta con el prospecto. El tope diario y el throttle de Gmail que ya
+  // existian son otra cosa (limite del proveedor), esto es la hora del dia.
+  if (modo === 'worker') {
+    const veredicto = dentroDeVentana(ahora, VENTANA_DEFAULT);
+    if (!veredicto.puede) {
+      console.log(`[push:correo] no se manda nada este ciclo: ${veredicto.motivo}`);
+      return;
+    }
+  }
+
   const topeDiario = configGmailNumero('gmail_tope_diario', GMAIL_TOPE_DIARIO_DEFAULT);
   const throttleMs = configGmailNumero('gmail_throttle_ms', GMAIL_THROTTLE_MS_DEFAULT);
 
@@ -183,14 +252,17 @@ async function tareaTracking(envioCorreo: ReturnType<typeof crearRegistroEnvio>[
 // todavia. lanzarCampanaAction llama esto UNA vez, justo despues de inscribir,
 // reusando el mismo codigo que corre el ciclo periodico (materializar + push por
 // canal) en vez de duplicarlo -- disparado ahora, no en el proximo intervalo.
+//
+// modo 'manual' (2026-07-16): sin ventana horaria y con espaciado corto -- hay un request
+// esperando del otro lado. Ver el comentario de tareaPush para el porque de cada uno.
 export async function materializarYEmpujarAhora(): Promise<void> {
   await tareaMaterializar();
   const registro = crearRegistroEntrega();
   for (const canal of Object.keys(registro) as Canal[]) {
     if (canal === 'correo') {
-      await tareaPushCorreo();
+      await tareaPushCorreo('manual');
     } else {
-      await tareaPush(canal, registro[canal]);
+      await tareaPush(canal, registro[canal], 'manual');
     }
   }
 }

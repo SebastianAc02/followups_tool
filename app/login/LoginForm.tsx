@@ -23,7 +23,12 @@ export default function LoginForm() {
         rememberMe: recordar,
       });
       if (error) {
-        setError('Correo o password incorrectos');
+        // No todo fallo de login es una credencial mala (2026-07-16): con el origen del
+        // tunel sin registrar, Better Auth respondia 403 INVALID_ORIGIN y esta pantalla
+        // decia "Correo o password incorrectos" -- media hora buscando el problema en la
+        // password, que estaba bien. Solo el 401 habla de credenciales; el resto se
+        // muestra tal cual lo manda el servidor.
+        setError(error.status === 401 ? 'Correo o password incorrectos' : error.message ?? `Error del servidor (${error.status ?? 'sin código'})`);
         return;
       }
       router.push('/');

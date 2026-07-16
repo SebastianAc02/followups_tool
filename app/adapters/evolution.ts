@@ -41,7 +41,12 @@ function webhookDeCreacion(): WebhookCreacion {
     url: token ? `${url}?token=${encodeURIComponent(token)}` : url,
     byEvents: false,
     base64: false,
-    events: ['MESSAGES_UPSERT'],
+    // MESSAGES_UPSERT corta la cadencia con la respuesta entrante (el requisito duro).
+    // MESSAGES_UPDATE trae el acuse de lectura (status READ) que arma el pill de
+    // tracking (parsearAcuseLectura/guardarVistoWhatsapp) -- sin suscribirlo, ese
+    // camino esta construido y nunca se ejecuta: Evolution simplemente no lo manda.
+    // Medido 2026-07-16: instancia ya conectada mostraba 0 vistos pese a leerlos de verdad.
+    events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
   };
 }
 
@@ -325,4 +330,22 @@ export function parsearMensajeEntrante(payload: unknown): MensajeEntrante | null
     typeof ts === 'number' ? new Date(ts * 1000).toISOString() : asString(p.date_time) ?? '';
 
   return { referenciaProveedor, telefono, texto, mensajeId, fecha };
+}
+
+export type AcuseLectura = { proveedorMensajeId: string; tipo: 'visto'; referenciaProveedor: string };
+
+// messages.update trae acuses de estado. Solo nos interesa READ (leido); DELIVERY_ACK
+// (entregado) se ignora -- el usuario pidio "alguien lo vio", no "llego". Señal no
+// confiable a proposito: si la persona desactivo las confirmaciones de lectura, READ
+// nunca llega. Correlaciona por key.id (el mismo proveedorMensajeId que guarda enviarPaso).
+export function parsearAcuseLectura(payload: unknown): AcuseLectura | null {
+  const p = asRecord(payload);
+  if (!p || p.event !== 'messages.update') return null;
+  const data = asRecord(p.data);
+  const key = data ? asRecord(data.key) : null;
+  if (!data || !key) return null;
+  if (asString(data.status) !== 'READ') return null;
+  const mensajeId = asString(key.id);
+  if (!mensajeId) return null;
+  return { proveedorMensajeId: mensajeId, tipo: 'visto', referenciaProveedor: asString(p.instance) ?? '' };
 }

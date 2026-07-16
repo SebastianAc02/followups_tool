@@ -3,6 +3,7 @@
 // Envuelta por layout.tsx que ya hace requireSession() + AppShell, así que esta página
 // solo renderiza el contenido específico de seguimiento.
 import { requireSession } from '../lib/session';
+import { hoy as hoyDemo } from '../lib/reloj';
 import { kpisPipeline, pipelineGlobal, pipelineSinCadencia, empresasConRespuestaPendiente } from '../db/repository';
 import { canalNormalizado } from '../cola/agenda.ts';
 import { SeguimientoShell } from '../ui/seguimiento/SeguimientoShell';
@@ -53,7 +54,7 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
   }
 
   const usuario = await requireSession();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyDemo();
 
   const kpisRaw = kpisPipeline(usuario.idOrganizacion, hoy);
   const kpis: KpiData = {

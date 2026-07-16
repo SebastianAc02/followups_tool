@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { ContextoToque, VersionDePaso } from "../../db/repository";
 import { resaltarVariables } from "../../core/personalizar-copy";
+import { renderizarCopy } from "../../core/render-copy";
 import { enviarToqueCanalAction, registrarToqueSueltoAction } from "./actions";
 import { ProximoToque } from "./ProximoToque";
 import { plusDias } from "../../lib/date-utils";
@@ -72,21 +73,28 @@ export function EditorCorreo({
   versiones: VersionDePaso[];
   idPasoInscripcion: number | null;
 }) {
+  // datos ANTES de los useState que lo usan: el editor precarga el texto YA sustituido
+  // (2026-07-16, bug real medido en vivo) -- antes el textarea nacia con la plantilla
+  // cruda ("Hola [nombre],") mientras el preview de arriba (CopyResaltado) SI sustituia
+  // y se veia bien ("Hola María,"). Sebastian confiaba en el preview, apretaba enviar, y
+  // lo que salia era el textarea crudo: dos vistas del mismo texto que no coincidian. Si
+  // una variable no tiene dato (ctx sin nombre/empresa) el placeholder se queda literal a
+  // proposito -- ahi si hace falta que Sebastian decida a mano, no hay con que rellenarlo.
+  const datos = datosVariables(ctx);
   const defaultVersion = versiones[0] ?? null;
   const [idVersionActiva, setIdVersionActiva] = useState<number | null>(defaultVersion?.idVersion ?? null);
-  const [asunto, setAsunto] = useState(defaultVersion?.asunto ?? "");
-  const [cuerpo, setCuerpo] = useState(defaultVersion?.cuerpo ?? "");
+  const [asunto, setAsunto] = useState(renderizarCopy(defaultVersion?.asunto ?? "", datos).texto);
+  const [cuerpo, setCuerpo] = useState(renderizarCopy(defaultVersion?.cuerpo ?? "", datos).texto);
   const [fecha, setFecha] = useState(plusDias(3));
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const datos = useMemo(() => datosVariables(ctx), [ctx]);
   const { emp } = ctx;
 
   function reusar(v: VersionDePaso) {
     setIdVersionActiva(v.idVersion);
-    setAsunto(v.asunto ?? "");
-    setCuerpo(v.cuerpo ?? "");
+    setAsunto(renderizarCopy(v.asunto ?? "", datos).texto);
+    setCuerpo(renderizarCopy(v.cuerpo ?? "", datos).texto);
   }
 
   async function enviar() {

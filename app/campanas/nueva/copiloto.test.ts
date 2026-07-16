@@ -41,6 +41,30 @@ test('pedirAlCopiloto devuelve el estado validado cuando la IA responde bien', a
   }
 });
 
+// Bug real (2026-07-15, encontrado probando la demo): escribir "test" (o cualquier frase
+// que no sea un criterio de segmentacion) devolvia "El Copiloto propuso un segmento
+// invalido. Ajustalo a mano." SIEMPRE, no a veces. La IA hacia lo correcto -- devolver
+// cero condiciones y listar la frase en noMapeado -- y el schema la rechazaba, porque
+// accionCopilotoSchema validaba contra definicionSegmentoSchema, que exige min(1)
+// condicion. Ese min(1) es la reja de PERSISTENCIA (un segmento sin condiciones matchea
+// la base entera = campana masiva a todo el mundo), no un contrato de la conversacion:
+// vacio es el estado inicial legitimo (NuevoSegmento.tsx lo llama VACIO) y la respuesta
+// correcta a una instruccion que no mapea. El Copiloto valida contra el schema de
+// BORRADOR; la reja sigue viva donde importa (ver validation.test.ts).
+test('pedirAlCopiloto acepta cero condiciones cuando la frase no mapea a nada', async () => {
+  const ia = new IAFake({
+    estadoNuevo: { condiciones: [] },
+    explicacion: 'La instruccion no contiene ninguna condicion de filtrado reconocible.',
+    noMapeado: ['test'],
+  });
+  const r = await pedirAlCopiloto({ frase: 'test', estadoActual: { condiciones: [] } }, ia);
+  assert.equal(r.ok, true, 'una frase sin criterio no es un error: es noMapeado');
+  if (r.ok) {
+    assert.deepEqual(r.estado.condiciones, []);
+    assert.deepEqual(r.noMapeado, ['test']);
+  }
+});
+
 test('pedirAlCopiloto rechaza un estado invalido de la IA (campo inventado)', async () => {
   const ia = new IAFake({
     estadoNuevo: { condiciones: [{ campo: 'inventado', op: 'en', valores: ['x'] }] },

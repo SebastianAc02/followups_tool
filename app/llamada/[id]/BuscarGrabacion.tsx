@@ -15,7 +15,12 @@ export default function BuscarGrabacion({ idEmpresa, idToque }: { idEmpresa: str
     setBuscando(true);
     setError(null);
     try {
-      setCandidatas(await buscarGrabacionAction(idToque));
+      const res = await buscarGrabacionAction(idToque);
+      if (res.ok) {
+        setCandidatas(res.candidatas);
+      } else {
+        setError(res.error);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo buscar en Granola");
     } finally {

@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { requireSession } from '../lib/session';
+import { hoy as hoyDemo } from '../lib/reloj';
 import { AppShell } from '../ui/shell/AppShell';
 import { ventanaPromedio, promedioDiario } from '../core/actividad';
 import {
@@ -29,7 +30,7 @@ export default async function Panel({
   if (!usuario.admin) redirect('/'); // sin flag admin, la ruta no existe para el usuario
 
   const params = await searchParams;
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyDemo();
   const ventana = ventanaPromedio(hoy);
   const desde = params.desde || ventana.desde;
   const hasta = params.hasta || ventana.hasta;

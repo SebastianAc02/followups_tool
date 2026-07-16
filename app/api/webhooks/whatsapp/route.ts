@@ -10,9 +10,12 @@ import {
   pausarInscripcion,
   registrarToqueEntrante,
   registrarRespuestaDetectada,
+  guardarVistoWhatsapp,
 } from '../../../db/repository';
 import { crearRegistroEnvio } from '../../../adapters/registro-envio';
-import { parsearMensajeEntrante } from '../../../adapters/evolution';
+import { parsearMensajeEntrante, parsearAcuseLectura } from '../../../adapters/evolution';
+import { esLineaDePruebas } from '../../../db/ruteo-linea';
+import { reservarModo } from '../../../lib/modo-prueba';
 import {
   procesarRespuestaEntrante,
   resolverPorUltimos10,
@@ -20,6 +23,12 @@ import {
 } from '../../../core/llego-respuesta';
 
 export async function POST(req: NextRequest) {
+  // VA ANTES DEL PRIMER await, igual que en requireSession (ver modo-prueba.ts): el cuerpo
+  // de una funcion async corre en el contexto del llamador solo hasta su primer await, y
+  // reservar despues marcaria un contexto que nadie lee. La caja se llena mas abajo, cuando
+  // el payload ya nos dijo de que linea viene.
+  const cajaModo = reservarModo();
+
   // Auth: token secreto en la URL (?token=...). Fijar WHATSAPP_WEBHOOK_TOKEN y ponerlo en
   // la URL del webhook de Evolution. Si esta seteado se EXIGE; si no (dev local) se procesa
   // igual. OJO Fase 1 (VPS): antes de exponer este endpoint el token es obligatorio.
@@ -35,12 +44,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, ignorado: 'body no-json' }, { status: 200 });
   }
 
+  // Acuse de lectura (visto): se resuelve antes del parseo de respuesta entrante --
+  // 'messages.update' nunca pasa el filtro de parsearMensajeEntrante (solo mira
+  // 'messages.upsert'), asi que no hay conflicto entre los dos caminos.
+  const acuse = parsearAcuseLectura(body);
+  if (acuse) {
+    cajaModo.valor = esLineaDePruebas(acuse.referenciaProveedor);
+    guardarVistoWhatsapp(acuse.proveedorMensajeId);
+    return NextResponse.json({ ok: true, visto: true }, { status: 200 });
+  }
+
   // Parseo en el adaptador: null = no es una respuesta entrante que nos interese (otro
   // evento, algo que mandamos nosotros, o un mensaje sin texto). Ack limpio, nada que hacer.
   const mensaje = parsearMensajeEntrante(body);
   if (!mensaje) {
     return NextResponse.json({ ok: true, ignorado: true }, { status: 200 });
   }
+
+  // La linea del payload decide la base, y va ANTES de tocar el repository: de aca en
+  // adelante todo (guardarMensajeEntrante, pausarInscripcion, el toque) cae donde vive esa
+  // linea. Sin esto, un reply a una linea de prueba se guardaba en isps.db y la UI en modo
+  // prueba nunca lo encontraba.
+  cajaModo.valor = esLineaDePruebas(mensaje.referenciaProveedor);
 
   try {
     // El adaptador de correo (Apollo) es el TrackingPoll que corta la secuencia externa

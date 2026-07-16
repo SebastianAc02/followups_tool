@@ -29,7 +29,7 @@ process.env.WHATSAPP_WEBHOOK_URL = 'http://followups-web:3000/api/webhooks/whats
 process.env.WHATSAPP_WEBHOOK_TOKEN = 'tok_test';
 
 const { guardarCredencialConector } = await import('../db/repository.ts');
-const { crearEvolutionAdapter, iniciarConexionPorQr, ErrorEvolution } = await import('./evolution.ts');
+const { crearEvolutionAdapter, iniciarConexionPorQr, ErrorEvolution, parsearAcuseLectura } = await import('./evolution.ts');
 
 function fetchFalso(handler: (path: string, init: RequestInit) => { status: number; body: unknown }) {
   return async (url: string | URL, init: RequestInit = {}) => {
@@ -286,7 +286,7 @@ test('iniciarConexion crea la instancia cuando Evolution todavia no la tiene, y 
       url: 'http://followups-web:3000/api/webhooks/whatsapp?token=tok_test',
       byEvents: false,
       base64: false,
-      events: ['MESSAGES_UPSERT'],
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
     },
   });
 });
@@ -411,6 +411,22 @@ test('llamarEvolution tira ErrorEvolution (no un Error generico) cuando la respu
     assert.strictEqual((e as InstanceType<typeof ErrorEvolution>).instanciaNoExiste, true);
     return true;
   });
+});
+
+test('parsearAcuseLectura extrae el visto de un messages.update con status READ', () => {
+  const payload = {
+    event: 'messages.update',
+    instance: 'prueba',
+    data: { key: { id: 'MSG-123', remoteJid: '573102186819@s.whatsapp.net', fromMe: true }, status: 'READ' },
+  };
+  const acuse = parsearAcuseLectura(payload);
+  assert.equal(acuse?.proveedorMensajeId, 'MSG-123');
+  assert.equal(acuse?.tipo, 'visto');
+});
+
+test('parsearAcuseLectura ignora un DELIVERY_ACK (entregado, no leido)', () => {
+  const payload = { event: 'messages.update', instance: 'prueba', data: { key: { id: 'M2' }, status: 'DELIVERY_ACK' } };
+  assert.equal(parsearAcuseLectura(payload), null);
 });
 
 test.after(() => borrarDbPrueba(dbPath));

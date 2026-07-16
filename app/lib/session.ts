@@ -4,21 +4,39 @@ import { auth } from './auth';
 import { usuarioDeSesion, type UsuarioSesion } from './session-user';
 import { organizacionDeUsuario } from '../db/organizacion-repository';
 import { marcarSoloLectura, ErrorSoloLectura } from './read-only';
-import { marcarModoPrueba } from './modo-prueba';
+import { reservarModo } from './modo-prueba';
 import { leerCookieModoPrueba } from './cookie-modo';
+import { reservarOffset } from './reloj';
+import { leerCookieOffsetDemo } from './cookie-reloj';
 import { resolverMembresia } from './resolucion-sesion';
 
 // Gate de sesion (V2.2): toda pagina y todo server action lo llaman primero.
 // Sin sesion valida no se ve ni se escribe nada.
 export async function requireSession(): Promise<UsuarioSesion> {
+  // ESTAS DOS LINEAS VAN ANTES DEL PRIMER await Y EL ORDEN NO ES COSMETICO.
+  //
+  // El cuerpo de una funcion async corre en el contexto del LLAMADOR solo hasta su primer
+  // await; despues vive en un contexto hijo que muere al retornar. Reservar aca es lo que
+  // hace que la page/action que nos awaitea comparta las cajas y vea lo que escribimos mas
+  // abajo. Mover esto debajo de cualquier await revive el bug del 2026-07-15: el banner
+  // decia MODO PRUEBA y las queries salian contra isps.db (ver modo-prueba.ts para el
+  // mecanismo completo, y modo-prueba-await.test.ts para la reproduccion).
+  const cajaModo = reservarModo();
+  const cajaOffset = reservarOffset();
+
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) redirect('/login');
 
-  // El modo se marca ANTES del primer acceso a `db` conmutable. getSession (arriba) y
-  // organizacionDeUsuario (abajo) leen dbReal fijo, asi que no dependen de esta marca --
-  // pero cualquier query de negocio de esta request si. esModoPrueba() no tiene default:
-  // sin esta linea, toda pagina lanzaria.
-  marcarModoPrueba(await leerCookieModoPrueba());
+  // El modo se resuelve ANTES del primer acceso a `db` conmutable. getSession (arriba) y
+  // organizacionDeUsuario (abajo) leen dbReal fijo, asi que no dependen de esto -- pero
+  // cualquier query de negocio de esta request si.
+  cajaModo.valor = await leerCookieModoPrueba();
+
+  // El offset del reloj de demo viaja junto al modo: hoy() en las paginas RSC lo lee.
+  // offsetActual() consulta esModoPrueba() (el offset solo aplica en prueba), asi que la
+  // caja del modo ya tiene que estar llena. En una request normal la cookie no existe y el
+  // offset queda en 0.
+  cajaOffset.dias = await leerCookieOffsetDemo();
 
   // Multi-organizacion (Parte 1): todo usuario que completo el registro (reclamo un
   // owner_canonico) tiene una fila en organizacion_miembro. Si no la tiene -- un usuario

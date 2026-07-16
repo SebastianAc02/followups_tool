@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { IAPort } from '../../core/ports/ia';
-import { definicionSegmentoSchema, type DefinicionSegmento } from '../../db/validation';
+import { definicionSegmentoBorradorSchema, type DefinicionSegmento } from '../../db/validation';
 
 // Campo ofrecido al Copiloto: nombre de dominio + valores conocidos (para que la IA
 // mapee "Valle" -> 'Valle del Cauca' sin inventar). Se arma desde el Repository
@@ -15,8 +15,12 @@ export type InstruccionCopiloto = {
   seleccion?: { total: number };
 };
 
+// estadoNuevo valida contra el schema de BORRADOR, no el estricto: la IA puede
+// legitimamente proponer cero condiciones (frase que no mapea a ningun campo, o el
+// arranque de la conversacion). La reja de min(1) sigue viva donde importa -- al guardar
+// y al inscribir, ver definicionSegmentoSchema en db/validation.ts.
 const accionCopilotoSchema = z.object({
-  estadoNuevo: definicionSegmentoSchema,
+  estadoNuevo: definicionSegmentoBorradorSchema,
   explicacion: z.string(),
   noMapeado: z.array(z.string()),
   relleno: z.object({ eje: z.string(), motivo: z.string() }).optional(),
@@ -81,10 +85,15 @@ estrecha (solo ISP) y en explicacion decis explicitamente que dejaste fuera y pr
 si quiere incluirlos.`;
 }
 
-// El estado que propone la IA SIEMPRE pasa por definicionSegmentoSchema (compuesto
-// dentro de accionCopilotoSchema): generar<T> ya garantiza esa validacion o lanza, asi
-// que una alucinacion nunca llega al Repository. Si lanza, se convierte en un
-// resultado {ok:false} para que la UI diga "ajustalo a mano" en vez de tumbar el flujo.
+// El estado que propone la IA SIEMPRE pasa por definicionSegmentoBorradorSchema
+// (compuesto dentro de accionCopilotoSchema): generar<T> ya garantiza esa validacion o
+// lanza, asi que una alucinacion (campo inventado, operador que no existe) nunca llega al
+// Repository. Si lanza, se convierte en un resultado {ok:false} para que la UI diga
+// "ajustalo a mano" en vez de tumbar el flujo.
+//
+// Un segmento sin condiciones NO es una alucinacion y por eso el borrador lo acepta: la
+// reja que impide guardar/ejecutar el conjunto entero vive en definicionSegmentoSchema,
+// al persistir. Confundir las dos era el bug del 2026-07-15.
 export async function pedirAlCopiloto(
   instruccion: InstruccionCopiloto,
   ia: IAPort,

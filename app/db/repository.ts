@@ -19,7 +19,12 @@ import {
 } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
-import { db } from './index';
+// dbReal ademas de db: organizacion_miembro es IDENTIDAD y NO conmuta con el modo prueba
+// (spec: "identidad siempre real, negocio conmutable"). Este archivo conmuta entero, asi que
+// las pocas lecturas de identidad que viven aca piden dbReal explicito -- ver
+// identidad-en-prueba.test.ts para el bug que causo trazar la frontera por archivo y no por
+// tabla. El resto del archivo sigue usando `db` (el Proxy) sin cambios.
+import { db, dbReal } from './index';
 import {
   empresa,
   contacto,
@@ -2554,6 +2559,9 @@ export type CampanaParaPreview = {
   nombre: string;
   idCadencia: number;
   cadencia: string;
+  // idSegmento ademas del nombre: Destinatarios necesita el id para sacar una cuenta del
+  // set curado sin mandar a Sebastian de vuelta al paso Segmento (alternarExclusionAction).
+  idSegmento: number;
   segmento: string;
   reglaFaltante: ReglaFaltante;
   estado: string;
@@ -2566,6 +2574,7 @@ export function campanaParaPreview(idCampana: number): CampanaParaPreview | null
       nombre: campana.nombre,
       idCadencia: campana.idCadencia,
       cadencia: cadencia.nombre,
+      idSegmento: campana.idSegmento,
       segmento: segmento.nombre,
       reglaFaltante: campana.reglaFaltante,
       estado: campana.estado,
@@ -3698,7 +3707,10 @@ export function lineaWhatsappActivaDeOwner(owner: string | null, idOrganizacion:
     return pool?.referenciaProveedor ? { referenciaProveedor: pool.referenciaProveedor } : null;
   }
 
-  const miembro = db
+  // dbReal para la identidad; la linea de abajo sigue en `db` porque linea_whatsapp SI es
+  // negocio y debe conmutar. Esta funcion mezcla los dos lados a proposito: por eso el corte
+  // es por tabla, no por funcion.
+  const miembro = dbReal
     .select({ idUser: organizacionMiembro.idUser })
     .from(organizacionMiembro)
     .where(and(eq(organizacionMiembro.ownerCanonico, owner), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
@@ -3719,7 +3731,10 @@ export function lineaWhatsappActivaDeOwner(owner: string | null, idOrganizacion:
 // duplicacion es 6 lineas, el riesgo de romper whatsapp no vale la pena ahorrarselas.
 export function idUsuarioDeOwner(owner: string | null, idOrganizacion: number): string | null {
   if (!owner) return null;
-  const miembro = db
+  // dbReal: organizacion_miembro es identidad, no conmuta. Con `db` esto devolvia null en
+  // modo prueba (pruebas.db no tiene usuarios, por diseño), el agrupador de correo concluia
+  // "el owner no tiene Gmail" y mandaba todo al fallback de Apollo.
+  const miembro = dbReal
     .select({ idUser: organizacionMiembro.idUser })
     .from(organizacionMiembro)
     .where(and(eq(organizacionMiembro.ownerCanonico, owner), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
@@ -3752,7 +3767,11 @@ export function marcarCampanaAprobadaGmail(idCampana: number): void {
 // owner_canonico que colisionara entre dos orgs sumaria envios de AMBAS, inflando el
 // conteo contra el tope diario de una organizacion con los envios de otra.
 export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: string): number {
-  const miembro = db
+  // dbReal para la identidad; el conteo de abajo sigue en `db` (paso_inscripcion es negocio
+  // y el tope diario debe contar los envios de la base en la que estas). Sin esto, en modo
+  // prueba el miembro no se encontraba y la funcion devolvia 0: el tope diario de Gmail
+  // quedaba desactivado en silencio.
+  const miembro = dbReal
     .select({ owner: organizacionMiembro.ownerCanonico })
     .from(organizacionMiembro)
     .where(and(eq(organizacionMiembro.idUser, idUsuario), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
@@ -4237,6 +4256,26 @@ export function resolverDestinatarioPorEmail(proveedorCampanaId: string, email: 
 
 // Idempotente (search-first, mismo idioma que crearPasoInscripcionPendiente): el
 // indice unico de proveedor_evento_id (V5.1) es el respaldo final ante una carrera.
+// Visto de WhatsApp: cruza el key.id del acuse con paso_inscripcion.proveedor_mensaje_id
+// (lo que guardo enviarPaso al mandar). Si no hay paso con ese id, es un mensaje que no
+// mandamos nosotros por cadencia -- se ignora. Idempotente por proveedor_evento_id.
+export function guardarVistoWhatsapp(proveedorMensajeId: string): 'insertado' | 'ignorado' | 'duplicado' {
+  const paso = db
+    .select({ id: pasoInscripcion.idPasoInscripcion })
+    .from(pasoInscripcion)
+    .where(eq(pasoInscripcion.proveedorMensajeId, proveedorMensajeId))
+    .get();
+  if (!paso) return 'ignorado';
+
+  const eventoId = `visto:${proveedorMensajeId}`;
+  const existente = db.select({ id: eventoTracking.idEvento }).from(eventoTracking).where(eq(eventoTracking.proveedorEventoId, eventoId)).get();
+  if (existente) return 'duplicado';
+
+  const ahora = new Date().toISOString();
+  db.insert(eventoTracking).values({ idPasoInscripcion: paso.id, tipo: 'visto', canal: 'whatsapp', proveedorEventoId: eventoId, fechaEvento: ahora, createdAt: ahora }).run();
+  return 'insertado';
+}
+
 export function guardarEventoTracking(idPasoInscripcion: number, evento: EventoProveedor): 'insertado' | 'duplicado' {
   const existente = db
     .select({ id: eventoTracking.idEvento })
@@ -4268,6 +4307,191 @@ export function pausarInscripcion(idInscripcion: number, motivo: string) {
     .set({ estado: 'pausada', motivoFin: motivo, fechaFin: ahora, updatedAt: ahora })
     .where(eq(inscripcion.idInscripcion, idInscripcion))
     .run();
+}
+
+// Baja manual de una empresa de una campaña viva (Sebastian saca a Felipe/Camilo antes
+// de que les llegue el siguiente paso). Reusa el mismo corte que la respuesta automatica:
+// pausada sale sola de agendaEnSeco (solo lee estado='activa'). El corte de la secuencia
+// externa en Apollo lo hace la action (necesita async + el adaptador), no esta funcion.
+// Aperturas y clics por inscripcion de una campana. Lee las filas 'abierto'/'clic' de
+// evento_tracking que hoy se guardan (pixel propio en /api/track/open y /click) pero
+// nadie leia -- metricasHub solo mira 'enviado' y 'respondio'. Una fila por inscripcion
+// con al menos un evento de apertura/clic/visto, para pintar "Abrio"/"Vio WhatsApp" en
+// Destinatarios. 'visto' (acuse de lectura de WhatsApp) se suma aca desde el dia uno
+// aunque solo lo escriba guardarVistoWhatsapp -- un solo lugar que leer, no dos.
+export function aperturasPorCampana(idCampana: number): { idInscripcion: number; abrio: boolean; hizoClic: boolean; vioWhatsapp: boolean }[] {
+  const filas = db
+    .select({
+      idInscripcion: destinatario.idInscripcion,
+      tipo: eventoTracking.tipo,
+    })
+    .from(eventoTracking)
+    .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .where(and(eq(inscripcion.idCampana, idCampana), inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto'])))
+    .all();
+
+  const porInscripcion = new Map<number, { abrio: boolean; hizoClic: boolean; vioWhatsapp: boolean }>();
+  for (const f of filas) {
+    const prev = porInscripcion.get(f.idInscripcion) ?? { abrio: false, hizoClic: false, vioWhatsapp: false };
+    if (f.tipo === 'abierto') prev.abrio = true;
+    if (f.tipo === 'clic') prev.hizoClic = true;
+    if (f.tipo === 'visto') prev.vioWhatsapp = true;
+    porInscripcion.set(f.idInscripcion, prev);
+  }
+  return [...porInscripcion.entries()].map(([idInscripcion, v]) => ({ idInscripcion, ...v }));
+}
+
+export type ResumenTrackingEmpresa = {
+  aperturas: number;
+  clics: number;
+  ultimaApertura: string | null; // ISO del evento 'abierto' mas reciente
+  vioWhatsapp: boolean;
+};
+
+// Tracking agregado POR EMPRESA para el pill de /cola: conteo de aperturas/clics, la hora de
+// la ultima apertura y si vio el WhatsApp. Gemela de aperturasPorCampana (mismos joins), pero
+// filtrada por empresa y con CONTEO en vez de booleanos -- la cola es por empresa y necesita
+// "3x . hace 2h", no un si/no. Una query para toda la cola + cruce en TS (mismo criterio que
+// aperturasPorCampana/actividadDeCampana: a la escala de una cola son decenas de filas).
+export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, ResumenTrackingEmpresa> {
+  const resultado = new Map<string, ResumenTrackingEmpresa>();
+  if (idsEmpresa.length === 0) return resultado;
+
+  const filas = db
+    .select({
+      idEmpresa: inscripcion.idEmpresa,
+      tipo: eventoTracking.tipo,
+      fecha: eventoTracking.fechaEvento,
+    })
+    .from(eventoTracking)
+    .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .where(and(inArray(inscripcion.idEmpresa, idsEmpresa), inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto'])))
+    .all();
+
+  for (const f of filas) {
+    const prev = resultado.get(f.idEmpresa) ?? { aperturas: 0, clics: 0, ultimaApertura: null, vioWhatsapp: false };
+    if (f.tipo === 'abierto') {
+      prev.aperturas += 1;
+      if (f.fecha && (prev.ultimaApertura === null || f.fecha > prev.ultimaApertura)) prev.ultimaApertura = f.fecha;
+    } else if (f.tipo === 'clic') {
+      prev.clics += 1;
+    } else if (f.tipo === 'visto') {
+      prev.vioWhatsapp = true;
+    }
+    resultado.set(f.idEmpresa, prev);
+  }
+  return resultado;
+}
+
+export type FilaActividad = {
+  idPasoInscripcion: number;
+  empresa: string;
+  contacto: string | null;
+  email: string | null;
+  orden: number;
+  canal: string;
+  estado: string;
+  proveedor: string | null;
+  fecha: string | null;
+  abrio: boolean;
+  hizoClic: boolean;
+  vioWhatsapp: boolean;
+  respondio: boolean;
+  reboto: boolean;
+};
+
+// "Que se mando y que paso con cada cosa": una fila por ENVIO (paso_inscripcion), con sus
+// señales cruzadas de evento_tracking. Es la pregunta que la app no sabia responder.
+//
+// El hueco nunca fue de captura: evento_tracking ya guardaba los 6 tipos
+// (enviado/abierto/clic/respondio/rebota/visto) desde el pixel propio, el poll de
+// Apollo/Gmail y el webhook de Evolution. Era de LECTURA -- metricasHub era la unica
+// funcion que tocaba la tabla y solo miraba 'enviado' y 'respondio'; los otros 4 se
+// escribian y se morian ahi.
+//
+// Incluye los pasos 'pendiente'/'fallo', no solo los enviados: "esto viene ahora" y "esto
+// se cayo" son parte de la respuesta. Dos queries y el cruce en TS (mismo criterio que
+// aperturasPorCampana): a la escala de una campaña son decenas de filas.
+export function actividadDeCampana(idCampana: number): FilaActividad[] {
+  const envios = db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      empresa: empresa.nombreOficial,
+      contacto: contacto.nombre,
+      email: contacto.email,
+      orden: pasoCadencia.orden,
+      canal: pasoInscripcion.canal,
+      estado: pasoInscripcion.estado,
+      proveedor: pasoInscripcion.proveedor,
+      fechaEnviada: pasoInscripcion.fechaEnviada,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .where(eq(inscripcion.idCampana, idCampana))
+    .orderBy(pasoCadencia.orden, pasoInscripcion.idPasoInscripcion)
+    .all();
+  if (envios.length === 0) return [];
+
+  const ids = envios.map((e) => e.idPasoInscripcion);
+  const eventos = db
+    .select({ idPasoInscripcion: eventoTracking.idPasoInscripcion, tipo: eventoTracking.tipo })
+    .from(eventoTracking)
+    .where(inArray(eventoTracking.idPasoInscripcion, ids))
+    .all();
+
+  const porPaso = new Map<number, Set<string>>();
+  for (const ev of eventos) {
+    if (!porPaso.has(ev.idPasoInscripcion)) porPaso.set(ev.idPasoInscripcion, new Set());
+    porPaso.get(ev.idPasoInscripcion)!.add(ev.tipo);
+  }
+
+  return envios.map((e) => {
+    const tipos = porPaso.get(e.idPasoInscripcion) ?? new Set<string>();
+    return {
+      idPasoInscripcion: e.idPasoInscripcion,
+      empresa: e.empresa,
+      contacto: e.contacto,
+      email: e.email,
+      orden: e.orden,
+      canal: e.canal,
+      estado: e.estado,
+      proveedor: e.proveedor,
+      fecha: e.fechaEnviada ?? e.fechaProgramada,
+      abrio: tipos.has('abierto'),
+      hizoClic: tipos.has('clic'),
+      vioWhatsapp: tipos.has('visto'),
+      respondio: tipos.has('respondio'),
+      reboto: tipos.has('rebota'),
+    };
+  });
+}
+
+export function sacarInscripcionDeCampana(idInscripcion: number) {
+  pausarInscripcion(idInscripcion, 'baja manual desde destinatarios');
+}
+
+// Datos para cortar la secuencia externa (Apollo) de una inscripcion puntual: el
+// proveedorCampanaId (id de Apollo) y el email del destinatario. Gemelo puntual de
+// inscripcionesActivasDeEmpresa, pero por inscripcion en vez de por empresa.
+export function datosSecuenciaExterna(idInscripcion: number): { proveedorCampanaId: string | null; email: string | null } | null {
+  const fila = db
+    .select({ proveedorCampanaId: campana.proveedorCampanaId, email: contacto.email })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(destinatario, eq(destinatario.idInscripcion, inscripcion.idInscripcion))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .where(eq(inscripcion.idInscripcion, idInscripcion))
+    .get();
+  return fila ?? null;
 }
 
 export function marcarDestinatarioSalio(idDestinatario: number) {

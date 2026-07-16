@@ -1,6 +1,7 @@
 import type { Canal } from "../ui/canal-tag.variants.ts";
 import type { Severity } from "../ui/severity-text.variants.ts";
 import { ESTADOS_CALIENTES } from "../db/funnel";
+import type { ResumenTracking } from "../core/resumen-tracking.ts";
 
 export type FiltroCanal = "todos" | Canal;
 
@@ -149,18 +150,19 @@ export function bucketDeEtapa(estado: string | null): "lead" | "cierre" {
 // lead nuevo. Sin esto la lista "Tus toques" no distinguia por que a veces hay mas filas
 // que el contador de Pendientes (que solo cuenta colaLeads). Opcional porque cola/
 // cierres/reagendar no lo setean (su ausencia = "directo").
-export type FilaColaConBucket = FilaCola & { bucket: Bucket; origen?: "cadencia" };
+export type FilaColaConBucket = FilaCola & { bucket: Bucket; origen?: "cadencia"; tracking?: ResumenTracking };
 
 export type FilaUnificada = FilaAgenda & {
   bucket: Bucket;
   campana: string | null;
   frescura: Frescura;
   origen?: "cadencia";
+  tracking?: ResumenTracking; // pill de "abrió/vio/clic"; ausente = no hubo envío que trackear
 };
 
 function filaUnificada(c: FilaColaConBucket, hoy: string, actual: boolean): FilaUnificada {
   const base = c.bucket === "cierre" ? filaSinVencimiento(c) : filaConVencimiento(c, hoy, actual);
-  return { ...base, bucket: c.bucket, campana: c.campana ?? null, frescura: frescuraDe(c.fecha, hoy), origen: c.origen };
+  return { ...base, bucket: c.bucket, campana: c.campana ?? null, frescura: frescuraDe(c.fecha, hoy), origen: c.origen, tracking: c.tracking };
 }
 
 // Mezcla las filas de las 4 fuentes (Leads/Cierres/Reagendar/pasos de cadencia, ya

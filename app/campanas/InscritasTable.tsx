@@ -1,6 +1,7 @@
 import { Pill } from '../ui/Pill';
 import { CanalTag, type Canal } from '../ui/CanalTag';
 import { SectionLabel } from '../ui/SectionLabel';
+import { BotonSacar } from './BotonSacar';
 
 export type InscritaHubVM = {
   id: number;
@@ -10,6 +11,11 @@ export type InscritaHubVM = {
   canalPrincipal: string | null;
   ultimoToque: string | null;
 };
+
+// Mismo shape que aperturasPorCampana() en db/repository.ts. Tipo duplicado (no
+// importado desde ahi) para no acoplar InscritasTable al modulo del repository --
+// esta tabla ya es puramente de presentacion.
+export type AperturaVM = { idInscripcion: number; abrio: boolean; hizoClic: boolean; vioWhatsapp: boolean };
 
 const ESTADO_TONE = {
   activa: 'hot',
@@ -28,7 +34,23 @@ function formatoFecha(iso: string | null): string {
 
 // mostrarCampana en false cuando ya estamos dentro de UNA campana (Destinatarios):
 // ahi la columna es redundante, todas las filas son la misma campana.
-export function InscritasTable({ inscritas, mostrarCampana = true }: { inscritas: InscritaHubVM[]; mostrarCampana?: boolean }) {
+//
+// idCampana solo llega desde Destinatarios (la unica pantalla donde "sacar" tiene
+// sentido: ahi la inscripcion ya es real, no un preview de usar-y-tirar). Sin idCampana
+// (el hub general de Campanas) no se renderiza el boton -- BotonSacar necesita saber a
+// que campana volver despues de revalidar.
+export function InscritasTable({
+  inscritas,
+  mostrarCampana = true,
+  idCampana,
+  aperturas,
+}: {
+  inscritas: InscritaHubVM[];
+  mostrarCampana?: boolean;
+  idCampana?: number;
+  aperturas?: AperturaVM[];
+}) {
+  const aperturaPorInscripcion = new Map((aperturas ?? []).map((a) => [a.idInscripcion, a]));
   return (
     <div className="mt-8">
       <SectionLabel className="mb-3">Empresas inscritas</SectionLabel>
@@ -44,6 +66,8 @@ export function InscritasTable({ inscritas, mostrarCampana = true }: { inscritas
                 <th className="px-5 py-3 font-normal">Canal</th>
                 <th className="px-5 py-3 font-normal">Último toque</th>
                 <th className="px-5 py-3 font-normal">Estado</th>
+                {aperturas != null && <th className="px-5 py-3 font-normal">Visto</th>}
+                {idCampana != null && <th className="px-5 py-3 font-normal"></th>}
               </tr>
             </thead>
             <tbody>
@@ -60,6 +84,27 @@ export function InscritasTable({ inscritas, mostrarCampana = true }: { inscritas
                       {ESTADO_LABEL[f.estado] ?? f.estado}
                     </Pill>
                   </td>
+                  {aperturas != null && (
+                    <td className="px-5 py-3.5">
+                      <div className="flex gap-1.5">
+                        {aperturaPorInscripcion.get(f.id)?.abrio && (
+                          <Pill tone="hot">Abrió</Pill>
+                        )}
+                        {aperturaPorInscripcion.get(f.id)?.hizoClic && (
+                          <Pill tone="hot">Clic</Pill>
+                        )}
+                        {aperturaPorInscripcion.get(f.id)?.vioWhatsapp && (
+                          <Pill tone="hot">Vio WhatsApp</Pill>
+                        )}
+                        {!aperturaPorInscripcion.get(f.id) && <span className="text-faint">—</span>}
+                      </div>
+                    </td>
+                  )}
+                  {idCampana != null && (
+                    <td className="px-5 py-3.5">
+                      {f.estado === 'activa' && <BotonSacar idInscripcion={f.id} idCampana={idCampana} />}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

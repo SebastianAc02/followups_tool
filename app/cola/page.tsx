@@ -8,7 +8,9 @@ import {
   agendaHoyCadencias,
   historialPasosDestinatario,
   empresasConRespuestaPendiente,
+  resumenTrackingPorEmpresa,
 } from "../db/repository";
+import { resumirTracking } from "../core/resumen-tracking.ts";
 import { registrarTapAction } from "../actions";
 import { requireSession } from "../lib/session";
 import { AppShell } from "../ui/shell/AppShell";
@@ -29,6 +31,7 @@ import {
   type FilaAgenda,
   type FilaColaConBucket,
 } from "./agenda.ts";
+import { hoy as hoyDemo } from "../lib/reloj";
 
 export default async function Cola({ searchParams }: { searchParams: Promise<{ owner?: string }> }) {
   const usuario = await requireSession();
@@ -37,7 +40,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0]. Visitante (solo
   // lectura) sin ?owner= ve la cola de TODOS los owners, no una propia (que estaria vacia).
   const owner = sp.owner ?? (usuario.soloLectura ? undefined : usuario.owner);
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyDemo();
   const splitActivo = owner === OWNER_COLA_SPLIT;
   const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
   const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
@@ -94,7 +97,18 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
       ]
     : [];
 
-  const filasUnificadas = splitActivo ? unificarCola(filasParaUnificar, hoy) : [];
+  // Tracking por empresa para el pill "abrió/vio/clic" (2026-07-15). Un solo query para toda
+  // la cola; el core (resumirTracking) decide texto y temperatura. El reloj de demo (hoyDemo)
+  // NO aplica: la hora de "hace 2h" es tiempo real de reloj, no la fecha de negocio, por eso
+  // ahora = new Date() y no hoyDemo(). resumenTrackingPorEmpresa([]) no toca la DB.
+  const trackingPorEmpresa = resumenTrackingPorEmpresa(filasParaUnificar.map((f) => f.id));
+  const ahora = new Date();
+  const filasConTracking: FilaColaConBucket[] = filasParaUnificar.map((f) => {
+    const s = trackingPorEmpresa.get(f.id);
+    return s ? { ...f, tracking: resumirTracking(s, ahora) } : f;
+  });
+
+  const filasUnificadas = splitActivo ? unificarCola(filasConTracking, hoy) : [];
 
   // Las tarjetas cuentan sobre las MISMAS filas que se listan abajo. En el split eso son las
   // 4 fuentes juntas (leads/cierres/reagendar/cadencias); fuera del split, colaDelDia ya es

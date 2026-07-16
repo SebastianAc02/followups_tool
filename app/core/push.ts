@@ -51,10 +51,22 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function pushPendientes(deps: PushDeps, envio: CanalEntrega, ahora: Date = new Date(), throttleMs: number = 0): Promise<void> {
+// throttleMs acepta una FUNCION ademas de un numero (2026-07-16): WhatsApp necesita jitter
+// (45-90s aleatorio, ver core/ventana-envio.ts) porque un intervalo fijo es tan patron de
+// bot como no tener ninguno. Gmail sigue pasando un numero fijo, sin cambios.
+export async function pushPendientes(
+  deps: PushDeps,
+  envio: CanalEntrega,
+  ahora: Date = new Date(),
+  throttleMs: number | (() => number) = 0,
+): Promise<void> {
+  const esperaDe = () => (typeof throttleMs === 'function' ? throttleMs() : throttleMs);
   let primero = true;
   for (const fila of deps.pendientes()) {
-    if (!primero && throttleMs > 0) await esperar(throttleMs);
+    if (!primero) {
+      const ms = esperaDe();
+      if (ms > 0) await esperar(ms);
+    }
     primero = false;
     try {
       deps.marcarEnviando(fila.idPasoInscripcion);

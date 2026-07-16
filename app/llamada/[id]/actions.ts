@@ -131,17 +131,32 @@ function sumarHoras(iso: string, horas: number): string {
 // V3.4: busca en Granola por los terminos de esta empresa/contacto, en una ventana
 // de tiempo alrededor del toque. No persiste nada, el buscar es de solo lectura,
 // solo confirmarGrabacionAction escribe.
-export async function buscarGrabacionAction(idToque: number): Promise<CandidataOFusion[]> {
+//
+// Resultado tipado, no excepcion (2026-07-16): en build de produccion Next.js sanitiza
+// CUALQUIER error de una server action al mismo mensaje generico ("An error occurred in
+// the Server Components render...") antes de mandarlo al cliente -- asi el error real
+// (p.ej. "no hay credencial de Granola para este usuario", el caso mas comun: el
+// conector conmuta por base y hay que conectarlo DENTRO del modo prueba, no solo en la
+// real) nunca llegaba a verse, solo el digest. Mismo patron que el resto de este
+// archivo/carpeta (CicloVidaResultado, LanzarCampanaResultado): atrapar aca y devolver
+// el mensaje real en el resultado, no dejar que escape como excepcion.
+export type BuscarGrabacionResultado = { ok: true; candidatas: CandidataOFusion[] } | { ok: false; error: string };
+
+export async function buscarGrabacionAction(idToque: number): Promise<BuscarGrabacionResultado> {
   const sesion = await requireSession();
-  const datos = terminosBusquedaTranscript(idToque);
-  if (!datos || datos.terminos.length === 0) return [];
+  try {
+    const datos = terminosBusquedaTranscript(idToque);
+    if (!datos || datos.terminos.length === 0) return { ok: true, candidatas: [] };
 
-  const adapter = crearGranolaAdapter(sesion.id);
-  const desde = sumarHoras(datos.fecha, -VENTANA_HORAS);
-  const hasta = sumarHoras(datos.fecha, VENTANA_HORAS);
-  const candidatas = await adapter.buscarCandidatas(datos.terminos, desde, hasta);
+    const adapter = crearGranolaAdapter(sesion.id);
+    const desde = sumarHoras(datos.fecha, -VENTANA_HORAS);
+    const hasta = sumarHoras(datos.fecha, VENTANA_HORAS);
+    const candidatas = await adapter.buscarCandidatas(datos.terminos, desde, hasta);
 
-  return agruparCandidatas(candidatas, datos.fecha);
+    return { ok: true, candidatas: agruparCandidatas(candidatas, datos.fecha) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'No se pudo buscar en Granola' };
+  }
 }
 
 // V3.4 + V3.6: escribe la candidata elegida por Sebastian. Nunca se llama sola --

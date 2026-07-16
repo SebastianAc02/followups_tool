@@ -168,17 +168,37 @@ const condicionComparaSchema = z.object({
   valor: z.number(),
 });
 
-export const definicionSegmentoSchema = z.object({
-  condiciones: z
-    .array(z.union([condicionEnSchema, condicionNullSchema, condicionEntreSchema, condicionComparaSchema]))
-    .min(1, 'un segmento necesita al menos una condicion'),
+const condicionSegmentoSchema = z.union([condicionEnSchema, condicionNullSchema, condicionEntreSchema, condicionComparaSchema]);
+
+// BORRADOR: lo que el Copiloto puede proponer y la UI puede tener en pantalla mientras se
+// arma el segmento. Admite cero condiciones a proposito -- vacio es el estado inicial
+// (NuevoSegmento.tsx lo llama VACIO) y es la respuesta CORRECTA a una instruccion que no
+// mapea a ningun campo ("test" -> condiciones: [], noMapeado: ['test']).
+//
+// Existe separado por un bug real (2026-07-15): el Copiloto validaba su salida contra el
+// schema estricto de abajo, asi que cualquier frase sin criterio de segmentacion moria en
+// "El Copiloto propuso un segmento invalido" -- culpando al modelo por acertar. Los dos
+// contratos vivian bajo un mismo nombre; separarlos es lo que arregla el bug sin tocar la
+// reja. A nivel de TypeScript los dos tipos son IDENTICOS (min(1) no cambia el tipo
+// inferido), asi que la separacion es puramente de validacion en runtime.
+export const definicionSegmentoBorradorSchema = z.object({
+  condiciones: z.array(condicionSegmentoSchema),
   // Ranking + tope: "las 50 mas grandes" = orden por usuarios desc, limite 50. Ambos
   // opcionales; sin ellos el segmento es el conjunto completo que cumple condiciones.
   orden: z.object({ campo: z.enum(CAMPOS_SEGMENTO_NUMERICOS), dir: z.enum(['asc', 'desc']) }).optional(),
   limite: z.number().int().positive().optional(),
 });
 
+// ESTRICTO: lo que se puede GUARDAR y EJECUTAR. min(1) es una reja de seguridad, no una
+// formalidad: un segmento sin condiciones matchea la base ENTERA, o sea una campana
+// masiva a todo el mundo. Todo lo que persiste o inscribe pasa por aca (repository.ts,
+// guardarSegmentoAction); el Copiloto no.
+export const definicionSegmentoSchema = definicionSegmentoBorradorSchema.extend({
+  condiciones: z.array(condicionSegmentoSchema).min(1, 'un segmento necesita al menos una condicion'),
+});
+
 export type DefinicionSegmento = z.infer<typeof definicionSegmentoSchema>;
+export type DefinicionSegmentoBorrador = z.infer<typeof definicionSegmentoBorradorSchema>;
 
 // V4.4: alta de una version A/B colgada de un paso. peso reparte el trafico en el
 // motor en seco (0 = version apagada, no recibe). Iterar copy = agregar una version,
