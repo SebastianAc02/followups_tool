@@ -2260,9 +2260,15 @@ export function marcarCampanaFinalizada(idCampana: number): { ok: true; proveedo
     // campana nunca se cerraban -- una campana finalizada con una inscripcion
     // "activa" colgando debajo, que ademas bloqueaba re-inscribir esa empresa en
     // otra campana hasta que alguien la limpiara a mano.
+    //
+    // 2026-07-15: cierra los DOS estados vivos, no solo 'activa'. Una 'bloqueada'
+    // (sin destinatario, esperando la cola de revision) sobrevivia a la cancelacion:
+    // el indice unico parcial solo cubre WHERE estado='activa', asi que no violaba
+    // nada y quedaba invisible, pero la cola la seguia ofreciendo y resolverla la
+    // promovia a 'activa' debajo de una campana ya archivada.
     tx.update(inscripcion)
       .set({ estado: 'finalizada', motivoFin: 'campana cancelada', fechaFin: ahora, updatedAt: ahora })
-      .where(and(eq(inscripcion.idCampana, idCampana), eq(inscripcion.estado, 'activa')))
+      .where(and(eq(inscripcion.idCampana, idCampana), inArray(inscripcion.estado, ['activa', 'bloqueada'])))
       .run();
   });
   return { ok: true, proveedorCampanaId: camp.proveedorCampanaId };
