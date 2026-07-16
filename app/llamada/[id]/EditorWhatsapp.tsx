@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { ContextoToque, VersionDePaso } from "../../db/repository";
 import { resaltarVariables } from "../../core/personalizar-copy";
+import { renderizarCopy } from "../../core/render-copy";
 import { enviarToqueCanalAction, registrarToqueSueltoAction } from "./actions";
 import { ProximoToque } from "./ProximoToque";
 import { plusDias } from "../../lib/date-utils";
@@ -69,18 +70,20 @@ export function EditorWhatsapp({
   versiones: VersionDePaso[];
   idPasoInscripcion: number | null;
 }) {
+  // Mismo bug/arreglo que EditorCorreo.tsx (2026-07-16): el textarea nace ya sustituido,
+  // no con la plantilla cruda -- antes el preview de arriba (CopyResaltado) mentia
+  // (mostraba el nombre real) mientras lo que de verdad se mandaba era el texto crudo.
+  const datos = datosVariables(ctx);
   const defaultVersion = versiones[0] ?? null;
   const [idVersionActiva, setIdVersionActiva] = useState<number | null>(defaultVersion?.idVersion ?? null);
-  const [cuerpo, setCuerpo] = useState(defaultVersion?.cuerpo ?? "");
+  const [cuerpo, setCuerpo] = useState(renderizarCopy(defaultVersion?.cuerpo ?? "", datos).texto);
   const [fecha, setFecha] = useState(plusDias(3));
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const datos = useMemo(() => datosVariables(ctx), [ctx]);
-
   function reusar(v: VersionDePaso) {
     setIdVersionActiva(v.idVersion);
-    setCuerpo(v.cuerpo ?? "");
+    setCuerpo(renderizarCopy(v.cuerpo ?? "", datos).texto);
   }
 
   async function enviar() {
