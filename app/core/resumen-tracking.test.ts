@@ -12,30 +12,37 @@ test('haceCuanto: minutos, horas, dias', () => {
   assert.equal(haceCuanto('2026-07-13T16:00:00.000Z', AHORA), 'hace 2d');
 });
 
-test('resumirTracking: 3 aperturas + clic', () => {
-  const s: SeñalTracking = { aperturas: 3, clics: 1, ultimaApertura: '2026-07-15T14:00:00.000Z', vioWhatsapp: false };
+test('sin ningun evento: "Sin abrir", frio', () => {
+  const r = resumirTracking(vacia, AHORA);
+  assert.equal(r.texto, 'Sin abrir');
+  assert.equal(r.temperatura, 'frio');
+});
+
+test('1 sola apertura: se descarta (posible proxy), sigue frio y sin hora', () => {
+  const s: SeñalTracking = { aperturas: 1, clics: 0, ultimaApertura: '2026-07-15T15:59:00.000Z', vioWhatsapp: false };
   const r = resumirTracking(s, AHORA);
-  assert.equal(r.texto, 'Abrió 3× · hizo clic · hace 2h');
+  assert.equal(r.texto, 'Sin abrir');
+  assert.equal(r.temperatura, 'frio');
+});
+
+test('2 aperturas: la primera se descarta, la 2da ya es real -> caliente de una, sin umbral extra', () => {
+  const s: SeñalTracking = { aperturas: 2, clics: 0, ultimaApertura: '2026-07-15T14:00:00.000Z', vioWhatsapp: false };
+  const r = resumirTracking(s, AHORA);
+  assert.equal(r.texto, 'Vio · hace 2h');
   assert.equal(r.temperatura, 'caliente');
 });
 
-test('resumirTracking: sin nada abre "Sin abrir"', () => {
-  assert.equal(resumirTracking(vacia, AHORA).texto, 'Sin abrir');
-  assert.equal(temperaturaDe(vacia), 'frio');
+test('4 aperturas: muestra el conteo REAL (descontando la primera), no el crudo', () => {
+  const s: SeñalTracking = { aperturas: 4, clics: 0, ultimaApertura: '2026-07-15T14:00:00.000Z', vioWhatsapp: false };
+  const r = resumirTracking(s, AHORA);
+  assert.equal(r.texto, 'Vio 3× · hace 2h');
 });
 
-test('temperaturaDe: clic solo ya es caliente aunque no haya aperturas', () => {
-  assert.equal(temperaturaDe({ aperturas: 0, clics: 1, ultimaApertura: null, vioWhatsapp: false }), 'caliente');
+test('clic cuenta como real aunque solo haya 1 apertura (la del clic)', () => {
+  const s: SeñalTracking = { aperturas: 1, clics: 1, ultimaApertura: '2026-07-15T14:00:00.000Z', vioWhatsapp: false };
+  assert.equal(temperaturaDe(s), 'caliente');
 });
 
-test('temperaturaDe: vio WhatsApp es caliente', () => {
+test('vio WhatsApp es caliente sin ninguna apertura de correo', () => {
   assert.equal(temperaturaDe({ aperturas: 0, clics: 0, ultimaApertura: null, vioWhatsapp: true }), 'caliente');
-});
-
-test('temperaturaDe: 1 apertura sola es frio (indistinguible del proxy)', () => {
-  assert.equal(temperaturaDe({ aperturas: 1, clics: 0, ultimaApertura: '2026-07-15T15:59:00.000Z', vioWhatsapp: false }), 'frio');
-});
-
-test('temperaturaDe: 2+ aperturas sin clic es tibio', () => {
-  assert.equal(temperaturaDe({ aperturas: 2, clics: 0, ultimaApertura: '2026-07-15T15:59:00.000Z', vioWhatsapp: false }), 'tibio');
 });

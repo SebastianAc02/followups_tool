@@ -41,7 +41,12 @@ function webhookDeCreacion(): WebhookCreacion {
     url: token ? `${url}?token=${encodeURIComponent(token)}` : url,
     byEvents: false,
     base64: false,
-    events: ['MESSAGES_UPSERT'],
+    // MESSAGES_UPSERT corta la cadencia con la respuesta entrante (el requisito duro).
+    // MESSAGES_UPDATE trae el acuse de lectura (status READ) que arma el pill de
+    // tracking (parsearAcuseLectura/guardarVistoWhatsapp) -- sin suscribirlo, ese
+    // camino esta construido y nunca se ejecuta: Evolution simplemente no lo manda.
+    // Medido 2026-07-16: instancia ya conectada mostraba 0 vistos pese a leerlos de verdad.
+    events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
   };
 }
 

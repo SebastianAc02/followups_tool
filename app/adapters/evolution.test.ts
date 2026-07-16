@@ -286,7 +286,7 @@ test('iniciarConexion crea la instancia cuando Evolution todavia no la tiene, y 
       url: 'http://followups-web:3000/api/webhooks/whatsapp?token=tok_test',
       byEvents: false,
       base64: false,
-      events: ['MESSAGES_UPSERT'],
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE'],
     },
   });
 });

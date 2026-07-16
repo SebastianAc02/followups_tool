@@ -166,6 +166,15 @@ function armarMensajeCrudo(destinatario: string, asunto: string, cuerpoHtml: str
   const asuntoSeguro = codificarHeaderSiHaceFalta(sinCrlf(asunto));
   let cuerpo = cuerpoHtml;
   const base = appBaseUrl();
+  if (!base) {
+    // Sin APP_BASE_URL el correo sale SIN pixel/links de tracking, y no hay ningun error
+    // ni marca en la UI que lo diga -- el envio "funciona" y evento_tracking se queda vacio
+    // para siempre para ese correo, sin importar cuantas veces el destinatario lo abra
+    // (medido en vivo 2026-07-16: correo mandado sin la variable, cero eventos posibles).
+    // No se bloquea el envio (un correo real sin pixel es mejor que no mandarlo), pero se
+    // avisa fuerte en el log del server para no repetir el diagnostico a ciegas.
+    console.error('[gmail] APP_BASE_URL no esta seteada: este correo se manda SIN tracking (sin pixel de apertura, sin links de clic).');
+  }
   if (base) {
     const params = { baseUrl: base, proveedorCampanaId };
     // reescribirLinksClic/inyectarPixelApertura dejan el tag {{email}} LITERAL a
