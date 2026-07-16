@@ -238,10 +238,27 @@ export function colaDelDia(hoy: string, owner: string | undefined, idOrganizacio
     .all();
 }
 
-// Bucket "Leads" del split de cola (2026-07-14): mismo criterio de colaDelDia (vencido o
-// de hoy) pero acotado a estado_notion = 'lead'. Los leads no aparecen en toques hasta
-// tener una fecha real (de una campana o puesta a mano); si no tienen fecha, no salen aqui
-// tampoco. owner es obligatorio: esta variante solo la usa la UI para un owner puntual.
+// Bucket "Leads" del split de cola (2026-07-14): estado_notion = 'lead', vencido o de hoy,
+// del owner pedido. owner es obligatorio: esta variante solo la usa la UI para un owner
+// puntual.
+//
+// REGLA (Sebastian, 2026-07-15): 'lead' NO es un estado activo. Ademas de la fecha, exige
+// una inscripcion ACTIVA -- un lead entra a Toques solo si esta en una secuencia.
+//
+// La fecha sola no alcanza y eso es el corazon del asunto: proximo_follow_up_fecha se llena
+// desde el seed de Notion y desde enriquecerDesdeNotion, no solo desde trabajo real, asi que
+// "tiene fecha vencida" no significa "la estoy trabajando". De los 15 leads que le salian a
+// Sebastian, 13 solo tenian historial importado de Notion y CERO trabajo hecho en la
+// herramienta.
+//
+// Esta regla no existia y nadie lo noto porque un bug la simulaba: hasta el fix de fechas
+// (c9dc96d, 2026-07-15) estos leads tenian la fecha en formato humano ('June 12, 2026') y
+// lte() compara TEXTO -- 'J' > '2' en ASCII, asi que jamas entraban. Al normalizar las
+// fechas se destaparon y la cola paso de 4 a 15. Estaba bien por accidente.
+//
+// El leftJoin de inscripcion ya estaba (trae el nombre de campana para columnasColaConCampana);
+// pedirle isNotNull lo vuelve un inner join de hecho, sin tocar el resto de la query. Un lead
+// que avanza a contacto_iniciado deja de ser lead y lo levanta colaContactoIniciadoSinSeguimiento.
 export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
   return db
     .select(columnasColaConCampana)
@@ -258,6 +275,9 @@ export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
         eq(empresa.estadoNotion, 'lead'),
         isNotNull(empresa.proximoFollowUpFecha),
         lte(empresa.proximoFollowUpFecha, hoy),
+        // El join de arriba ya filtra estado='activa': si no matcheo, no hay secuencia viva.
+        // Una inscripcion 'pausada' (respuesta detectada, B6) tampoco lo revive.
+        isNotNull(inscripcion.idInscripcion),
       ),
     )
     .orderBy(empresa.proximoFollowUpFecha)

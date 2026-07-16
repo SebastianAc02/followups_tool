@@ -42,17 +42,49 @@ function seedInscripcionActiva(idEmpresa: string, nombreCampana: string) {
   raw.close();
 }
 
-test('colaLeads: solo estado lead, vencido o de hoy, del owner y organizacion pedidos', () => {
-  seedEmpresa('l1', OWNER, 'lead', '2026-07-14'); // hoy: entra
-  seedEmpresa('l2', OWNER, 'lead', '2026-07-10'); // vencido: entra
+// Regla de dominio (decision de Sebastian, 2026-07-15): 'lead' NO es un estado activo. Una
+// fecha de follow-up vencida NO alcanza para meterlo en Toques -- esa columna se llena
+// desde el seed de Notion y desde enriquecerDesdeNotion, no solo desde trabajo real, asi
+// que "tiene fecha" no significa "la estoy trabajando". Un lead entra a Toques solo cuando
+// esta en una SECUENCIA (inscripcion activa); si avanza a contacto_iniciado u otro estado,
+// deja de ser lead y lo levantan las otras funciones del split.
+//
+// Por que aparecio ahora: hasta el 2026-07-15 estos leads tenian la fecha en formato humano
+// de Notion ('June 12, 2026') y lte() los comparaba como TEXTO ('J' > '2' en ASCII), asi que
+// nunca entraban. El fix de fechas (c9dc96d) los destapo: la cola de Sebastian paso de 4 a
+// 15. Estaba "bien" por accidente -- esta regla nunca existio en el codigo.
+test('colaLeads: un lead con fecha vencida pero SIN secuencia no entra a Toques', () => {
+  seedEmpresa('l1', OWNER, 'lead', '2026-07-14'); // hoy, sin secuencia: NO entra
+  seedEmpresa('l2', OWNER, 'lead', '2026-07-10'); // vencido, sin secuencia: NO entra
   seedEmpresa('l3', OWNER, 'lead', '2026-07-20'); // futuro: no entra
   seedEmpresa('l4', OWNER, 'lead', null); // sin fecha: no entra
   seedEmpresa('l5', OWNER, 'contacto_iniciado', '2026-07-10'); // otro estado: no entra
   seedEmpresa('l6', OTRO_OWNER, 'lead', '2026-07-10'); // otro owner: no entra
 
   const r = colaLeads('2026-07-14', OWNER, 1);
-  const ids = r.map((f) => f.id).sort();
-  assert.deepEqual(ids, ['l1', 'l2']);
+  assert.deepEqual(r.map((f) => f.id), [], 'un lead sin secuencia no es trabajo activo');
+});
+
+test('colaLeads: un lead EN secuencia con fecha vencida si entra a Toques', () => {
+  seedEmpresa('ls1', OWNER, 'lead', '2026-07-10');
+  seedInscripcionActiva('ls1', 'Campana viva');
+  // Mismo lead, mismo estado, misma fecha: lo unico que cambia es que esta en una secuencia.
+  seedEmpresa('ls2', OWNER, 'lead', '2026-07-10');
+
+  const r = colaLeads('2026-07-14', OWNER, 1);
+  assert.deepEqual(r.map((f) => f.id), ['ls1']);
+});
+
+test('colaLeads: una inscripcion NO activa no lo revive', () => {
+  seedEmpresa('lp1', OWNER, 'lead', '2026-07-10');
+  const raw = new Database(dbPath);
+  raw.prepare(`INSERT INTO campana (nombre, id_cadencia, id_segmento) VALUES ('Pausada', 1, 1)`).run();
+  const idCampana = (raw.prepare(`SELECT last_insert_rowid() id`).get() as { id: number }).id;
+  raw.prepare(`INSERT INTO inscripcion (id_campana, id_empresa, estado) VALUES (?, 'lp1', 'pausada')`).run(idCampana);
+  raw.close();
+
+  const r = colaLeads('2026-07-14', OWNER, 1);
+  assert.equal(r.some((f) => f.id === 'lp1'), false, 'pausada por respuesta detectada = ya no se le escribe');
 });
 
 test('colaCierres: estados calientes del owner, con y sin fecha, sin nocion de vencido', () => {
@@ -123,11 +155,15 @@ test('colaDelDia: excluye on_hold y firma_pago; conserva otros estados y estado 
 test('colaLeads/colaCierres/colaReagendar: campana viene poblada solo si hay inscripcion activa', () => {
   seedEmpresa('m1', OWNER, 'lead', '2026-07-10', 3);
   seedInscripcionActiva('m1', 'Reactivacion express');
-  seedEmpresa('m2', OWNER, 'lead', '2026-07-10', 3); // sin inscripcion: campana null
+  // Sin inscripcion ya no entra a colaLeads (un lead sin secuencia no es trabajo activo,
+  // ver los tests de arriba), asi que el caso "campana null" se cubre donde SI puede pasar:
+  // colaCierres no exige secuencia -- una cuenta caliente es trabajo real por si sola.
+  seedEmpresa('m2', OWNER, 'oportunidad', '2026-07-10', 3);
 
   const r = colaLeads('2026-07-14', OWNER, 3);
-  const m1 = r.find((f) => f.id === 'm1');
-  const m2 = r.find((f) => f.id === 'm2');
-  assert.equal(m1?.campana, 'Reactivacion express');
-  assert.equal(m2?.campana, null);
+  assert.deepEqual(r.map((f) => f.id), ['m1'], 'solo el lead con secuencia');
+  assert.equal(r[0]?.campana, 'Reactivacion express');
+
+  const cierres = colaCierres(OWNER, 3);
+  assert.equal(cierres.find((f) => f.id === 'm2')?.campana, null, 'sin inscripcion, campana null');
 });
