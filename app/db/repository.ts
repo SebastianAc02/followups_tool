@@ -19,7 +19,12 @@ import {
 } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
-import { db } from './index';
+// dbReal ademas de db: organizacion_miembro es IDENTIDAD y NO conmuta con el modo prueba
+// (spec: "identidad siempre real, negocio conmutable"). Este archivo conmuta entero, asi que
+// las pocas lecturas de identidad que viven aca piden dbReal explicito -- ver
+// identidad-en-prueba.test.ts para el bug que causo trazar la frontera por archivo y no por
+// tabla. El resto del archivo sigue usando `db` (el Proxy) sin cambios.
+import { db, dbReal } from './index';
 import {
   empresa,
   contacto,
@@ -3696,7 +3701,10 @@ export function lineaWhatsappActivaDeOwner(owner: string | null, idOrganizacion:
     return pool?.referenciaProveedor ? { referenciaProveedor: pool.referenciaProveedor } : null;
   }
 
-  const miembro = db
+  // dbReal para la identidad; la linea de abajo sigue en `db` porque linea_whatsapp SI es
+  // negocio y debe conmutar. Esta funcion mezcla los dos lados a proposito: por eso el corte
+  // es por tabla, no por funcion.
+  const miembro = dbReal
     .select({ idUser: organizacionMiembro.idUser })
     .from(organizacionMiembro)
     .where(and(eq(organizacionMiembro.ownerCanonico, owner), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
@@ -3717,7 +3725,10 @@ export function lineaWhatsappActivaDeOwner(owner: string | null, idOrganizacion:
 // duplicacion es 6 lineas, el riesgo de romper whatsapp no vale la pena ahorrarselas.
 export function idUsuarioDeOwner(owner: string | null, idOrganizacion: number): string | null {
   if (!owner) return null;
-  const miembro = db
+  // dbReal: organizacion_miembro es identidad, no conmuta. Con `db` esto devolvia null en
+  // modo prueba (pruebas.db no tiene usuarios, por diseño), el agrupador de correo concluia
+  // "el owner no tiene Gmail" y mandaba todo al fallback de Apollo.
+  const miembro = dbReal
     .select({ idUser: organizacionMiembro.idUser })
     .from(organizacionMiembro)
     .where(and(eq(organizacionMiembro.ownerCanonico, owner), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
@@ -3750,7 +3761,11 @@ export function marcarCampanaAprobadaGmail(idCampana: number): void {
 // owner_canonico que colisionara entre dos orgs sumaria envios de AMBAS, inflando el
 // conteo contra el tope diario de una organizacion con los envios de otra.
 export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: string): number {
-  const miembro = db
+  // dbReal para la identidad; el conteo de abajo sigue en `db` (paso_inscripcion es negocio
+  // y el tope diario debe contar los envios de la base en la que estas). Sin esto, en modo
+  // prueba el miembro no se encontraba y la funcion devolvia 0: el tope diario de Gmail
+  // quedaba desactivado en silencio.
+  const miembro = dbReal
     .select({ owner: organizacionMiembro.ownerCanonico })
     .from(organizacionMiembro)
     .where(and(eq(organizacionMiembro.idUser, idUsuario), eq(organizacionMiembro.idOrganizacion, idOrganizacion)))
