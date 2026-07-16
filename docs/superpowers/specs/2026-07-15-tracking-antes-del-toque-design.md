@@ -29,47 +29,63 @@ enviado, y `push.ts` lo persiste en `paso_inscripcion.proveedor_mensaje_id`.
 
 ## Alcance
 
-Correo (leer lo que ya existe) y visto de WhatsApp (capturar lo que falta), mostrados como
-un pill en la fila de `/cola`.
+Mostrar, como pill en la fila de `/cola`, si el contacto abrio el correo anterior (cuantas
+veces y hace cuanto), si hizo clic, y si vio el WhatsApp.
+
+**Revision al armar el plan (2026-07-15):** medido contra la rama `feat/modo-prueba-demo`,
+casi toda la CAPTURA y parte de la LECTURA ya estan construidas y commiteadas. El alcance
+real es mas chico de lo que asumia la version anterior de este spec. Ver "Qué falta".
 
 Fuera: ficha de empresa, vista de campaña, pantalla de llamada. Nada de cambiar la captura
 del correo, que ya funciona.
 
+## Qué YA existe en la rama (medido, no asumido)
+
+- **Captura del visto de WhatsApp: COMPLETA.** `parsearAcuseLectura` (evolution.ts:336),
+  `guardarVistoWhatsapp` (repository.ts:4256) y el webhook con ruteo por base
+  (`app/api/webhooks/whatsapp/route.ts`, rama del acuse antes del parseo de entrantes).
+  Correlaciona `key.id` -> `proveedor_mensaje_id`, idempotente por `proveedor_evento_id`,
+  rutea por `esLineaDePruebas(instancia)`. No hay nada que construir aca.
+- **Lectura por campaña: existe.** `aperturasPorCampana(idCampana)` (repository.ts:4316) y
+  `actividadDeCampana(idCampana)` (4369) leen los 6 tipos de `evento_tracking`. PERO son por
+  campaña y devuelven BOOLEANOS (`abrio`/`hizoClic`/`vioWhatsapp`), no sirven para el pill de
+  la cola, que es por empresa y necesita conteo + hora.
+
+## Qué falta
+
+1. Una lectura POR EMPRESA con conteo de veces y ultima hora de apertura (las existentes son
+   por campaña y booleanas).
+2. El core `resumen-tracking.ts` con la regla de temperatura (no existe).
+3. El pill en la fila de la cola (`ColaUnificada`, la cola de Sebastián en modo split).
+
 ## Diseño
 
-### 1. Captura del visto de WhatsApp
+### 1. Lectura por empresa
 
-Suscribir `MESSAGES_UPDATE` en la instancia de Evolution. En el webhook, una rama nueva: si
-el update trae status `READ`, correlacionar `key.id` contra `paso_inscripcion.proveedor_mensaje_id`
-y guardar `tipo='visto'`, `canal='whatsapp'`.
+Una funcion nueva en el repository, `resumenTrackingPorEmpresa(idsEmpresa)`, que dado el set
+de empresas de la cola devuelve por empresa: numero de aperturas, numero de clics, ultima
+fecha de apertura (ISO) y si vio el WhatsApp. Mismos joins que `aperturasPorCampana`
+(`evento_tracking` -> `paso_inscripcion` -> `destinatario` -> `inscripcion`), pero
+filtrando por `inscripcion.idEmpresa IN (...)` y contando en vez de marcar booleanos.
+Una query para toda la cola, cruce en TS (mismo criterio que las dos lecturas que ya existen).
 
-- Idempotencia: `proveedorEventoId = wa-read:${key.id}`. El indice unico ya existente absorbe
-  el reintento del webhook. No hay codigo de dedup nuevo.
-- **Ruteo de base:** la ruta entra sin cookie, asi que decide el DATO via
-  `esLineaDePruebas(instancia)` de `app/db/ruteo-linea.ts`, igual que el resto del webhook.
-  Ver `project_modo_prueba_frontera_request`: es la familia de bug que ya costo una sesion.
-- Correlacion fallida (mensaje que no reconocemos): se ignora y se ack limpio, mismo criterio
-  que el pixel (`/api/track/open` nunca rompe la entrega por un fallo de correlacion).
+### 2. Veredicto (core puro)
 
-### 2. Lectura
+`app/core/resumen-tracking.ts`: recibe la señal (conteos + ultima apertura + vioWhatsapp) y
+`ahora` inyectado (patron de `pollTracking`), devuelve el texto del pill y la temperatura. No
+importa DB ni adaptadores, segun la constitucion.
 
-Una funcion nueva en el repository que, dado el set de empresas de la cola, devuelve por
-empresa: aperturas, clics, ultima fecha de apertura y visto de WhatsApp. Un solo `GROUP BY`
-sobre `evento_tracking` unido a `paso_inscripcion` -> `destinatario` -> `inscripcion`, no una
-query por fila.
+El modulo trae el boilerplate ya resuelto (formateo "hace 2h", armado del texto del pill). El
+UNICO hueco es `temperaturaDe(señal, ahora)`: la regla de negocio de que cuenta como interes
+real. La escribe Sebastián (5-10 lineas, modo learning).
 
-### 3. Veredicto (core puro)
-
-`app/core/resumen-tracking.ts`: recibe los contadores y `ahora` inyectado (patron de
-`pollTracking`), devuelve el texto del pill y la temperatura. No importa DB ni adaptadores,
-segun la constitucion.
-
-Aca vive la regla de negocio de que cuenta como interes real. La escribe Sebastián.
-
-### 4. UI
+### 3. UI
 
 Un pill en `ColaUnificada.tsx` al lado de `Respondió`, con el mismo patron de tooltip que ya
 usan `PBX`, `Cadencia` y `Respondió`. Formato: `Abrió 3× · hace 2h`. Sin rediseño de la fila.
+El color del pill sale de la temperatura que devuelve el core. `FilaUnificada` (agenda.ts)
+gana un campo opcional `tracking` que `page.tsx` llena cruzando el Map por `id` de empresa,
+igual que hoy hace con `respuestaPendiente`.
 
 ## Decisiones y trade-offs
 
