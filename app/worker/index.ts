@@ -25,6 +25,7 @@ import { pollTracking } from '../core/tracking';
 import type { ConfigCalendario } from '../core/motor-cadencia';
 import { crearNotionAdapter } from '../adapters/notion';
 import { crearRegistroEnvio, crearRegistroEntrega, agruparPendientesCorreo } from '../adapters/registro-envio';
+import { hoy } from '../lib/reloj';
 import type { Canal } from '../db/validation';
 
 // Calendario de la agenda real (sesion 2026-07-08, materializador): sin fin de semana
@@ -57,9 +58,16 @@ async function tareaOutbox(): Promise<void> {
 // planning/experimento-apollo.md, Hallazgo real #4). Corre primero en el ciclo (antes
 // de tareaPush) para que el correo recien materializado alcance a salir en la misma
 // pasada, mismo catch-up-first que el resto del worker.
+// hoy() y no new Date(): esta funcion la llama el worker (proceso aparte, sin sesion, donde
+// hoy() es la fecha real y punto) PERO tambien materializarYEmpujarAhora, que corre DENTRO
+// del request de "Siguiente dia" y de lanzarCampanaAction. En ese caso hay que respetar el
+// reloj de demo, o el boton miente: el banner dice "Dia simulado: +1" porque las paginas si
+// leen hoy(), mientras el materializador calculaba contra la fecha real y no encontraba
+// nada debido. Sintoma exacto (2026-07-15): avanzar el dia no hacia nada, el paso 2 nunca
+// se materializaba. offsetActual() ya se defiende solo -- devuelve 0 si no hay modo prueba,
+// asi que el worker sigue viendo la fecha real sin cambiar nada.
 async function tareaMaterializar(): Promise<void> {
-  const hoy = new Date().toISOString().slice(0, 10);
-  materializarPasosDebidos(hoy, CONFIG_CALENDARIO_DEFAULT);
+  materializarPasosDebidos(hoy(), CONFIG_CALENDARIO_DEFAULT);
 }
 
 // Auto-archivo (sesion 2026-07-10): distinto de "Cancelar" (cancelarCampanaAction,
