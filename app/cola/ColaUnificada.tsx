@@ -93,6 +93,19 @@ export function ColaUnificada({
                           Respondió
                         </span>
                       )}
+                      {fila.tracking && fila.tracking.temperatura !== 'ninguna' && (
+                        <span
+                          className={cn(
+                            'shrink-0 rounded-[6px] border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                            fila.tracking.temperatura === 'caliente' && 'border-done/40 bg-done-bg text-done',
+                            fila.tracking.temperatura === 'tibio' && 'border-accent-soft bg-surface-2 text-acento',
+                            fila.tracking.temperatura === 'frio' && 'border-line-card bg-surface-2 text-faint',
+                          )}
+                          title={fila.tracking.title}
+                        >
+                          {fila.tracking.texto}
+                        </span>
+                      )}
                       {(pill || fila.ciudad || fila.campana) && (
                         <span className="shrink-0 truncate text-xs text-faint">
                           · {[pill?.label, fila.ciudad, fila.campana].filter(Boolean).join(' · ')}

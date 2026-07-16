@@ -4337,6 +4337,50 @@ export function aperturasPorCampana(idCampana: number): { idInscripcion: number;
   return [...porInscripcion.entries()].map(([idInscripcion, v]) => ({ idInscripcion, ...v }));
 }
 
+export type ResumenTrackingEmpresa = {
+  aperturas: number;
+  clics: number;
+  ultimaApertura: string | null; // ISO del evento 'abierto' mas reciente
+  vioWhatsapp: boolean;
+};
+
+// Tracking agregado POR EMPRESA para el pill de /cola: conteo de aperturas/clics, la hora de
+// la ultima apertura y si vio el WhatsApp. Gemela de aperturasPorCampana (mismos joins), pero
+// filtrada por empresa y con CONTEO en vez de booleanos -- la cola es por empresa y necesita
+// "3x . hace 2h", no un si/no. Una query para toda la cola + cruce en TS (mismo criterio que
+// aperturasPorCampana/actividadDeCampana: a la escala de una cola son decenas de filas).
+export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, ResumenTrackingEmpresa> {
+  const resultado = new Map<string, ResumenTrackingEmpresa>();
+  if (idsEmpresa.length === 0) return resultado;
+
+  const filas = db
+    .select({
+      idEmpresa: inscripcion.idEmpresa,
+      tipo: eventoTracking.tipo,
+      fecha: eventoTracking.fechaEvento,
+    })
+    .from(eventoTracking)
+    .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .where(and(inArray(inscripcion.idEmpresa, idsEmpresa), inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto'])))
+    .all();
+
+  for (const f of filas) {
+    const prev = resultado.get(f.idEmpresa) ?? { aperturas: 0, clics: 0, ultimaApertura: null, vioWhatsapp: false };
+    if (f.tipo === 'abierto') {
+      prev.aperturas += 1;
+      if (f.fecha && (prev.ultimaApertura === null || f.fecha > prev.ultimaApertura)) prev.ultimaApertura = f.fecha;
+    } else if (f.tipo === 'clic') {
+      prev.clics += 1;
+    } else if (f.tipo === 'visto') {
+      prev.vioWhatsapp = true;
+    }
+    resultado.set(f.idEmpresa, prev);
+  }
+  return resultado;
+}
+
 export type FilaActividad = {
   idPasoInscripcion: number;
   empresa: string;
