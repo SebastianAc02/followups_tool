@@ -64,29 +64,58 @@ ajusta si no le cuadra. Vive en `app/core/resumen-tracking.ts`, una sola funcion
 
 ---
 
-## Plan B: Dashboard de campañas
+## Plan B: Dashboard de campañas -- YA ESTA CONSTRUIDO (2026-07-16)
 
 **Queja textual:** "en campañas no hay un dashboard. Necesitaría ver mi panel de control de
 todo lo que está pasando: si los correos se están mandando, si el WhatsApp se está mandando,
 si no se ha mandado".
 
-**Qué existe:** `actividadDeCampana` ya devuelve exactamente ese dato (una fila por envio con
-estado y señales). Falta la pantalla y los contadores de arriba.
+**Medido al ir a ejecutarlo: ya existe.** `/campanas/[id]/page.tsx` tiene hoy:
+- Estado de la campaña + controles de ciclo de vida (pausar/reanudar/cancelar).
+- Stats: toques esta semana, tasa de respuesta, empresas en secuencia, bloqueadas.
+- `TablaActividad`: una fila por ENVIO con Enviado / Pendiente / Falló / Enviando, el canal,
+  el proveedor real que lo mando, la fecha, y chips de Abrió / Clic / Visto / Respondió /
+  Rebotó. Es exactamente "que se mando, que se va a mandar, que se cayo".
+- Nota al pie honesta sobre por que "sin señal" no significa "no lo vio" (pixel bloqueado,
+  confirmaciones de lectura apagadas).
 
-**Alcance:**
-- Pantalla de campaña con: contadores por canal (mandados / pendientes / fallados / abiertos /
-  respondidos) y la tabla de actividad debajo (ya existe la query).
-- Distinguir visualmente los 3 estados que a el le importan: "ya se mando", "se va a mandar",
-  "se cayo".
+**Por que Sebastián no lo vio:** viene del commit `238622b`, el MAS RECIENTE de
+`feat/modo-prueba-demo`. Su demo corre una version vieja de la rama. Es el mismo motivo por
+el que no vio el tracking, el visto de WhatsApp, ni Granola eligiendo entre las ultimas
+llamadas.
 
-**Decisión pendiente:** si el dashboard vive en `/campanas/[id]` (reemplazando o encima de lo
-que hay) o es una pestaña nueva. Definir antes de escribir codigo.
+**Lo unico que falta aca:** correr la rama al dia y hacer los 3 pasos manuales del Plan A.
+Sin esos pasos, los chips de señales de la tabla salen TODOS vacios y se vuelve a leer como
+"no funciona".
 
-**Tamaño:** mediana. Una sesion, porque la lectura pesada ya esta hecha.
+**Lo que si podria faltar despues de verlo funcionando** (no planear a ciegas, mirar primero):
+contadores por canal arriba (hoy los stats son globales de la campaña, no separan correo de
+WhatsApp), y el bloque de "errores recientes" esta vacio a proposito porque `sync_cambios` no
+tiene relacion con campaña en el schema.
+
+**Tamaño:** cero hasta verlo corriendo. Despues, chico.
 
 ---
 
-## Plan C: Scheduling de envíos (anti-ban)
+## Plan C: Scheduling de envíos (anti-ban) -- EJECUTADO 2026-07-16
+
+**Hecho.** Commit `e491085` en `feat/tracking-antes-del-toque`. 923 tests, tsc limpio.
+
+- `app/core/ventana-envio.ts` (puro, 11 tests): ventana 8am-6pm L-V Colombia (UTC-5 fijo, sin
+  DST ni libreria de timezones) + jitter 45-90s entre WhatsApps.
+- El worker respeta la ventana en su ciclo automatico; lo que no alcanza queda 'pendiente'
+  para el proximo ciclo (mismo mecanismo del tope diario de Gmail, no se pierde nada).
+- Decision tomada por la IA por falta de tiempo: la ventana NO aplica al empuje manual
+  ("Lanzar hoy" / "Siguiente dia"). Si Sebastián lanza a las 11pm sabe que son las 11pm, y
+  bloquearlo en silencio romperia la demo. El jitter en manual es corto (3s) porque hay un
+  request esperando -- 30 empresas x 60s serian 30 minutos colgado.
+
+**Falta que Sebastián ajuste** (constantes en un solo archivo, `core/ventana-envio.ts`):
+rango horario, dias bloqueados, y el rango del jitter. Los defaults los eligio la IA.
+
+---
+
+## Plan C (original, para referencia): Scheduling de envíos (anti-ban)
 
 **Queja textual:** "el lanzamiento está superflojo, ni siquiera logra el schedule. Me gustaría
 un schedule de los toques de WhatsApp, para no mandar 30 toques automáticos en un solo minuto
@@ -173,14 +202,28 @@ Plan A primero y volver a mirar antes de planear nada aca.
 
 ---
 
-## Orden recomendado
+## Orden recomendado (actualizado 2026-07-16, despues de ejecutar)
 
-1. **Plan A** (cerrar lo construido) - apaga 3 quejas, casi todo es config.
-2. **Plan D** (continuar cadencia) - hueco de flujo, chico, lo bloquea a diario.
-3. **Plan C** (scheduling anti-ban) - el unico con riesgo de tumbar un canal entero.
-4. **Plan B** (dashboard) - visibilidad, con la lectura ya hecha.
+1. ~~**Plan C** (scheduling anti-ban)~~ **HECHO**, commit `e491085`.
+2. ~~**Plan B** (dashboard)~~ **YA ESTABA CONSTRUIDO** (commit `238622b`, sin correr).
+3. **Plan A** (cerrar lo construido) - AHORA ES EL CUELLO DE BOTELLA DE TODO. Son 3 pasos
+   manuales de Sebastián, la IA no los puede hacer (credenciales + navegador).
+4. **Plan D** (continuar cadencia) - hueco de flujo real, chico. Tiene una decision de
+   negocio sin resolver (ver el plan).
 5. **Plan F** (Granola) - re-medir despues de A.
 6. **Plan E** (UI del toque) - solo cuando este acotado.
 
-Si solo hay tiempo para dos, son A y C: A porque es casi gratis, y C porque es el unico que
-protege algo que se puede perder para siempre (la linea de WhatsApp).
+## El hallazgo que importa mas que cualquier plan de esta lista
+
+Cuatro de las quejas de la prueba (tracking de correo, visto de WhatsApp, Granola trayendo
+las ultimas llamadas, dashboard de campañas) ya estaban construidas cuando Sebastián dijo que
+faltaban. No es que la herramienta este quedada en features: **la demo corre una version
+vieja de la rama**, con 20+ commits sin mergear encima.
+
+La distancia entre lo que existe y lo que el ve es el problema real, y no se cierra
+escribiendo mas codigo. Se cierra con:
+1. Correr `feat/tracking-antes-del-toque` (tiene la rama demo debajo).
+2. Los 3 pasos manuales del Plan A.
+
+Sin eso, cualquier plan nuevo de esta lista se ejecuta a ciegas y probablemente reconstruye
+algo que ya existe.
