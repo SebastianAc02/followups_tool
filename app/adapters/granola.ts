@@ -1,5 +1,6 @@
 import type { TranscriptAdapter, SesionTranscript } from '../core/ports/transcript';
 import { leerCredencialConector } from '../db/repository';
+import { esModoPrueba } from '../lib/modo-prueba';
 
 // Verificado en vivo contra el spec real (docs.granola.ai/api-reference/openapi.json):
 // la base documentada NO es api.granola.ai, es public-api.granola.ai.
@@ -146,6 +147,18 @@ export function crearGranolaAdapter(idUsuario: string): TranscriptAdapter {
       // ?include=transcript (la constitucion pide el resumen, nunca el transcript
       // literal). Una nota que falla se descarta, no aborta la busqueda completa.
       const detalles = await traerDetallesEnLotes(enVentana, apiKey);
+
+      // Modo prueba (2026-07-15): el matching por termino no puede funcionar en la demo. Los
+      // toques son de empresas inventadas ("Viajes Andinos") con numeros de prueba, y la
+      // llamada que Sebastian acaba de grabar en Granola no menciona ninguno de los dos: el
+      // filtro daria SIEMPRE cero y no habria nada que enganchar. En prueba se devuelve lo
+      // que haya en la ventana, "la ultima llamada, la que sea", y el humano elige cual es.
+      //
+      // El puerto lo permite explicitamente ("el adaptador decide COMO buscar"): el core
+      // sigue entregando terminos y ventana, y es el adaptador el que sabe que en prueba no
+      // sirven. Fuera de prueba el filtro real no se toca -- ahi confundir dos llamadas
+      // significa colgarle el resumen equivocado a un ISP de verdad.
+      if (esModoPrueba()) return detalles.map(mapearASesion);
 
       return detalles
         .filter((d) => coincideAlgunTermino(`${d.title ?? ''} ${d.summary_text ?? ''}`, terminos))

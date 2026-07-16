@@ -11,6 +11,11 @@ import { crearDbPrueba, borrarDbPrueba } from '../db/test-helpers.ts';
 
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
+// Las dos rutas a la MISMA base: aca se prueba el filtro por terminos, no el ruteo entre
+// bases. Sin esto, el test de modo prueba muere en "no such table: conector" --
+// leerCredencialConector conmuta con el modo, igual que el resto de conectores, y una
+// pruebas.db :memory: nace sin esquema.
+process.env.PRUEBAS_DB_PATH = dbPath;
 process.env.FOLLOWUPS_CRYPTO_KEY = Buffer.alloc(32, 5).toString('base64');
 
 const { guardarCredencialConector } = await import('../db/repository.ts');
@@ -134,3 +139,49 @@ test('ultimaNotaDe: lanza si no hay credencial guardada para ese usuario', async
 });
 
 test.after(() => borrarDbPrueba(dbPath));
+
+// Modo prueba (Sebastian, 2026-07-15): el matching por terminos NO puede funcionar en la
+// demo. Los toques son de empresas inventadas ("Viajes Andinos") con numeros de prueba, y
+// la llamada real que Sebastian acaba de grabar en Granola no menciona ninguno de los dos:
+// buscar por termino daria SIEMPRE cero candidatas y la demo se cae ahi.
+//
+// En prueba el adaptador devuelve las notas de la ventana SIN filtrar -- "la ultima llamada,
+// la que sea". Cabe en el contrato del puerto, que dice explicito "el adaptador decide COMO
+// buscar": el core sigue entregando terminos y ventana, el adaptador decide que en prueba no
+// sirven. Fuera de prueba el filtro es el de siempre.
+test('en modo prueba devuelve las notas de la ventana SIN filtrar por termino', async (t) => {
+  const { marcarModoPrueba } = await import('../lib/modo-prueba.ts');
+  const notes = [
+    { id: 'p-1', title: 'Llamada con quien sea', created_at: '2026-07-04T10:00:00.000Z' },
+    { id: 'p-2', title: 'Otra llamada distinta', created_at: '2026-07-04T11:00:00.000Z' },
+  ];
+  const detalles: Record<string, unknown> = {
+    'p-1': { id: 'p-1', title: 'Llamada con quien sea', created_at: '2026-07-04T10:00:00.000Z', summary_text: 'resumen 1', web_url: null },
+    'p-2': { id: 'p-2', title: 'Otra llamada distinta', created_at: '2026-07-04T11:00:00.000Z', summary_text: 'resumen 2', web_url: null },
+  };
+  t.mock.method(globalThis, 'fetch', fetchFalso(notes, detalles));
+
+  marcarModoPrueba(true);
+  const adapter = crearGranolaAdapter('user-sebastian');
+  // Un termino que NO aparece en ninguna nota: fuera de prueba daria cero.
+  const candidatas = await adapter.buscarCandidatas(['Viajes Andinos'], '2026-07-04T00:00:00.000Z', '2026-07-04T23:59:59.000Z');
+  marcarModoPrueba(false);
+
+  assert.strictEqual(candidatas.length, 2, 'en prueba no filtra: trae lo que haya en la ventana');
+  assert.deepEqual(candidatas.map((c) => c.transcriptId).sort(), ['p-1', 'p-2']);
+});
+
+test('fuera de modo prueba, un termino que no aparece sigue dando cero', async (t) => {
+  const { marcarModoPrueba } = await import('../lib/modo-prueba.ts');
+  const notes = [{ id: 'r-1', title: 'Llamada con quien sea', created_at: '2026-07-04T10:00:00.000Z' }];
+  const detalles = {
+    'r-1': { id: 'r-1', title: 'Llamada con quien sea', created_at: '2026-07-04T10:00:00.000Z', summary_text: 'resumen', web_url: null },
+  };
+  t.mock.method(globalThis, 'fetch', fetchFalso(notes, detalles));
+
+  marcarModoPrueba(false);
+  const adapter = crearGranolaAdapter('user-sebastian');
+  const candidatas = await adapter.buscarCandidatas(['Viajes Andinos'], '2026-07-04T00:00:00.000Z', '2026-07-04T23:59:59.000Z');
+
+  assert.strictEqual(candidatas.length, 0, 'el matching real no se toca');
+});
