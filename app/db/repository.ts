@@ -2548,6 +2548,9 @@ export type CampanaParaPreview = {
   nombre: string;
   idCadencia: number;
   cadencia: string;
+  // idSegmento ademas del nombre: Destinatarios necesita el id para sacar una cuenta del
+  // set curado sin mandar a Sebastian de vuelta al paso Segmento (alternarExclusionAction).
+  idSegmento: number;
   segmento: string;
   reglaFaltante: ReglaFaltante;
   estado: string;
@@ -2560,6 +2563,7 @@ export function campanaParaPreview(idCampana: number): CampanaParaPreview | null
       nombre: campana.nombre,
       idCadencia: campana.idCadencia,
       cadencia: cadencia.nombre,
+      idSegmento: campana.idSegmento,
       segmento: segmento.nombre,
       reglaFaltante: campana.reglaFaltante,
       estado: campana.estado,

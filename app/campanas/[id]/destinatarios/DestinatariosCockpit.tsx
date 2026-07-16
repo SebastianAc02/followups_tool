@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState, useTransition } from 'react';
-import { previsualizarInscripcionAction } from './actions';
+import { previsualizarInscripcionAction, excluirDelSegmentoAction } from './actions';
 import type { CampanaParaPreview, FilaPreviewInscripcion } from '../../../db/repository';
 import { InscritasTable, type InscritaHubVM } from '../../InscritasTable';
 import { CANAL_LABEL, type Canal } from '../../../ui/canal-tag.variants.ts';
@@ -57,6 +57,22 @@ export function DestinatariosCockpit({
     setError('');
     startTransition(async () => {
       const res = await previsualizarInscripcionAction(campana.idCampana);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setFilas(res.filas);
+    });
+  }
+
+  // Opt-out antes de lanzar: saca la cuenta del set curado del segmento (lo mismo que los
+  // checkboxes del paso Segmento) y repinta con el preview que devuelve la action, ya
+  // recalculado. Sin confirmacion a proposito: no destruye nada -- se deshace volviendo al
+  // paso Segmento y marcando la cuenta de nuevo.
+  function sacarDelSegmento(idEmpresa: string) {
+    setError('');
+    startTransition(async () => {
+      const res = await excluirDelSegmentoAction(campana.idSegmento, idEmpresa, campana.idCampana);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -173,20 +189,21 @@ export function DestinatariosCockpit({
           </h2>
           <div
             className="grid gap-3 border-b border-line bg-surface px-5 py-3 text-[10px] uppercase tracking-wide text-muted"
-            style={{ gridTemplateColumns: '1.4fr 1.1fr 2fr 0.5fr 0.85fr' }}
+            style={{ gridTemplateColumns: '1.4fr 1.1fr 2fr 0.5fr 0.85fr 0.5fr' }}
           >
             <span>Contacto</span>
             <span>Empresa</span>
             <span>Cadencia que recibe</span>
             <span className="text-right">Toques</span>
             <span>Estado</span>
+            <span />
           </div>
 
           {destinatarios.map((fila) => (
             <div
               key={fila.idEmpresa}
               className={cn('grid items-center gap-3 border-b border-line px-5 py-4 transition-opacity last:border-b-0', pendiente && 'opacity-60')}
-              style={{ gridTemplateColumns: '1.4fr 1.1fr 2fr 0.5fr 0.85fr' }}
+              style={{ gridTemplateColumns: '1.4fr 1.1fr 2fr 0.5fr 0.85fr 0.5fr' }}
             >
               <div>
                 <div className="text-sm font-semibold text-ink">{fila.nombreContacto ?? '—'}</div>
@@ -203,6 +220,17 @@ export function DestinatariosCockpit({
                 <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold', ESTADO_PILL[fila.estado].className)}>
                   {ESTADO_PILL[fila.estado].label}
                 </span>
+              </span>
+              <span className="text-right">
+                <button
+                  type="button"
+                  disabled={pendiente}
+                  onClick={() => sacarDelSegmento(fila.idEmpresa)}
+                  className="text-[12px] text-overdue underline underline-offset-2 hover:no-underline disabled:opacity-50"
+                  title={`Sacar a ${fila.nombreEmpresa} antes de lanzar`}
+                >
+                  Sacar
+                </button>
               </span>
             </div>
           ))}
