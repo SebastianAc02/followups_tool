@@ -106,6 +106,13 @@ for (const e of EMPRESAS) {
       // VISTA_CATEGORIA_CON_TEST, para que el Copiloto y la pantalla digan "test" en vez
       // de "isp" (el default de la vista cuando no hay clasificacion).
       categoria: 'test',
+      // El owner NO es decorativo: agendaHoyCadencias filtra por empresa.owner cuando la
+      // cola corre en modo split (la vista de Sebastian). Sin owner, una empresa no le sale
+      // en Toques a NADIE -- que es correcto para una cuenta huerfana de verdad, pero
+      // convertia a las 4 de prueba en invisibles: el toque se materializaba, /seguimiento
+      // lo mostraba (llama a agendaHoyCadencias SIN owner) y /toques no. Mordio el
+      // 2026-07-15 en la demo. Debe ser el valor EXACTO de OWNER_COLA_SPLIT (app/cola/agenda.ts).
+      owner: 'Sebastian Acosta Molina',
       organizacionActivaId: 1,
       createdAt: AHORA,
       updatedAt: AHORA,
