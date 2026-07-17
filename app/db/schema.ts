@@ -360,7 +360,18 @@ export const inscripcion = sqliteTable('inscripcion', {
   pasoActual: integer('paso_actual'),
   fechaInscripcion: text('fecha_inscripcion'),
   fechaFin: text('fecha_fin'),
+  // motivo_fin es PROSA para la bitacora humana ("respuesta detectada (whatsapp)").
+  // origen_fin es el DATO del que depende el comportamiento: quien puede volver a la
+  // cadencia y quien no. Antes el unico discriminador era el texto de motivo_fin, y
+  // comparar strings en prosa para decidir es exactamente lo que la constitucion
+  // prohibe (canal y transcript_proveedor son datos, no codigo).
+  //
+  // NULL = la inscripcion sigue viva (no tiene fin), O se pauso antes de esta columna.
+  // Ninguno de los dos es reversible: al viejo no sabemos por que lo pausaron, y
+  // ofrecer la reversa sobre uno que se corto por respuesta es el error que esto
+  // existe para evitar. Ver core/reinscripcion.ts.
   motivoFin: text('motivo_fin'),
+  origenFin: text('origen_fin'),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
 });

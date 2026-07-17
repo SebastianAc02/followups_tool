@@ -18,6 +18,8 @@ import {
   leerDiscovery,
   guardarDiscovery,
   leerTranscriptResumen,
+  sacarInscripcionDeCampana,
+  datosSecuenciaExterna,
 } from "../../db/repository";
 import { fusionarDiscovery, hidratarBrief } from "../../core/fusionar";
 import { pedirBorradores } from "../../core/borradores";
@@ -382,4 +384,48 @@ export async function registrarToqueSueltoAction(
   revalidatePath(`/llamada/${idEmpresa}`);
   revalidatePath("/cola");
   redirect(`/llamada/${idEmpresa}?vista=confirmacion`);
+}
+
+// Baja de la cadencia DESDE la llamada (spec 2026-07-17-cadencia-desde-la-llamada).
+// Suelta a proposito: no exige registrar el toque primero. La decision "esta ya no" se
+// toma colgando, y obligar a llenar el toque para poder ejecutarla es papeleo entre
+// Sebastian y lo que quiere hacer.
+//
+// "Seguir en la cadencia" NO tiene action porque ya es el default: registrarToqueAction
+// marca el paso activo como 'enviada' y el motor re-ancla el siguiente. Lo unico que
+// faltaba era la salida.
+//
+// Gemela de sacarContactoDeCampanaAction (campanas/[id]/destinatarios/actions.ts): mismo
+// corte, misma tolerancia a Apollo caido. Se duplica el cableado y no la logica -- lo que
+// decide vive en sacarInscripcionDeCampana; aca solo cambia de donde salio la baja (para
+// la bitacora) y que pantalla se revalida.
+export async function sacarDeCadenciaAction(
+  idEmpresa: string,
+  idInscripcion: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireEscritura();
+
+  // El corte LOCAL primero e incondicional: es lo minimo que garantiza que el motor deja
+  // de mandar pasos, sin depender de que un proveedor externo conteste.
+  sacarInscripcionDeCampana(idInscripcion, "llamada");
+
+  // Apollo solo si esta campana de verdad tiene secuencia alla. Sin proveedorCampanaId no
+  // hay nada externo que cortar (campana sin Apollo) y este bloque se salta solo -- por
+  // eso "no uso Apollo" no necesita ninguna rama aparte.
+  const datos = datosSecuenciaExterna(idInscripcion);
+  const correo = crearRegistroEnvio().correo;
+  if (datos?.proveedorCampanaId && datos.email && correo) {
+    try {
+      await correo.sacarDestinatario(datos.proveedorCampanaId, datos.email);
+    } catch {
+      // Apollo caido no revierte el corte local (mismo criterio que llego-respuesta.ts y
+      // que el worker): que Apollo mande un paso mas es peor que no cortar nada, pero es
+      // mucho menos malo que tirar la baja entera por un fallo de red.
+    }
+  }
+
+  revalidatePath(`/llamada/${idEmpresa}`);
+  revalidatePath("/cola");
+  revalidatePath("/seguimiento");
+  return { ok: true };
 }

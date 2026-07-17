@@ -12,6 +12,9 @@ function ctxCon(secuencia: PasoSecuencia[]): ContextoToque {
     objetivo: null,
     idPasoInscripcionActivo: null,
     pbx: null,
+    // decidirVista no lo mira (elige vista por la secuencia, no por la inscripcion), pero
+    // el tipo lo exige: un contexto de prueba que no compila es un contexto que miente.
+    idInscripcionActiva: null,
   };
 }
 

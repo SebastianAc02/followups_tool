@@ -2,6 +2,7 @@ import type { PasoSecuencia, ContextoToque } from "../../db/repository";
 import { CANAL_LABEL, type Canal } from "../../ui/canal-tag.variants.ts";
 import { cn } from "../../ui/cn";
 import { etiquetaFechaToque, esToqueDeLaHerramienta } from "../../core/fecha-toque";
+import { BotonSacarDeCadencia } from "./BotonSacarDeCadencia";
 
 // Riel vertical de la secuencia del Toque 1 (specimen "Onepay Llamada Toque 1"): un nodo
 // por paso de la cadencia (hecho/activo/pendiente) + el objetivo del paso activo al fondo.
@@ -51,10 +52,16 @@ export function SecuenciaRail({
   toques,
   estado,
   hoy,
+  idEmpresa,
+  idInscripcionActiva,
 }: {
   pasos: PasoSecuencia[];
   objetivo: string | null;
   toques?: ContextoToque["toques"];
+  idEmpresa: string;
+  // La inscripcion viva de esta empresa, o null si es llamada suelta (spec 2026-07-17).
+  // Sale de getContextoToque, que ya filtra por inscripcion 'activa' de campana 'activa'.
+  idInscripcionActiva: number | null;
   // 'YYYY-MM-DD' resuelto en el server. El riel no calcula "hoy" por su cuenta: si lo
   // hiciera en el cliente, el dia dependeria del reloj del navegador y "hoy" podria
   // discrepar de lo que la cola ya decidio en el servidor.
@@ -153,6 +160,16 @@ export function SecuenciaRail({
           </div>
         )}
       </div>
+
+      {/* La baja va PEGADA a la secuencia y arriba del OBJETIVO, no en la barra de
+          acciones del toque: es una decision sobre la cadencia, no sobre este toque. Solo
+          existe si hay cadencia viva -- en una llamada suelta no hay de que sacar a nadie
+          y el boton seria ruido que no hace nada. */}
+      {idInscripcionActiva != null && (
+        <div className="border-t border-line pt-3">
+          <BotonSacarDeCadencia idEmpresa={idEmpresa} idInscripcion={idInscripcionActiva} />
+        </div>
+      )}
 
       <div className="mt-auto border-t border-line px-4 py-3">
         <div className="mb-1 font-toque-mono text-[9.5px] uppercase tracking-widest text-faint">OBJETIVO</div>

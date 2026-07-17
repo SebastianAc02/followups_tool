@@ -57,6 +57,13 @@
       "when": 1784143991209,
       "tag": "0007_brown_maverick",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784291834122,
+      "tag": "0008_common_santa_claus",
+      "breakpoints": true
     }
   ]
 }

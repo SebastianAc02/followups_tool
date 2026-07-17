@@ -9,6 +9,7 @@
 // cuenta. Por eso este caso de uso SI empuja envio.sacarDestinatario(...) -- es la
 // decision B (corte directo, 2026-07-09): cortar tambien la secuencia en Apollo.
 import type { TrackingPoll } from './ports/envio';
+import type { OrigenFin } from './reinscripcion';
 
 // Evento de dominio que cruza del adaptador (parsea el payload de Evolution) al core.
 // El core no sabe nada de 'messages.upsert' ni de remoteJid: recibe esto ya limpio.
@@ -48,7 +49,9 @@ export type RespuestaEntranteDeps = {
   // Inscripciones activas de la empresa. Puede haber mas de una (aunque el indice
   // ux_inscripcion_activa deja una activa por empresa, se modela lista por robustez).
   inscripcionesActivas: (idEmpresa: string) => InscripcionActiva[];
-  pausarInscripcion: (idInscripcion: number, motivo: string) => void;
+  // origen: ver reinscripcion.ts. Aca siempre 'respuesta' -- este caso de uso ES el de
+  // "el ISP contesto", y una cadencia cortada asi no vuelve sola desde la llamada.
+  pausarInscripcion: (idInscripcion: number, motivo: string, origen: OrigenFin) => void;
   // Deja el toque entrante en el historial de la empresa, fuente 'whatsapp_entrante'
   // (decision C: es un hecho ocurrido, se persiste directo, no pasa por borrador).
   registrarToqueEntrante: (match: ContactoMatch, texto: string, fecha: string) => void;
@@ -103,7 +106,7 @@ export async function procesarRespuestaEntrante(
   for (const activa of activas) {
     // Corte local siempre, incondicional: es lo minimo que garantiza que el motor
     // deja de mandar el siguiente paso, sin depender de que Apollo responda.
-    deps.pausarInscripcion(activa.idInscripcion, 'respuesta detectada (whatsapp)');
+    deps.pausarInscripcion(activa.idInscripcion, 'respuesta detectada (whatsapp)', 'respuesta');
     deps.registrarRespuestaDetectada(activa.idInscripcion, match.idEmpresa, 'whatsapp');
 
     if (activa.proveedorCampanaId && activa.email) {

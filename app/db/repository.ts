@@ -55,6 +55,7 @@ import {
   empresaCategoriaView,
   identidadDecision,
 } from './schema';
+import type { OrigenFin } from '../core/reinscripcion';
 import type { CambioNotion } from '../core/ports/sync';
 import type { FilaOutbox } from '../core/outbox';
 import type { CadenciaParseada } from '../core/cadencia-parser';
@@ -4301,10 +4302,25 @@ export function guardarEventoTracking(idPasoInscripcion: number, evento: EventoP
 // pausada es un estado nuevo (no 'finalizada'): B6 pide que una reply o un
 // agotamiento de destinatarios frene la cadencia de inmediato, con motivo visible;
 // agendaEnSeco solo lee estado='activa', asi que pausada sale sola del calculo.
-export function pausarInscripcion(idInscripcion: number, motivo: string) {
+export function pausarInscripcion(idInscripcion: number, motivo: string, origen: OrigenFin) {
   const ahora = new Date().toISOString();
   db.update(inscripcion)
-    .set({ estado: 'pausada', motivoFin: motivo, fechaFin: ahora, updatedAt: ahora })
+    .set({ estado: 'pausada', motivoFin: motivo, origenFin: origen, fechaFin: ahora, updatedAt: ahora })
+    .where(eq(inscripcion.idInscripcion, idInscripcion))
+    .run();
+}
+
+// Vuelta atras de una baja (spec 2026-07-17). NO decide QUIEN puede volver: eso es
+// puedeVolverAInscribirse en core/reinscripcion.ts, y lo pregunta el caller antes de
+// llamar aca. Este es el escritor, no el juez -- si mezclara las dos cosas, la regla de
+// negocio quedaria enterrada en el acceso a datos y no habria como probarla sin DB.
+//
+// Limpia los tres campos de fin, no solo el estado: dejar un motivo_fin/origen_fin viejo
+// en una inscripcion viva es dato que miente, y la proxima baja los sobreescribe igual.
+export function reactivarInscripcion(idInscripcion: number) {
+  const ahora = new Date().toISOString();
+  db.update(inscripcion)
+    .set({ estado: 'activa', motivoFin: null, origenFin: null, fechaFin: null, updatedAt: ahora })
     .where(eq(inscripcion.idInscripcion, idInscripcion))
     .run();
 }
@@ -4475,8 +4491,12 @@ export function actividadDeCampana(idCampana: number): FilaActividad[] {
   });
 }
 
-export function sacarInscripcionDeCampana(idInscripcion: number) {
-  pausarInscripcion(idInscripcion, 'baja manual desde destinatarios');
+// desde: de que pantalla salio la baja. Solo cambia la PROSA de la bitacora (auditar de
+// donde salen las bajas); el origen es 'manual' en los dos casos, que es lo que decide si
+// admite reversa. Un enum chico y no un string libre para que la bitacora no se llene de
+// variantes a mano.
+export function sacarInscripcionDeCampana(idInscripcion: number, desde: 'destinatarios' | 'llamada' = 'destinatarios') {
+  pausarInscripcion(idInscripcion, `baja manual desde ${desde === 'llamada' ? 'la llamada' : 'destinatarios'}`, 'manual');
 }
 
 // Datos para cortar la secuencia externa (Apollo) de una inscripcion puntual: el
@@ -4829,6 +4849,12 @@ export type ContextoToque = {
   // paso puntual). null cuando no hay secuencia activa (toque suelto, sin cadencia).
   idPasoInscripcionActivo: number | null;
   pbx: PbxContexto | null;
+  // Spec 2026-07-17: la inscripcion viva de esta empresa, para poder sacarla de la
+  // cadencia sin irse a Destinatarios. null = llamada suelta (sin cadencia), que ya es el
+  // caso que secuencia:[] representa -- se expone aparte porque el boton necesita el ID,
+  // no la lista de pasos. Solo trae inscripciones 'activa' de campanas 'activa' (mismo
+  // filtro de arriba): una pausada no se puede volver a sacar.
+  idInscripcionActiva: number | null;
 };
 
 // Atajo documentado (plan Fase 3, "Riesgos/notas"): cuenta TODOS los toques
@@ -4886,7 +4912,7 @@ export function getContextoToque(id: string, idOrganizacion: number): ContextoTo
     .get();
 
   if (!inscripcionActiva) {
-    return { emp, principal, toques, secuencia: [], objetivo: null, idPasoInscripcionActivo: null, pbx };
+    return { emp, principal, toques, secuencia: [], objetivo: null, idPasoInscripcionActivo: null, pbx, idInscripcionActiva: null };
   }
 
   const pasos = db
@@ -4940,7 +4966,7 @@ export function getContextoToque(id: string, idOrganizacion: number): ContextoTo
     return { idPaso: p.idPaso, orden: p.orden, diaOffset: p.diaOffset, canal: p.canal, objetivo: p.objetivo, estado };
   });
 
-  return { emp, principal, toques, secuencia, objetivo: objetivoActivo, idPasoInscripcionActivo, pbx };
+  return { emp, principal, toques, secuencia, objetivo: objetivoActivo, idPasoInscripcionActivo, pbx, idInscripcionActiva: inscripcionActiva.idInscripcion };
 }
 
 // Tarea 9 (rediseño UI de toque): versiones A/B/C de un paso, para la barra lateral

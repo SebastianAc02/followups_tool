@@ -1,6 +1,7 @@
 // Poll de tracking + reply detection (V5.5). Mismo estilo que outbox.ts/push.ts:
 // logica pura, deps inyectadas, una campana caida no bloquea el poll de las demas.
 import type { TrackingPoll, EventoProveedor } from './ports/envio';
+import type { OrigenFin } from './reinscripcion';
 
 export type CampanaConSecuencia = { idCampana: number; proveedorCampanaId: string };
 export type DestinatarioResuelto = { idPasoInscripcion: number; idDestinatario: number; idInscripcion: number; idEmpresa: string };
@@ -13,7 +14,10 @@ export type TrackingDeps = {
   // Idempotente por proveedor_evento_id (indice unico, V5.1): 'duplicado' si ya
   // se proceso este evento en una corrida anterior.
   guardarEvento: (idPasoInscripcion: number, evento: EventoProveedor) => 'insertado' | 'duplicado';
-  pausarInscripcion: (idInscripcion: number, motivo: string) => void;
+  // origen es el DATO del que depende quien puede volver a la cadencia; motivo es la
+  // prosa de la bitacora. Va en la firma y sin default a proposito (spec 2026-07-17):
+  // una via de pausa nueva tiene que declarar de que tipo es, o el compilador para.
+  pausarInscripcion: (idInscripcion: number, motivo: string, origen: OrigenFin) => void;
   marcarDestinatarioSalio: (idDestinatario: number) => void;
   quedanDestinatariosActivos: (idInscripcion: number) => boolean;
   // Aviso de respuesta (V6.1): se llama SIEMPRE junto a pausarInscripcion cuando el
@@ -47,12 +51,12 @@ export async function pollTracking(deps: TrackingDeps, envio: TrackingPoll, ahor
       if (evento.tipo === 'respondio') {
         // Reply de CUALQUIER destinatario pausa la inscripcion de inmediato (B6):
         // ningun paso futuro sale, sin importar si otros destinatarios siguen activos.
-        deps.pausarInscripcion(destinatario.idInscripcion, 'respuesta detectada');
+        deps.pausarInscripcion(destinatario.idInscripcion, 'respuesta detectada', 'respuesta');
         deps.registrarRespuestaDetectada(destinatario.idInscripcion, destinatario.idEmpresa, evento.canal);
       } else if (evento.tipo === 'rebota') {
         deps.marcarDestinatarioSalio(destinatario.idDestinatario);
         if (!deps.quedanDestinatariosActivos(destinatario.idInscripcion)) {
-          deps.pausarInscripcion(destinatario.idInscripcion, 'todos los destinatarios salieron (rebote)');
+          deps.pausarInscripcion(destinatario.idInscripcion, 'todos los destinatarios salieron (rebote)', 'rebote');
         }
       }
     }

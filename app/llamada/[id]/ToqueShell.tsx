@@ -54,7 +54,7 @@ export function ToqueShell({
   canal: "whatsapp" | "correo";
   children: ReactNode;
 }) {
-  const { emp, principal, secuencia, objetivo, toques } = ctx;
+  const { emp, principal, secuencia, objetivo, toques, idInscripcionActiva } = ctx;
   const estadoPill = pillParaEstado(emp?.estado);
   const ultimoToque = toques[0];
   const acc = ACCENT[canal];
@@ -96,7 +96,15 @@ export function ToqueShell({
 
       {/* Two-column body: riel de secuencia + cuerpo del canal */}
       <div className="flex flex-col md:grid md:grid-cols-[192px_1fr]">
-        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} estado={emp?.estado} hoy={hoy} />
+        <SecuenciaRail
+          pasos={secuencia}
+          objetivo={objetivo}
+          toques={toques}
+          estado={emp?.estado}
+          hoy={hoy}
+          idEmpresa={emp?.id ?? ""}
+          idInscripcionActiva={idInscripcionActiva}
+        />
 
         <div className="flex flex-col gap-4 p-5">
           {/* Accion sugerida del canal (mismo lugar que "Llamar a X" en la llamada) */}

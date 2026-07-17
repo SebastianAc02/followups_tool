@@ -1,0 +1,1 @@
+ALTER TABLE `inscripcion` ADD `origen_fin` text;

@@ -17,6 +17,7 @@ const DDL = sql`
     fecha_inscripcion TEXT,
     fecha_fin TEXT,
     motivo_fin TEXT,
+    origen_fin TEXT,
     created_at TEXT,
     updated_at TEXT
   )

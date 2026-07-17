@@ -24,6 +24,8 @@ const {
   resolverDestinatarioPorEmail,
   guardarEventoTracking,
   pausarInscripcion,
+  reactivarInscripcion,
+  sacarInscripcionDeCampana,
   marcarDestinatarioSalio,
   quedanDestinatariosActivos,
 } = await import('./repository.ts');
@@ -109,10 +111,49 @@ test('guardarEventoTracking es idempotente: el mismo proveedor_evento_id no se d
 });
 
 test('pausarInscripcion cambia el estado a pausada con motivo visible', () => {
-  pausarInscripcion(idInscripcion, 'respuesta detectada');
+  pausarInscripcion(idInscripcion, 'respuesta detectada', 'respuesta');
   const h = historialInscripciones('e-track-1').find((i) => i.id === idInscripcion)!;
   assert.strictEqual(h.estado, 'pausada');
   assert.strictEqual(h.motivoFin, 'respuesta detectada');
+});
+
+// El origen se GUARDA (no solo se acepta en la firma): es el dato del que va a depender
+// quien puede volver a la cadencia, asi que si no aterriza en la fila no sirve de nada.
+test('pausarInscripcion graba el origen_fin, no solo el motivo en prosa', () => {
+  const db = raw();
+  pausarInscripcion(idInscripcion, 'baja manual desde la llamada', 'manual');
+  const fila = db
+    .prepare('SELECT estado, motivo_fin, origen_fin FROM inscripcion WHERE id_inscripcion = ?')
+    .get(idInscripcion) as any;
+  db.close();
+  assert.strictEqual(fila.estado, 'pausada');
+  assert.strictEqual(fila.motivo_fin, 'baja manual desde la llamada');
+  assert.strictEqual(fila.origen_fin, 'manual');
+});
+
+// La vuelta atras limpia los TRES campos de fin, no solo el estado: una inscripcion viva
+// con motivo_fin viejo es dato que miente sobre su propia historia.
+test('reactivarInscripcion la deja activa y borra los campos de fin', () => {
+  pausarInscripcion(idInscripcion, 'baja manual desde la llamada', 'manual');
+  reactivarInscripcion(idInscripcion);
+  const db = raw();
+  const fila = db
+    .prepare('SELECT estado, motivo_fin, origen_fin, fecha_fin FROM inscripcion WHERE id_inscripcion = ?')
+    .get(idInscripcion) as any;
+  db.close();
+  assert.strictEqual(fila.estado, 'activa');
+  assert.strictEqual(fila.motivo_fin, null);
+  assert.strictEqual(fila.origen_fin, null);
+  assert.strictEqual(fila.fecha_fin, null);
+});
+
+test('sacarInscripcionDeCampana desde la llamada deja origen manual y su propia prosa', () => {
+  sacarInscripcionDeCampana(idInscripcion, 'llamada');
+  const db = raw();
+  const fila = db.prepare('SELECT motivo_fin, origen_fin FROM inscripcion WHERE id_inscripcion = ?').get(idInscripcion) as any;
+  db.close();
+  assert.strictEqual(fila.motivo_fin, 'baja manual desde la llamada');
+  assert.strictEqual(fila.origen_fin, 'manual');
 });
 
 test('marcarDestinatarioSalio + quedanDestinatariosActivos refleja el cambio real', () => {

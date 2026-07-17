@@ -57,7 +57,7 @@ export function LlamadaCard({
   idPasoInscripcion: number | null;
   calificacion: Calificacion;
 }) {
-  const { emp, principal, secuencia, objetivo, toques } = ctx;
+  const { emp, principal, secuencia, objetivo, toques, idInscripcionActiva } = ctx;
   const estadoPill = pillParaEstado(emp?.estado);
   const ultimoToque = toques[0];
 
@@ -96,7 +96,15 @@ export function LlamadaCard({
 
       {/* Two-column body */}
       <div className="flex flex-col md:grid md:grid-cols-[192px_1fr]">
-        <SecuenciaRail pasos={secuencia} objetivo={objetivo} toques={toques} estado={emp?.estado} hoy={hoy} />
+        <SecuenciaRail
+          pasos={secuencia}
+          objetivo={objetivo}
+          toques={toques}
+          estado={emp?.estado}
+          hoy={hoy}
+          idEmpresa={emp?.id ?? ""}
+          idInscripcionActiva={idInscripcionActiva}
+        />
 
         <PreguntarProvider>
           <div className="flex flex-col gap-4 p-5">
