@@ -133,17 +133,27 @@ test('calcularProximoIntentoPush crece y tiene tope', () => {
   assert.strictEqual(t5, t99);
 });
 
+// El throttle se observa por su SEAM (throttleMs como funcion), no con Date.now(): medir
+// reloj de pared contra el valor exacto hacia rojo el test por 1ms en CI (setTimeout(50)
+// puede devolver a los 49 por el redondeo del event loop; Node nunca prometio el piso).
+// La funcion se consulta una vez POR ESPERA, asi que su conteo prueba el contrato real:
+// espera entre los dos envios, no antes del primero -- eso es lo que "no rafaga" significa.
 test('con throttleMs>0, espera entre envios consecutivos (no rafaga)', async () => {
   const iniciales = [filaBase(1, 'ana@empresa.com'), filaBase(2, 'beto@empresa.com')];
   const { deps } = depsFalsos(iniciales);
   const envio = envioFalso(() => true);
 
-  const inicio = Date.now();
-  await pushPendientes(deps, envio, new Date(), 50);
-  const duracion = Date.now() - inicio;
+  const consultas: number[] = [];
+  const throttle = () => {
+    consultas.push(envio.llamadas.length);
+    return 5;
+  };
+
+  await pushPendientes(deps, envio, new Date(), throttle);
 
   assert.equal(envio.llamadas.length, 2);
-  assert.ok(duracion >= 50, `deberia tardar al menos 50ms por el throttle entre los 2 envios, tardo ${duracion}ms`);
+  assert.equal(consultas.length, 1, `el throttle se consulta una sola vez, entre los 2 envios; se consulto ${consultas.length} veces`);
+  assert.deepEqual(consultas, [1], 'la espera va DESPUES del primer envio y ANTES del segundo, no antes del primero');
 });
 
 test('sin throttleMs (default), no espera entre envios', async () => {
