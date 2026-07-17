@@ -337,15 +337,26 @@ export type AcuseLectura = { proveedorMensajeId: string; tipo: 'visto'; referenc
 // messages.update trae acuses de estado. Solo nos interesa READ (leido); DELIVERY_ACK
 // (entregado) se ignora -- el usuario pidio "alguien lo vio", no "llego". Señal no
 // confiable a proposito: si la persona desactivo las confirmaciones de lectura, READ
-// nunca llega. Correlaciona por key.id (el mismo proveedorMensajeId que guarda enviarPaso).
+// nunca llega.
+//
+// data.keyId, PLANO (verificado 2026-07-17 contra el emisor de Evolution v2 y las filas de
+// su Postgres). OJO, la trampa que ya mordio una vez: messages.upsert SI trae key.id
+// anidado porque es el mensaje crudo de Baileys, pero messages.update lo arma Evolution a
+// mano y es plano:
+//
+//   let l = { messageId, keyId: a.id, remoteJid, fromMe, participant, status, instanceId };
+//   this.sendDataWebhook("messages.update", l)
+//
+// La version anterior leia data.key.id (la forma del hermano) y devolvia null contra TODO
+// payload real: el visto estaba muerto en produccion con sus tests en verde, porque los
+// tests inventaban la misma forma. Correlaciona con el proveedorMensajeId de enviarPaso.
 export function parsearAcuseLectura(payload: unknown): AcuseLectura | null {
   const p = asRecord(payload);
   if (!p || p.event !== 'messages.update') return null;
   const data = asRecord(p.data);
-  const key = data ? asRecord(data.key) : null;
-  if (!data || !key) return null;
+  if (!data) return null;
   if (asString(data.status) !== 'READ') return null;
-  const mensajeId = asString(key.id);
+  const mensajeId = asString(data.keyId);
   if (!mensajeId) return null;
   return { proveedorMensajeId: mensajeId, tipo: 'visto', referenciaProveedor: asString(p.instance) ?? '' };
 }

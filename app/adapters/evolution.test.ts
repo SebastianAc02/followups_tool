@@ -413,20 +413,58 @@ test('llamarEvolution tira ErrorEvolution (no un Error generico) cuando la respu
   });
 });
 
-test('parsearAcuseLectura extrae el visto de un messages.update con status READ', () => {
-  const payload = {
+// PAYLOAD REAL de messages.update, copiado del emisor de Evolution v2 y verificado contra
+// la fila que quedo en su Postgres (2026-07-17, instancia wa-573105182997):
+//
+//   let l = { messageId: c.id, keyId: a.id, remoteJid: a.remoteJid, fromMe: a.fromMe,
+//             participant: a?.remoteJid, status: r.status.toUpperCase(), instanceId: ... };
+//   this.sendDataWebhook("messages.update", l)
+//
+// data es PLANO: keyId, NO key.id. Ese anidado solo existe en messages.upsert, que es el
+// mensaje crudo de Baileys; messages.update lo construye Evolution a mano. La version
+// anterior de estos tests inventaba `data.key.id` y pasaba en verde contra un parser que
+// hacia la misma suposicion: dos errores que se confirmaban entre si mientras el visto
+// estaba muerto en produccion.
+function acuseReal(status: string, keyId = '3EB072E598686CA9AE2204') {
+  return {
     event: 'messages.update',
-    instance: 'prueba',
-    data: { key: { id: 'MSG-123', remoteJid: '573102186819@s.whatsapp.net', fromMe: true }, status: 'READ' },
+    instance: 'wa-573105182997',
+    data: {
+      messageId: 'cmrmqo51z03nxqr4xi32kkj32',
+      keyId,
+      remoteJid: '24103473967193@lid',
+      fromMe: true,
+      participant: '24103473967193@lid',
+      status,
+      instanceId: 'f1afe885-bc17-4bec-ad42-3c8ee3a7bf2a',
+    },
   };
-  const acuse = parsearAcuseLectura(payload);
-  assert.equal(acuse?.proveedorMensajeId, 'MSG-123');
+}
+
+test('parsearAcuseLectura extrae el visto de un messages.update REAL con status READ', () => {
+  const acuse = parsearAcuseLectura(acuseReal('READ'));
+  assert.equal(acuse?.proveedorMensajeId, '3EB072E598686CA9AE2204');
   assert.equal(acuse?.tipo, 'visto');
+  assert.equal(acuse?.referenciaProveedor, 'wa-573105182997');
 });
 
-test('parsearAcuseLectura ignora un DELIVERY_ACK (entregado, no leido)', () => {
-  const payload = { event: 'messages.update', instance: 'prueba', data: { key: { id: 'M2' }, status: 'DELIVERY_ACK' } };
-  assert.equal(parsearAcuseLectura(payload), null);
+// Los 5 status que Evolution tiene de verdad en su Postgres (medido: DELIVERY_ACK 570,
+// READ 353, SERVER_ACK 60, PLAYED 31, EDITED 1). Solo READ es "lo vieron"; el resto son
+// ruido de transporte. PLAYED es de notas de voz y no aplica a lo que manda la cadencia.
+for (const status of ['DELIVERY_ACK', 'SERVER_ACK', 'PLAYED', 'EDITED']) {
+  test(`parsearAcuseLectura ignora ${status} (no es "lo vieron")`, () => {
+    assert.equal(parsearAcuseLectura(acuseReal(status)), null);
+  });
+}
+
+test('parsearAcuseLectura ignora un evento que no es messages.update', () => {
+  const otro = { ...acuseReal('READ'), event: 'messages.upsert' };
+  assert.equal(parsearAcuseLectura(otro), null);
+});
+
+test('parsearAcuseLectura sin keyId devuelve null en vez de un visto sin con que correlacionar', () => {
+  const sinId = { event: 'messages.update', instance: 'wa-1', data: { status: 'READ' } };
+  assert.equal(parsearAcuseLectura(sinId), null);
 });
 
 test.after(() => borrarDbPrueba(dbPath));
