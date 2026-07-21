@@ -2551,6 +2551,110 @@ export function inscribirCampana(idCampana: number, idOrganizacion: number): Res
   return res;
 }
 
+export type ResultadoInscripcionEmpresa =
+  | { ok: true; idInscripcion: number; estado: 'activa' | 'bloqueada'; reemplazo: boolean }
+  | { ok: false; motivo: 'ya_inscrita' };
+
+// Actividad on-hold con cadencia de precio (docs/actividad-on-hold-cadencia-precio.md):
+// Sebastian toca una empresa a la vez, no corre un segmento completo. inscribirCampana no
+// sirve para eso: itera TODO el segmento y reparte fechas con goteo (intakeDiario) pensado
+// para inscribir muchas empresas de un golpe. Esta funcion reusa la MISMA seleccion de
+// destinatario (previsualizarInscripcion) que inscribirCampana aplica por empresa, pero para
+// una sola fila y sin goteo -- no aplica cuando es una empresa, hoy, ahora.
+// Misma regla de "una activa por empresa" que el resto del sistema (ux_inscripcion_activa):
+// si la empresa ya tenia otra inscripcion activa, se cierra antes de abrir esta.
+export function inscribirEmpresaEnCadencia(idEmpresa: string, idCampana: number): ResultadoInscripcionEmpresa {
+  const camp = db
+    .select({ idCadencia: campana.idCadencia, reglaFaltante: campana.reglaFaltante })
+    .from(campana)
+    .where(eq(campana.idCampana, idCampana))
+    .get();
+  if (!camp) throw new Error(`campana ${idCampana} no existe`);
+
+  const pasosCrudos = db
+    .select({ orden: pasoCadencia.orden, canal: pasoCadencia.canal })
+    .from(pasoCadencia)
+    .where(eq(pasoCadencia.idCadencia, camp.idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+  const pasos: PasoRequerido[] = pasosCrudos.map((p) => ({ orden: p.orden, canal: p.canal as Canal }));
+
+  const ahora = new Date().toISOString();
+  let resultado: ResultadoInscripcionEmpresa = { ok: false, motivo: 'ya_inscrita' };
+
+  db.transaction((tx) => {
+    const yaEnEsta = tx
+      .select({ id: inscripcion.idInscripcion })
+      .from(inscripcion)
+      .where(and(eq(inscripcion.idEmpresa, idEmpresa), eq(inscripcion.idCampana, idCampana), inArray(inscripcion.estado, ['activa', 'bloqueada'])))
+      .get();
+    if (yaEnEsta) return;
+
+    let reemplazo = false;
+    const activaOtra = tx
+      .select({ id: inscripcion.idInscripcion })
+      .from(inscripcion)
+      .where(and(eq(inscripcion.idEmpresa, idEmpresa), eq(inscripcion.estado, 'activa')))
+      .get();
+    if (activaOtra) {
+      tx.update(inscripcion)
+        .set({ estado: 'finalizada', motivoFin: 'cambio de campana', fechaFin: ahora, updatedAt: ahora })
+        .where(eq(inscripcion.idInscripcion, activaOtra.id))
+        .run();
+      reemplazo = true;
+    }
+
+    const contactos = tx
+      .select({
+        idContacto: contacto.idContacto,
+        esKeyDecisionMaker: contacto.esKeyDecisionMaker,
+        esPrincipal: contacto.esPrincipal,
+        email: contacto.email,
+        telefono: contacto.telefono,
+      })
+      .from(contacto)
+      .where(eq(contacto.idEmpresa, idEmpresa))
+      .orderBy(contacto.idContacto)
+      .all();
+
+    const [preview] = previsualizarInscripcion({
+      empresas: [
+        {
+          idEmpresa,
+          contactos: contactos.map((c) => ({
+            idContacto: c.idContacto,
+            esKeyDecisionMaker: c.esKeyDecisionMaker === 1,
+            esPrincipal: c.esPrincipal === 1,
+            email: c.email,
+            telefono: c.telefono,
+          })),
+        },
+      ],
+      pasos,
+      regla: camp.reglaFaltante as ReglaFaltante,
+    });
+
+    const idContactoDest = preview.idContactoDestinatario;
+    const estado = idContactoDest != null ? 'activa' : 'bloqueada';
+    const ins = tx
+      .insert(inscripcion)
+      .values({ idCampana, idEmpresa, estado, pasoActual: 0, fechaInscripcion: ahora, createdAt: ahora, updatedAt: ahora })
+      .run();
+
+    if (idContactoDest != null) {
+      tx.insert(destinatario)
+        .values({ idInscripcion: Number(ins.lastInsertRowid), idContacto: idContactoDest, estado: 'activo', createdAt: ahora })
+        .run();
+    }
+
+    tx.update(campana).set({ estado: 'activa', updatedAt: ahora }).where(eq(campana.idCampana, idCampana)).run();
+
+    resultado = { ok: true, idInscripcion: Number(ins.lastInsertRowid), estado, reemplazo };
+  });
+
+  return resultado;
+}
+
 // Fase 6 (V4 Destinatarios): cabecera de la campana para la factura del preview
 // (nombre, cadencia, segmento, regla activa). Es lo que necesita la UI antes de
 // pedir el detalle por empresa -- separado de PreviewInscripcionCampana para no
