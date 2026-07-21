@@ -99,7 +99,9 @@ export function crearDbPrueba() {
       -- la suma del embudo, cosa que una columna generada rechazaria. El recalculo automatico
       -- lo cubre la DB real, no se asegura aca.
       usuarios_efectivos REAL,
-      actualizado_en TEXT,
+      -- NOT NULL DEFAULT como en isps.db real: sin esto el harness no reproduce el
+      -- NOT NULL constraint que rompe los inserts sin actualizado_en explicito.
+      actualizado_en TEXT NOT NULL DEFAULT (datetime('now')),
       actualizado_por TEXT
     );
 

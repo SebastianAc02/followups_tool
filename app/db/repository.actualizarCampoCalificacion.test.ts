@@ -31,6 +31,32 @@ test('actualizarCampoCalificacion escribe el campo cuando el lead es de la organ
   raw.close();
 });
 
+test('actualizarCampoCalificacion escribe usuarios sin reventar por actualizado_en NOT NULL', () => {
+  seedEmpresa('cal-usuarios');
+  actualizarCampoCalificacion('cal-usuarios', 'usuarios', '1200', 1);
+
+  const raw = new Database(dbPath);
+  const fila = raw
+    .prepare('SELECT usuarios_estimados, actualizado_en FROM empresa_usuarios WHERE id_empresa = ?')
+    .get('cal-usuarios') as any;
+  assert.equal(fila.usuarios_estimados, 1200);
+  assert.ok(fila.actualizado_en, 'actualizado_en debe quedar seteado, no NULL');
+  raw.close();
+});
+
+test('actualizarCampoCalificacion actualiza usuarios en segundo guardado (upsert)', () => {
+  seedEmpresa('cal-usuarios-2');
+  actualizarCampoCalificacion('cal-usuarios-2', 'usuarios', '500', 1);
+  actualizarCampoCalificacion('cal-usuarios-2', 'usuarios', '800', 1);
+
+  const raw = new Database(dbPath);
+  const fila = raw
+    .prepare('SELECT usuarios_estimados FROM empresa_usuarios WHERE id_empresa = ?')
+    .get('cal-usuarios-2') as any;
+  assert.equal(fila.usuarios_estimados, 800);
+  raw.close();
+});
+
 test('actualizarCampoCalificacion rechaza si el lead esta activo en otra organizacion', () => {
   seedEmpresa('cal-2', 2);
   assert.throws(() => actualizarCampoCalificacion('cal-2', 'crm', 'HubSpot', 1), /organizacion/i);

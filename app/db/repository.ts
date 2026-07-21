@@ -653,8 +653,8 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
 
     if (parsed.usuarios != null && !Number.isNaN(parsed.usuarios)) {
       tx.insert(empresaUsuarios)
-        .values({ idEmpresa: parsed.idEmpresa, usuariosEstimados: parsed.usuarios })
-        .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: { usuariosEstimados: parsed.usuarios } })
+        .values({ idEmpresa: parsed.idEmpresa, usuariosEstimados: parsed.usuarios, actualizadoEn: ahora })
+        .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: { usuariosEstimados: parsed.usuarios, actualizadoEn: ahora } })
         .run();
     }
 
@@ -703,9 +703,14 @@ export function actualizarCampoCalificacion(
   if (val.campo === 'usuarios') {
     const usuarios = Number(val.valor);
     if (!Number.isFinite(usuarios)) throw new Error('Usuarios debe ser un número');
+    // actualizadoEn explicito: sin marcarlo, este Drizzle incluye la columna en el INSERT
+    // con NULL y pisa el DEFAULT (datetime('now')) de la tabla real -> NOT NULL constraint.
+    // ISO string para igualar el unico sitio que ya maneja bien esta columna
+    // (enriquecerDesdeNotion mas abajo, actualizadoEn: ahora).
+    const ahora = new Date().toISOString();
     db.insert(empresaUsuarios)
-      .values({ idEmpresa, usuariosEstimados: usuarios })
-      .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: { usuariosEstimados: usuarios } })
+      .values({ idEmpresa, usuariosEstimados: usuarios, actualizadoEn: ahora })
+      .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: { usuariosEstimados: usuarios, actualizadoEn: ahora } })
       .run();
     return;
   }
