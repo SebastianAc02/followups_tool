@@ -68,6 +68,7 @@ import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { normalizarFechaToque } from '../core/fecha-toque';
+import { estadoDestinoPorToque } from '../core/transicion-estado';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { aplicaBuclePBX, estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { cifrar, descifrar } from '../lib/crypto';
@@ -548,7 +549,7 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
     // organizacion_activa_id coincide con la del que llama. Evita que dos organizaciones
     // se pisen el estado de un lead compartido por error (ver spec 2026-07-09).
     const emp = tx
-      .select({ organizacionActivaId: empresa.organizacionActivaId })
+      .select({ organizacionActivaId: empresa.organizacionActivaId, estadoNotion: empresa.estadoNotion })
       .from(empresa)
       .where(eq(empresa.idEmpresa, parsed.idEmpresa))
       .get();
@@ -628,6 +629,18 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
     if (parsed.crm) sets.crmSoftware = parsed.crm;
     if (parsed.pasarela) sets.pasarelaActual = parsed.pasarela;
     tx.update(empresa).set(sets).where(eq(empresa.idEmpresa, parsed.idEmpresa)).run();
+
+    // Fase 5 (plan-produccion-cro-campana.md): un toque real puede graduar la etapa
+    // comercial (on_hold -> contacto_iniciado, on_hold|contacto_iniciado -> reunion_agendada
+    // si el resultado fue 'contesto_reunion'). La regla vive en el core
+    // (transicion-estado.ts), aca solo se ejecuta si aplica -- estadoDestinoPorToque ya
+    // devuelve null para cualquier estado de origen que no este en su lista blanca, asi
+    // que un toque sobre una cuenta ya avanzada (oportunidad, cierre_documentacion...) o
+    // sobre un lead dormido no toca estado_notion.
+    const estadoDestino = estadoDestinoPorToque(emp.estadoNotion, parsed.resultado);
+    if (estadoDestino) {
+      escribirTransicionEstado(tx, parsed.idEmpresa, emp.estadoNotion, estadoDestino, idOrganizacion, ahora);
+    }
 
     // V3.7: outbox en la MISMA transaccion que el cambio (patron outbox). Si la empresa
     // no tiene notion_page_id todavia (nadie la enlazo a mano, ver nota en V3.1b/V3.7)
@@ -5103,6 +5116,35 @@ export function versionesDePaso(idPaso: number): VersionDePaso[] {
   return filas.map((f) => ({ ...f, esDefault: f.esDefault === 1 }));
 }
 
+// Escribe una transicion de estado_notion YA decidida (update + fila en el historico),
+// dentro de una transaccion que el caller ya tiene abierta. Unico lugar que toca las dos
+// tablas juntas -- actualizarEstadoNotion (sync de Notion) y registrarToque (toque manual,
+// Fase 5 plan-produccion-cro-campana.md) lo comparten en vez de duplicar el par
+// update+insert cada uno por su lado.
+function escribirTransicionEstado(
+  tx: Tx,
+  idEmpresa: string,
+  estadoAnterior: string | null,
+  estadoNuevo: string,
+  idOrganizacion: number,
+  fecha: string,
+): void {
+  tx.update(empresa)
+    .set({ estadoNotion: estadoNuevo, updatedAt: fecha })
+    .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .run();
+
+  tx.insert(empresaEstadoHistorial)
+    .values({
+      idEmpresa,
+      estadoAnterior,
+      estadoNuevo,
+      fecha,
+      idOrganizacion,
+    })
+    .run();
+}
+
 // Cambia la etapa comercial de una empresa y registra la transicion en el historico,
 // en una sola transaccion (patron Outbox ligero). Si la etapa no cambia, no registra.
 // Este es el UNICO camino de escritura de estado_notion: el sync de Notion debe llamarlo
@@ -5122,20 +5164,7 @@ export function actualizarEstadoNotion(
     if (!emp) return;
     if (emp.estadoNotion === estadoNuevo) return;
 
-    tx.update(empresa)
-      .set({ estadoNotion: estadoNuevo, updatedAt: fecha })
-      .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
-      .run();
-
-    tx.insert(empresaEstadoHistorial)
-      .values({
-        idEmpresa,
-        estadoAnterior: emp.estadoNotion,
-        estadoNuevo,
-        fecha,
-        idOrganizacion,
-      })
-      .run();
+    escribirTransicionEstado(tx, idEmpresa, emp.estadoNotion, estadoNuevo, idOrganizacion, fecha);
   });
 }
 
