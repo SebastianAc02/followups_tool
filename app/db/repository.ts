@@ -73,6 +73,7 @@ import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltant
 import { aplicaBuclePBX, estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { calcularDuracionPorEtapa, calcularCicloVenta, type TransicionEtapa } from '../core/tiempoEnEtapa';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
+import { contarToquesAntesDeFecha } from '../core/panel/toquesAntesCerrar';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
@@ -5447,6 +5448,147 @@ export function mrrEstimadoTotal(idOrganizacion: number, tarifaTxnPlan: number, 
     total += calcularMrrEstimado({ usuarios, digitalPct: digitalPctConDefault(null), tarifaTxnPlan, saasMensual });
   }
   return Math.round(total);
+}
+
+// --- Widgets conectados 2026-07-22 (auditoria de data confirmada en prod) -----------
+//
+// Decision de Sebastian: de los 11 widgets del mockup con dataSource: null, 4 SI tienen
+// fuente real (las de abajo) y se conectan; los otros 6 (show_rate, reschedule_rate,
+// weighted_pipeline, ticket_promedio, matar_deal_post_reunion, probabilidad_cierre) se
+// sacaron del catalogo (widgets.ts) -- no hay monto/deal size en la DB, ni señal de
+// presento/reagendo/perdido, y probabilidad ya se descarto por subjetiva.
+
+// Deals nuevos (throughput): una transicion cuyo origen es null (primera fila que
+// escribe actualizarEstadoNotion para esa empresa) o 'lead' (contacto dormido, nunca
+// trabajado) y cuyo destino YA es un stage real -- eso ES "entrar al pipeline". El NOT
+// 'lead' del destino es mas una afirmacion explicita que una proteccion real: una
+// transicion lead->lead no puede existir (actualizarEstadoNotion no escribe fila si
+// estadoNuevo === estadoActual, ver arriba). Mismo join+scope que transicionesEnRango
+// (EMPRESA_VIVA + organizacion); owner opcional porque este widget vive en el grupo
+// throughput junto a toquesTotal/leadsTocados (esos SI filtran por owner) -- a diferencia
+// de los widgets de velocity/economia (tiempo en etapa, ciclo de venta, MRR), que son
+// vistas del CRO sobre TODA la organizacion y no toman owner.
+export function dealsNuevosEnRango(idOrganizacion: number, desde: string, hasta: string, owner?: string): number {
+  const condiciones = [
+    eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+    EMPRESA_VIVA,
+    sql`substr(${empresaEstadoHistorial.fecha}, 1, 10) >= ${desde} AND substr(${empresaEstadoHistorial.fecha}, 1, 10) <= ${hasta}`,
+    sql`(${empresaEstadoHistorial.estadoAnterior} IS NULL OR ${empresaEstadoHistorial.estadoAnterior} = 'lead')`,
+    ne(empresaEstadoHistorial.estadoNuevo, 'lead'),
+  ];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
+  const r = db
+    .select({ n: sql<number>`count(*)` })
+    .from(empresaEstadoHistorial)
+    .innerJoin(empresa, eq(empresa.idEmpresa, empresaEstadoHistorial.idEmpresa))
+    .where(and(...condiciones))
+    .get();
+  return r?.n ?? 0;
+}
+
+// Reuniones agendadas (throughput): CUANTAS reuniones se agendaron en el rango (un
+// evento), no cuantas siguen agendadas hoy (un estado). Mismo patron de arriba.
+export function reunionesAgendadasEnRango(idOrganizacion: number, desde: string, hasta: string, owner?: string): number {
+  const condiciones = [
+    eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+    EMPRESA_VIVA,
+    sql`substr(${empresaEstadoHistorial.fecha}, 1, 10) >= ${desde} AND substr(${empresaEstadoHistorial.fecha}, 1, 10) <= ${hasta}`,
+    eq(empresaEstadoHistorial.estadoNuevo, 'reunion_agendada'),
+  ];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
+  const r = db
+    .select({ n: sql<number>`count(*)` })
+    .from(empresaEstadoHistorial)
+    .innerJoin(empresa, eq(empresa.idEmpresa, empresaEstadoHistorial.idEmpresa))
+    .where(and(...condiciones))
+    .get();
+  return r?.n ?? 0;
+}
+
+// Segmentacion por persona (segmentacion): distribucion del comite de compra por
+// contacto.cargo_categoria (dueno/gerente/financiero/tecnico/...). A diferencia de las
+// dos funciones de arriba, NO filtra por [desde,hasta]: contacto no tiene columna de
+// fecha (ni created_at) -- es un snapshot de "quienes son los contactos hoy", no un
+// evento que ocurrio en una ventana, y filtrar por fecha inventaria una semantica que la
+// tabla no tiene. Owner opcional (mismo criterio que toquesPorCanal/toquesPorResultado,
+// sus vecinos en el grupo 'segmentacion'). Alcance EMPRESA_VIVA + EN_PIPELINE: el comite
+// de compra de una empresa que ni siquiera esta en pipeline no es data del CRO (mismo
+// alcance que mrrEstimadoTotal). null/'' cae en el bucket 'sin_categoria' -- se reporta,
+// no se descarta (mismo principio que CLAVE_SIN_ETAPA en core/embudo.ts).
+export function segmentacionPorPersona(idOrganizacion: number, owner?: string): Record<string, number> {
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
+  const filas = db
+    .select({ categoria: contacto.cargoCategoria, n: sql<number>`count(*)` })
+    .from(contacto)
+    .innerJoin(empresa, eq(empresa.idEmpresa, contacto.idEmpresa))
+    .where(and(...condiciones))
+    .groupBy(contacto.cargoCategoria)
+    .all();
+
+  const out: Record<string, number> = {};
+  for (const f of filas) {
+    const clave = f.categoria && f.categoria.trim() !== '' ? f.categoria : 'sin_categoria';
+    out[clave] = (out[clave] ?? 0) + f.n;
+  }
+  return out;
+}
+
+// Toques antes de cerrar (velocity, widget BORDERLINE -- ver la decision larga en
+// widgets.ts junto a DataSourceKey.toquesAntesDeCerrarPromedio): promedio de toques que
+// tuvo una empresa ANTES de llegar a 'firma_pago' (la unica señal de "cerrado" que existe
+// hoy; no hay señal de "perdido" -- este numero mide solo el lado de "gano"). Solo
+// organizacion, sin owner ni rango de fechas: es la MISMA convencion que
+// cicloVentaPromedio/duracionPromedioPorEtapa (arriba), vecinos de este widget en el
+// grupo 'velocity' -- son vistas del CRO sobre TODO el historial, no un reporte por owner
+// ni acotado a una ventana (cortar por [desde,hasta] descartaria toques que pasaron antes
+// de la ventana y sesgaria el promedio hacia abajo sin ninguna razon de negocio).
+//
+// Dos queries, nunca N+1: la primera trae la fecha del PRIMER firma_pago por empresa (MIN,
+// por si alguna vez reingresa); la segunda trae TODOS los toques de esas empresas de una
+// sola vez (inArray) y se agrupan en memoria -- mismo principio de
+// historialPorEmpresaOrg (arriba): la tabla no tiene volumen hoy, pero la forma de la
+// query no se degrada si algun dia lo tiene.
+export function toquesAntesDeCerrarPromedio(idOrganizacion: number): number | null {
+  const cierres = db
+    .select({
+      idEmpresa: empresaEstadoHistorial.idEmpresa,
+      fechaCierre: sql<string>`min(${empresaEstadoHistorial.fecha})`,
+    })
+    .from(empresaEstadoHistorial)
+    .innerJoin(empresa, eq(empresa.idEmpresa, empresaEstadoHistorial.idEmpresa))
+    .where(
+      and(
+        eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+        EMPRESA_VIVA,
+        eq(empresaEstadoHistorial.estadoNuevo, 'firma_pago'),
+      ),
+    )
+    .groupBy(empresaEstadoHistorial.idEmpresa)
+    .all();
+
+  if (cierres.length === 0) return null;
+
+  const ids = cierres.map((c) => c.idEmpresa);
+  const toques = db
+    .select({ idEmpresa: toque.idEmpresa, fecha: toque.fecha })
+    .from(toque)
+    .where(inArray(toque.idEmpresa, ids))
+    .all();
+
+  const fechasPorEmpresa = new Map<string, string[]>();
+  for (const t of toques) {
+    if (!t.fecha) continue;
+    const arr = fechasPorEmpresa.get(t.idEmpresa) ?? [];
+    arr.push(t.fecha);
+    fechasPorEmpresa.set(t.idEmpresa, arr);
+  }
+
+  let total = 0;
+  for (const c of cierres) {
+    total += contarToquesAntesDeFecha(fechasPorEmpresa.get(c.idEmpresa) ?? [], c.fechaCierre);
+  }
+  return Math.round((total / cierres.length) * 10) / 10;
 }
 
 // Metrica 5 del plan: fila cruda por empresa para el endpoint REST de solo lectura --

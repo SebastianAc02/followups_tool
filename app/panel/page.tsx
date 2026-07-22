@@ -4,6 +4,7 @@ import { AppShell } from '../ui/shell/AppShell';
 import { ventanaPromedio, promedioDiario } from '../core/actividad';
 import { diasEntre } from '../core/tiempoEnEtapa';
 import { calcularVelocidadCambioEtapa } from '../core/velocity';
+import { calcularFollowUpPorDeal } from '../core/panel/followUpPorDeal';
 import {
   contarToquesEnRango,
   leadsTocadosEnRango,
@@ -18,6 +19,10 @@ import {
   transicionesEnRango,
   mrrEstimadoTotal,
   leerConfiguracionAdmin,
+  dealsNuevosEnRango,
+  reunionesAgendadasEnRango,
+  segmentacionPorPersona,
+  toquesAntesDeCerrarPromedio,
 } from '../db/repository';
 import { WIDGETS } from '../core/panel/widgets';
 import { resolverMetrica, type MetricaValor } from '../core/panel/metricas';
@@ -61,10 +66,15 @@ export default async function Panel({
   const diasVentana = Math.max(1, diasEntre(desde, hasta) + 1);
 
   const toquesTotal = contarToquesEnRango(desde, hasta, owner);
+  // followUpPorDeal (conectado 2026-07-22): "deal" es la MISMA definicion que ya usa
+  // leadsTocadosEnRango (empresa distinta con toque en el rango) -- se reusan los dos
+  // conteos que este objeto YA calcula para toques_total/leads_tocados en vez de volver a
+  // consultar la DB; la division es logica pura, vive en core/panel/followUpPorDeal.ts.
+  const leadsTocados = leadsTocadosEnRango(desde, hasta, owner);
   const datos = {
     toquesTotal,
     promedioDiario: promedioDiario(toquesTotal),
-    leadsTocados: leadsTocadosEnRango(desde, hasta, owner),
+    leadsTocados,
     toquesPorCanal: toquesPorCanal(desde, hasta, owner),
     toquesPorResultado: toquesPorResultado(desde, hasta, owner),
     campanasActivas: campanasActivas(),
@@ -74,6 +84,16 @@ export default async function Panel({
     cicloVentaPromedio: cicloVentaPromedio(usuario.idOrganizacion, hoy),
     velocidadCambioEtapa: calcularVelocidadCambioEtapa(transicionesEnRango(usuario.idOrganizacion, desde, hasta), diasVentana),
     mrrEstimadoTotal: mrrEstimadoTotal(usuario.idOrganizacion, tarifaTxnPlan, saasMensual),
+    dealsNuevosEnRango: dealsNuevosEnRango(usuario.idOrganizacion, desde, hasta, owner),
+    reunionesAgendadasEnRango: reunionesAgendadasEnRango(usuario.idOrganizacion, desde, hasta, owner),
+    followUpPorDeal: calcularFollowUpPorDeal(toquesTotal, leadsTocados),
+    // Sin owner: contacto no tiene columna de fecha, y el grupo 'segmentacion' es un
+    // snapshot del comite de compra, no un evento en rango -- ver el comentario largo en
+    // segmentacionPorPersona (repository.ts).
+    segmentacionPorPersona: segmentacionPorPersona(usuario.idOrganizacion, owner),
+    // Sin owner ni rango: mismo criterio que cicloVentaPromedio/duracionPromedioPorEtapa
+    // (vecinos en el grupo 'velocity') -- vista del CRO sobre TODO el historial.
+    toquesAntesDeCerrarPromedio: toquesAntesDeCerrarPromedio(usuario.idOrganizacion),
   };
 
   // Se resuelve la metrica de TODOS los widgets del catalogo (no solo los del tablero

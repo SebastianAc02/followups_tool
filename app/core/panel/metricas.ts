@@ -30,6 +30,16 @@ export type MetricasDatos = {
   cicloVentaPromedio?: number | null;
   velocidadCambioEtapa?: number;
   mrrEstimadoTotal?: number;
+  // Conectados 2026-07-22 (ver widgets.ts): dealsNuevosEnRango/reunionesAgendadasEnRango/
+  // followUpPorDeal pueden venir en 0 (0 deals nuevos, 0 toques todavia) -- eso SI es 'ok'
+  // con dato real, mismo principio que tiempoPromedioPorEtapa/mrrEstimadoTotal arriba.
+  // toquesAntesDeCerrarPromedio es el unico que puede venir null (ninguna empresa llego a
+  // firma_pago todavia): mismo tratamiento que cicloVentaPromedio, null real != sin_datos.
+  dealsNuevosEnRango?: number;
+  reunionesAgendadasEnRango?: number;
+  followUpPorDeal?: number;
+  segmentacionPorPersona?: Record<string, number>;
+  toquesAntesDeCerrarPromedio?: number | null;
 };
 
 const SIN_DATOS: MetricaValor = { estado: 'sin_datos' };
@@ -66,6 +76,20 @@ export function resolverMetrica(dataSource: DataSourceKey | null, datos: Metrica
       return datos.velocidadCambioEtapa === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.velocidadCambioEtapa };
     case 'mrrEstimadoTotal':
       return datos.mrrEstimadoTotal === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.mrrEstimadoTotal };
+    case 'dealsNuevosEnRango':
+      return datos.dealsNuevosEnRango === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.dealsNuevosEnRango };
+    case 'reunionesAgendadasEnRango':
+      return datos.reunionesAgendadasEnRango === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.reunionesAgendadasEnRango };
+    case 'followUpPorDeal':
+      return datos.followUpPorDeal === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.followUpPorDeal };
+    case 'segmentacionPorPersona':
+      return datos.segmentacionPorPersona === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.segmentacionPorPersona };
+    case 'toquesAntesDeCerrarPromedio':
+      // null = se calculo pero ninguna empresa llego a firma_pago todavia (mismo
+      // tratamiento que cicloVentaPromedio arriba).
+      return datos.toquesAntesDeCerrarPromedio === undefined || datos.toquesAntesDeCerrarPromedio === null
+        ? SIN_DATOS
+        : { estado: 'ok', valor: datos.toquesAntesDeCerrarPromedio };
     default: {
       const _exhaustivo: never = dataSource;
       return _exhaustivo;
