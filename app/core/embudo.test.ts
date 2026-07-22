@@ -7,15 +7,17 @@ import { construirEmbudo, CLAVE_SIN_ETAPA } from './embudo.ts';
 // CIERRE (11). Una etapa posterior once veces mas grande que la anterior no convirtio nada:
 // son cuentas que saltaron etapas, que en un pipeline movido a mano es normal.
 test('una etapa posterior mas grande que la anterior no reporta conversion', () => {
+  // Orden corregido 2026-07-22: cierre va ANTES de enviar_contrato. La posterior
+  // (enviar_contrato=11) mas grande que la anterior (cierre=1) = saltaron etapas, conversion null.
   const embudo = construirEmbudo([
-    { estado: 'enviar_contrato', total: 1, usuarios: 6000 },
-    { estado: 'cierre_documentacion', total: 11, usuarios: 43800 },
+    { estado: 'cierre_documentacion', total: 1, usuarios: 6000 },
+    { estado: 'enviar_contrato', total: 11, usuarios: 43800 },
   ]);
-  const contrato = embudo.bandas.find((b) => b.estado === 'enviar_contrato')!;
   const cierre = embudo.bandas.find((b) => b.estado === 'cierre_documentacion')!;
-  assert.equal(contrato.total, 1);
-  assert.equal(cierre.total, 11);
-  assert.equal(cierre.conversionDesdeAnterior, null);
+  const contrato = embudo.bandas.find((b) => b.estado === 'enviar_contrato')!;
+  assert.equal(cierre.total, 1);
+  assert.equal(contrato.total, 11);
+  assert.equal(contrato.conversionDesdeAnterior, null);
 });
 
 test('construirEmbudo: ordena bandas frio->caliente y calcula conversion vs anterior', () => {

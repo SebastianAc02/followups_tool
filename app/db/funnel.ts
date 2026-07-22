@@ -23,8 +23,11 @@ export const FUNNEL_ETAPAS: EtapaFunnel[] = [
   { estado: 'contacto_iniciado', label: 'Contactado', colorClass: 'bg-[#3b3670]' },
   { estado: 'reunion_agendada', label: 'Reunión', colorClass: 'bg-[#4d4795]' },
   { estado: 'oportunidad', label: 'Oportunidad', colorClass: 'bg-[#635bbf]' },
-  { estado: 'enviar_contrato', label: 'Contrato', colorClass: 'bg-[#7a70e0]' },
-  { estado: 'cierre_documentacion', label: 'Cierre', colorClass: 'bg-[#8b7cff]' },
+  // Orden corregido (Sebastian 2026-07-22): cierre/documentacion va ANTES de enviar_contrato.
+  // El color es degradado por POSICION (mas claro = mas cerca del cierre), asi que el color
+  // se queda con la posicion, no con la etapa.
+  { estado: 'cierre_documentacion', label: 'Cierre', colorClass: 'bg-[#7a70e0]' },
+  { estado: 'enviar_contrato', label: 'Contrato', colorClass: 'bg-[#8b7cff]' },
   { estado: 'firma_pago', label: 'Firma y pago', colorClass: 'bg-accent-soft' },
 ];
 
