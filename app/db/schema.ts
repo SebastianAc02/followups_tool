@@ -60,6 +60,29 @@ export const empresa = sqliteTable('empresa', {
   organizacionActivaId: integer('organizacion_activa_id').notNull(),
   createdAt: text('created_at'),
   updatedAt: text('updated_at'),
+  // MRR potencial real (2026-07-22, plan-panel-metricas-tiempo-real.md): que plan puede
+  // tomar el deal y que % de sus transacciones ya son digitales, ambos capturados en el
+  // discovery. Nullable: la mayoria de deals no lo tiene todavia (se llena hacia
+  // adelante). Sin id_plan, el deal no aporta al MRR total (no se inventa tarifa).
+  idPlan: integer('id_plan'),
+  // 0..1, mismo rango que digitalPct en app/core/mrr.ts. Null hasta que el discovery lo
+  // capture; digitalPctConDefault() aplica el 40% (igual que la formula de Notion,
+  // verificada contra un deal real) mientras tanto.
+  pctDigital: real('pct_digital'),
+});
+
+// Catalogo de planes (2026-07-22, plan-panel-metricas-tiempo-real.md): NO se refleja de
+// Notion (la propiedad "Planes" de Notion es una relacion a su propia DB), es tabla
+// nueva local, sembrada a mano desde ese catalogo (scripts/seed_planes.ts). saasMensual y
+// tarifaTxn en COP enteros (el negocio no maneja centavos). Es la fuente real de
+// calcularMrrEstimado (app/core/mrr.ts), reemplaza la tarifa global de configuracion_admin.
+export const plan = sqliteTable('plan', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  // unique: el seed (scripts/seed_planes.ts) hace upsert por nombre, correrlo dos veces
+  // no debe duplicar el catalogo.
+  nombre: text('nombre').notNull().unique(),
+  saasMensual: integer('saas_mensual').notNull(),
+  tarifaTxn: integer('tarifa_txn').notNull(),
 });
 
 export const contacto = sqliteTable('contacto', {

@@ -18,12 +18,23 @@ test('calcularMrrEstimado: 0 usuarios deja solo el saas fijo', () => {
   assert.equal(mrr, 90000);
 });
 
-test('digitalPctConDefault: null y undefined caen al 100%', () => {
-  assert.equal(digitalPctConDefault(null), 1);
-  assert.equal(digitalPctConDefault(undefined), 1);
+test('digitalPctConDefault: null y undefined caen al 40% (igual que la formula de Notion)', () => {
+  assert.equal(digitalPctConDefault(null), 0.4);
+  assert.equal(digitalPctConDefault(undefined), 0.4);
 });
 
 test('digitalPctConDefault: un valor real explicito nunca se pisa', () => {
   assert.equal(digitalPctConDefault(0.35), 0.35);
   assert.equal(digitalPctConDefault(0), 0);
+});
+
+test('calcularMrrEstimado: ancla contra un deal real de Notion (plan Pro, 4.000 usuarios, 40% digital)', () => {
+  // Verificado 2026-07-22 contra el "MRR potencial" real de Notion para este deal: COP 4.488.000.
+  const mrr = calcularMrrEstimado({
+    usuarios: 4000,
+    digitalPct: digitalPctConDefault(null),
+    tarifaTxnPlan: 1680,
+    saasMensual: 1_800_000,
+  });
+  assert.equal(mrr, 4_488_000);
 });

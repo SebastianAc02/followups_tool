@@ -20,7 +20,6 @@ import {
   cicloVentaPromedio,
   transicionesEnRango,
   mrrEstimadoTotal,
-  leerConfiguracionAdmin,
   dealsNuevosEnRango,
   reunionesAgendadasEnRango,
   segmentacionPorPersona,
@@ -59,13 +58,6 @@ export default async function Panel({
   const hasta = params.hasta || ventana.hasta;
   const owner = params.owner || undefined;
 
-  // MRR estimado (metrica 4): tarifa_txn_plan / saas_mensual no existen como columna ni
-  // tabla en ningun lado (se busco en schema.ts y app/adapters/notion/ antes de escribir
-  // esto, ver el comentario largo en app/core/mrr.ts) -- se leen de configuracion_admin,
-  // el mismo mecanismo clave/valor que ya usa el buzon de Apollo en /conectores. Sin
-  // configurar todavia, caen a 0 (no se inventa una tarifa).
-  const tarifaTxnPlan = Number(leerConfiguracionAdmin('mrr_tarifa_txn_plan')) || 0;
-  const saasMensual = Number(leerConfiguracionAdmin('mrr_saas_mensual')) || 0;
   const diasVentana = Math.max(1, diasEntre(desde, hasta) + 1);
 
   const toquesTotal = contarToquesEnRango(desde, hasta, owner);
@@ -86,7 +78,7 @@ export default async function Panel({
     tiempoPromedioPorEtapa: duracionPromedioPorEtapa(usuario.idOrganizacion, hoy),
     cicloVentaPromedio: cicloVentaPromedio(usuario.idOrganizacion, hoy),
     velocidadCambioEtapa: calcularVelocidadCambioEtapa(transicionesEnRango(usuario.idOrganizacion, desde, hasta), diasVentana),
-    mrrEstimadoTotal: mrrEstimadoTotal(usuario.idOrganizacion, tarifaTxnPlan, saasMensual),
+    mrrEstimadoTotal: mrrEstimadoTotal(usuario.idOrganizacion),
     dealsNuevosEnRango: dealsNuevosEnRango(usuario.idOrganizacion, desde, hasta, owner),
     reunionesAgendadasEnRango: reunionesAgendadasEnRango(usuario.idOrganizacion, desde, hasta, owner),
     followUpPorDeal: calcularFollowUpPorDeal(toquesTotal, leadsTocados),

@@ -50,6 +50,21 @@ function seedUsuarios(idEmpresa: string, usuariosEfectivos: number) {
   raw.close();
 }
 
+// Catalogo de planes (2026-07-22): seedPlan crea una fila y devuelve su id;
+// asignarPlan es el equivalente a llenar el discovery (id_plan + opcional pct_digital).
+function seedPlan(nombre: string, saasMensual: number, tarifaTxn: number): number {
+  const raw = new Database(dbPath);
+  const info = raw.prepare(`INSERT INTO plan (nombre, saas_mensual, tarifa_txn) VALUES (?, ?, ?)`).run(nombre, saasMensual, tarifaTxn);
+  raw.close();
+  return Number(info.lastInsertRowid);
+}
+
+function asignarPlan(idEmpresa: string, idPlan: number, pctDigital?: number) {
+  const raw = new Database(dbPath);
+  raw.prepare(`UPDATE empresa SET id_plan = ?, pct_digital = ? WHERE id_empresa = ?`).run(idPlan, pctDigital ?? null, idEmpresa);
+  raw.close();
+}
+
 test('ETAPAS_TIEMPO_PANEL: las 3 etapas que pide el plan (metrica 1)', () => {
   assert.deepEqual([...ETAPAS_TIEMPO_PANEL], ['contacto_iniciado', 'reunion_agendada', 'cierre_documentacion']);
 });
@@ -120,30 +135,45 @@ test('transicionesEnRango: cuenta transiciones dentro del rango, scoped a organi
   assert.equal(n, 2);
 });
 
-test('mrrEstimadoTotal: suma usuarios x digital(100%) x tarifa + saas por empresa en pipeline', () => {
+test('mrrEstimadoTotal: suma usuarios x digital(40% default) x tarifa del plan + saas del plan por empresa', () => {
   const ORG = 1006;
+  const idPlan = seedPlan('TestPlan', 10000, 200);
   seedEmpresa('mrr1', 'oportunidad', ORG);
   seedUsuarios('mrr1', 100);
+  asignarPlan('mrr1', idPlan);
   seedEmpresa('mrr2', 'oportunidad', ORG);
   seedUsuarios('mrr2', 50);
+  asignarPlan('mrr2', idPlan);
 
-  const total = mrrEstimadoTotal(ORG, 200, 10000);
-  // (100*1*200 + 10000) + (50*1*200 + 10000) = 30000 + 20000 = 50000
-  assert.equal(total, 50000);
+  const total = mrrEstimadoTotal(ORG);
+  // (100*0.4*200 + 10000) + (50*0.4*200 + 10000) = 18000 + 14000 = 32000
+  assert.equal(total, 32000);
 });
 
 test('mrrEstimadoTotal: empresa sin fila en empresa_usuarios cuenta como 0 usuarios, no revienta', () => {
   const ORG = 1007;
+  const idPlan = seedPlan('TestPlan2', 10000, 200);
   seedEmpresa('mrr3', 'oportunidad', ORG);
-  const total = mrrEstimadoTotal(ORG, 200, 10000);
+  asignarPlan('mrr3', idPlan);
+  const total = mrrEstimadoTotal(ORG);
   assert.equal(total, 10000); // solo el saas fijo, 0 usuarios
+});
+
+test('mrrEstimadoTotal: empresa sin plan asignado no aporta al total (no se inventa tarifa)', () => {
+  const ORG = 1010;
+  seedEmpresa('mrr4', 'oportunidad', ORG);
+  seedUsuarios('mrr4', 999); // usuarios grandes, pero sin plan
+  const total = mrrEstimadoTotal(ORG);
+  assert.equal(total, 0);
 });
 
 test('pipelineParaEndpoint: trae idEmpresa/nombre/estado/usuarios, scoped a organizacion y EMPRESA_VIVA', () => {
   const ORG = 1008;
   const OTRA_ORG = 1009;
+  const idPlan = seedPlan('TestPlan3', 5000, 100);
   seedEmpresa('pe1', 'reunion_agendada', ORG);
   seedUsuarios('pe1', 40);
+  asignarPlan('pe1', idPlan);
   seedEmpresa('pe2', 'reunion_agendada', ORG, { operaBajoId: 'pe1' }); // fusionada, no debe salir
   seedEmpresa('pe3', 'reunion_agendada', OTRA_ORG); // otra organizacion, no debe salir
 
@@ -156,4 +186,7 @@ test('pipelineParaEndpoint: trae idEmpresa/nombre/estado/usuarios, scoped a orga
   const pe1 = filas.find((f) => f.idEmpresa === 'pe1');
   assert.equal(pe1?.estado, 'reunion_agendada');
   assert.equal(pe1?.usuariosEfectivos, 40);
+  assert.equal(pe1?.tarifaTxn, 100);
+  assert.equal(pe1?.saasMensual, 5000);
+  assert.equal(pe1?.pctDigital, null); // crudo: el default 40% lo aplica el caller, no esta funcion
 });
