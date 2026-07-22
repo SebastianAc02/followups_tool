@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { resumenHome, colaLeads, contarPorEstado, listarCampanas } from './db/repository';
+import { resumenHome, colaLeads, colaCierres, colaReagendar, agendaHoyCadencias, contarPorEstado, listarCampanas } from './db/repository';
 import { cargarPerfil } from './lib/perfil';
 import { AppShell } from './ui/shell/AppShell';
 import { SectionLabel } from './ui/SectionLabel';
@@ -27,12 +27,22 @@ export default async function Dashboard() {
   const hoy = ahora.toISOString().slice(0, 10);
 
   const resumen = resumenHome(owner, hoy, perfil.idOrganizacion);
-  // Split leads/cierres/reagendar (2026-07-14): para Sebastian, "toques para hoy"/"vencidos"
-  // del home deben coincidir con /cola (solo Leads), no con colaDelDia mezclando estados.
+  // Split (2026-07-14, corregido 2026-07-22): "toques para hoy"/"vencidos" del home deben
+  // contar las MISMAS 4 fuentes que /cola (leads + cierres + reagendar + cadencias), no solo
+  // colaLeads. Antes solo contaba leads, asi que las 25 de campana (que son on_hold, no lead)
+  // y los cierres no aparecian y el home mostraba 0 aunque hubiera trabajo. pendientesDeHoy =
+  // fecha <= hoy; vencidos = fecha < hoy (misma logica de app/cola/agenda.ts).
   if (owner === OWNER_COLA_SPLIT) {
-    const leads = colaLeads(hoy, owner, perfil.idOrganizacion);
-    resumen.toquesHoy = leads.length;
-    resumen.vencidos = leads.filter((c) => (c.fecha ?? '') < hoy).length;
+    const fechas: (string | null)[] = [
+      ...colaLeads(hoy, owner, perfil.idOrganizacion).map((c) => c.fecha ?? null),
+      ...colaCierres(owner, perfil.idOrganizacion).map((c) => c.fecha ?? null),
+      ...colaReagendar(hoy, owner, perfil.idOrganizacion).map((c) => c.fecha ?? null),
+      ...agendaHoyCadencias(hoy, owner)
+        .filter((t) => !(t.esManual === 1 && t.modo === 'batch'))
+        .map((t) => (t.fechaProgramada ? t.fechaProgramada.slice(0, 10) : null)),
+    ];
+    resumen.toquesHoy = fechas.filter((f) => f != null && f <= hoy).length;
+    resumen.vencidos = fechas.filter((f) => f != null && f < hoy).length;
   }
   const porEstado = contarPorEstado(undefined, perfil.idOrganizacion);
   const campanas: CampaignVM[] = listarCampanas(perfil.idOrganizacion)
