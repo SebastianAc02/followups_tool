@@ -358,27 +358,30 @@ export function colaReagendar(hoy: string, owner: string, idOrganizacion: number
 // que no se van a meter a ninguna cadencia por ahora y hoy son invisibles -- colaDelDia
 // exige fecha, esta no la tiene. General para cualquier owner (no gateado como el split de
 // /cola). Lista fija (sin filtro de fecha), mismo patron que colaCierres/colaReagendar.
-export function colaContactoIniciadoSinSeguimiento(owner: string, idOrganizacion: number) {
+// owner opcional (Fase 3 CRO, 2026-07-21): mismo patron que colaDelDia -- con owner filtra
+// a ese owner, sin owner (undefined) trae la seccion de TODA la organizacion. El caller
+// (pagina) decide si ese "todo" es apropiado (CRO) o si prefiere no mostrar la seccion
+// (visitante, decision anterior de Sebastian).
+export function colaContactoIniciadoSinSeguimiento(owner: string | undefined, idOrganizacion: number) {
+  const condiciones = [
+    eq(empresa.organizacionActivaId, idOrganizacion),
+    EMPRESA_VIVA,
+    eq(empresa.estadoNotion, 'contacto_iniciado'),
+    isNull(empresa.proximoFollowUpFecha),
+    notExists(
+      db
+        .select({ x: sql`1` })
+        .from(inscripcion)
+        .where(and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa'))),
+    ),
+  ];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
   return db
     .select(columnasCola)
     .from(empresa)
     .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
-    .where(
-      and(
-        eq(empresa.organizacionActivaId, idOrganizacion),
-        EMPRESA_VIVA,
-        eq(empresa.owner, owner),
-        eq(empresa.estadoNotion, 'contacto_iniciado'),
-        isNull(empresa.proximoFollowUpFecha),
-        notExists(
-          db
-            .select({ x: sql`1` })
-            .from(inscripcion)
-            .where(and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa'))),
-        ),
-      ),
-    )
+    .where(and(...condiciones))
     .orderBy(empresa.nombreOficial)
     .all();
 }
@@ -409,11 +412,28 @@ export type FilaPipelineSinCadencia = {
 //
 // Lo que SIGUE fuera: on_hold (dormido) y firma_pago (ya cliente) -- no son trabajo
 // activo. COALESCE para que estado null no caiga por el NULL NOT IN (que da NULL).
+//
+// owner opcional (Fase 3 CRO, 2026-07-21): la B de 2026-07-15 (mas arriba) lo volvio
+// obligatorio para que "cada quien vea lo suyo" -- eso sigue valiendo para Felipe y
+// Sebastian sin cambios. undefined es la excepcion deliberada para el rol CRO (ve
+// Felipe + Sebastian a la vez), nunca el default de un vendedor normal.
 export function pipelineSinCadencia(
   idOrganizacion: number,
   hoy: string,
-  owner: string,
+  owner: string | undefined,
 ): FilaPipelineSinCadencia[] {
+  const condiciones = [
+    eq(empresa.organizacionActivaId, idOrganizacion),
+    EMPRESA_VIVA,
+    sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago')`,
+    notExists(
+      db
+        .select({ x: sql`1` })
+        .from(inscripcion)
+        .where(and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa'))),
+    ),
+  ];
+  if (owner) condiciones.push(eq(empresa.owner, owner));
   const filas = db
     .select({
       idEmpresa: empresa.idEmpresa,
@@ -426,20 +446,7 @@ export function pipelineSinCadencia(
     })
     .from(empresa)
     .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
-    .where(
-      and(
-        eq(empresa.organizacionActivaId, idOrganizacion),
-        EMPRESA_VIVA,
-        eq(empresa.owner, owner),
-        sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago')`,
-        notExists(
-          db
-            .select({ x: sql`1` })
-            .from(inscripcion)
-            .where(and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa'))),
-        ),
-      ),
-    )
+    .where(and(...condiciones))
     // Primero lo vencido, despues lo de hoy, despues lo agendado a futuro, y de ultimo
     // lo que no tiene fecha (NULLS LAST explicito: en SQLite NULL ordena primero).
     .orderBy(sql`CASE WHEN ${empresa.proximoFollowUpFecha} IS NULL THEN 1 ELSE 0 END`, empresa.proximoFollowUpFecha)

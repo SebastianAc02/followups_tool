@@ -92,6 +92,38 @@ test('respeta la organizacion', () => {
   assert.ok(!ids.includes('e-otra-org'));
 });
 
+// Fase 3 (CRO, docs/plan-produccion-cro-campana.md): sin owner (undefined) trae la
+// franja "Sin cadencia" de TODOS los owners de la organizacion -- es la excepcion
+// deliberada para Camilo. Organizacion 6, aislada del resto de este archivo.
+test('sin owner (CRO) trae "Sin cadencia" de TODOS los owners, no solo uno', () => {
+  seedEmpresa('cro-sebastian', 'Sebastian Acosta Molina', 'oportunidad', null);
+  seedEmpresa('cro-felipe', 'Felipe Castro', 'contacto_iniciado', null);
+  const db = new Database(dbPath);
+  db.prepare(`UPDATE empresa SET organizacion_activa_id = 6 WHERE id_empresa IN ('cro-sebastian', 'cro-felipe')`).run();
+  db.close();
+
+  const ids = pipelineSinCadencia(6, HOY, undefined).map((f) => f.idEmpresa);
+  assert.deepEqual(ids.sort(), ['cro-felipe', 'cro-sebastian']);
+});
+
+// Felipe y Sebastian se siguen viendo aislados: pasarles su propio owner (el camino
+// normal, no CRO) sigue excluyendo al otro, aunque la funcion ahora acepte undefined.
+test('con owner puntual, Felipe y Sebastian se siguen viendo aislados uno del otro', () => {
+  seedEmpresa('aislado-sebastian', 'Sebastian Acosta Molina', 'oportunidad', null);
+  seedEmpresa('aislado-felipe', 'Felipe Castro', 'contacto_iniciado', null);
+  const db = new Database(dbPath);
+  db.prepare(
+    `UPDATE empresa SET organizacion_activa_id = 7 WHERE id_empresa IN ('aislado-sebastian', 'aislado-felipe')`,
+  ).run();
+  db.close();
+
+  const idsSebastian = pipelineSinCadencia(7, HOY, 'Sebastian Acosta Molina').map((f) => f.idEmpresa);
+  assert.deepEqual(idsSebastian, ['aislado-sebastian']);
+
+  const idsFelipe = pipelineSinCadencia(7, HOY, 'Felipe Castro').map((f) => f.idEmpresa);
+  assert.deepEqual(idsFelipe, ['aislado-felipe']);
+});
+
 test.after(() => {
   borrarDbPrueba(dbPath);
 });

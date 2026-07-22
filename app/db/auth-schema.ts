@@ -18,6 +18,11 @@ export const user = sqliteTable("user", {
     .notNull(),
   owner: text("owner"),
   admin: integer("admin", { mode: "boolean" }).default(false),
+  // CRO / rol "ve todo el pipeline" (Fase 3, docs/plan-produccion-cro-campana.md):
+  // deliberadamente NO es `admin` -- admin ya significa "panel + conectores de equipo"
+  // (Sebastian es admin=1 hoy) y ese usuario debe seguir viendo SOLO su propia cartera.
+  // input:false en auth.ts, mismo patron que owner/admin: solo lo setea el script de seed.
+  verTodoPipeline: integer("ver_todo_pipeline", { mode: "boolean" }).default(false),
 });
 
 export const session = sqliteTable(

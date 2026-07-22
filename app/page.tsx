@@ -18,7 +18,10 @@ export default async function Dashboard() {
   const perfil = await cargarPerfil();
   // Visitante (solo lectura): ve el resumen de TODA la organizacion (todos los owners),
   // no una cola propia -- por eso owner undefined.
-  const owner = perfil.soloLectura ? undefined : perfil.nombre;
+  // CRO (verTodoPipeline, Fase 3): mismo undefined -- ve el resumen de TODA la
+  // organizacion (Felipe + Sebastian), sin ganar soloLectura ni perder su propio owner
+  // para otras acciones.
+  const owner = perfil.soloLectura || perfil.verTodoPipeline ? undefined : perfil.nombre;
 
   const ahora = new Date();
   const hoy = ahora.toISOString().slice(0, 10);

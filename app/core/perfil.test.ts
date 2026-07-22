@@ -6,7 +6,16 @@ import { construirPerfil, PREFERENCIAS_DEFAULT } from './perfil.ts';
 import type { UsuarioSesion } from '../lib/session-user.ts';
 
 function identidad(overrides: Partial<UsuarioSesion> = {}): UsuarioSesion {
-  return { id: 'u1', email: 'a@onepay.co', owner: 'Sebastian Acosta Molina', admin: false, idOrganizacion: 1, soloLectura: false, ...overrides };
+  return {
+    id: 'u1',
+    email: 'a@onepay.co',
+    owner: 'Sebastian Acosta Molina',
+    admin: false,
+    idOrganizacion: 1,
+    soloLectura: false,
+    verTodoPipeline: false,
+    ...overrides,
+  };
 }
 
 test('iniciales de nombre con dos tokens toma la primera letra de cada uno', () => {
@@ -39,6 +48,17 @@ test('rol es Vendedor cuando admin es false', () => {
   assert.equal(perfil.rol, 'Vendedor');
 });
 
+test('rol es CRO cuando verTodoPipeline es true, aunque admin sea false (Camilo no es admin)', () => {
+  const perfil = construirPerfil(identidad({ verTodoPipeline: true, admin: false }), PREFERENCIAS_DEFAULT);
+  assert.equal(perfil.rol, 'CRO');
+  assert.equal(perfil.verTodoPipeline, true);
+});
+
+test('un admin normal (Sebastian) NO es CRO solo por ser admin', () => {
+  const perfil = construirPerfil(identidad({ admin: true, verTodoPipeline: false }), PREFERENCIAS_DEFAULT);
+  assert.equal(perfil.rol, 'Administrador');
+});
+
 test('preferencias resueltas pasan sin transformar al perfil', () => {
   const perfil = construirPerfil(identidad(), { ...PREFERENCIAS_DEFAULT, colorAvatar: 'rose', vistaInicio: '/cola' });
   assert.equal(perfil.colorAvatar, 'rose');
@@ -59,7 +79,7 @@ test('id y email vienen de la identidad, no de las preferencias', () => {
 
 test('construirPerfil pasa idOrganizacion de la identidad tal cual', () => {
   const perfil = construirPerfil(
-    { id: 'u1', email: 'a@b.com', owner: 'Ana Owner', admin: false, idOrganizacion: 3, soloLectura: false },
+    { id: 'u1', email: 'a@b.com', owner: 'Ana Owner', admin: false, idOrganizacion: 3, soloLectura: false, verTodoPipeline: false },
     PREFERENCIAS_DEFAULT,
   );
   assert.equal(perfil.idOrganizacion, 3);

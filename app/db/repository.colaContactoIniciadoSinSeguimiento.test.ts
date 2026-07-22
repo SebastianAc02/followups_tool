@@ -49,3 +49,18 @@ test('colaContactoIniciadoSinSeguimiento: contacto_iniciado, sin fecha, sin insc
   const ids = r.map((f) => f.id).sort();
   assert.deepEqual(ids, ['s1']);
 });
+
+// Fase 3 (CRO, docs/plan-produccion-cro-campana.md): sin owner, la funcion trae la
+// seccion de TODOS los owners de la organizacion -- es lo que necesita Camilo para ver
+// Felipe + Sebastian juntos. El caller (pagina) decide cuando pedir esto; el Repository
+// solo sabe "con owner filtra, sin owner trae todo" (mismo patron que colaDelDia).
+// Organizacion 5, aislada del resto de este archivo (sin limpieza entre tests, mismo
+// problema documentado en repository.contadoresHoy.test.ts).
+test('colaContactoIniciadoSinSeguimiento: sin owner (CRO) trae la seccion de TODOS los owners de la organizacion', () => {
+  seedEmpresa('cro1', OWNER, 'contacto_iniciado', null, 5);
+  seedEmpresa('cro2', OTRO_OWNER, 'contacto_iniciado', null, 5);
+
+  const r = colaContactoIniciadoSinSeguimiento(undefined, 5);
+  const ids = r.map((f) => f.id).sort();
+  assert.deepEqual(ids, ['cro1', 'cro2'], 've las de ambos owners, no solo uno');
+});

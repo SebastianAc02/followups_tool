@@ -28,7 +28,10 @@ function fechaCorta(d: Date) {
 // quieren el sidebar -- ver SidebarFrame. Evita duplicar las mismas queries al repository.
 export async function datosSidebar() {
   const usuario = await requireSession();
-  const owner = usuario.owner;
+  // CRO (verTodoPipeline, Fase 3): el badge de "Toques" debe contar el pipeline entero
+  // (Felipe + Sebastian), no una cola propia vacia -- mismo owner undefined que ya usan
+  // /cola y / para este rol.
+  const owner = usuario.verTodoPipeline ? undefined : usuario.owner;
 
   const hoy = hoyDemo();
 

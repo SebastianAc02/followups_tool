@@ -49,6 +49,10 @@ export const auth = betterAuth({
       // setea desde el cliente, solo por el script de seed (V2.3).
       owner: { type: 'string', required: false, input: false },
       admin: { type: 'boolean', defaultValue: false, input: false },
+      // CRO (Camilo, Fase 3 plan-produccion-cro-campana.md): ve TODO el pipeline en
+      // lectura (Felipe + Sebastian), sin ganar `admin` (panel/conectores de equipo).
+      // input:false: solo lo setea scripts/seed_auth_users.ts o un UPDATE a mano.
+      verTodoPipeline: { type: 'boolean', defaultValue: false, input: false },
     },
   },
 });
