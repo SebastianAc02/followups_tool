@@ -70,6 +70,8 @@ import { restarUnDia } from '../core/actividad';
 import { normalizarFechaToque } from '../core/fecha-toque';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { aplicaBuclePBX, estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
+import { calcularDuracionPorEtapa, calcularCicloVenta, type TransicionEtapa } from '../core/tiempoEnEtapa';
+import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { cifrar, descifrar } from '../lib/crypto';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
@@ -5283,6 +5285,160 @@ export function historialEtapasEmpresa(idEmpresa: string, idOrganizacion: number
     etapaActual: emp?.estadoNotion ?? null,
     transiciones: filas,
   };
+}
+
+// --- Cockpit del CRO (Fase 4, plan-produccion-cro-campana.md) ----------------------
+//
+// Las 3 metricas de abajo (tiempo en etapa, ciclo de venta, velocity) leen la MISMA
+// tabla (empresa_estado_historial) que historialEtapasEmpresa, pero agregadas sobre TODA
+// la organizacion en vez de una sola cuenta. Comparten el fetch+agrupado (una fila por
+// empresa, transiciones ordenadas) porque las tres son distintas cuentas sobre el mismo
+// timeline -- separarlas en tres queries identicas solo duplicaria SQL sin necesidad; la
+// tabla hoy no tiene volumen (nada la escribe en produccion todavia, ver comentario en
+// actualizarEstadoNotion) asi que no hay caso de perf que justifique cachear entre
+// llamadas.
+function historialPorEmpresaOrg(idOrganizacion: number): Map<string, TransicionEtapa[]> {
+  const filas = db
+    .select({ idEmpresa: empresaEstadoHistorial.idEmpresa, estado: empresaEstadoHistorial.estadoNuevo, fecha: empresaEstadoHistorial.fecha })
+    .from(empresaEstadoHistorial)
+    .innerJoin(empresa, eq(empresa.idEmpresa, empresaEstadoHistorial.idEmpresa))
+    .where(and(eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion), EMPRESA_VIVA))
+    .orderBy(asc(empresaEstadoHistorial.idEmpresa), asc(empresaEstadoHistorial.fecha), asc(empresaEstadoHistorial.id))
+    .all();
+
+  const porEmpresa = new Map<string, TransicionEtapa[]>();
+  for (const f of filas) {
+    const arr = porEmpresa.get(f.idEmpresa) ?? [];
+    arr.push({ estado: f.estado, fecha: f.fecha });
+    porEmpresa.set(f.idEmpresa, arr);
+  }
+  return porEmpresa;
+}
+
+// Metrica 1 del plan: tiempo promedio en cada una de las 3 etapas que Fase 5 cablea
+// (on_hold -> contacto_iniciado, reunion desde hold -> reunion_agendada) mas
+// cierre_documentacion como la siguiente etapa natural hacia el cierre -- mismo trio que
+// ya usan los fixtures de core/tiempoEnEtapa.test.ts. Promedio flat sobre TODAS las
+// ventanas encontradas (si una empresa reingresa a la misma etapa dos veces, cuentan las
+// dos ventanas por separado, igual que calcularDuracionPorEtapa las separa).
+export const ETAPAS_TIEMPO_PANEL = ['contacto_iniciado', 'reunion_agendada', 'cierre_documentacion'] as const;
+
+export function duracionPromedioPorEtapa(
+  idOrganizacion: number,
+  ahora: string,
+  estados: readonly string[] = ETAPAS_TIEMPO_PANEL,
+): Record<string, number> {
+  const porEmpresa = historialPorEmpresaOrg(idOrganizacion);
+  const sumas = new Map<string, { total: number; n: number }>();
+
+  for (const transiciones of porEmpresa.values()) {
+    const duraciones = calcularDuracionPorEtapa({ transiciones }, ahora);
+    for (const d of duraciones) {
+      if (!estados.includes(d.estado)) continue;
+      const acc = sumas.get(d.estado) ?? { total: 0, n: 0 };
+      acc.total += d.dias;
+      acc.n += 1;
+      sumas.set(d.estado, acc);
+    }
+  }
+
+  const out: Record<string, number> = {};
+  for (const estado of estados) {
+    const acc = sumas.get(estado);
+    if (acc && acc.n > 0) out[estado] = Math.round((acc.total / acc.n) * 10) / 10;
+  }
+  return out;
+}
+
+// Metrica 2 del plan: ciclo de venta completo, promedio SOLO de las empresas que ya
+// cerraron (llegaron a firma_pago) -- un ciclo en curso no tiene punto final todavia, no
+// se puede promediar con los cerrados sin sesgar el numero hacia abajo. null (no
+// "sin_datos" fabricado) cuando todavia no cerro ninguna, para que el widget lo muestre
+// como "sin datos" real en vez de un 0 que parece un ciclo instantaneo.
+export function cicloVentaPromedio(idOrganizacion: number, ahora: string): number | null {
+  const porEmpresa = historialPorEmpresaOrg(idOrganizacion);
+  let total = 0;
+  let n = 0;
+  for (const transiciones of porEmpresa.values()) {
+    const ciclo = calcularCicloVenta({ transiciones }, ahora);
+    if (ciclo?.cerrado) {
+      total += ciclo.dias;
+      n += 1;
+    }
+  }
+  return n > 0 ? Math.round((total / n) * 10) / 10 : null;
+}
+
+// Metrica 3 del plan: cuenta cruda de transiciones registradas en el rango, scoped a la
+// organizacion. La division (transiciones / dias) es logica pura -> vive en
+// core/velocity.ts (calcularVelocidadCambioEtapa), esta funcion solo hace el COUNT. Mismo
+// patron substr(fecha,1,10) que enRango (arriba, toque.fecha): tolera que fecha traiga
+// hora pegada o no.
+export function transicionesEnRango(idOrganizacion: number, desde: string, hasta: string): number {
+  const r = db
+    .select({ n: sql<number>`count(*)` })
+    .from(empresaEstadoHistorial)
+    .innerJoin(empresa, eq(empresa.idEmpresa, empresaEstadoHistorial.idEmpresa))
+    .where(
+      and(
+        eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+        EMPRESA_VIVA,
+        sql`substr(${empresaEstadoHistorial.fecha}, 1, 10) >= ${desde} AND substr(${empresaEstadoHistorial.fecha}, 1, 10) <= ${hasta}`,
+      ),
+    )
+    .get();
+  return r?.n ?? 0;
+}
+
+// Metrica 4 del plan: total del MRR estimado de TODA la organizacion (suma de
+// calcularMrrEstimado por empresa). tarifaTxnPlan/saasMensual son numeros de negocio, no
+// hay columna/tabla para ellos hoy (ver comentario largo en app/core/mrr.ts) -- se leen de
+// configuracion_admin (mismo mecanismo clave/valor que ya usa /conectores), el caller se
+// los pasa ya resueltos porque leerConfiguracionAdmin no es dominio, es Repository.
+// digitalPct entra fijo en 1 (default del plan) porque, otra vez, no hay fuente real por
+// empresa todavia.
+export function mrrEstimadoTotal(idOrganizacion: number, tarifaTxnPlan: number, saasMensual: number): number {
+  const filas = db
+    .select({ usuariosEfectivos: empresaUsuarios.usuariosEfectivos })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
+    .all();
+
+  let total = 0;
+  for (const f of filas) {
+    const usuarios = f.usuariosEfectivos ?? 0;
+    total += calcularMrrEstimado({ usuarios, digitalPct: digitalPctConDefault(null), tarifaTxnPlan, saasMensual });
+  }
+  return Math.round(total);
+}
+
+// Metrica 5 del plan: fila cruda por empresa para el endpoint REST de solo lectura --
+// deal size (proxy: usuarios efectivos, la unica cifra de tamano de cuenta que existe
+// hoy), estado (para derivar probabilidad de cierre en el caller via
+// core/probabilidadCierre.ts) y usuariosEfectivos (para derivar revenue estimado via
+// core/mrr.ts). El calculo de probabilidad/revenue NO vive aca a proposito: son formulas
+// puras, van en core/, esta funcion solo trae los datos crudos (Repository).
+export type FilaPipelineMrr = {
+  idEmpresa: string;
+  nombre: string;
+  estado: string | null;
+  usuariosEfectivos: number | null;
+};
+
+export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] {
+  return db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      estado: empresa.estadoNotion,
+      usuariosEfectivos: empresaUsuarios.usuariosEfectivos,
+    })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
+    .orderBy(asc(empresa.nombreOficial))
+    .all();
 }
 
 // --- Bucle PBX (enriquecimiento del decisor) ---------------------------------------

@@ -56,9 +56,10 @@ export async function datosSidebar() {
     { href: '/seguimiento', label: 'Seguimiento', icon: <IconSeguimiento />, badge: String(cuentasFunnel) },
     { href: '/cola', label: 'Toques', icon: <IconToques />, badge: String(toquesHoy), badgeTone: toquesHoy > 0 ? 'done' : 'neutral' },
     { href: '/por-revisar', label: 'Por revisar', icon: <IconPorRevisar />, badge: String(porRevisar), badgeTone: porRevisar > 0 ? 'overdue' : 'neutral' },
-    // Panel: dashboard de metricas, admin-only (la ruta redirige a / si no es admin), asi
-    // que el item solo aparece para admins -- antes se rotulaba "Pipeline" y apuntaba aca.
-    ...(usuario.admin ? [{ href: '/panel', label: 'Panel', icon: <IconPanel /> }] : []),
+    // Panel: dashboard de metricas del CRO. Fase 4 (plan-produccion-cro-campana.md, tarea
+    // 11) lo abrio a todos los usuarios -- ya no admin-only, el item siempre aparece.
+    // Antes se rotulaba "Pipeline" y apuntaba aca.
+    { href: '/panel', label: 'Panel', icon: <IconPanel /> },
     { href: '/conectores', label: 'Conectores', icon: <IconConectores />, badge: `${conectadosReales + 1}/3`, badgeTone: conectadosReales < 2 ? 'overdue' : 'neutral' },
   ];
 

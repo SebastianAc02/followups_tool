@@ -21,7 +21,15 @@ export type DataSourceKey =
   | 'toquesPorResultado'
   | 'campanasActivas'
   | 'inscripcionesActivas'
-  | 'empresasPorCadencia';
+  | 'empresasPorCadencia'
+  // Fase 4 (cockpit del CRO, plan-produccion-cro-campana.md): las 3 primeras leen
+  // empresa_estado_historial (hoy vacia en produccion -- nada la escribe todavia, ver
+  // comentario en actualizarEstadoNotion -- asi que salen "sin datos" hasta que Fase 5
+  // cablee las transiciones reales, no es un bug de esta tarea).
+  | 'tiempoPromedioPorEtapa' // metrica 1: tiempo en las 3 etapas
+  | 'cicloVentaPromedio' // metrica 2: ciclo de venta completo
+  | 'velocidadCambioEtapa' // metrica 3: tasa de cambio de stage
+  | 'mrrEstimadoTotal'; // metrica 4: MRR estimado
 
 export type Widget = {
   id: string; // estable, ej 'toques_por_canal'
@@ -43,10 +51,14 @@ export const WIDGETS: readonly Widget[] = [
   { id: 'leads_tocados', titulo: 'Leads tocados', grupo: 'throughput', tipo: 'kpi', dataSource: 'leadsTocados', spanDefault: 1 },
 
   // Velocity / cycle time
-  { id: 'lead_a_cliente', titulo: 'Lead → cliente', grupo: 'velocity', tipo: 'tendencia', dataSource: null, spanDefault: 1 },
+  // "Lead → cliente" YA es el ciclo de venta completo del plan (metrica 2): mismo widget
+  // del mockup, se le cablea la fuente real en vez de crear uno nuevo con el mismo sentido.
+  { id: 'lead_a_cliente', titulo: 'Lead → cliente', grupo: 'velocity', tipo: 'tendencia', dataSource: 'cicloVentaPromedio', spanDefault: 1 },
   { id: 'matar_deal_post_reunion', titulo: 'Matar deal post-reunion', grupo: 'velocity', tipo: 'tendencia', dataSource: null, spanDefault: 1 },
   { id: 'follow_up_por_deal', titulo: 'Follow-up por deal', grupo: 'velocity', tipo: 'tendencia', dataSource: null, spanDefault: 1 },
   { id: 'toques_antes_cerrar', titulo: 'Toques antes de cerrar/morir', grupo: 'velocity', tipo: 'tendencia', dataSource: null, spanDefault: 1 },
+  { id: 'tiempo_en_etapa', titulo: 'Tiempo promedio en etapa (dias)', grupo: 'velocity', tipo: 'barras', dataSource: 'tiempoPromedioPorEtapa', spanDefault: 2 },
+  { id: 'velocidad_cambio_etapa', titulo: 'Velocity: cambios de etapa / dia', grupo: 'velocity', tipo: 'kpi', dataSource: 'velocidadCambioEtapa', spanDefault: 1 },
 
   // Segmentacion
   { id: 'segmentacion_persona', titulo: 'Segmentacion por persona', grupo: 'segmentacion', tipo: 'lista', dataSource: null, spanDefault: 4 },
@@ -58,6 +70,7 @@ export const WIDGETS: readonly Widget[] = [
   { id: 'ticket_promedio', titulo: 'Ticket promedio', grupo: 'economia', tipo: 'kpi', dataSource: null, spanDefault: 1 },
   { id: 'campanas_activas', titulo: 'Campañas activas', grupo: 'economia', tipo: 'kpi', dataSource: 'campanasActivas', spanDefault: 1 },
   { id: 'inscripciones_activas', titulo: 'Inscripciones corriendo', grupo: 'economia', tipo: 'kpi', dataSource: 'inscripcionesActivas', spanDefault: 1 },
+  { id: 'mrr_estimado', titulo: 'MRR estimado', grupo: 'economia', tipo: 'kpi', dataSource: 'mrrEstimadoTotal', spanDefault: 2 },
 
   // Probabilidad de cierre
   { id: 'probabilidad_cierre', titulo: 'Probabilidad de cierre', grupo: 'probabilidad', tipo: 'histograma', dataSource: null, spanDefault: 4 },

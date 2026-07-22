@@ -3,7 +3,7 @@
 // Puro: no lee DB, recibe el historial y un "ahora" explicito (nunca Date.now() adentro).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularDuracionPorEtapa } from './tiempoEnEtapa.ts';
+import { calcularDuracionPorEtapa, calcularCicloVenta } from './tiempoEnEtapa.ts';
 
 test('historial vacio no tiene ventanas', () => {
   const resultado = calcularDuracionPorEtapa({ transiciones: [] }, '2026-06-10T00:00:00.000Z');
@@ -55,4 +55,49 @@ test('reingresar a la misma etapa dos veces da dos ventanas separadas, no se sum
   assert.equal(resultado[2].estado, 'on_hold');
   assert.equal(resultado[2].fechaFin, null);
   assert.equal(resultado[2].dias, 2);
+});
+
+test('calcularCicloVenta: historial vacio no tiene ciclo', () => {
+  assert.equal(calcularCicloVenta({ transiciones: [] }, '2026-06-10T00:00:00.000Z'), null);
+});
+
+test('calcularCicloVenta: llega a firma_pago -- ciclo cerrado, medido hasta ese punto', () => {
+  const historial = {
+    transiciones: [
+      { estado: 'contacto_iniciado', fecha: '2026-06-01T00:00:00.000Z' },
+      { estado: 'reunion_agendada', fecha: '2026-06-05T00:00:00.000Z' },
+      { estado: 'firma_pago', fecha: '2026-06-15T00:00:00.000Z' },
+    ],
+  };
+
+  const resultado = calcularCicloVenta(historial, '2026-07-01T00:00:00.000Z');
+
+  assert.deepEqual(resultado, { dias: 14, cerrado: true });
+});
+
+test('calcularCicloVenta: todavia no cierra -- ciclo en curso medido contra "ahora"', () => {
+  const historial = {
+    transiciones: [
+      { estado: 'contacto_iniciado', fecha: '2026-06-01T00:00:00.000Z' },
+      { estado: 'reunion_agendada', fecha: '2026-06-05T00:00:00.000Z' },
+    ],
+  };
+
+  const resultado = calcularCicloVenta(historial, '2026-06-10T00:00:00.000Z');
+
+  assert.deepEqual(resultado, { dias: 9, cerrado: false });
+});
+
+test('calcularCicloVenta: firma_pago que no es la ULTIMA transicion igual cierra el ciclo ahi (no sigue contando)', () => {
+  const historial = {
+    transiciones: [
+      { estado: 'contacto_iniciado', fecha: '2026-06-01T00:00:00.000Z' },
+      { estado: 'firma_pago', fecha: '2026-06-10T00:00:00.000Z' },
+      { estado: 'on_hold', fecha: '2026-06-20T00:00:00.000Z' },
+    ],
+  };
+
+  const resultado = calcularCicloVenta(historial, '2026-07-01T00:00:00.000Z');
+
+  assert.deepEqual(resultado, { dias: 9, cerrado: true });
 });

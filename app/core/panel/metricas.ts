@@ -21,6 +21,15 @@ export type MetricasDatos = {
   campanasActivas?: number;
   inscripcionesActivas?: number;
   empresasPorCadencia?: { cadencia: string; empresas: number }[];
+  // Fase 4 (cockpit del CRO): tiempoPromedioPorEtapa/mrrEstimadoTotal pueden venir
+  // presentes pero "vacios" (objeto {} / 0 empresas) -- eso SI es 'ok' con datos reales
+  // (la organizacion existe, solo no tiene historial/usuarios todavia). cicloVentaPromedio
+  // es el unico null real (ninguna empresa cerro un ciclo) -- resolverMetrica lo trata
+  // aparte para no confundir "no lo calcule" con "lo calcule y dio cero cierres".
+  tiempoPromedioPorEtapa?: Record<string, number>;
+  cicloVentaPromedio?: number | null;
+  velocidadCambioEtapa?: number;
+  mrrEstimadoTotal?: number;
 };
 
 const SIN_DATOS: MetricaValor = { estado: 'sin_datos' };
@@ -45,6 +54,18 @@ export function resolverMetrica(dataSource: DataSourceKey | null, datos: Metrica
       return datos.inscripcionesActivas === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.inscripcionesActivas };
     case 'empresasPorCadencia':
       return datos.empresasPorCadencia === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.empresasPorCadencia };
+    case 'tiempoPromedioPorEtapa':
+      return datos.tiempoPromedioPorEtapa === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.tiempoPromedioPorEtapa };
+    case 'cicloVentaPromedio':
+      // null = se calculo pero ninguna empresa cerro un ciclo todavia (ver comentario en
+      // MetricasDatos): mismo tratamiento visual que sin_datos, no hay numero que mostrar.
+      return datos.cicloVentaPromedio === undefined || datos.cicloVentaPromedio === null
+        ? SIN_DATOS
+        : { estado: 'ok', valor: datos.cicloVentaPromedio };
+    case 'velocidadCambioEtapa':
+      return datos.velocidadCambioEtapa === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.velocidadCambioEtapa };
+    case 'mrrEstimadoTotal':
+      return datos.mrrEstimadoTotal === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.mrrEstimadoTotal };
     default: {
       const _exhaustivo: never = dataSource;
       return _exhaustivo;
