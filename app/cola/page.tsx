@@ -39,16 +39,24 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   // Pipeline compartido (B3 v1): cualquier autenticado puede MIRAR la cola de otro por
   // ?owner=, pero el default es el owner de la sesion, ya no OWNERS[0]. Visitante (solo
   // lectura) sin ?owner= ve la cola de TODOS los owners, no una propia (que estaria vacia).
-  const owner = sp.owner ?? (usuario.soloLectura ? undefined : usuario.owner);
+  // verTodoPipeline (CRO, Fase 3): mismo default que el visitante -- sin ?owner= ve TODOS
+  // los owners, Felipe y Sebastian incluidos, sin perder su propio owner si algo se lo pide.
+  const owner = sp.owner ?? (usuario.soloLectura || usuario.verTodoPipeline ? undefined : usuario.owner);
   const hoy = hoyDemo();
   const splitActivo = owner === OWNER_COLA_SPLIT;
   const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
   const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
   const reagendar = splitActivo ? colaReagendar(hoy, owner, usuario.idOrganizacion) : [];
   // Seccion "Contacto iniciado sin seguimiento" (2026-07-14): para CUALQUIER owner, no
-  // solo el split de Sebastian. Sin owner (visitante viendo TODA la organizacion) no hay
-  // un owner concreto contra el que filtrar -- la seccion simplemente no se muestra.
-  const sinSeguimiento = owner ? colaContactoIniciadoSinSeguimiento(owner, usuario.idOrganizacion) : [];
+  // solo el split de Sebastian. Sin owner por ser visitante, la seccion simplemente no se
+  // muestra (decision anterior de Sebastian: un visitante no tiene "lo suyo" que completar).
+  // Sin owner por ser CRO (Fase 3), si se muestra: org-wide, la misma seccion pero de
+  // Felipe + Sebastian juntos -- es lectura, exactamente lo que el CRO pidio ver.
+  const sinSeguimiento = owner
+    ? colaContactoIniciadoSinSeguimiento(owner, usuario.idOrganizacion)
+    : usuario.verTodoPipeline
+      ? colaContactoIniciadoSinSeguimiento(undefined, usuario.idOrganizacion)
+      : [];
   const contadores = contadoresHoy(hoy, owner, usuario.idOrganizacion);
   // V5.7: cadencias (automatico Apollo + manual Tier 1) no son por owner todavia
   // (campana.owner es la campana masiva, no un individuo -- ver memoria del proyecto);

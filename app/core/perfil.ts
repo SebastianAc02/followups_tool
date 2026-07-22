@@ -39,6 +39,7 @@ export type Perfil = {
   admin: boolean;
   idOrganizacion: number;
   soloLectura: boolean;
+  verTodoPipeline: boolean;
   colorAvatar: string;
   vistaInicio: string;
   cargo: string;
@@ -59,10 +60,17 @@ export function construirPerfil(identidad: UsuarioSesion, preferencias: Preferen
     nombre: identidad.owner,
     primerNombre,
     iniciales: inic,
-    rol: identidad.soloLectura ? 'Visitante' : identidad.admin ? 'Administrador' : 'Vendedor',
+    rol: identidad.soloLectura
+      ? 'Visitante'
+      : identidad.verTodoPipeline
+        ? 'CRO'
+        : identidad.admin
+          ? 'Administrador'
+          : 'Vendedor',
     admin: identidad.admin,
     idOrganizacion: identidad.idOrganizacion,
     soloLectura: identidad.soloLectura,
+    verTodoPipeline: identidad.verTodoPipeline,
     colorAvatar: preferencias.colorAvatar,
     vistaInicio: preferencias.vistaInicio,
     cargo: preferencias.cargo,

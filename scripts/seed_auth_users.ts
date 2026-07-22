@@ -6,12 +6,16 @@ const DB_PATH =
   '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db';
 
 // owner = valor EXACTO de empresa.owner en isps.db (B1.c en plan-claude-v2.md).
+// verTodoPipeline (Fase 3, docs/plan-produccion-cro-campana.md): solo Camilo (el CRO) lo
+// tiene en 1. Deliberadamente NO es admin=1 -- admin es panel/conectores de equipo, y
+// Camilo no necesita eso para ver el pipeline, solo lectura ampliada.
 const USUARIOS = [
   {
     email: process.env.SEED_EMAIL_SEBASTIAN ?? 'sacostamolin@gmail.com',
     nombre: 'Sebastián Acosta',
     owner: 'Sebastian Acosta Molina',
     admin: 1,
+    verTodoPipeline: 0,
     passwordEnv: 'SEED_PASSWORD_SEBASTIAN',
   },
   {
@@ -19,7 +23,16 @@ const USUARIOS = [
     nombre: 'Felipe Castro',
     owner: 'Felipe Castro',
     admin: 0,
+    verTodoPipeline: 0,
     passwordEnv: 'SEED_PASSWORD_FELIPE',
+  },
+  {
+    email: process.env.SEED_EMAIL_CAMILO ?? '',
+    nombre: 'Camilo Fonseca',
+    owner: 'Camilo fonseca',
+    admin: 0,
+    verTodoPipeline: 1,
+    passwordEnv: 'SEED_PASSWORD_CAMILO',
   },
 ];
 
@@ -38,11 +51,12 @@ async function main() {
       } catch (e) {
         console.log(`${u.email} ya existia o fallo el alta: ${(e as Error).message}`);
       }
-      // owner y admin son input:false: solo se setean aqui, nunca desde el cliente.
+      // owner, admin y ver_todo_pipeline son input:false: solo se setean aqui, nunca
+      // desde el cliente.
       const r = db
-        .prepare('UPDATE "user" SET "owner" = ?, "admin" = ? WHERE "email" = ?')
-        .run(u.owner, u.admin, u.email);
-      console.log(`  owner/admin seteados (${r.changes} fila)`);
+        .prepare('UPDATE "user" SET "owner" = ?, "admin" = ?, "ver_todo_pipeline" = ? WHERE "email" = ?')
+        .run(u.owner, u.admin, u.verTodoPipeline, u.email);
+      console.log(`  owner/admin/verTodoPipeline seteados (${r.changes} fila)`);
 
       // Multi-organizacion (Parte 1): reclamar la fila de organizacion_miembro que le
       // corresponde a este owner_canonico, si todavia esta libre. Sin esto, un usuario
