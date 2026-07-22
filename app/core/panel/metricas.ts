@@ -40,6 +40,11 @@ export type MetricasDatos = {
   followUpPorDeal?: number;
   segmentacionPorPersona?: Record<string, number>;
   toquesAntesDeCerrarPromedio?: number | null;
+  // conversionStage (2026-07-22): mismo principio que tiempoPromedioPorEtapa arriba -- un
+  // objeto vacio ({}) es un resultado real (nadie llego a la primera etapa todavia), no
+  // "sin_datos". No es null nunca (calcularConversionStage siempre devuelve un Record, aunque
+  // este vacio).
+  conversionStage?: Record<string, number>;
 };
 
 const SIN_DATOS: MetricaValor = { estado: 'sin_datos' };
@@ -90,6 +95,8 @@ export function resolverMetrica(dataSource: DataSourceKey | null, datos: Metrica
       return datos.toquesAntesDeCerrarPromedio === undefined || datos.toquesAntesDeCerrarPromedio === null
         ? SIN_DATOS
         : { estado: 'ok', valor: datos.toquesAntesDeCerrarPromedio };
+    case 'conversionStage':
+      return datos.conversionStage === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.conversionStage };
     default: {
       const _exhaustivo: never = dataSource;
       return _exhaustivo;

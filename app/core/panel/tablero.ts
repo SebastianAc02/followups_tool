@@ -18,10 +18,15 @@ export type TableroItem = { widgetId: string; span: number };
 // Sin probabilidad_cierre: decision de Sebastian (2026-07-22). La probabilidad de cierre
 // depende del proceso del CLIENTE (que haya agreement de su lado), no del proceso propio;
 // forzar un numero seria subjetivo. Se deja fuera hasta que exista una senal objetiva.
+//
+// velocidad_cambio_etapa -> conversion_stage (2026-07-22): Sebastian pidio la conversion
+// real de stage a stage (% que avanza) para el default, no solo la velocidad (cambios/dia).
+// velocidad_cambio_etapa SIGUE en el catalogo (widgets.ts) -- se puede agregar de vuelta
+// por el Constructor -- solo sale del default.
 const DEFAULT_IDS = [
   'tiempo_en_etapa', // tiempo promedio en las 3 stages (cuanto dura cada etapa)
   'lead_a_cliente', // ciclo de venta (cuanto tarda un cierre)
-  'velocidad_cambio_etapa', // tasa de cambio de stage
+  'conversion_stage', // % de deals que avanzan de una etapa a la siguiente
   'mrr_estimado', // revenue estimado (0 hasta configurar tarifa del plan)
 ] as const;
 

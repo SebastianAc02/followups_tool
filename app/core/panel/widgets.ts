@@ -51,7 +51,12 @@ export type DataSourceKey =
   // de toque tipo 'perdido' ni razon_perdida poblada en prod) -- el widget mide SOLO el
   // lado de "gano", nunca "murio", y eso se documenta en el titulo/comentario, no se
   // inventa la mitad que falta.
-  | 'toquesAntesDeCerrarPromedio';
+  | 'toquesAntesDeCerrarPromedio'
+  // Conectado 2026-07-22: distinta de velocidadCambioEtapa (esa es throughput -- cambios
+  // de etapa / dia; esta es conversion -- de los deals que llegaron a una etapa, que %
+  // avanzo a la siguiente). Ver el detalle largo de "llego a la etapa" (high-water-mark)
+  // en core/panel/conversionStage.ts.
+  | 'conversionStage';
 
 export type Widget = {
   id: string; // estable, ej 'toques_por_canal'
@@ -80,6 +85,10 @@ export const WIDGETS: readonly Widget[] = [
   { id: 'toques_antes_cerrar', titulo: 'Toques antes de ganar', grupo: 'velocity', tipo: 'tendencia', dataSource: 'toquesAntesDeCerrarPromedio', spanDefault: 1 },
   { id: 'tiempo_en_etapa', titulo: 'Tiempo promedio en etapa (dias)', grupo: 'velocity', tipo: 'barras', dataSource: 'tiempoPromedioPorEtapa', spanDefault: 2 },
   { id: 'velocidad_cambio_etapa', titulo: 'Velocity: cambios de etapa / dia', grupo: 'velocity', tipo: 'kpi', dataSource: 'velocidadCambioEtapa', spanDefault: 1 },
+  // Tipo 'barras': mismo shape (Record<par, tasa>) que tiempo_en_etapa/toques_por_canal.
+  // Distinta de velocidad_cambio_etapa (velocity/throughput) -- esta es conversion: % de
+  // deals que avanzaron de una etapa a la siguiente.
+  { id: 'conversion_stage', titulo: 'Conversión stage → stage', grupo: 'velocity', tipo: 'barras', dataSource: 'conversionStage', spanDefault: 2 },
 
   // Segmentacion
   // Tipo 'barras' (no 'lista'): la distribucion por cargo_categoria es exactamente el

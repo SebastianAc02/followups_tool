@@ -48,7 +48,7 @@ test('tableroDefault trae SOLO las 4 metricas objetivas del CRO (sin probabilida
   const def = tableroDefault();
   assert.deepEqual(
     def.map((w) => w.widgetId),
-    ['tiempo_en_etapa', 'lead_a_cliente', 'velocidad_cambio_etapa', 'mrr_estimado'],
+    ['tiempo_en_etapa', 'lead_a_cliente', 'conversion_stage', 'mrr_estimado'],
   );
   assert.ok(def.every((w) => typeof w.widgetId === 'string' && w.span > 0));
 });

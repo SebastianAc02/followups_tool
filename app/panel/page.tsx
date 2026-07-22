@@ -5,6 +5,8 @@ import { ventanaPromedio, promedioDiario } from '../core/actividad';
 import { diasEntre } from '../core/tiempoEnEtapa';
 import { calcularVelocidadCambioEtapa } from '../core/velocity';
 import { calcularFollowUpPorDeal } from '../core/panel/followUpPorDeal';
+import { calcularConversionStage } from '../core/panel/conversionStage';
+import { FUNNEL_ETAPAS } from '../db/funnel';
 import {
   contarToquesEnRango,
   leadsTocadosEnRango,
@@ -23,6 +25,7 @@ import {
   reunionesAgendadasEnRango,
   segmentacionPorPersona,
   toquesAntesDeCerrarPromedio,
+  empresasParaConversionStage,
 } from '../db/repository';
 import { WIDGETS } from '../core/panel/widgets';
 import { resolverMetrica, type MetricaValor } from '../core/panel/metricas';
@@ -94,6 +97,15 @@ export default async function Panel({
     // Sin owner ni rango: mismo criterio que cicloVentaPromedio/duracionPromedioPorEtapa
     // (vecinos en el grupo 'velocity') -- vista del CRO sobre TODO el historial.
     toquesAntesDeCerrarPromedio: toquesAntesDeCerrarPromedio(usuario.idOrganizacion),
+    // conversion_stage (2026-07-22): mismo criterio sin-owner que sus vecinos de 'velocity'
+    // de arriba -- vista del CRO sobre TODA la organizacion, no un corte por vendedor
+    // (empresasParaConversionStage soporta owner pero este caller no lo usa, ver el
+    // comentario largo junto a la funcion en repository.ts). El orden del funnel sale de
+    // FUNNEL_ETAPAS (db/funnel.ts), la unica fuente de verdad del orden en el repo.
+    conversionStage: calcularConversionStage(
+      empresasParaConversionStage(usuario.idOrganizacion),
+      FUNNEL_ETAPAS.map((e) => e.estado),
+    ),
   };
 
   // Se resuelve la metrica de TODOS los widgets del catalogo (no solo los del tablero

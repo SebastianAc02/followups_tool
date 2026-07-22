@@ -72,6 +72,7 @@ import { estadoDestinoPorToque } from '../core/transicion-estado';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { aplicaBuclePBX, estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { calcularDuracionPorEtapa, calcularCicloVenta, type TransicionEtapa } from '../core/tiempoEnEtapa';
+import type { EmpresaFunnelInput } from '../core/panel/conversionStage';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { contarToquesAntesDeFecha } from '../core/panel/toquesAntesCerrar';
 import { cifrar, descifrar } from '../lib/crypto';
@@ -5593,6 +5594,58 @@ export function toquesAntesDeCerrarPromedio(idOrganizacion: number): number | nu
     total += contarToquesAntesDeFecha(fechasPorEmpresa.get(c.idEmpresa) ?? [], c.fechaCierre);
   }
   return Math.round((total / cierres.length) * 10) / 10;
+}
+
+// Conversion stage->stage (widget nuevo del cockpit del CRO, grupo velocity): trae, por
+// cada empresa viva de la organizacion, su etapa actual (empresa.estado_notion) y la lista
+// de estado_nuevo que aparecen en su historial (empresa_estado_historial) -- el calculo del
+// high-water-mark y las razones de conversion es logica pura (calcularConversionStage en
+// core/panel/conversionStage.ts), esta funcion solo trae los datos crudos.
+//
+// Dos queries, no N+1 (mismo principio que historialPorEmpresaOrg/toquesAntesDeCerrarPromedio
+// arriba): la primera trae TODAS las empresas de la organizacion con su etapa actual (asi
+// una empresa sin ninguna fila de historial -- ej. un lead crudo que nunca se toco -- igual
+// entra al calculo con su etapa actual); la segunda trae TODO el historial de esa
+// organizacion de una sola vez y se agrupa en memoria por idEmpresa.
+//
+// owner opcional (parametro, no wireado desde /panel hoy): duracionPromedioPorEtapa/
+// cicloVentaPromedio/toquesAntesDeCerrarPromedio, los vecinos de este widget en el grupo
+// 'velocity', son vistas del CRO sobre TODA la organizacion y no toman owner -- se mantiene
+// esa misma convencion en el caller (page.tsx llama esta funcion sin owner). El parametro
+// se deja opcional aca (no se descarta la firma) por si mas adelante se quiere un corte
+// "conversion de MI cartera" -- construirlo ahora sin que nadie lo pida seria trabajo
+// especulativo.
+export function empresasParaConversionStage(idOrganizacion: number, owner?: string): EmpresaFunnelInput[] {
+  const condicionesEmpresa = [eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA];
+  if (owner) condicionesEmpresa.push(eq(empresa.owner, owner));
+
+  const filasEmpresa = db
+    .select({ idEmpresa: empresa.idEmpresa, estadoActual: empresa.estadoNotion })
+    .from(empresa)
+    .where(and(...condicionesEmpresa))
+    .all();
+
+  const condicionesHist = [eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion), EMPRESA_VIVA];
+  if (owner) condicionesHist.push(eq(empresa.owner, owner));
+  const filasHist = db
+    .select({ idEmpresa: empresaEstadoHistorial.idEmpresa, estado: empresaEstadoHistorial.estadoNuevo })
+    .from(empresaEstadoHistorial)
+    .innerJoin(empresa, eq(empresa.idEmpresa, empresaEstadoHistorial.idEmpresa))
+    .where(and(...condicionesHist))
+    .all();
+
+  const historialPorEmpresa = new Map<string, string[]>();
+  for (const f of filasHist) {
+    const arr = historialPorEmpresa.get(f.idEmpresa) ?? [];
+    arr.push(f.estado);
+    historialPorEmpresa.set(f.idEmpresa, arr);
+  }
+
+  return filasEmpresa.map((f) => ({
+    idEmpresa: f.idEmpresa,
+    estadoActual: f.estadoActual,
+    estadosHistorial: historialPorEmpresa.get(f.idEmpresa) ?? [],
+  }));
 }
 
 // Metrica 5 del plan: fila cruda por empresa para el endpoint REST de solo lectura --

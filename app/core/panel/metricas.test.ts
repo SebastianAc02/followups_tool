@@ -66,3 +66,15 @@ test('los 5 dataSources nuevos: sin_datos cuando el caller no calculo nada (unde
   assert.equal(resolverMetrica('segmentacionPorPersona', {}).estado, 'sin_datos');
   assert.equal(resolverMetrica('toquesAntesDeCerrarPromedio', {}).estado, 'sin_datos');
 });
+
+// conversionStage (2026-07-22): mismo shape Record<string, number> que tiempoPromedioPorEtapa
+// -- ok incluso con objeto vacio (nadie llego a la primera etapa todavia es un dato real).
+test('conversionStage: ok con el Record de razones, incluso vacio', () => {
+  const r = resolverMetrica('conversionStage', { conversionStage: { 'lead→contacto_iniciado': 0.42 } });
+  assert.deepEqual(r, { estado: 'ok', valor: { 'lead→contacto_iniciado': 0.42 } });
+  assert.deepEqual(resolverMetrica('conversionStage', { conversionStage: {} }), { estado: 'ok', valor: {} });
+});
+
+test('conversionStage: sin_datos cuando el caller no calculo nada (undefined)', () => {
+  assert.equal(resolverMetrica('conversionStage', {}).estado, 'sin_datos');
+});
