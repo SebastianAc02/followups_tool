@@ -7,15 +7,27 @@
 // con un widgetId que despues se borro del catalogo no rompe el render, simplemente
 // desaparece del tablero.
 
-import { WIDGETS, widgetPorId } from './widgets.ts';
+import { widgetPorId } from './widgets.ts';
 
 export type TableroItem = { widgetId: string; span: number };
 
-// Default = el catalogo completo (Decision 1 del plan: se porta TODO el shell visual del
-// mockup, con "sin datos" donde no hay fuente real -- no un subconjunto arbitrario que
-// deja secciones enteras (Velocity/Economia/Probabilidad) sin renderizar).
+// Default = las 5 metricas del CRO (docs/plan-produccion-cro-campana.md, Fase 4). Decision
+// de Sebastian (2026-07-22): el tablero abre con SOLO estas cinco; el resto del catalogo
+// sigue disponible por el drag&drop, no se borra. Antes el default traia el catalogo
+// completo (~24 widgets), la mayoria "sin datos", y enterraba las cinco que importan.
+const DEFAULT_IDS = [
+  'tiempo_en_etapa', // tiempo promedio en las 3 stages
+  'lead_a_cliente', // ciclo de venta
+  'velocidad_cambio_etapa', // tasa de cambio de stage
+  'mrr_estimado', // revenue estimado
+  'probabilidad_cierre', // deal size / probabilidad
+] as const;
+
 export function tableroDefault(): TableroItem[] {
-  return WIDGETS.map((w) => ({ widgetId: w.id, span: w.spanDefault }));
+  return DEFAULT_IDS.map((id) => {
+    const w = widgetPorId(id);
+    return { widgetId: id, span: w?.spanDefault ?? 1 };
+  });
 }
 
 // Invariante: un widgetId no se repite en el tablero (un usuario no puede tener "Toques

@@ -44,8 +44,11 @@ test('serialize/parse hacen roundtrip', () => {
   assert.deepEqual(parse(serialize(original)), original);
 });
 
-test('tableroDefault solo trae widgets del catalogo real', () => {
+test('tableroDefault trae SOLO las 5 metricas del CRO, todas del catalogo real', () => {
   const def = tableroDefault();
-  assert.ok(def.length > 0);
-  assert.ok(def.every((w) => typeof w.widgetId === 'string'));
+  assert.deepEqual(
+    def.map((w) => w.widgetId),
+    ['tiempo_en_etapa', 'lead_a_cliente', 'velocidad_cambio_etapa', 'mrr_estimado', 'probabilidad_cierre'],
+  );
+  assert.ok(def.every((w) => typeof w.widgetId === 'string' && w.span > 0));
 });
