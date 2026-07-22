@@ -10,18 +10,8 @@
 import { useRouter } from 'next/navigation';
 import type { TableroItem } from '../core/panel/tablero';
 import type { MetricaValor } from '../core/panel/metricas';
-import { WIDGETS, type WidgetGrupo } from '../core/panel/widgets';
+import { WIDGETS } from '../core/panel/widgets';
 import { Widget } from './widgets/Widget';
-
-const GRUPO_LABEL: Record<WidgetGrupo, string> = {
-  throughput: 'Throughput del periodo',
-  velocity: 'Velocity / cycle time',
-  segmentacion: 'Segmentación',
-  economia: 'Economía del deal',
-  probabilidad: 'Probabilidad de cierre',
-};
-
-const ORDEN_GRUPOS: WidgetGrupo[] = ['throughput', 'velocity', 'segmentacion', 'economia', 'probabilidad'];
 
 function navegarConFiltro(router: ReturnType<typeof useRouter>, cambios: Record<string, string | undefined>, actuales: Record<string, string | undefined>) {
   const params = new URLSearchParams();
@@ -46,8 +36,6 @@ export function Cockpit({
   hasta: string;
 }) {
   const router = useRouter();
-  const idsEnTablero = new Set(tablero.map((t) => t.widgetId));
-  const spanPorId = new Map(tablero.map((t) => [t.widgetId, t.span]));
   const actuales = { owner, desde, hasta };
 
   return (
@@ -102,22 +90,17 @@ export function Cockpit({
         ))}
       </div>
 
-      {ORDEN_GRUPOS.map((grupo) => {
-        const widgetsDelGrupo = WIDGETS.filter((w) => w.grupo === grupo && idsEnTablero.has(w.id));
-        if (widgetsDelGrupo.length === 0) return null;
-        return (
-          <section key={grupo} aria-label={GRUPO_LABEL[grupo]}>
-            <div className="mb-4 font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              {GRUPO_LABEL[grupo]}
-            </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {widgetsDelGrupo.map((w) => (
-                <Widget key={w.id} widget={w} metrica={metricas[w.id] ?? { estado: 'sin_datos' }} span={spanPorId.get(w.id)} />
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      {/* Se renderiza en el ORDEN del tablero (drag & drop), no reagrupado por categoria
+          (Sebastian 2026-07-22): antes el cockpit agrupaba por grupo e ignoraba el orden de
+          la edicion, asi un widget que arrastrabas abajo salia arriba en el cockpit. Ahora
+          cockpit y edicion muestran lo mismo, en el mismo orden. */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {tablero.map((item) => {
+          const w = WIDGETS.find((x) => x.id === item.widgetId);
+          if (!w) return null;
+          return <Widget key={w.id} widget={w} metrica={metricas[w.id] ?? { estado: 'sin_datos' }} span={item.span} />;
+        })}
+      </div>
 
       {tablero.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
