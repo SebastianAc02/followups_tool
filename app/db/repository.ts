@@ -427,7 +427,11 @@ export function pipelineSinCadencia(
   const condiciones = [
     eq(empresa.organizacionActivaId, idOrganizacion),
     EMPRESA_VIVA,
-    sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago')`,
+    // 'lead' excluido (Sebastián 2026-07-22): "Sin cadencia" debe mostrar solo los deals
+    // avanzados que uno supervisa a mano (cierre, contacto_iniciado, oportunidad, etc.), no
+    // las decenas de leads dormidos con fecha vieja/nula que ensucian la vista. on_hold ya
+    // sale por su cadencia; firma_pago es un deal ganado (cerrado), no un follow-up abierto.
+    sql`COALESCE(${empresa.estadoNotion}, '') NOT IN ('on_hold', 'firma_pago', 'lead')`,
     notExists(
       db
         .select({ x: sql`1` })

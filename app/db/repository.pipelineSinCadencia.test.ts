@@ -55,9 +55,9 @@ test('on_hold y firma_pago siguen fuera (no son trabajo activo)', () => {
 });
 
 test('esHoy y esVencido marcan la urgencia sin esconder nada', () => {
-  seedEmpresa('e-vencida', 'Owner Marca', 'lead', '2026-07-01');
-  seedEmpresa('e-hoy', 'Owner Marca', 'lead', HOY);
-  seedEmpresa('e-nueva', 'Owner Marca', 'lead', null);
+  seedEmpresa('e-vencida', 'Owner Marca', 'cierre_documentacion', '2026-07-01');
+  seedEmpresa('e-hoy', 'Owner Marca', 'cierre_documentacion', HOY);
+  seedEmpresa('e-nueva', 'Owner Marca', 'cierre_documentacion', null);
 
   const filas = pipelineSinCadencia(1, HOY, 'Owner Marca');
   const porId = new Map(filas.map((f) => [f.idEmpresa, f]));
@@ -65,6 +65,14 @@ test('esHoy y esVencido marcan la urgencia sin esconder nada', () => {
   assert.equal(porId.get('e-hoy')!.esHoy, true);
   assert.equal(porId.get('e-nueva')!.esVencido, false);
   assert.equal(porId.get('e-nueva')!.esHoy, false);
+});
+
+test('los leads NO salen (Sebastián 2026-07-22: Sin cadencia = solo deals avanzados)', () => {
+  seedEmpresa('e-lead-fresco', 'Owner Marca', 'lead', HOY);
+  seedEmpresa('e-lead-viejo', 'Owner Marca', 'lead', '2026-06-01');
+  const ids = pipelineSinCadencia(1, HOY, 'Owner Marca').map((f) => f.idEmpresa);
+  assert.ok(!ids.includes('e-lead-fresco'), 'un lead no entra a Sin cadencia');
+  assert.ok(!ids.includes('e-lead-viejo'));
 });
 
 test('excluye empresas en cadencia activa (esas van en las franjas de toque)', () => {
