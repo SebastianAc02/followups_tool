@@ -36,3 +36,33 @@ test('velocidadCambioEtapa y mrrEstimadoTotal: ok cuando el caller los calculo',
   assert.deepEqual(resolverMetrica('velocidadCambioEtapa', { velocidadCambioEtapa: 0.5 }), { estado: 'ok', valor: 0.5 });
   assert.deepEqual(resolverMetrica('mrrEstimadoTotal', { mrrEstimadoTotal: 1200000 }), { estado: 'ok', valor: 1200000 });
 });
+
+// Widgets conectados 2026-07-22: los 5 dataSources nuevos deben devolver 'ok' (nunca
+// sin_datos) cuando el caller ya calculo el dato -- incluye el caso 0/objeto vacio, que
+// es un numero real (0 deals nuevos, ningun toque todavia), no "no lo calcule".
+test('dealsNuevosEnRango / reunionesAgendadasEnRango: ok incluso en 0 (dato real, no sin_datos)', () => {
+  assert.deepEqual(resolverMetrica('dealsNuevosEnRango', { dealsNuevosEnRango: 0 }), { estado: 'ok', valor: 0 });
+  assert.deepEqual(resolverMetrica('reunionesAgendadasEnRango', { reunionesAgendadasEnRango: 3 }), { estado: 'ok', valor: 3 });
+});
+
+test('followUpPorDeal: ok con el promedio ya calculado por el caller', () => {
+  assert.deepEqual(resolverMetrica('followUpPorDeal', { followUpPorDeal: 2.5 }), { estado: 'ok', valor: 2.5 });
+});
+
+test('segmentacionPorPersona: ok con el Record por categoria', () => {
+  const r = resolverMetrica('segmentacionPorPersona', { segmentacionPorPersona: { dueno: 5, gerente: 2 } });
+  assert.deepEqual(r, { estado: 'ok', valor: { dueno: 5, gerente: 2 } });
+});
+
+test('toquesAntesDeCerrarPromedio: null (nadie cerro) es sin_datos, un numero real es ok', () => {
+  assert.equal(resolverMetrica('toquesAntesDeCerrarPromedio', { toquesAntesDeCerrarPromedio: null }).estado, 'sin_datos');
+  assert.deepEqual(resolverMetrica('toquesAntesDeCerrarPromedio', { toquesAntesDeCerrarPromedio: 1.5 }), { estado: 'ok', valor: 1.5 });
+});
+
+test('los 5 dataSources nuevos: sin_datos cuando el caller no calculo nada (undefined)', () => {
+  assert.equal(resolverMetrica('dealsNuevosEnRango', {}).estado, 'sin_datos');
+  assert.equal(resolverMetrica('reunionesAgendadasEnRango', {}).estado, 'sin_datos');
+  assert.equal(resolverMetrica('followUpPorDeal', {}).estado, 'sin_datos');
+  assert.equal(resolverMetrica('segmentacionPorPersona', {}).estado, 'sin_datos');
+  assert.equal(resolverMetrica('toquesAntesDeCerrarPromedio', {}).estado, 'sin_datos');
+});
