@@ -67,6 +67,14 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
 
   const filas = pipelineGlobal(usuario.idOrganizacion, hoy);
 
+  // Distinción pedida por Sebastián (2026-07-22): las que YA arrancan (toque de hoy) van en
+  // sus grupos "Toque N"; las que AÚN NO entran (primer paso, programadas para un día futuro,
+  // sin tocar todavía) van en su propio grupo, para no inflar "Toque uno" con las que todavía
+  // no empiezan. "No entra" = primer paso (orden <= 1) y sin toque de hoy.
+  const noEntran = filas.filter((f) => !f.esHoy && (f.pasoActual ?? 1) <= 1);
+  const noEntranIds = new Set(noEntran.map((f) => f.idInscripcion));
+  const filasEnSecuencia = filas.filter((f) => !noEntranIds.has(f.idInscripcion));
+
   // Pedido de Sebastián (2026-07-10): el overview agrupa por NUMERO DE TOQUE (el
   // paso 1-indexed de la cadencia), no por día de calendario ni por etapa del funnel
   // (D1 sigue valiendo para el Home, no aca). "Toque uno" es mas claro para el equipo
@@ -74,7 +82,7 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
   // contactos lleva la empresa en el playbook y por que canal le toca el siguiente.
   // pasoActual null (inscripcion sin paso activo, ej. ya se agotaron los pasos) cae
   // en un grupo aparte en vez de perderse.
-  const pasos = [...new Set(filas.map((f) => f.pasoActual))].sort((a, b) => {
+  const pasos = [...new Set(filasEnSecuencia.map((f) => f.pasoActual))].sort((a, b) => {
     if (a === null) return 1;
     if (b === null) return -1;
     return a - b;
@@ -82,7 +90,7 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
 
   const grupos = pasos
     .map((paso) => {
-      const empresasPaso = filas.filter((f) => f.pasoActual === paso);
+      const empresasPaso = filasEnSecuencia.filter((f) => f.pasoActual === paso);
       if (empresasPaso.length === 0) return null;
 
       const mezclaCanales = { ll: 0, wa: 0, co: 0 };
@@ -198,9 +206,45 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
     return { data, empresas };
   })();
 
+  // Grupo "Aún no entran": las inscritas cuyo primer toque está programado para un día
+  // futuro (no arrancan hoy). Separadas de "Toque uno" para que ahí solo se vea lo de hoy.
+  const grupoNoEntran = (() => {
+    if (noEntran.length === 0) return null;
+    const mezclaCanales = { ll: 0, wa: 0, co: 0 };
+    const empresas: EmpresaRowData[] = noEntran.map((f) => {
+      const canal = canalNormalizado(f.canal);
+      if (canal === 'llamada') mezclaCanales.ll += 1;
+      else if (canal === 'whatsapp') mezclaCanales.wa += 1;
+      else mezclaCanales.co += 1;
+      return {
+        id: f.idEmpresa,
+        nombre: f.empresa,
+        contacto: f.contacto ?? 'Sin contacto activo',
+        cargo: f.cargo ?? '',
+        pasoActual: 'Aún no entra',
+        diaSecuencia: f.diaSecuencia ?? 0,
+        cadencia: f.campana,
+        objetivo: f.objetivo,
+        canal,
+        esHoy: false,
+      };
+    });
+
+    const data: EtapaGroupData = {
+      estado: 'no-entran',
+      label: 'Aún no entran · programadas para después',
+      total: noEntran.length,
+      mezclaCanales,
+      toquesHoy: 0,
+    };
+
+    return { data, empresas };
+  })();
+
   const todosLosGrupos = [
     ...(grupoRespondieron ? [grupoRespondieron] : []),
     ...grupos,
+    ...(grupoNoEntran ? [grupoNoEntran] : []),
     ...(grupoSinCadencia ? [grupoSinCadencia] : []),
   ];
 
