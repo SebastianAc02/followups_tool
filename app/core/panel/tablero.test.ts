@@ -44,11 +44,11 @@ test('serialize/parse hacen roundtrip', () => {
   assert.deepEqual(parse(serialize(original)), original);
 });
 
-test('tableroDefault trae SOLO las 5 metricas del CRO, todas del catalogo real', () => {
+test('tableroDefault trae SOLO las 4 metricas objetivas del CRO (sin probabilidad), todas del catalogo real', () => {
   const def = tableroDefault();
   assert.deepEqual(
     def.map((w) => w.widgetId),
-    ['tiempo_en_etapa', 'lead_a_cliente', 'velocidad_cambio_etapa', 'mrr_estimado', 'probabilidad_cierre'],
+    ['tiempo_en_etapa', 'lead_a_cliente', 'velocidad_cambio_etapa', 'mrr_estimado'],
   );
   assert.ok(def.every((w) => typeof w.widgetId === 'string' && w.span > 0));
 });

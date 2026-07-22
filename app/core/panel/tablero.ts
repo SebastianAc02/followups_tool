@@ -15,12 +15,14 @@ export type TableroItem = { widgetId: string; span: number };
 // de Sebastian (2026-07-22): el tablero abre con SOLO estas cinco; el resto del catalogo
 // sigue disponible por el drag&drop, no se borra. Antes el default traia el catalogo
 // completo (~24 widgets), la mayoria "sin datos", y enterraba las cinco que importan.
+// Sin probabilidad_cierre: decision de Sebastian (2026-07-22). La probabilidad de cierre
+// depende del proceso del CLIENTE (que haya agreement de su lado), no del proceso propio;
+// forzar un numero seria subjetivo. Se deja fuera hasta que exista una senal objetiva.
 const DEFAULT_IDS = [
-  'tiempo_en_etapa', // tiempo promedio en las 3 stages
-  'lead_a_cliente', // ciclo de venta
+  'tiempo_en_etapa', // tiempo promedio en las 3 stages (cuanto dura cada etapa)
+  'lead_a_cliente', // ciclo de venta (cuanto tarda un cierre)
   'velocidad_cambio_etapa', // tasa de cambio de stage
-  'mrr_estimado', // revenue estimado
-  'probabilidad_cierre', // deal size / probabilidad
+  'mrr_estimado', // revenue estimado (0 hasta configurar tarifa del plan)
 ] as const;
 
 export function tableroDefault(): TableroItem[] {
