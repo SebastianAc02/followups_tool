@@ -88,11 +88,10 @@ Variables de entorno (en `.env.production`, no en el compose versionado):
 | `MCP_TOKEN` | si | secreto del bearer token. El server no arranca sin ella |
 | `MCP_PORT` | no (default 3900) | puerto donde escucha el server dentro del contenedor |
 
-El puerto se publica directo al host (`3900:3900`, ver el comentario en
-`docker-compose.mcp.yml`): no esta detras de Caddy porque la decision del owner fue que
-cualquiera se conecte por red sin instalar nada, sin necesitar TLS/dominio publico.
-Alcanzable dentro de la red del VPS o por Tailscale, igual que dario
-(`reference_dario_deployment_topology`).
+Dos caminos de acceso, por diseño:
+
+- **Publico con TLS (para clientes externos, ej. Camilo):** `https://mcp.followupsonepay.duckdns.org/mcp`. Caddy termina TLS (cert automatico de Let's Encrypt; el subdominio resuelve por wildcard de DuckDNS a la IP del VPS) y proxea al contenedor `mcp` por la red interna `onepay`. Ver el bloque en `Caddyfile`. Se conecta desde cualquier lado sin instalar nada ni entrar a Tailscale; la barrera es el token bearer.
+- **Tailscale (admin/debug):** el `ports:` de `docker-compose.mcp.yml` bindea `100.71.80.117:3900` (IP Tailscale del VPS), NO `0.0.0.0` (un bind a 0.0.0.0 quedaria publico saltandose UFW, porque Docker escribe iptables directo). Alcanzable solo desde la red Tailscale.
 
 Bajar solo este servicio sin afectar el resto del stack:
 
@@ -103,14 +102,15 @@ docker compose -f docker-compose.production.yml -f docker-compose.mcp.yml stop m
 ## Conectar un cliente MCP por HTTP
 
 Cualquier cliente que hable Streamable HTTP (el transporte estandar del SDK de MCP) se
-conecta apuntando a `http://<host>:3900/mcp` con el header de auth. Ejemplo de config para
-un cliente tipo Claude Desktop/Claude Code (`mcpServers` en su config JSON):
+conecta apuntando a la URL publica con el header de auth. Config lista para un cliente tipo
+Claude Desktop/Claude Code (`mcpServers` en su config JSON) -- el token se lo pasa Sebastian
+por un canal seguro, NO va en el repo:
 
 ```json
 {
   "mcpServers": {
     "followups-panel": {
-      "url": "http://<host-vps-o-tailscale>:3900/mcp",
+      "url": "https://mcp.followupsonepay.duckdns.org/mcp",
       "headers": {
         "Authorization": "Bearer <MCP_TOKEN>"
       }
@@ -127,7 +127,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const client = new Client({ name: 'mi-cliente', version: '1.0.0' });
-const transport = new StreamableHTTPClientTransport(new URL('http://<host>:3900/mcp'), {
+const transport = new StreamableHTTPClientTransport(new URL('https://mcp.followupsonepay.duckdns.org/mcp'), {
   requestInit: { headers: { Authorization: 'Bearer <MCP_TOKEN>' } },
 });
 await client.connect(transport);
