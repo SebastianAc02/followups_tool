@@ -5681,6 +5681,12 @@ export function empresasParaConversionStage(idOrganizacion: number, owner?: stri
 // 2026-07-22: tarifaTxn/saasMensual salen del plan real del deal (empresa.idPlan), NO de
 // configuracion_admin. null cuando el deal no tiene plan asignado todavia (el caller debe
 // mostrar "sin datos", no inventar una tarifa).
+//
+// planNombre (2026-07-23, MCP server Fase 3): se agrega al SELECT que ya hacia join con
+// `plan` para tarifaTxn/saasMensual -- no es una query nueva, es una columna mas del mismo
+// join. La necesita deal_historia (app/mcp/tools.ts) para mostrar CON QUE plan quedo el
+// deal, no solo sus tarifas. route.ts (el endpoint REST) no la usa hoy, pero tenerla en el
+// tipo no le rompe nada (solo lee los campos que ya destructuraba).
 export type FilaPipelineMrr = {
   idEmpresa: string;
   nombre: string;
@@ -5689,6 +5695,7 @@ export type FilaPipelineMrr = {
   pctDigital: number | null;
   tarifaTxn: number | null;
   saasMensual: number | null;
+  planNombre: string | null;
 };
 
 export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] {
@@ -5701,6 +5708,7 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
       pctDigital: empresa.pctDigital,
       tarifaTxn: plan.tarifaTxn,
       saasMensual: plan.saasMensual,
+      planNombre: plan.nombre,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))

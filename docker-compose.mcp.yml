@@ -1,0 +1,69 @@
+# Complemento a docker-compose.production.yml para el MCP server de solo lectura de la
+# Fase 3 (docs/plan-panel-metricas-tiempo-real.md, docs/mcp-panel-server.md). Mismo patron
+# de "servicio agregado con doble -f" que ya usa el stack (ver docker-compose.production.yml:
+# followups-web es el unico que hace `build:`, el resto reusa la imagen ya construida) --
+# este archivo NO toca followups-web/worker/caddy, solo agrega un servicio mas a la red
+# "onepay" ya creada y reusa el volumen `followups_data`.
+#
+# Levantar (desde ~/followups-tool en el VPS, junto al resto del stack):
+#   docker compose -f docker-compose.production.yml -f docker-compose.mcp.yml up -d mcp
+#
+# Bajar solo este servicio (no afecta followups-web/worker/caddy):
+#   docker compose -f docker-compose.production.yml -f docker-compose.mcp.yml stop mcp
+#
+# NO construye su propia imagen: `image: followups-tool:latest` reusa la que ya construyo
+# followups-web (mismo motivo que followups-worker -- un solo build, ver el comentario
+# largo sobre el incidente de memoria del 2026-07-15 en docker-compose.production.yml). Si
+# este archivo se levanta ANTES de que exista esa imagen (`docker compose ... up -d`
+# corriendo primero el archivo base), Compose hace pull/usa la imagen local existente; en
+# la practica se despliega junto con el resto del stack, no solo.
+
+networks:
+  onepay:
+    external: true
+
+services:
+  mcp:
+    image: followups-tool:latest
+    container_name: followups_mcp
+    depends_on:
+      - followups-web
+    # Mismo estilo que followups-worker: proceso Node aparte con
+    # --experimental-strip-types (el repo corre TypeScript sin paso de build para
+    # scripts/servicios standalone, ver package.json). app/mcp/index.ts es el entrypoint
+    # (NO una route de Next): falla rapido si falta MCP_TOKEN, ver el comentario en ese
+    # archivo.
+    command: ["node", "--experimental-strip-types", "--experimental-loader", "./scripts/resolve-ts-ext.mjs", "./app/mcp/index.ts"]
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      # MCP_TOKEN NO va aca (es secreto real): se define en .env.production, igual que
+      # WHATSAPP_WEBHOOK_TOKEN y el resto de credenciales del stack -- este archivo es
+      # versionado, un secreto real no. MCP_PORT si es publico (no es secreto, es solo el
+      # puerto interno del contenedor).
+      MCP_PORT: "3900"
+    ports:
+      # Puerto expuesto directo al host (no detras de Caddy): la decision del owner fue
+      # "cualquiera se conecta por red sin instalar nada" -- un cliente MCP habla HTTP
+      # plano al puerto, sin necesitar TLS/dominio publico. Vive en la misma red que
+      # Evolution/dario (ver docs/*deployment*), alcanzable por Tailscale o dentro de la
+      # red interna del VPS. Si mas adelante se necesita exponerlo con dominio y TLS, se
+      # agrega un bloque a Caddyfile (proxy a mcp:3900 dentro de la red onepay) y este
+      # `ports:` se puede quitar.
+      - '3900:3900'
+    volumes:
+      # Mismo volumen que followups-web/worker, SIN :ro: better-sqlite3 abre el archivo en
+      # modo lectura-escritura por default (ver app/db/index.ts) y el modo WAL de SQLite
+      # necesita crear/actualizar los archivos -wal/-shm incluso en una conexion que solo
+      # hace SELECT -- montar :ro tumbaria el proceso al abrir la conexion (EROFS). El
+      # "solo lectura" de este servicio es una garantia de CODIGO (app/mcp/tools.ts solo
+      # importa funciones de consulta del Repository, ninguna de escritura), no un
+      # permiso de filesystem -- mismo criterio que ya usa esSoloLectura()/marcarSoloLectura
+      # en el resto del repo (candado a nivel de aplicacion, no de disco).
+      - followups_data:/data
+    networks:
+      - onepay
+
+volumes:
+  followups_data:
