@@ -23,7 +23,9 @@ import { calcularMrrEstimado, digitalPctConDefault } from '../../../core/mrr';
 // salen de configuracion_admin. digitalPct es el real del deal (empresa.pctDigital,
 // capturado en discovery) o el default 40% -- igual que la formula real de Notion. La
 // tarifa/saas salen del plan asignado al deal (empresa.idPlan -> tabla plan). Sin plan
-// asignado, revenueEstimado es null: no se inventa una tarifa.
+// asignado, revenueEstimado es null: no se inventa una tarifa. `plan` (nombre) se expone
+// aparte para que quien lea el endpoint sepa CON que plan se calculo el revenue, no solo
+// el numero final.
 export async function GET() {
   const usuario = await requireSession();
 
@@ -39,6 +41,7 @@ export async function GET() {
       nombre: f.nombre,
       etapa: f.estado,
       dealSize: f.usuariosEfectivos,
+      plan: f.nombrePlan,
       probabilidadCierre: probabilidad.valor,
       metodoProbabilidad: probabilidad.metodo,
       digitalPct,

@@ -189,4 +189,17 @@ test('pipelineParaEndpoint: trae idEmpresa/nombre/estado/usuarios, scoped a orga
   assert.equal(pe1?.tarifaTxn, 100);
   assert.equal(pe1?.saasMensual, 5000);
   assert.equal(pe1?.pctDigital, null); // crudo: el default 40% lo aplica el caller, no esta funcion
+  assert.equal(pe1?.nombrePlan, 'TestPlan3'); // 2026-07-22: para que el endpoint muestre CON que plan se calculo
+});
+
+test('pipelineParaEndpoint: sin plan asignado, nombrePlan/tarifaTxn/saasMensual son null (no se inventa)', () => {
+  const ORG = 1011;
+  seedEmpresa('pe4', 'oportunidad', ORG);
+  seedUsuarios('pe4', 10);
+
+  const filas = pipelineParaEndpoint(ORG);
+  const pe4 = filas.find((f) => f.idEmpresa === 'pe4');
+  assert.equal(pe4?.nombrePlan, null);
+  assert.equal(pe4?.tarifaTxn, null);
+  assert.equal(pe4?.saasMensual, null);
 });

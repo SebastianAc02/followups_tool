@@ -1,7 +1,17 @@
 "use server";
 
 import { requireSession } from "../lib/session";
-import { perfilPipelineEmpresa, historialEtapasEmpresa, marcarRespuestaVista, type HistorialEtapas } from "../db/repository";
+import {
+  perfilPipelineEmpresa,
+  historialEtapasEmpresa,
+  marcarRespuestaVista,
+  listarPlanes,
+  asignarPlanEmpresa,
+  actualizarPctDigitalEmpresa,
+  actualizarCampoCalificacion,
+  type HistorialEtapas,
+  type PlanCatalogo,
+} from "../db/repository";
 import { canalNormalizado } from "../cola/agenda.ts";
 import type { DetallePanelData } from "../ui/seguimiento/DetallePanel";
 
@@ -19,6 +29,7 @@ export async function perfilPipelineEmpresaAction(idEmpresa: string): Promise<De
   marcarRespuestaVista(idEmpresa);
 
   return {
+    idEmpresa,
     empresa: perfil.empresa,
     ciudad: perfil.ciudad,
     categoria: perfil.categoria,
@@ -29,6 +40,10 @@ export async function perfilPipelineEmpresaAction(idEmpresa: string): Promise<De
     proximoToque: perfil.proximoToque
       ? { fecha: perfil.proximoToque.fecha, canal: canalNormalizado(perfil.proximoToque.canal), paso: perfil.proximoToque.paso }
       : undefined,
+    plan: perfil.plan,
+    pctDigital: perfil.pctDigital,
+    usuariosEstimados: perfil.usuariosEstimados,
+    usuariosEfectivos: perfil.usuariosEfectivos,
   };
 }
 
@@ -38,4 +53,62 @@ export async function perfilPipelineEmpresaAction(idEmpresa: string): Promise<De
 export async function historialEtapasAction(idEmpresa: string): Promise<HistorialEtapas> {
   const usuario = await requireSession();
   return historialEtapasEmpresa(idEmpresa, usuario.idOrganizacion);
+}
+
+// --- Captura financiera del deal (Fase 1 punto 4, plan-panel-metricas-tiempo-real.md) --
+// Mismo patron que actualizarCampoCalificacionAction (app/llamada/[id]/actions.ts): el
+// modal cliente no toca el Repository directo, pasa por un server action que resuelve la
+// organizacion de quien llama y devuelve {ok:false, error} en vez de tirar la excepcion
+// cruda al cliente.
+
+// Catalogo de planes para el selector -- solo lectura, no cambia por organizacion.
+export async function listarPlanesAction(): Promise<PlanCatalogo[]> {
+  await requireSession();
+  return listarPlanes();
+}
+
+export async function asignarPlanAction(
+  idEmpresa: string,
+  idPlan: number | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const usuario = await requireSession();
+  try {
+    asignarPlanEmpresa(idEmpresa, usuario.idOrganizacion, idPlan);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "No se pudo guardar" };
+  }
+}
+
+// pctDigital llega de la UI en 0..100 (lo que ve Sebastian); la conversion a 0..1
+// (lo que guarda la columna, mismo rango que digitalPctConDefault en core/mrr.ts) pasa
+// aca, en la frontera server action, no en el Repository ni en el componente.
+export async function actualizarPctDigitalAction(
+  idEmpresa: string,
+  pctDigital100: number | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const usuario = await requireSession();
+  try {
+    actualizarPctDigitalEmpresa(idEmpresa, usuario.idOrganizacion, pctDigital100 === null ? null : pctDigital100 / 100);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "No se pudo guardar" };
+  }
+}
+
+// Usuarios estimados: NO es un metodo nuevo del Repository -- reusa
+// actualizarCampoCalificacion (Toque 1, /llamada/[id]), mismo campo real
+// (empresa_usuarios.usuarios_estimados), para no abrir un segundo camino de escritura
+// a la misma columna.
+export async function actualizarUsuariosEstimadosAction(
+  idEmpresa: string,
+  usuarios: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const usuario = await requireSession();
+  try {
+    actualizarCampoCalificacion(idEmpresa, "usuarios", usuarios, usuario.idOrganizacion);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "No se pudo guardar" };
+  }
 }
