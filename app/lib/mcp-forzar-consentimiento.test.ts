@@ -5,7 +5,10 @@
 // prueba aca sin DB ni better-auth, mismo criterio que mcp-gate.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { forzarQueryConsentimiento } from './mcp-forzar-consentimiento.ts';
+import { z } from 'zod';
+import { betterAuth } from 'better-auth';
+import { createAuthEndpoint } from 'better-auth/api';
+import { forzarQueryConsentimiento, forzarConsentimientoMcp } from './mcp-forzar-consentimiento.ts';
 
 test('fuerza prompt=consent exacto aunque el cliente no mande prompt', () => {
   const q = forzarQueryConsentimiento({ client_id: 'x', redirect_uri: 'https://evil.test/cb' });
@@ -30,4 +33,42 @@ test('no toca el resto del query (client_id/redirect_uri/code_challenge se prese
 test('funciona sin query previo (undefined)', () => {
   const q = forzarQueryConsentimiento(undefined);
   assert.deepEqual(q, { prompt: 'consent' });
+});
+
+// Test de INTEGRACION contra el pipeline real de better-auth (el que faltaba y dejo pasar
+// el bug del review 2026-07-23: el hook reasignaba ctx.query y la mutacion se descartaba).
+// Monta un endpoint de eco en el MISMO path que intercepta el hook (/mcp/authorize) y
+// confirma que el `prompt=consent` forzado por el `before` hook SI llega a la logica del
+// endpoint, aunque el cliente no lo mande. Si esto falla, el consentimiento no se fuerza y
+// el vector de phishing (code sin pantalla) queda abierto.
+const ecoAuthorize = {
+  id: 'eco-authorize-test',
+  endpoints: {
+    ecoAuthorize: createAuthEndpoint(
+      '/mcp/authorize',
+      { method: 'GET', query: z.record(z.string(), z.any()) },
+      async (ctx) => ctx.json({ query: ctx.query }),
+    ),
+  },
+} as const;
+
+const authEco = betterAuth({
+  baseURL: 'https://test.local',
+  secret: 'secreto-de-prueba-suficientemente-largo-1234567890',
+  plugins: [ecoAuthorize, forzarConsentimientoMcp],
+});
+
+test('el hook fuerza prompt=consent en el pipeline REAL de better-auth, no solo en la funcion pura', async () => {
+  // Cliente que NO manda prompt=consent (el caso de phishing): el hook debe forzarlo.
+  const res = await (authEco.api as Record<string, (a: unknown) => Promise<unknown>>).ecoAuthorize({
+    query: { client_id: 'atacante', redirect_uri: 'https://evil.test/cb' },
+  });
+  assert.equal((res as { query: { prompt?: string } }).query.prompt, 'consent');
+});
+
+test('el hook fuerza prompt=consent aunque el cliente pida prompt=none', async () => {
+  const res = await (authEco.api as Record<string, (a: unknown) => Promise<unknown>>).ecoAuthorize({
+    query: { client_id: 'atacante', prompt: 'none' },
+  });
+  assert.equal((res as { query: { prompt?: string } }).query.prompt, 'consent');
 });

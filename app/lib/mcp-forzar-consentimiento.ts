@@ -42,7 +42,17 @@ export const forzarConsentimientoMcp: BetterAuthPlugin = {
         // del endpoint.
         matcher: (context) => context.path === '/mcp/authorize',
         handler: createAuthMiddleware(async (ctx) => {
-          ctx.query = forzarQueryConsentimiento(ctx.query as Record<string, unknown> | undefined);
+          // Mutar IN-PLACE, NO reasignar. better-auth copia el contexto entre capas
+          // (createInternalContext / createMiddleware, cada una `{...context}`): un
+          // `ctx.query = objetoNuevo` cambia solo la copia local del handler y se descarta,
+          // dejando el hook como no-op (el consentimiento NO se forzaba y el vector de
+          // phishing seguia abierto -- review de seguridad 2026-07-23, verificado ejecutando
+          // el mecanismo real de better-auth). El objeto `query` ya existente SI se comparte
+          // por referencia entre las copias, asi que Object.assign sobre el mismo objeto si
+          // propaga hasta la logica de /mcp/authorize.
+          if (ctx.query) {
+            Object.assign(ctx.query as Record<string, unknown>, forzarQueryConsentimiento(ctx.query as Record<string, unknown>));
+          }
         }),
       },
     ],
