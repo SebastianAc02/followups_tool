@@ -57,6 +57,16 @@ export function reclamarMiembro(idMiembro: number, idUsuario: string, db: DbInst
   return res.changes === 1;
 }
 
+// Fila cruda de `user` por id (identidad, no negocio). La usa el wiring OAuth del MCP
+// (app/lib/mcp-sesion.ts, Fase 6, docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md)
+// para resolver un UsuarioSesion a partir del userId que trae el OAuthAccessToken --
+// withMcpAuth entrega SOLO el token (accessToken/clientId/userId/scopes), no el objeto de
+// sesion completo, porque el cliente MCP no manda la cookie de navegador que
+// auth.api.getSession espera.
+export function usuarioPorId(idUsuario: string, db: DbInstancia = dbSingleton) {
+  return db.select().from(user).where(eq(user.id, idUsuario)).get();
+}
+
 // owner es input:false en Better Auth (app/lib/auth.ts): nunca se setea desde el cliente.
 // Este UPDATE directo es la unica via para escribirlo en runtime, igual que ya hace
 // scripts/seed_auth_users.ts a mano para el alta por script.

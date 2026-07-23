@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { mcp } from 'better-auth/plugins';
 import { dbReal } from '../db/index';
 
 // Adaptador de auth (B3). El core no importa este archivo: la identidad entra a la app
@@ -29,6 +30,14 @@ export const auth = betterAuth({
   // conmutara, activar el modo prueba buscaria tu sesion en pruebas.db (donde no existe)
   // y te sacaria a /login, y loguearte ahi crearia una cuenta duplicada.
   database: drizzleAdapter(dbReal, { provider: 'sqlite' }),
+  // Explicito y no dejado a inferir del request/env (2026-07-23, login OAuth del MCP):
+  // getMCPProviderMetadata (plugin `mcp`, ver abajo) lee ctx.context.options.baseURL --
+  // el campo LITERAL de esta config, no el baseURL resuelto en runtime -- para el
+  // `issuer` del discovery OAuth. Sin esto seteado a mano, options.baseURL queda
+  // undefined (el resto del stack SI cae de vuelta a BETTER_AUTH_URL vía getBaseURL, pero
+  // esta funcion puntual no), el endpoint /.well-known/oauth-authorization-server tira
+  // "invalid_issuer" y el discovery sale roto en produccion aunque todo lo demas ande bien.
+  baseURL: process.env.BETTER_AUTH_URL ?? process.env.APP_BASE_URL,
   trustedOrigins: origenesConfiables(),
   emailAndPassword: {
     enabled: true,
@@ -55,4 +64,12 @@ export const auth = betterAuth({
       verTodoPipeline: { type: 'boolean', defaultValue: false, input: false },
     },
   },
+  // Login OAuth para el MCP del panel (2026-07-23,
+  // docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md): Better Auth pasa a ser el
+  // authorization server (discovery + dynamic client registration + authorize + token),
+  // reusando /login como pantalla de login -- no se rueda OAuth a mano. loginPage es la
+  // UNICA opcion que exige el tipo `MCPOptions` (node_modules/better-auth/dist/plugins/mcp/
+  // index.d.mts); resource/oidcConfig se dejan sin setear (quedan en su default: recurso =
+  // origen de baseURL, scopes openid/profile/email/offline_access).
+  plugins: [mcp({ loginPage: '/login' })],
 });
