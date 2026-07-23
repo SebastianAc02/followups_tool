@@ -448,13 +448,15 @@ export function borrarDbPrueba(dbPath: string) {
 
 // Agrega las tablas de Better Auth que necesita el login OAuth del MCP (Fase 6,
 // docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md) a una DB YA creada por
-// crearDbPrueba(). Solo `user` (identidad: owner/admin/verTodoPipeline) + las 3 del plugin
-// `mcp` (oauth_application/oauth_access_token/oauth_consent, esta ultima sin usar en los
-// tests de hoy pero se crea para que un INSERT futuro no la encuentre faltante) -- session/
-// account/verification quedan afuera porque el login por bearer token no las toca (esas son
-// para el login por cookie de /login, ya cubierto por otras pruebas). Mismo criterio de
-// test-helpers.ts arriba: DDL a mano, verificado contra app/db/auth-schema.ts, no contra
-// isps.db directo.
+// crearDbPrueba(). `user` (identidad: owner/admin/verTodoPipeline) + las 3 del plugin `mcp`
+// (oauth_application/oauth_access_token/oauth_consent, esta ultima sin usar en los tests de
+// hoy pero se crea para que un INSERT futuro no la encuentre faltante) + `verification`
+// (better-auth guarda ahi el authorization code de corta duracion; /mcp/token lo consulta
+// via internalAdapter.consumeVerificationValue incluso para un code que no existe, asi que
+// hace falta la tabla aunque el test no inserte ninguna fila) -- session/account quedan
+// afuera porque el login por bearer token no las toca (esas son para el login por cookie de
+// /login, ya cubierto por otras pruebas). Mismo criterio de test-helpers.ts arriba: DDL a
+// mano, verificado contra app/db/auth-schema.ts, no contra isps.db directo.
 export function agregarEsquemaAuthOAuth(dbPath: string) {
   const sqlite = new Database(dbPath);
 
@@ -506,6 +508,15 @@ export function agregarEsquemaAuthOAuth(dbPath: string) {
       user_id TEXT NOT NULL,
       scopes TEXT NOT NULL,
       consent_given INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE verification (
+      id TEXT PRIMARY KEY,
+      identifier TEXT NOT NULL,
+      value TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     );

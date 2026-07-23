@@ -65,10 +65,10 @@ Output: `{ organizacion, empresas: [{ idEmpresa, nombre, etapa, dealSize, probab
 
 ## Auth (OAuth, plugin `mcp` de Better Auth)
 
-`app/lib/auth.ts` habilita el plugin `mcp` de better-auth (`mcp({ loginPage: '/login' })`):
-better-auth pasa a ser el authorization server completo (discovery, dynamic client
-registration, authorize, token), reusando `/login` como pantalla de login. No hay OAuth
-rodado a mano.
+`app/lib/auth.ts` habilita el plugin `mcp` de better-auth (`mcp({ loginPage: '/login',
+oidcConfig: { requirePKCE: true, consentPage: '/mcp-consent' } })`): better-auth pasa a ser
+el authorization server completo (discovery, dynamic client registration, authorize, token),
+reusando `/login` como pantalla de login. No hay OAuth rodado a mano.
 
 `app/api/mcp/route.ts` protege el endpoint con `withMcpAuth(auth, handler)`:
 
@@ -85,6 +85,36 @@ Discovery tambien publicado en la raiz del origen (`app/.well-known/oauth-author
 y `app/.well-known/oauth-protected-resource/route.ts`), ademas de los que sirve el catch-all
 de better-auth bajo `/api/auth/.well-known/*` -- por si el cliente prueba la convencion de
 raiz antes de recibir el 401.
+
+### PKCE y consentimiento obligatorios (review de seguridad 2026-07-23)
+
+El registro de clientes (DCR) esta abierto por diseño del protocolo MCP -- Claude se
+registra solo, no hay un `client_id` fijo para pre-aprobar. Eso solo, sin mas, es un hueco:
+cualquiera puede registrar un cliente con su propio `redirect_uri`, armar un link a
+`/api/auth/mcp/authorize` y mandarselo a alguien ya logueado (Sebastian/Camilo); sin una
+barrera adicional el `code` sale directo hacia el `redirect_uri` del atacante. Dos capas lo
+cierran:
+
+- **`requirePKCE: true`**: sin esto, el default REAL del plugin (no lo que documenta el tipo
+  `OIDCOptions` para el `oidcProvider` generico) es no exigir PKCE en `/mcp/authorize` ni en
+  `/mcp/token`. Ya seteado, un intercambio de codigo sin `code_verifier` falla antes de
+  siquiera mirar si el `code` es valido (`app/api/mcp/route.test.ts`).
+- **Consentimiento SIEMPRE, no opcional**: `consentPage` por si solo NO alcanza -- el plugin
+  solo redirige ahi cuando la request a `/mcp/authorize` trae `prompt=consent`, decision del
+  CLIENTE que arma la URL (un atacante simplemente no lo manda). `app/lib/mcp-forzar-consentimiento.ts`
+  agrega un plugin con un hook `before` que fuerza `prompt=consent` en TODA request a
+  `/mcp/authorize`, sin excepcion -- asi la decision de mostrar consentimiento es del
+  servidor. La pantalla real (`app/mcp-consent/page.tsx` + `app/mcp-consent/actions.ts`)
+  muestra que cliente pide acceso y a que scope, con Aprobar/Rechazar; sin aprobacion
+  explicita el plugin nunca emite `code` (rechazar redirige con `error=access_denied`).
+
+DCR/redirect_uri en si NO se restringieron (evaluado y descartado por ahora): el unico
+cliente real esperado es Claude, pero Claude tampoco trae un `client_id` fijo conocido de
+antemano (se registra solo via DCR, como cualquier cliente MCP), asi que no hay una lista
+blanca simple de `client_id`/`redirect_uri` que aplicar sin romper la conexion real. Acotar
+por dominio de `redirect_uri` (ej. solo `claude.ai`/`claude.com`) es posible pero exige un
+hook `before` propio sobre `/mcp/register` -- requirePKCE + consentimiento forzado ya cierran
+el vector real (suplantacion silenciosa), asi que queda anotado, no construido.
 
 ## Levantar / desplegar
 
@@ -127,8 +157,10 @@ o `mcpServers` en Claude Desktop/Code) -- SIN headers ni token, el login pasa po
 
 (el subdominio `https://mcp.followupsonepay.duckdns.org/api/mcp` sirve exactamente lo
 mismo). Al conectar, Claude detecta el `401` + `WWW-Authenticate`, resuelve el discovery
-OAuth, abre `/login` en el navegador y, tras loguearse con la cuenta de la tool, guarda el
-token -- no hay ningun secreto que copiar ni pegar.
+OAuth, abre `/login` en el navegador y, tras loguearse con la cuenta de la tool, SIEMPRE
+muestra la pantalla "Autorizar acceso" (`/mcp-consent`, ver arriba) antes de volver a Claude
+con el token -- no hay ningun secreto que copiar ni pegar, pero si un paso explicito de
+Aprobar.
 
 ## Desarrollo local / debug directo con el SDK (proceso standalone, token manual)
 

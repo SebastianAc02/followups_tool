@@ -164,3 +164,40 @@ test('POST /api/mcp con token de un owner real de Onepay (no admin, no CRO): pas
   assert.notEqual(res.status, 401);
   assert.notEqual(res.status, 403);
 });
+
+// Review de seguridad 2026-07-23: requirePKCE:true (app/lib/auth.ts) tiene que ser real, no
+// solo un flag seteado y olvidado. mcpOAuthToken (node_modules/better-auth/dist/plugins/mcp/
+// index.mjs) chequea `opts.requirePKCE && !code_verifier` ANTES de siquiera mirar si el
+// `code` existe en la DB -- por eso este test no necesita un code real ni una sesion: un
+// code inventado + sin code_verifier ya debe fallar por PKCE, con un mensaje que lo diga
+// (no "invalid code", que probaria otra cosa).
+test('POST /api/auth/mcp/token exige PKCE: sin code_verifier falla ANTES de validar el code', async () => {
+  const res = await auth.api.mcpOAuthToken({
+    body: {
+      grant_type: 'authorization_code',
+      code: 'codigo-que-ni-existe',
+      client_id: 'cliente-que-ni-existe',
+      redirect_uri: 'https://evil.test/callback',
+    },
+    asResponse: true,
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.match(body.error_description ?? body.message ?? '', /code verifier/i);
+});
+
+test('POST /api/auth/mcp/token con code_verifier presente: ya no falla por PKCE (falla mas adelante, por code invalido)', async () => {
+  const res = await auth.api.mcpOAuthToken({
+    body: {
+      grant_type: 'authorization_code',
+      code: 'codigo-que-ni-existe',
+      code_verifier: 'lo-que-sea-pero-presente',
+      client_id: 'cliente-que-ni-existe',
+      redirect_uri: 'https://evil.test/callback',
+    },
+    asResponse: true,
+  });
+  assert.equal(res.status, 401);
+  const body = await res.json();
+  assert.match(body.error_description ?? body.message ?? '', /invalid code/i);
+});
