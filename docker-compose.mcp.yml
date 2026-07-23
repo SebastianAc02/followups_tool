@@ -44,14 +44,14 @@ services:
       # puerto interno del contenedor).
       MCP_PORT: "3900"
     ports:
-      # Puerto expuesto directo al host (no detras de Caddy): la decision del owner fue
-      # "cualquiera se conecta por red sin instalar nada" -- un cliente MCP habla HTTP
-      # plano al puerto, sin necesitar TLS/dominio publico. Vive en la misma red que
-      # Evolution/dario (ver docs/*deployment*), alcanzable por Tailscale o dentro de la
-      # red interna del VPS. Si mas adelante se necesita exponerlo con dominio y TLS, se
-      # agrega un bloque a Caddyfile (proxy a mcp:3900 dentro de la red onepay) y este
-      # `ports:` se puede quitar.
-      - '3900:3900'
+      # Bindeado SOLO a la IP de Tailscale del VPS (100.71.80.117), igual que dario y
+      # Evolution: alcanzable por quien este en la red Tailscale, NO desde internet. Un
+      # bind a 0.0.0.0 (`3900:3900`) quedaria publico pese a UFW, porque Docker escribe
+      # iptables directo y se salta el firewall (UFW solo deja SSH publico). La barrera de
+      # token sigue puesta; esto solo cierra la superficie de red. Si mas adelante se
+      # necesita exponerlo con dominio y TLS, se agrega un bloque a Caddyfile (proxy a
+      # mcp:3900 dentro de la red onepay) y este bind se ajusta.
+      - '100.71.80.117:3900:3900'
     volumes:
       # Mismo volumen que followups-web/worker, SIN :ro: better-sqlite3 abre el archivo en
       # modo lectura-escritura por default (ver app/db/index.ts) y el modo WAL de SQLite
