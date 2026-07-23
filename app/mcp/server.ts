@@ -27,7 +27,12 @@ const VERSION_SERVIDOR = '1.0.0';
 // solo lectura y sin volumen -- no hay ninguna razon para pagar el estado de sesiones
 // (reconexion, resumibilidad) que el modo stateful ofrece. Cada tool call es una foto de
 // la DB en ese instante, no una conversacion con memoria.
-function crearMcpServer(): McpServer {
+// Exportada (2026-07-23): app/api/mcp/route.ts (wiring OAuth dentro de Next, ver
+// docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md) la reusa tal cual para no
+// duplicar las 3 declaraciones de tool -- unico cambio de esa fase es el TRANSPORTE/AUTH
+// (StreamableHTTPServerTransport+token aca, WebStandardStreamableHTTPServerTransport+OAuth
+// alla), nunca la forma del McpServer.
+export function crearMcpServer(): McpServer {
   const server = new McpServer({ name: NOMBRE_SERVIDOR, version: VERSION_SERVIDOR });
 
   server.registerTool(

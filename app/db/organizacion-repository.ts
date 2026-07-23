@@ -8,7 +8,7 @@ import * as schema from './schema';
 import * as authSchema from './auth-schema';
 
 const { organizacionMiembro, organizacion, empresa } = schema;
-const { user } = authSchema;
+const { user, oauthApplication } = authSchema;
 
 type DbInstancia = typeof dbSingleton;
 
@@ -55,6 +55,29 @@ export function reclamarMiembro(idMiembro: number, idUsuario: string, db: DbInst
     .where(and(eq(organizacionMiembro.idMiembro, idMiembro), isNull(organizacionMiembro.idUser)))
     .run();
   return res.changes === 1;
+}
+
+// Fila cruda de `user` por id (identidad, no negocio). La usa el wiring OAuth del MCP
+// (app/lib/mcp-sesion.ts, Fase 6, docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md)
+// para resolver un UsuarioSesion a partir del userId que trae el OAuthAccessToken --
+// withMcpAuth entrega SOLO el token (accessToken/clientId/userId/scopes), no el objeto de
+// sesion completo, porque el cliente MCP no manda la cookie de navegador que
+// auth.api.getSession espera.
+export function usuarioPorId(idUsuario: string, db: DbInstancia = dbSingleton) {
+  return db.select().from(user).where(eq(user.id, idUsuario)).get();
+}
+
+// Cliente OAuth (registrado por DCR, "oauth_application") por su clientId. Lo usa la
+// pantalla de consentimiento (app/mcp-consent/page.tsx, review de seguridad 2026-07-23) para
+// mostrar QUE app esta pidiendo acceso -- sin esto solo se podria mostrar el clientId crudo
+// (un string aleatorio), que no le dice nada a Camilo/Sebastian sobre si el cliente es
+// legitimo o no.
+export function clienteOauthPorId(clientId: string, db: DbInstancia = dbSingleton) {
+  return db
+    .select({ name: oauthApplication.name, clientId: oauthApplication.clientId })
+    .from(oauthApplication)
+    .where(eq(oauthApplication.clientId, clientId))
+    .get();
 }
 
 // owner es input:false en Better Auth (app/lib/auth.ts): nunca se setea desde el cliente.

@@ -445,3 +445,82 @@ export function borrarDbPrueba(dbPath: string) {
     if (fs.existsSync(p)) fs.rmSync(p);
   }
 }
+
+// Agrega las tablas de Better Auth que necesita el login OAuth del MCP (Fase 6,
+// docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md) a una DB YA creada por
+// crearDbPrueba(). `user` (identidad: owner/admin/verTodoPipeline) + las 3 del plugin `mcp`
+// (oauth_application/oauth_access_token/oauth_consent, esta ultima sin usar en los tests de
+// hoy pero se crea para que un INSERT futuro no la encuentre faltante) + `verification`
+// (better-auth guarda ahi el authorization code de corta duracion; /mcp/token lo consulta
+// via internalAdapter.consumeVerificationValue incluso para un code que no existe, asi que
+// hace falta la tabla aunque el test no inserte ninguna fila) -- session/account quedan
+// afuera porque el login por bearer token no las toca (esas son para el login por cookie de
+// /login, ya cubierto por otras pruebas). Mismo criterio de test-helpers.ts arriba: DDL a
+// mano, verificado contra app/db/auth-schema.ts, no contra isps.db directo.
+export function agregarEsquemaAuthOAuth(dbPath: string) {
+  const sqlite = new Database(dbPath);
+
+  sqlite.exec(`
+    CREATE TABLE user (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      image TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      owner TEXT,
+      admin INTEGER DEFAULT 0,
+      ver_todo_pipeline INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE oauth_application (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      icon TEXT,
+      metadata TEXT,
+      client_id TEXT NOT NULL UNIQUE,
+      client_secret TEXT,
+      redirect_urls TEXT NOT NULL,
+      type TEXT NOT NULL,
+      disabled INTEGER DEFAULT 0,
+      user_id TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE oauth_access_token (
+      id TEXT PRIMARY KEY,
+      access_token TEXT NOT NULL UNIQUE,
+      refresh_token TEXT NOT NULL UNIQUE,
+      access_token_expires_at INTEGER NOT NULL,
+      refresh_token_expires_at INTEGER NOT NULL,
+      client_id TEXT NOT NULL,
+      user_id TEXT,
+      scopes TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE oauth_consent (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      scopes TEXT NOT NULL,
+      consent_given INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+
+    CREATE TABLE verification (
+      id TEXT PRIMARY KEY,
+      identifier TEXT NOT NULL,
+      value TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    );
+  `);
+
+  sqlite.close();
+}

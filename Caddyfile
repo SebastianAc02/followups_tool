@@ -9,13 +9,16 @@ followupsonepay.duckdns.org {
 	}
 }
 
-# MCP server del panel (Fase 3): puerta publica con TLS para que un cliente MCP externo
-# (ej. Camilo) queree los ISPs sin instalar nada ni entrar a Tailscale. Caddy termina TLS
-# (cert automatico de Let's Encrypt, el subdominio resuelve por wildcard de DuckDNS a la IP
-# del VPS) y proxea al contenedor `mcp` por la red interna `onepay`. La barrera de acceso
-# es el token bearer que valida el propio server (MCP_TOKEN en .env.production); Caddy solo
-# agrega el TLS. El bind del `ports:` en docker-compose.mcp.yml sigue siendo solo-Tailscale
-# para admin; el trafico de Camilo entra por aca, no por ese puerto.
+# MCP del panel: login OAuth (2026-07-23, docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md).
+# El MCP ya no vive en el contenedor `mcp` standalone (token bearer manual): pasa a ser una
+# route de followups-web (app/api/mcp), protegida por el plugin `mcp` de Better Auth --
+# Camilo pega la URL en Claude y se loguea con su cuenta de la tool, sin copiar tokens. Este
+# subdominio sigue vivo (Camilo ya lo tenia guardado) pero apunta al mismo contenedor que el
+# dominio principal, no a `mcp:3900`. El contenedor `mcp` standalone (docker-compose.mcp.yml)
+# queda sin trafico real -- se apaga aparte, como paso de deploy, no se borra el codigo.
 mcp.followupsonepay.duckdns.org {
-	reverse_proxy mcp:3900
+	reverse_proxy followups-web:3000 {
+		lb_try_duration 10s
+		lb_try_interval 250ms
+	}
 }

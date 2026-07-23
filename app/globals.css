@@ -708,6 +708,22 @@
 .ac-btn:hover { background: #4ee79a; }
 .ac-btn:disabled { opacity: 0.55; cursor: default; }
 
+/* Pantalla de consentimiento OAuth del MCP (app/mcp-consent/page.tsx, review de seguridad
+   2026-07-23): Aprobar reusa .ac-btn (filled), Rechazar necesita distinguirse visualmente
+   sin competir por atencion -- bordeado, no filled. margin-top separa los dos <form>. */
+.ac-btn-secondary {
+  background: transparent; border: 1px solid #232a31; color: #c7cdd3; margin-top: 12px;
+}
+.ac-btn-secondary:hover { background: #14181d; border-color: #2f3841; }
+
+.ac-consent-scopes {
+  list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-direction: column; gap: 6px;
+}
+.ac-consent-scopes li {
+  font-family: var(--ff-mono-tag), monospace; font-size: 12.5px; color: #8a939b;
+  background: #0f1317; border: 1px solid #232a31; border-radius: 8px; padding: 6px 10px;
+}
+
 .ac-error {
   color: #ff8b7d; font-size: 13px; margin: 0 0 16px; line-height: 1.4;
 }

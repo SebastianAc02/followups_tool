@@ -1,6 +1,8 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { mcp } from 'better-auth/plugins';
 import { dbReal } from '../db/index';
+import { forzarConsentimientoMcp } from './mcp-forzar-consentimiento';
 
 // Adaptador de auth (B3). El core no importa este archivo: la identidad entra a la app
 // solo como datos planos (email, owner, admin) via app/lib/session.ts.
@@ -29,6 +31,14 @@ export const auth = betterAuth({
   // conmutara, activar el modo prueba buscaria tu sesion en pruebas.db (donde no existe)
   // y te sacaria a /login, y loguearte ahi crearia una cuenta duplicada.
   database: drizzleAdapter(dbReal, { provider: 'sqlite' }),
+  // Explicito y no dejado a inferir del request/env (2026-07-23, login OAuth del MCP):
+  // getMCPProviderMetadata (plugin `mcp`, ver abajo) lee ctx.context.options.baseURL --
+  // el campo LITERAL de esta config, no el baseURL resuelto en runtime -- para el
+  // `issuer` del discovery OAuth. Sin esto seteado a mano, options.baseURL queda
+  // undefined (el resto del stack SI cae de vuelta a BETTER_AUTH_URL vía getBaseURL, pero
+  // esta funcion puntual no), el endpoint /.well-known/oauth-authorization-server tira
+  // "invalid_issuer" y el discovery sale roto en produccion aunque todo lo demas ande bien.
+  baseURL: process.env.BETTER_AUTH_URL ?? process.env.APP_BASE_URL,
   trustedOrigins: origenesConfiables(),
   emailAndPassword: {
     enabled: true,
@@ -55,4 +65,38 @@ export const auth = betterAuth({
       verTodoPipeline: { type: 'boolean', defaultValue: false, input: false },
     },
   },
+  // Login OAuth para el MCP del panel (2026-07-23,
+  // docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md): Better Auth pasa a ser el
+  // authorization server (discovery + dynamic client registration + authorize + token),
+  // reusando /login como pantalla de login -- no se rueda OAuth a mano.
+  //
+  // requirePKCE + consentPage agregados tras un review de seguridad (2026-07-23, mismo dia):
+  // sin esto, DCR abierto (cualquiera registra un cliente, el protocolo MCP lo exige) + code
+  // issuance sin consentimiento = un atacante arma un link de phishing a /mcp/authorize con
+  // su propio redirect_uri y, si la victima ya esta logueada, el code sale solo hacia ese
+  // redirect_uri sin que la victima vea ni apruebe nada -- suplanta identidad ANTES de que
+  // corra el gate de rol (app/lib/mcp-gate.ts). requirePKCE:true (default real del plugin es
+  // `undefined` = sin exigir, pese a que el tipo OIDCOptions documenta @default true para el
+  // oidcProvider generico -- el opts que arma `mcp()` para SU PROPIO /mcp/authorize no
+  // hereda ese default, ver node_modules/better-auth/dist/plugins/mcp/index.mjs) cierra el
+  // downgrade de PKCE. consentPage por si solo NO alcanza (el redirect a consentPage esta
+  // gateado por `query.prompt === "consent"`, decision del CLIENTE que arma la URL, no del
+  // servidor): forzarConsentimientoMcp (abajo, plugin aparte) fuerza prompt=consent SIEMPRE
+  // via un hook `before` sobre /mcp/authorize, para que la decision de mostrar consentimiento
+  // sea del servidor. Ver el comentario largo en app/lib/mcp-forzar-consentimiento.ts.
+  plugins: [
+    mcp({
+      loginPage: '/login',
+      oidcConfig: {
+        // loginPage duplicado aca: MCPOptions.oidcConfig tipa como OIDCOptions completo, que
+        // exige loginPage no-opcional, aunque en runtime mcp() SIEMPRE lo pisa con el de
+        // arriba (`loginPage: options.loginPage` en node_modules/better-auth/dist/plugins/
+        // mcp/index.mjs). Es solo para que el tipo compile, no una segunda fuente de verdad.
+        loginPage: '/login',
+        requirePKCE: true,
+        consentPage: '/mcp-consent',
+      },
+    }),
+    forzarConsentimientoMcp,
+  ],
 });
