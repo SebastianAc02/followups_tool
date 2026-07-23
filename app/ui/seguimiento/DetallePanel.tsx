@@ -5,13 +5,21 @@
 // mas ancho que 384px para no amontonar contactos + timeline + historial.
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '../cn';
 import { CanalTag, type Canal } from '../CanalTag';
 import { FUNNEL_ETAPAS, ETAPA_GANADA, ETAPA_ONHOLD } from '../../db/funnel';
-import type { HistorialEtapas } from '../../db/repository';
+import type { HistorialEtapas, PlanCatalogo } from '../../db/repository';
 import { calcularDuracionPorEtapa } from '../../core/tiempoEnEtapa';
+import { calcularMrrEstimado, digitalPctConDefault } from '../../core/mrr';
+import { probabilidadCierrePorEtapa } from '../../core/probabilidadCierre';
+import {
+  listarPlanesAction,
+  asignarPlanAction,
+  actualizarPctDigitalAction,
+  actualizarUsuariosEstimadosAction,
+} from '../../seguimiento/actions';
 
 const MS_POR_DIA = 1000 * 60 * 60 * 24;
 
@@ -72,6 +80,7 @@ export interface PasoTimeline {
 }
 
 export interface DetallePanelData {
+  idEmpresa: string;
   empresa: string;
   ciudad: string | null;
   categoria: string | null;
@@ -84,6 +93,14 @@ export interface DetallePanelData {
     canal: Canal;
     paso: string;
   };
+  // Cara financiera del deal (2026-07-22, plan-panel-metricas-tiempo-real.md): crudos,
+  // sin formula -- este componente aplica calcularMrrEstimado/digitalPctConDefault/
+  // probabilidadCierrePorEtapa (core, puras) igual que ya hace con calcularDuracionPorEtapa
+  // arriba para el timeline.
+  plan: { id: number; nombre: string; saasMensual: number; tarifaTxn: number } | null;
+  pctDigital: number | null; // 0..1 crudo; null = sin capturar (se aplica el default 40%)
+  usuariosEstimados: number | null;
+  usuariosEfectivos: number | null;
 }
 
 function EstadoPasoDot({ estado }: { estado: PasoTimeline['estado'] }) {
@@ -120,7 +137,125 @@ export function DetallePanel({
   const [montado, setMontado] = useState(false);
   useEffect(() => setMontado(true), []);
 
+  // --- Datos financieros (Fase 1 punto 4, plan-panel-metricas-tiempo-real.md) --------
+  //
+  // Copia local editable de la cara financiera: `data` la trae el padre (fetch al abrir
+  // la ficha) y este componente no puede escribirle de vuelta -- por eso se copia a un
+  // estado propio en cuanto llega, y las acciones de guardar actualizan ESA copia
+  // (optimista) para que el numero se vea al toque sin esperar un refetch completo de la
+  // ficha. Se resincroniza cada vez que cambia la empresa abierta (data?.idEmpresa).
+  const [financiero, setFinanciero] = useState<{
+    plan: DetallePanelData['plan'];
+    pctDigital: number | null;
+    usuariosEstimados: number | null;
+    usuariosEfectivos: number | null;
+  } | null>(null);
+  useEffect(() => {
+    setFinanciero(
+      data
+        ? { plan: data.plan, pctDigital: data.pctDigital, usuariosEstimados: data.usuariosEstimados, usuariosEfectivos: data.usuariosEfectivos }
+        : null,
+    );
+  }, [data]);
+
+  const [planes, setPlanes] = useState<PlanCatalogo[]>([]);
+  useEffect(() => {
+    listarPlanesAction().then(setPlanes);
+  }, []);
+
+  const [guardandoPlan, startPlanTransition] = useTransition();
+  function guardarPlan(idPlanRaw: string) {
+    if (!data) return;
+    const idPlan = idPlanRaw === '' ? null : Number(idPlanRaw);
+    startPlanTransition(async () => {
+      const res = await asignarPlanAction(data.idEmpresa, idPlan);
+      if (res.ok) {
+        const nuevoPlan = idPlan === null ? null : planes.find((p) => p.id === idPlan) ?? null;
+        setFinanciero((f) => (f ? { ...f, plan: nuevoPlan } : f));
+      }
+    });
+  }
+
+  const [editandoDigital, setEditandoDigital] = useState(false);
+  const [valorDigital, setValorDigital] = useState('');
+  const [errorDigital, setErrorDigital] = useState<string | null>(null);
+  const [guardandoDigital, startDigitalTransition] = useTransition();
+
+  function abrirEdicionDigital() {
+    setValorDigital(financiero?.pctDigital != null ? String(Math.round(financiero.pctDigital * 100)) : '');
+    setErrorDigital(null);
+    setEditandoDigital(true);
+  }
+
+  function guardarDigital() {
+    if (!data) return;
+    const texto = valorDigital.trim();
+    const num = texto === '' ? null : Number(texto);
+    if (num !== null && (!Number.isFinite(num) || num < 0 || num > 100)) {
+      setErrorDigital('Debe ser un numero entre 0 y 100');
+      return;
+    }
+    setErrorDigital(null);
+    startDigitalTransition(async () => {
+      const res = await actualizarPctDigitalAction(data.idEmpresa, num);
+      if (res.ok) {
+        setFinanciero((f) => (f ? { ...f, pctDigital: num === null ? null : num / 100 } : f));
+        setEditandoDigital(false);
+      } else {
+        setErrorDigital(res.error);
+      }
+    });
+  }
+
+  const [editandoUsuarios, setEditandoUsuarios] = useState(false);
+  const [valorUsuarios, setValorUsuarios] = useState('');
+  const [errorUsuarios, setErrorUsuarios] = useState<string | null>(null);
+  const [guardandoUsuarios, startUsuariosTransition] = useTransition();
+
+  function abrirEdicionUsuarios() {
+    setValorUsuarios(financiero?.usuariosEstimados != null ? String(financiero.usuariosEstimados) : '');
+    setErrorUsuarios(null);
+    setEditandoUsuarios(true);
+  }
+
+  function guardarUsuarios() {
+    if (!data) return;
+    const texto = valorUsuarios.trim();
+    if (!texto) return;
+    setErrorUsuarios(null);
+    startUsuariosTransition(async () => {
+      const res = await actualizarUsuariosEstimadosAction(data.idEmpresa, texto);
+      if (res.ok) {
+        const num = Number(texto);
+        // usuariosEfectivos = COALESCE(reales, estimados) en la DB real -- si ya habia un
+        // efectivo (viene de "reales"), este edit de "estimados" no lo cambia; si no habia
+        // ninguno, el nuevo estimado pasa a ser el efectivo. No se puede distinguir el caso
+        // exacto solo con este numero, pero la ficha se refresca completa la proxima vez
+        // que se abre (perfilPipelineEmpresaAction), asi que esto es solo la vista optimista.
+        setFinanciero((f) => (f ? { ...f, usuariosEstimados: num, usuariosEfectivos: f.usuariosEfectivos ?? num } : f));
+        setEditandoUsuarios(false);
+      } else {
+        setErrorUsuarios(res.error);
+      }
+    });
+  }
+
   if (!isOpen || !montado) return null;
+
+  // MRR potencial / probabilidad de cierre: mismas funciones puras de core/ que ya usa
+  // el endpoint /api/panel/pipeline (route.ts) -- sin plan asignado, mrrPotencial es null
+  // (nunca un 0 falso, regla del plan). Probabilidad es heuristica por etapa, no una
+  // medicion real (ver core/probabilidadCierre.ts).
+  const digitalPctEfectivo = digitalPctConDefault(financiero?.pctDigital ?? null);
+  const mrrPotencial = financiero?.plan
+    ? calcularMrrEstimado({
+        usuarios: financiero.usuariosEfectivos ?? 0,
+        digitalPct: digitalPctEfectivo,
+        tarifaTxnPlan: financiero.plan.tarifaTxn,
+        saasMensual: financiero.plan.saasMensual,
+      })
+    : null;
+  const probabilidad = probabilidadCierrePorEtapa(timelineEtapas?.etapaActual ?? null);
 
   return createPortal(
     <>
@@ -184,6 +319,131 @@ export function DetallePanel({
                     </div>
                   </section>
                 )}
+
+                {/* Datos financieros del deal: plan, %digital, usuarios (editables) + MRR
+                    potencial y probabilidad de cierre (calculados, solo lectura). */}
+                <section>
+                  <h4 className="text-xs font-semibold uppercase tracking-widest text-muted mb-3">Datos financieros</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Plan */}
+                    <div className="bg-pipeline-card border border-line-card rounded-lg p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted mb-1.5">Plan</div>
+                      <select
+                        value={financiero?.plan?.id ?? ''}
+                        onChange={(e) => guardarPlan(e.target.value)}
+                        disabled={guardandoPlan}
+                        className="w-full rounded-md border border-line bg-shell px-2 py-1 text-[12.5px] text-ink outline-none focus:border-accent disabled:opacity-60"
+                      >
+                        <option value="">Sin plan asignado</option>
+                        {planes.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* % digital */}
+                    <div className="bg-pipeline-card border border-line-card rounded-lg p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted mb-1.5">% digital</div>
+                      {editandoDigital ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              autoFocus
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={valorDigital}
+                              onChange={(e) => setValorDigital(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') guardarDigital();
+                                if (e.key === 'Escape') setEditandoDigital(false);
+                              }}
+                              disabled={guardandoDigital}
+                              className="w-full rounded-md border border-line bg-shell px-2 py-1 text-[12.5px] text-ink outline-none focus:border-accent"
+                            />
+                            <button
+                              type="button"
+                              onClick={guardarDigital}
+                              disabled={guardandoDigital}
+                              className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[11.5px] font-semibold text-shell disabled:opacity-40"
+                            >
+                              {guardandoDigital ? '…' : 'Guardar'}
+                            </button>
+                          </div>
+                          {errorDigital && <p className="text-[11px] text-overdue">{errorDigital}</p>}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={abrirEdicionDigital}
+                          title="Editar % digital del deal"
+                          className="text-[13px] font-semibold text-ink hover:text-accent"
+                        >
+                          {financiero?.pctDigital != null
+                            ? `${Math.round(financiero.pctDigital * 100)}%`
+                            : `${Math.round(digitalPctEfectivo * 100)}% (default)`}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Usuarios estimados */}
+                    <div className="bg-pipeline-card border border-line-card rounded-lg p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted mb-1.5">Usuarios estimados</div>
+                      {editandoUsuarios ? (
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              autoFocus
+                              type="number"
+                              min={0}
+                              value={valorUsuarios}
+                              onChange={(e) => setValorUsuarios(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') guardarUsuarios();
+                                if (e.key === 'Escape') setEditandoUsuarios(false);
+                              }}
+                              disabled={guardandoUsuarios}
+                              className="w-full rounded-md border border-line bg-shell px-2 py-1 text-[12.5px] text-ink outline-none focus:border-accent"
+                            />
+                            <button
+                              type="button"
+                              onClick={guardarUsuarios}
+                              disabled={guardandoUsuarios || !valorUsuarios.trim()}
+                              className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[11.5px] font-semibold text-shell disabled:opacity-40"
+                            >
+                              {guardandoUsuarios ? '…' : 'Guardar'}
+                            </button>
+                          </div>
+                          {errorUsuarios && <p className="text-[11px] text-overdue">{errorUsuarios}</p>}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={abrirEdicionUsuarios}
+                          title="Editar usuarios estimados del deal"
+                          className="text-[13px] font-semibold text-ink hover:text-accent"
+                        >
+                          {financiero?.usuariosEstimados != null ? financiero.usuariosEstimados.toLocaleString('en-US') : 'Sin dato'}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* MRR potencial (calculado, solo lectura) */}
+                    <div className="bg-pipeline-card border border-line-card rounded-lg p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted mb-1.5">MRR potencial</div>
+                      <div className="text-[13px] font-semibold text-ink">
+                        {mrrPotencial !== null ? `$${mrrPotencial.toLocaleString('es-CO')}` : 'Sin datos (falta plan)'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 text-[11px] text-muted">
+                    Probabilidad de cierre (heurística por etapa):{' '}
+                    <span className="font-semibold text-ink-soft">{Math.round(probabilidad.valor * 100)}%</span>
+                  </div>
+                </section>
 
                 {/* Contactos */}
                 <section>

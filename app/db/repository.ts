@@ -3545,6 +3545,14 @@ export type PerfilPipelineEmpresa = {
   toques: { idToque: number; fecha: string | null; canal: string | null; resultado: string | null; quePaso: string | null }[];
   secuencia: PasoSecuencia[];
   proximoToque: { fecha: string | null; canal: string; paso: string } | null;
+  // Cara financiera del deal (2026-07-22, plan-panel-metricas-tiempo-real.md): crudos
+  // solamente, sin formula -- calcularMrrEstimado/digitalPctConDefault/probabilidadCierrePorEtapa
+  // son funciones puras de core/, el caller (server action / componente) las aplica. Mismo
+  // principio que pipelineParaEndpoint: el Repository trae datos, no calcula.
+  plan: { id: number; nombre: string; saasMensual: number; tarifaTxn: number } | null;
+  pctDigital: number | null; // 0..1 crudo capturado; null = sin capturar (el caller aplica el default 40%)
+  usuariosEstimados: number | null; // input crudo del discovery, editable en la ficha
+  usuariosEfectivos: number | null; // COALESCE(reales, estimados) -- la cifra que ya usa mrrEstimadoTotal
 };
 
 // Ficha completa de una empresa desde el Pipeline: "todos los contactos, todo el
@@ -3574,6 +3582,22 @@ export function perfilPipelineEmpresa(idEmpresa: string, idOrganizacion: number)
 
   const detalle = inscripcionActiva ? detalleInscrita(inscripcionActiva.idInscripcion, idOrganizacion) : null;
 
+  const financiero = db
+    .select({
+      idPlan: empresa.idPlan,
+      pctDigital: empresa.pctDigital,
+      nombrePlan: plan.nombre,
+      saasMensual: plan.saasMensual,
+      tarifaTxn: plan.tarifaTxn,
+      usuariosEstimados: empresaUsuarios.usuariosEstimados,
+      usuariosEfectivos: empresaUsuarios.usuariosEfectivos,
+    })
+    .from(empresa)
+    .leftJoin(plan, eq(plan.id, empresa.idPlan))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+
   return {
     empresa: emp.nombre ?? idEmpresa,
     ciudad: emp.ciudad,
@@ -3583,7 +3607,82 @@ export function perfilPipelineEmpresa(idEmpresa: string, idOrganizacion: number)
     toques,
     secuencia: ctx.secuencia,
     proximoToque: detalle?.proximoToque ?? null,
+    plan:
+      financiero?.idPlan != null && financiero.nombrePlan != null
+        ? {
+            id: financiero.idPlan,
+            nombre: financiero.nombrePlan,
+            saasMensual: financiero.saasMensual as number,
+            tarifaTxn: financiero.tarifaTxn as number,
+          }
+        : null,
+    pctDigital: financiero?.pctDigital ?? null,
+    usuariosEstimados: financiero?.usuariosEstimados ?? null,
+    usuariosEfectivos: financiero?.usuariosEfectivos ?? null,
   };
+}
+
+// --- Captura de datos financieros del deal (Fase 1 punto 4, plan-panel-metricas-tiempo-real.md) --
+//
+// Estos tres campos (plan, pctDigital, usuarios) se capturan en la ficha del deal
+// (DetallePanel), no en Notion (el CSV los trae muertos) -- decision de Sebastian: la
+// tool es la fuente de verdad. usuariosEstimados NO tiene metodo propio aca: ya existe
+// actualizarCampoCalificacion(idEmpresa, 'usuarios', valor, idOrganizacion) (Toque 1,
+// /llamada/[id]), mismo campo (empresa_usuarios.usuarios_estimados) -- reusarlo evita un
+// segundo camino de escritura para la misma columna.
+
+export type PlanCatalogo = { id: number; nombre: string; saasMensual: number; tarifaTxn: number };
+
+// Catalogo de planes para el selector de la ficha. Sembrado por scripts/seed_planes.ts,
+// de solo lectura desde la UI (nadie crea planes nuevos desde el cockpit todavia).
+export function listarPlanes(): PlanCatalogo[] {
+  return db
+    .select({ id: plan.id, nombre: plan.nombre, saasMensual: plan.saasMensual, tarifaTxn: plan.tarifaTxn })
+    .from(plan)
+    .orderBy(asc(plan.nombre))
+    .all();
+}
+
+function verificarOrganizacionEmpresa(idEmpresa: string, idOrganizacion: number): void {
+  const emp = db
+    .select({ organizacionActivaId: empresa.organizacionActivaId })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!emp) throw new Error(`Empresa ${idEmpresa} no existe`);
+  if (emp.organizacionActivaId !== idOrganizacion) {
+    throw new Error(`La empresa ${idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+  }
+}
+
+// Asigna (o quita, con null) el plan que puede tomar el deal. Mismo guard de
+// organizacion que actualizarCampoCalificacion: un lead compartido no se edita desde
+// otra organizacion. Valida que el plan exista en el catalogo -- esta DB no enforza FKs
+// por default, un id_plan huerfano dejaria el MRR en null silenciosamente sin este check.
+export function asignarPlanEmpresa(idEmpresa: string, idOrganizacion: number, idPlan: number | null): void {
+  verificarOrganizacionEmpresa(idEmpresa, idOrganizacion);
+  if (idPlan !== null) {
+    const existe = db.select({ id: plan.id }).from(plan).where(eq(plan.id, idPlan)).get();
+    if (!existe) throw new Error(`Plan ${idPlan} no existe en el catalogo`);
+  }
+  db.update(empresa)
+    .set({ idPlan, updatedAt: sql`datetime('now')` })
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .run();
+}
+
+// %digital del deal, 0..1 (mismo rango que digitalPctConDefault en core/mrr.ts). null
+// borra el dato capturado -- el caller vuelve a caer al default 40% via
+// digitalPctConDefault, no se inventa aca.
+export function actualizarPctDigitalEmpresa(idEmpresa: string, idOrganizacion: number, pctDigital: number | null): void {
+  verificarOrganizacionEmpresa(idEmpresa, idOrganizacion);
+  if (pctDigital !== null && (pctDigital < 0 || pctDigital > 1)) {
+    throw new Error('pctDigital debe estar entre 0 y 1');
+  }
+  db.update(empresa)
+    .set({ pctDigital, updatedAt: sql`datetime('now')` })
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .run();
 }
 
 // V4.8: agenda EN SECO. Para cada inscripcion activa, calcula que paso toca a la fecha
@@ -5689,6 +5788,10 @@ export type FilaPipelineMrr = {
   pctDigital: number | null;
   tarifaTxn: number | null;
   saasMensual: number | null;
+  // Plan asignado (nombre) -- entregable 2 del plan: el endpoint muestra CON que plan
+  // se calculo el revenue, no solo el numero final. null junto con tarifaTxn/saasMensual
+  // null es la misma senal de "sin plan asignado".
+  nombrePlan: string | null;
 };
 
 export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] {
@@ -5701,6 +5804,7 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
       pctDigital: empresa.pctDigital,
       tarifaTxn: plan.tarifaTxn,
       saasMensual: plan.saasMensual,
+      nombrePlan: plan.nombre,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
