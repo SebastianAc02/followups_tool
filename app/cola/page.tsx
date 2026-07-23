@@ -3,6 +3,7 @@ import {
   colaLeads,
   colaCierres,
   colaReagendar,
+  colaContactoIniciadoConSeguimiento,
   colaContactoIniciadoSinSeguimiento,
   contadoresHoy,
   agendaHoyCadencias,
@@ -47,6 +48,14 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
   const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
   const reagendar = splitActivo ? colaReagendar(hoy, owner, usuario.idOrganizacion) : [];
+  // Bucket "Contacto iniciado con seguimiento" (2026-07-23): contacto_iniciado con fecha
+  // vencida-o-hoy y SIN cadencia activa. Sin esto, toda cuenta reactivada trabajada a mano
+  // (Wicom, Intel Go) quedaba invisible: no era 'lead', no era estado caliente, tenia fecha
+  // (no calificaba para sinSeguimiento) y no tenia inscripcion (no la levantaba
+  // agendaHoyCadencias).
+  const contactoIniciadoConSeguimiento = splitActivo
+    ? colaContactoIniciadoConSeguimiento(hoy, owner, usuario.idOrganizacion)
+    : [];
   // Seccion "Contacto iniciado sin seguimiento" (2026-07-14): para CUALQUIER owner, no
   // solo el split de Sebastian. Sin owner por ser visitante, la seccion simplemente no se
   // muestra (decision anterior de Sebastian: un visitante no tiene "lo suyo" que completar).
@@ -86,6 +95,13 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
         ...cola.map((c): FilaColaConBucket => ({ ...c, bucket: 'lead', respuestaPendiente: respuestasPendientes.has(c.id) })),
         ...cierres.map((c): FilaColaConBucket => ({ ...c, bucket: 'cierre', respuestaPendiente: respuestasPendientes.has(c.id) })),
         ...reagendar.map((c): FilaColaConBucket => ({ ...c, bucket: 'reagendar', respuestaPendiente: respuestasPendientes.has(c.id) })),
+        // bucket 'lead': contacto_iniciado no es estado caliente, asi que es la misma
+        // clasificacion que le daria bucketDeEtapa (usada para los pasos de cadencia). Es
+        // date-driven como colaLeads/colaReagendar, por eso filaUnificada le aplica
+        // filaConVencimiento (todo bucket != 'cierre' lo usa).
+        ...contactoIniciadoConSeguimiento.map(
+          (c): FilaColaConBucket => ({ ...c, bucket: 'lead', respuestaPendiente: respuestasPendientes.has(c.id) }),
+        ),
         ...cadenciasParaUnificar.map(
           (t): FilaColaConBucket => ({
             id: t.idEmpresa,

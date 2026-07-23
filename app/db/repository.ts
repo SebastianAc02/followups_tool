@@ -359,6 +359,37 @@ export function colaReagendar(hoy: string, owner: string, idOrganizacion: number
     .all();
 }
 
+// Bucket "Contacto iniciado con seguimiento" del split de cola (2026-07-23): una empresa en
+// contacto_iniciado con proximo_follow_up_fecha vencida o de hoy y SIN cadencia activa
+// quedaba invisible en la cola de Sebastian -- no es 'lead' (no entra a colaLeads), no es
+// estado caliente (no entra a colaCierres), tiene fecha (no entra a colaContactoIniciadoSin
+// Seguimiento, que exige fecha NULL) y no tiene inscripcion (no la levanta
+// agendaHoyCadencias). Pasa con toda cuenta reactivada que se trabaja a mano (Wicom, Intel
+// Go). El leftJoin de inscripcion + isNull(inscripcion.idInscripcion) evita duplicar con el
+// bucket de cadencias: si hay secuencia activa, ese toque ya sale por su propio bucket.
+export function colaContactoIniciadoConSeguimiento(hoy: string, owner: string, idOrganizacion: number) {
+  return db
+    .select(columnasColaConCampana)
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(inscripcion, and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa')))
+    .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
+        eq(empresa.owner, owner),
+        eq(empresa.estadoNotion, 'contacto_iniciado'),
+        isNotNull(empresa.proximoFollowUpFecha),
+        lte(empresa.proximoFollowUpFecha, hoy),
+        isNull(inscripcion.idInscripcion),
+      ),
+    )
+    .orderBy(empresa.proximoFollowUpFecha)
+    .all();
+}
+
 // Seccion "Contacto iniciado sin seguimiento" (2026-07-14): empresas en contacto_iniciado
 // que no se van a meter a ninguna cadencia por ahora y hoy son invisibles -- colaDelDia
 // exige fecha, esta no la tiene. General para cualquier owner (no gateado como el split de
