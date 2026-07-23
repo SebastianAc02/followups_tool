@@ -5780,6 +5780,12 @@ export function empresasParaConversionStage(idOrganizacion: number, owner?: stri
 // 2026-07-22: tarifaTxn/saasMensual salen del plan real del deal (empresa.idPlan), NO de
 // configuracion_admin. null cuando el deal no tiene plan asignado todavia (el caller debe
 // mostrar "sin datos", no inventar una tarifa).
+//
+// nombrePlan (2026-07-23): se agrega al SELECT que ya hacia join con
+// `plan` para tarifaTxn/saasMensual -- no es una query nueva, es una columna mas del mismo
+// join. La necesita deal_historia (app/mcp/tools.ts) para mostrar CON QUE plan quedo el
+// deal, no solo sus tarifas. route.ts (el endpoint REST) no la usa hoy, pero tenerla en el
+// tipo no le rompe nada (solo lee los campos que ya destructuraba).
 export type FilaPipelineMrr = {
   idEmpresa: string;
   nombre: string;
@@ -5790,7 +5796,8 @@ export type FilaPipelineMrr = {
   saasMensual: number | null;
   // Plan asignado (nombre) -- entregable 2 del plan: el endpoint muestra CON que plan
   // se calculo el revenue, no solo el numero final. null junto con tarifaTxn/saasMensual
-  // null es la misma senal de "sin plan asignado".
+  // null es la misma senal de "sin plan asignado". Tambien lo usa deal_historia/pipeline
+  // del MCP server (app/mcp/tools.ts) para mostrar el plan del deal.
   nombrePlan: string | null;
 };
 
