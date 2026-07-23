@@ -44,7 +44,16 @@ export function crearDbPrueba() {
       notion_page_id TEXT,
       organizacion_activa_id INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      updated_at TEXT DEFAULT (datetime('now')),
+      id_plan INTEGER,
+      pct_digital REAL
+    );
+
+    CREATE TABLE plan (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL UNIQUE,
+      saas_mensual INTEGER NOT NULL,
+      tarifa_txn INTEGER NOT NULL
     );
 
     CREATE TABLE contacto (

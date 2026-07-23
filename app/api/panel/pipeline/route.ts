@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireSession } from '../../../lib/session';
-import { pipelineParaEndpoint, leerConfiguracionAdmin } from '../../../db/repository';
+import { pipelineParaEndpoint } from '../../../db/repository';
 import { probabilidadCierrePorEtapa } from '../../../core/probabilidadCierre';
 import { calcularMrrEstimado, digitalPctConDefault } from '../../../core/mrr';
 
@@ -16,24 +16,24 @@ import { calcularMrrEstimado, digitalPctConDefault } from '../../../core/mrr';
 // usuarios_efectivos (la unica cifra real de tamano de cuenta que hay) como proxy, mismo
 // proxy que ya usa embudoPipeline para "usuarios" en el embudo.
 // probabilidad de cierre: heuristica por etapa (core/probabilidadCierre.ts), NO una
-// probabilidad medida -- el campo `metodo` lo deja explicito en la respuesta para que
-// nadie la lea como dato duro.
-// digital: no hay %digital por empresa en ningun lado (schema ni Notion, ver
-// app/core/mrr.ts) -- cae al 100% default del plan para TODAS las filas hoy.
-// revenue estimado: calcularMrrEstimado con tarifa_txn_plan/saas_mensual leidos de
-// configuracion_admin (0 si nadie los configuro todavia -- no se inventa una tarifa).
+// probabilidad medida -- decision de Sebastian 2026-07-22 (Notion tiene un campo manual
+// real pero se descarta por ahora, se mantiene la heuristica). El campo `metodo` lo deja
+// explicito en la respuesta para que nadie la lea como dato duro.
+// digital / revenue estimado (2026-07-22, plan-panel-metricas-tiempo-real.md): ya NO
+// salen de configuracion_admin. digitalPct es el real del deal (empresa.pctDigital,
+// capturado en discovery) o el default 40% -- igual que la formula real de Notion. La
+// tarifa/saas salen del plan asignado al deal (empresa.idPlan -> tabla plan). Sin plan
+// asignado, revenueEstimado es null: no se inventa una tarifa.
 export async function GET() {
   const usuario = await requireSession();
-
-  const tarifaTxnPlan = Number(leerConfiguracionAdmin('mrr_tarifa_txn_plan')) || 0;
-  const saasMensual = Number(leerConfiguracionAdmin('mrr_saas_mensual')) || 0;
-  const digitalPct = digitalPctConDefault(null);
 
   const filas = pipelineParaEndpoint(usuario.idOrganizacion);
 
   const empresas = filas.map((f) => {
     const usuarios = f.usuariosEfectivos ?? 0;
     const probabilidad = probabilidadCierrePorEtapa(f.estado);
+    const digitalPct = digitalPctConDefault(f.pctDigital);
+    const tienePlan = f.tarifaTxn !== null && f.saasMensual !== null;
     return {
       idEmpresa: f.idEmpresa,
       nombre: f.nombre,
@@ -42,19 +42,14 @@ export async function GET() {
       probabilidadCierre: probabilidad.valor,
       metodoProbabilidad: probabilidad.metodo,
       digitalPct,
-      revenueEstimado: calcularMrrEstimado({ usuarios, digitalPct, tarifaTxnPlan, saasMensual }),
+      revenueEstimado: tienePlan
+        ? calcularMrrEstimado({ usuarios, digitalPct, tarifaTxnPlan: f.tarifaTxn as number, saasMensual: f.saasMensual as number })
+        : null,
     };
   });
 
   return NextResponse.json({
     organizacion: usuario.idOrganizacion,
-    configuracion: {
-      tarifaTxnPlan,
-      tarifaTxnPlanConfigurada: tarifaTxnPlan !== 0,
-      saasMensual,
-      saasMensualConfigurada: saasMensual !== 0,
-      digitalPctDefault: digitalPct,
-    },
     empresas,
   });
 }

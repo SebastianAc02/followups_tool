@@ -54,6 +54,7 @@ import {
   empresaClasificacion,
   empresaCategoriaView,
   identidadDecision,
+  plan,
 } from './schema';
 import type { OrigenFin } from '../core/reinscripcion';
 import type { CambioNotion } from '../core/ports/sync';
@@ -5433,24 +5434,40 @@ export function transicionesEnRango(idOrganizacion: number, desde: string, hasta
 }
 
 // Metrica 4 del plan: total del MRR estimado de TODA la organizacion (suma de
-// calcularMrrEstimado por empresa). tarifaTxnPlan/saasMensual son numeros de negocio, no
-// hay columna/tabla para ellos hoy (ver comentario largo en app/core/mrr.ts) -- se leen de
-// configuracion_admin (mismo mecanismo clave/valor que ya usa /conectores), el caller se
-// los pasa ya resueltos porque leerConfiguracionAdmin no es dominio, es Repository.
-// digitalPct entra fijo en 1 (default del plan) porque, otra vez, no hay fuente real por
-// empresa todavia.
-export function mrrEstimadoTotal(idOrganizacion: number, tarifaTxnPlan: number, saasMensual: number): number {
+// calcularMrrEstimado por empresa). 2026-07-22: tarifaTxnPlan/saasMensual ya NO salen de
+// configuracion_admin (ese numero era global, y planes distintos tienen tarifas muy
+// distintas -- Essential vs Utilities Enterprise difieren 100x). Cada deal trae su propio
+// plan (empresa.idPlan -> tabla plan) y su propio pctDigital (empresa.pctDigital, default
+// 40% via digitalPctConDefault si el discovery no lo capturo todavia).
+//
+// Deals SIN plan asignado no aportan al total: no hay tarifa razonable que inventarles
+// (mismo criterio de "no inventar" que ya aplicaba antes de esta migracion). El total de
+// hoy sera bajo mientras pocos deals tengan plan asignado -- se llena hacia adelante, como
+// empresa_estado_historial.
+export function mrrEstimadoTotal(idOrganizacion: number): number {
   const filas = db
-    .select({ usuariosEfectivos: empresaUsuarios.usuariosEfectivos })
+    .select({
+      usuariosEfectivos: empresaUsuarios.usuariosEfectivos,
+      pctDigital: empresa.pctDigital,
+      tarifaTxn: plan.tarifaTxn,
+      saasMensual: plan.saasMensual,
+    })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(plan, eq(plan.id, empresa.idPlan))
     .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
     .all();
 
   let total = 0;
   for (const f of filas) {
+    if (f.tarifaTxn === null || f.saasMensual === null) continue; // sin plan asignado, no se inventa
     const usuarios = f.usuariosEfectivos ?? 0;
-    total += calcularMrrEstimado({ usuarios, digitalPct: digitalPctConDefault(null), tarifaTxnPlan, saasMensual });
+    total += calcularMrrEstimado({
+      usuarios,
+      digitalPct: digitalPctConDefault(f.pctDigital),
+      tarifaTxnPlan: f.tarifaTxn,
+      saasMensual: f.saasMensual,
+    });
   }
   return Math.round(total);
 }
@@ -5651,14 +5668,22 @@ export function empresasParaConversionStage(idOrganizacion: number, owner?: stri
 // Metrica 5 del plan: fila cruda por empresa para el endpoint REST de solo lectura --
 // deal size (proxy: usuarios efectivos, la unica cifra de tamano de cuenta que existe
 // hoy), estado (para derivar probabilidad de cierre en el caller via
-// core/probabilidadCierre.ts) y usuariosEfectivos (para derivar revenue estimado via
-// core/mrr.ts). El calculo de probabilidad/revenue NO vive aca a proposito: son formulas
-// puras, van en core/, esta funcion solo trae los datos crudos (Repository).
+// core/probabilidadCierre.ts) y usuariosEfectivos + tarifaTxn/saasMensual/pctDigital (para
+// derivar revenue estimado via core/mrr.ts). El calculo de probabilidad/revenue NO vive
+// aca a proposito: son formulas puras, van en core/, esta funcion solo trae los datos
+// crudos (Repository).
+//
+// 2026-07-22: tarifaTxn/saasMensual salen del plan real del deal (empresa.idPlan), NO de
+// configuracion_admin. null cuando el deal no tiene plan asignado todavia (el caller debe
+// mostrar "sin datos", no inventar una tarifa).
 export type FilaPipelineMrr = {
   idEmpresa: string;
   nombre: string;
   estado: string | null;
   usuariosEfectivos: number | null;
+  pctDigital: number | null;
+  tarifaTxn: number | null;
+  saasMensual: number | null;
 };
 
 export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] {
@@ -5668,9 +5693,13 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
       nombre: empresa.nombreOficial,
       estado: empresa.estadoNotion,
       usuariosEfectivos: empresaUsuarios.usuariosEfectivos,
+      pctDigital: empresa.pctDigital,
+      tarifaTxn: plan.tarifaTxn,
+      saasMensual: plan.saasMensual,
     })
     .from(empresa)
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(plan, eq(plan.id, empresa.idPlan))
     .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
     .orderBy(asc(empresa.nombreOficial))
     .all();
