@@ -8,3 +8,14 @@ followupsonepay.duckdns.org {
 		lb_try_interval 250ms
 	}
 }
+
+# MCP server del panel (Fase 3): puerta publica con TLS para que un cliente MCP externo
+# (ej. Camilo) queree los ISPs sin instalar nada ni entrar a Tailscale. Caddy termina TLS
+# (cert automatico de Let's Encrypt, el subdominio resuelve por wildcard de DuckDNS a la IP
+# del VPS) y proxea al contenedor `mcp` por la red interna `onepay`. La barrera de acceso
+# es el token bearer que valida el propio server (MCP_TOKEN en .env.production); Caddy solo
+# agrega el TLS. El bind del `ports:` en docker-compose.mcp.yml sigue siendo solo-Tailscale
+# para admin; el trafico de Camilo entra por aca, no por ese puerto.
+mcp.followupsonepay.duckdns.org {
+	reverse_proxy mcp:3900
+}
