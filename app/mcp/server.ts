@@ -17,10 +17,121 @@ import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { tokenDeHeaders, tokenValido } from './auth';
-import { panelMetricas, dealHistoria, pipeline } from './tools';
+import {
+  panelMetricas,
+  dealHistoria,
+  pipeline,
+  registrarToqueTool,
+  moverEstadoTool,
+  cambiarCadenciaTool,
+  marcarPerdidaTool,
+} from './tools';
+import { CANALES, RESULTADOS } from '../db/validation';
 
 const NOMBRE_SERVIDOR = 'followups-panel-mcp';
 const VERSION_SERVIDOR = '1.0.0';
+
+// Organizacion default para las WRITE tools cuando el caller no la fija (solo el server
+// standalone legacy, que hoy corre en modo solo-lectura y por tanto nunca registra escritura).
+// El camino real (app/api/mcp/route.ts) SIEMPRE pasa la organizacion de la sesion.
+const ORGANIZACION_DEFAULT = 1;
+
+// Registra las tools de ESCRITURA (write-path, 2026-07-24). Se llaman SOLO si el caller
+// autenticado paso el gate de escritura (puedeEscribirMcp) -- esa decision la toma route.ts,
+// aca solo se cablean las tools contra la organizacion de esa sesion. Los inputSchema
+// declaran el contrato para el cliente; la validacion dura (razonPerdida obligatoria, canal
+// valido, etc.) la reimpone el dominio via Zod .parse(), no se confia solo en esto.
+function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
+  const kdmShape = z
+    .object({ nombre: z.string().min(1), telefono: z.string().min(1).optional() })
+    .optional()
+    .describe('Contacto decisor (KDM) opcional a enlazar/crear con el toque');
+
+  server.registerTool(
+    'registrar_toque',
+    {
+      description:
+        'Registra un toque comercial (llamada/whatsapp/correo) sobre una empresa: escribe el evento, ' +
+        'mueve el embudo si aplica y encola el sync a Notion. Envuelve registrarToque() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
+        canal: z.enum(CANALES),
+        resultado: z.enum(RESULTADOS).describe("razonPerdida es obligatoria si resultado='contesto_no'"),
+        quePaso: z.string().min(1).optional(),
+        proximoFollowUp: z.string().min(1).optional().describe('YYYY-MM-DD'),
+        proximoCanal: z.string().min(1).optional(),
+        usuarios: z.number().optional(),
+        crm: z.string().min(1).optional(),
+        pasarela: z.string().min(1).optional(),
+        razonPerdida: z.string().min(1).optional(),
+        objecion: z.string().min(1).optional(),
+        kdm: kdmShape,
+      },
+    },
+    async (input) => {
+      const r = registrarToqueTool(input as Parameters<typeof registrarToqueTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r) }] };
+    },
+  );
+
+  server.registerTool(
+    'mover_estado',
+    {
+      description:
+        'Mueve la etapa comercial (estado_notion) de una empresa y encola el cambio DB -> Notion. ' +
+        'Envuelve actualizarEstadoNotion() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1),
+        estado: z.string().min(1).describe('slug de estado_notion: lead|contacto_iniciado|reunion_agendada|oportunidad|cierre_documentacion|enviar_contrato|firma_pago|on_hold'),
+        fecha: z.string().optional().describe('YYYY-MM-DD para el historico. Default: hoy'),
+      },
+    },
+    async ({ idEmpresa, estado, fecha }) => {
+      const r = moverEstadoTool({ idEmpresa, estado, fecha }, idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r) }] };
+    },
+  );
+
+  server.registerTool(
+    'cambiar_cadencia',
+    {
+      description:
+        'Reprograma el seguimiento de una empresa (fecha/canal/proximo paso) y opcionalmente la mueve ' +
+        'a otra cadencia (idCampana). Envuelve cambiarCadencia() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1),
+        idCampana: z.number().int().positive().optional().describe('Inscribe la empresa en la cadencia de esta campana'),
+        proximoFollowUp: z.string().min(1).optional().describe('YYYY-MM-DD'),
+        proximoCanal: z.string().min(1).optional(),
+        proximoPaso: z.string().min(1).optional(),
+      },
+    },
+    async (input) => {
+      const r = cambiarCadenciaTool(input as Parameters<typeof cambiarCadenciaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_perdida',
+    {
+      description:
+        'Marca una empresa como perdida/parqueada: registra un toque de perdida (razon obligatoria) y ' +
+        'la pone en on_hold, encolando el sync a Notion. Envuelve marcarPerdida() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1),
+        canal: z.enum(CANALES),
+        razonPerdida: z.string().min(1).describe('Por que se pierde/parquea la cuenta (obligatorio)'),
+        quePaso: z.string().min(1).optional(),
+        objecion: z.string().min(1).optional(),
+      },
+    },
+    async (input) => {
+      const r = marcarPerdidaTool(input as Parameters<typeof marcarPerdidaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r) }] };
+    },
+  );
+}
 
 // Un McpServer nuevo por request (modo "stateless" del SDK, sessionIdGenerator: undefined,
 // ver el ejemplo simpleStatelessStreamableHttp.js del propio paquete): este server es de
@@ -32,7 +143,11 @@ const VERSION_SERVIDOR = '1.0.0';
 // duplicar las 3 declaraciones de tool -- unico cambio de esa fase es el TRANSPORTE/AUTH
 // (StreamableHTTPServerTransport+token aca, WebStandardStreamableHTTPServerTransport+OAuth
 // alla), nunca la forma del McpServer.
-export function crearMcpServer(): McpServer {
+// opts.escritura (write-path, 2026-07-24): registra ADEMAS las 4 write tools, atadas a
+// opts.idOrganizacion (la de la sesion). Default false: el server standalone legacy
+// (crearServidorMcp) lo llama sin opts y queda SOLO LECTURA, igual que antes. Solo el camino
+// OAuth de Next (app/api/mcp/route.ts) opta por escritura, y SOLO tras pasar puedeEscribirMcp.
+export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: number } = {}): McpServer {
   const server = new McpServer({ name: NOMBRE_SERVIDOR, version: VERSION_SERVIDOR });
 
   server.registerTool(
@@ -85,6 +200,10 @@ export function crearMcpServer(): McpServer {
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );
+
+  if (opts.escritura) {
+    registrarWriteTools(server, opts.idOrganizacion ?? ORGANIZACION_DEFAULT);
+  }
 
   return server;
 }

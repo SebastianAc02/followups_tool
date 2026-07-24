@@ -25,3 +25,16 @@ export function puedeQuerearMcp(sesion: UsuarioSesion): boolean {
   if (sesion.verTodoPipeline) return true;
   return sesion.owner.trim().length > 0 && !sesion.soloLectura;
 }
+
+// Gate de ESCRITURA del MCP (write-path, 2026-07-24, integraciones/propuesta-write-path.md).
+// Separado del de lectura A PROPOSITO: se puede revocar la escritura (escrituraMcp=false) sin
+// perder la lectura (puedeQuerearMcp sigue en true). Reglas:
+//   - primero tiene que poder LEER (todo escritor lee).
+//   - el flag dedicado escrituraMcp tiene que estar encendido. NO se hereda de admin ni de
+//     ser owner: es un permiso que se concede aparte (script de seed / UPDATE a mano), para
+//     que "quien puede registrar toques reales en produccion" sea una decision explicita.
+// Un Visitante (soloLectura) nunca escribe: ya falla puedeQuerearMcp.
+export function puedeEscribirMcp(sesion: UsuarioSesion): boolean {
+  if (!puedeQuerearMcp(sesion)) return false;
+  return sesion.escrituraMcp === true;
+}

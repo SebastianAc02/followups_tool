@@ -19,12 +19,46 @@ function trocearRichText(texto: string): { text: { content: string } }[] {
   return trozos;
 }
 
+// write-path del MCP (2026-07-24, integraciones/propuesta-write-path.md): mapeo del slug
+// interno de estado_notion al NOMBRE de la opcion de status en Notion. estado es tipo
+// "status" (no texto), asi que el PATCH necesita el nombre EXACTO de la opcion, no el slug.
+//
+// SIN VERIFICAR EN VIVO: estos nombres son candidatos (derivados de los labels de
+// FUNNEL_ETAPAS en db/funnel.ts) y NO estan confirmados contra los grupos de status reales
+// del "Sales Pipeline" de Notion. Un humano debe confirmarlos antes de encender
+// FOLLOWUPS_NOTION_SYNC_EXTENDIDO en produccion. Un estado que no este en este mapa se OMITE
+// del PATCH (no se manda un nombre inventado que rompa la request).
+const ESTADO_A_NOTION_STATUS: Record<string, string> = {
+  lead: 'Lead',
+  contacto_iniciado: 'Contacto Iniciado',
+  reunion_agendada: 'Reunión Agendada',
+  oportunidad: 'Oportunidad',
+  cierre_documentacion: 'Cierre y Documentación',
+  enviar_contrato: 'Enviar Contrato',
+  firma_pago: 'Firma y Pago',
+  on_hold: 'On Hold',
+};
+
+// Gate del sync extendido (estado + razonPerdida DB -> Notion). Default APAGADO: mientras
+// los nombres de propiedad/opcion de Notion no esten verificados en vivo, emitirlos
+// arriesga romper el PATCH ENTERO de la fila (Notion rechaza toda la request si una
+// propiedad esta mal), y con ella el sync base (proximoPaso, fechas) que hoy si funciona.
+// El outbox igual CARGA estado/razonPerdida en el payload; solo su emision final espera
+// esta verificacion. Se lee en cada llamada (no una constante de modulo) para que los tests
+// puedan alternarlo.
+function syncExtendidoHabilitado(): boolean {
+  return process.env.FOLLOWUPS_NOTION_SYNC_EXTENDIDO === '1';
+}
+
 // Tarea 6: fechaPrimerContacto, fechaUltimoContacto y toquesHechos son campos NUEVOS.
 // Los nombres de propiedad de abajo ("Fecha Primer Contacto", "Fecha Último Contacto",
 // "Toques") son CANDIDATOS, igual que la nota de `Estado` mas abajo: no estan
 // verificados contra el "Sales Pipeline" real de Notion. No activar esto en produccion
 // sin confirmar esos 3 nombres en vivo (mismo checkpoint que ya aplica para Estado).
-function construirPropiedades(cambio: CambioNotion): Record<string, unknown> {
+//
+// Exportada (2026-07-24) solo para el test del adaptador (notion.test.ts): arma el mismo
+// PATCH sin levantar un fetch real.
+export function construirPropiedades(cambio: CambioNotion): Record<string, unknown> {
   const props: Record<string, unknown> = {};
   if (cambio.notasDiscovery !== undefined) {
     props['Notas Discovery'] = { rich_text: trocearRichText(cambio.notasDiscovery) };
@@ -44,6 +78,22 @@ function construirPropiedades(cambio: CambioNotion): Record<string, unknown> {
   if (cambio.toquesHechos !== undefined) {
     props['Toques'] = { rich_text: trocearRichText(cambio.toquesHechos) };
   }
+
+  // Sync extendido (estado + razonPerdida): gateado, ver syncExtendidoHabilitado arriba.
+  if (syncExtendidoHabilitado()) {
+    if (cambio.estado !== undefined) {
+      const nombreStatus = ESTADO_A_NOTION_STATUS[cambio.estado];
+      // Un estado sin mapeo conocido se OMITE: preferible perder ese campo a mandar un
+      // nombre de opcion inventado que Notion rechace y tumbe el PATCH entero.
+      if (nombreStatus) {
+        props['Estado'] = { status: { name: nombreStatus } };
+      }
+    }
+    if (cambio.razonPerdida !== undefined) {
+      props['Razón Pérdida'] = { rich_text: trocearRichText(cambio.razonPerdida) };
+    }
+  }
+
   return props;
 }
 

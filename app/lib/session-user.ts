@@ -12,6 +12,11 @@
 // solo su propia cartera). Las paginas deciden que owner pasarle al Repository leyendo
 // este flag; el Repository mismo no sabe de roles, solo de "con owner filtra, sin owner
 // (undefined) trae todo" (mismo patron que ya existia para el visitante).
+// escrituraMcp: permiso de ESCRITURA por MCP (write-path, 2026-07-24). Separado de admin/
+// verTodoPipeline/soloLectura a proposito: se concede/revoca aparte para poder cortar la
+// escritura del brain sin perder su lectura (ver app/lib/mcp-gate.ts puedeEscribirMcp).
+// input:false en auth.ts, mismo patron que admin/verTodoPipeline: solo lo setea el seed o
+// un UPDATE a mano.
 export type UsuarioSesion = {
   id: string;
   email: string;
@@ -20,6 +25,7 @@ export type UsuarioSesion = {
   idOrganizacion: number;
   soloLectura: boolean;
   verTodoPipeline: boolean;
+  escrituraMcp: boolean;
 };
 
 export function usuarioDeSesion(
@@ -30,6 +36,7 @@ export function usuarioDeSesion(
     owner?: string | null;
     admin?: boolean | null;
     verTodoPipeline?: boolean | null;
+    escrituraMcp?: boolean | null;
   },
   idOrganizacion: number,
   soloLectura: boolean = false,
@@ -44,5 +51,6 @@ export function usuarioDeSesion(
     idOrganizacion,
     soloLectura,
     verTodoPipeline: Boolean(user.verTodoPipeline),
+    escrituraMcp: Boolean(user.escrituraMcp),
   };
 }

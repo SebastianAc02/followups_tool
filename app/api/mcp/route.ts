@@ -22,7 +22,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { auth } from '../../lib/auth';
 import { crearMcpServer } from '../../mcp/server';
 import { usuarioSesionDesdeOAuth } from '../../lib/mcp-sesion';
-import { puedeQuerearMcp } from '../../lib/mcp-gate';
+import { puedeQuerearMcp, puedeEscribirMcp } from '../../lib/mcp-gate';
 
 function respuestaForbidden(): Response {
   return Response.json(
@@ -42,9 +42,15 @@ export const POST = withMcpAuth(auth, async (req, oauthSession) => {
   }
 
   // Un McpServer + transport nuevo por request (modo stateless, sessionIdGenerator:
-  // undefined): mismo criterio que app/mcp/server.ts -- este MCP es de solo lectura y sin
-  // volumen, no hay razon para pagar el estado de sesiones del modo stateful.
-  const mcpServer = crearMcpServer();
+  // undefined): mismo criterio que app/mcp/server.ts -- sin volumen de sesiones, no hay razon
+  // para pagar el estado del modo stateful.
+  //
+  // write-path (2026-07-24): las write tools se registran SOLO si esta sesion pasa el gate de
+  // ESCRITURA (puedeEscribirMcp, separado del de lectura). Un lector sin ese permiso ve las 3
+  // tools de lectura y ninguna de escritura -- ni siquiera aparecen en tools/list. La
+  // organizacion sobre la que escribe la fija la sesion, no el cliente.
+  const escritura = puedeEscribirMcp(sesion);
+  const mcpServer = crearMcpServer({ escritura, idOrganizacion: sesion.idOrganizacion });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await mcpServer.connect(transport);
   return transport.handleRequest(req);

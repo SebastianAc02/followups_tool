@@ -471,7 +471,8 @@ export function agregarEsquemaAuthOAuth(dbPath: string) {
       updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       owner TEXT,
       admin INTEGER DEFAULT 0,
-      ver_todo_pipeline INTEGER DEFAULT 0
+      ver_todo_pipeline INTEGER DEFAULT 0,
+      escritura_mcp INTEGER DEFAULT 0
     );
 
     CREATE TABLE oauth_application (

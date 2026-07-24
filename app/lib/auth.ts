@@ -63,6 +63,10 @@ export const auth = betterAuth({
       // lectura (Felipe + Sebastian), sin ganar `admin` (panel/conectores de equipo).
       // input:false: solo lo setea scripts/seed_auth_users.ts o un UPDATE a mano.
       verTodoPipeline: { type: 'boolean', defaultValue: false, input: false },
+      // Permiso de ESCRITURA por MCP (write-path, 2026-07-24): separado del de lectura para
+      // revocar escritura sin perder lectura (app/lib/mcp-gate.ts). input:false: solo lo
+      // setea el seed o un UPDATE a mano, nunca el cliente.
+      escrituraMcp: { type: 'boolean', defaultValue: false, input: false },
     },
   },
   // Login OAuth para el MCP del panel (2026-07-23,

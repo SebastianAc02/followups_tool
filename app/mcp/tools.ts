@@ -18,7 +18,14 @@ import {
   empresasParaConversionStage,
   historialEtapasEmpresa,
   pipelineParaEndpoint,
+  registrarToque,
+  actualizarEstadoNotion,
+  cambiarCadencia,
+  marcarPerdida,
+  type CambiarCadenciaInput,
+  type MarcarPerdidaInput,
 } from '../db/repository';
+import type { RegistrarToqueInput } from '../db/validation';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
@@ -197,4 +204,43 @@ export function pipeline(input: PipelineInput = {}): PipelineOutput {
   });
 
   return { organizacion: idOrganizacion, empresas };
+}
+
+// --- WRITE tools (write-path del MCP, 2026-07-24, integraciones/propuesta-write-path.md) ---
+//
+// Adaptadores DELGADOS: cada uno envuelve una funcion de dominio del Repository tal cual
+// (misma validacion Zod, misma transaccion, mismo encolado al outbox). Cero logica de negocio
+// aca -- si faltaba una regla, se agrego en el dominio (marcarPerdida, cambiarCadencia), no en
+// el MCP. Misma regla de arquitectura que las tools de lectura, al reves: leen/escriben SOLO
+// por el Repository.
+//
+// idOrganizacion NO es un parametro del cliente: lo fija la sesion (route.ts lo pasa desde el
+// UsuarioSesion). Un cliente no elige sobre que organizacion escribe. El resultado es un JSON
+// { ok: true } minimo -- si la validacion de dominio falla, la funcion LANZA y el server lo
+// traduce a un error MCP (mismo comportamiento que un .parse() de Zod que no cumple).
+
+export type ResultadoEscritura = { ok: true };
+
+export function registrarToqueTool(input: RegistrarToqueInput, idOrganizacion: number): ResultadoEscritura {
+  registrarToque(input, idOrganizacion);
+  return { ok: true };
+}
+
+export type MoverEstadoInput = { idEmpresa: string; estado: string; fecha?: string };
+
+export function moverEstadoTool(input: MoverEstadoInput, idOrganizacion: number): ResultadoEscritura {
+  // encolarNotion:true -- este SI es un cambio DB -> Notion (a diferencia del sync que baja de
+  // Notion). fecha default hoy() para el historico de la transicion.
+  actualizarEstadoNotion(input.idEmpresa, input.estado, idOrganizacion, input.fecha ?? hoy(), { encolarNotion: true });
+  return { ok: true };
+}
+
+export function cambiarCadenciaTool(input: CambiarCadenciaInput, idOrganizacion: number): ResultadoEscritura {
+  cambiarCadencia(input, idOrganizacion);
+  return { ok: true };
+}
+
+export function marcarPerdidaTool(input: MarcarPerdidaInput, idOrganizacion: number): ResultadoEscritura {
+  marcarPerdida(input, idOrganizacion);
+  return { ok: true };
 }

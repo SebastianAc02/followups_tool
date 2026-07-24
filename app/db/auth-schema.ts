@@ -23,6 +23,13 @@ export const user = sqliteTable("user", {
   // (Sebastian es admin=1 hoy) y ese usuario debe seguir viendo SOLO su propia cartera.
   // input:false en auth.ts, mismo patron que owner/admin: solo lo setea el script de seed.
   verTodoPipeline: integer("ver_todo_pipeline", { mode: "boolean" }).default(false),
+  // Permiso de ESCRITURA por MCP (write-path, 2026-07-24, integraciones/propuesta-write-path.md):
+  // separado del de lectura para poder revocar escritura sin perder lectura (ver
+  // app/lib/mcp-gate.ts puedeEscribirMcp). input:false en auth.ts, mismo patron que
+  // admin/verTodoPipeline: solo lo setea el seed o un UPDATE a mano. La columna se crea con
+  // scripts/migrate_escritura_mcp_apply.py (fuera de las migraciones drizzle, igual que
+  // ver_todo_pipeline: la tabla `user` la maneja Better Auth, no schema.ts).
+  escrituraMcp: integer("escritura_mcp", { mode: "boolean" }).default(false),
 });
 
 export const session = sqliteTable(
