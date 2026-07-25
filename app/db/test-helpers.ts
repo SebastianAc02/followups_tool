@@ -120,6 +120,10 @@ export function crearDbPrueba() {
       razon_perdida TEXT,
       objecion TEXT,
       fuente TEXT NOT NULL,
+      -- Migracion 0012: quien ejecuto el toque, distinto del owner del deal. Nullable, sin
+      -- default (NULL = no atribuido). Si falta aca, cualquier INSERT de Drizzle sobre toque
+      -- revienta, igual que paso con nombre_notion.
+      ejecutado_por TEXT,
       id_organizacion INTEGER NOT NULL DEFAULT 1,
       created_at TEXT
     );
@@ -439,6 +443,22 @@ export function crearDbPrueba() {
       estado_nuevo TEXT NOT NULL,
       fecha TEXT NOT NULL,
       id_organizacion INTEGER NOT NULL DEFAULT 1
+    );
+
+    -- Migracion 0013: cada vez que un seguimiento programado no se ejecuto y se corrio a
+    -- otra fecha. Append-only.
+    CREATE TABLE seguimiento_aplazado (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_empresa TEXT NOT NULL,
+      fecha_incumplida TEXT NOT NULL,
+      fecha_nueva TEXT NOT NULL,
+      -- motivo acotado a MOTIVOS_APLAZO, enforzado por Zod y no por un CHECK: se replica el
+      -- DDL de la migracion tal cual, sin agregarle restricciones que la base real no tiene.
+      motivo TEXT,
+      nota TEXT,
+      aplazado_por TEXT,
+      id_organizacion INTEGER NOT NULL,
+      created_at TEXT
     );
 
     CREATE TABLE empresa_clasificacion (

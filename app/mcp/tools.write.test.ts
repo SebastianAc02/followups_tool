@@ -131,7 +131,7 @@ test('crearMcpServer() (default, standalone legacy) expone SOLO las tools de lec
   assert.deepEqual(nombres, [...TOOLS_LECTURA].sort());
 });
 
-test('crearMcpServer({escritura:true}) expone ademas las 7 write tools', async () => {
+test('crearMcpServer({escritura:true}) expone ademas las write tools', async () => {
   const nombres = await toolsDe(crearMcpServer({ escritura: true, idOrganizacion: 1 }));
   assert.deepEqual(nombres, [...TOOLS_LECTURA, ...TOOLS_ESCRITURA].sort());
 });

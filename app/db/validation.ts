@@ -54,6 +54,26 @@ export const RESULTADO_LABELS: Record<Resultado, string> = {
   no_llego: 'No llegó a la reunión',
 };
 
+// Por que no se hizo un seguimiento programado (2026-07-25, tabla seguimiento_aplazado).
+// Cerrado en cuatro valores a proposito: en texto libre "no me dio el dia" y "se me
+// atraveso la U" son la misma causa escrita de dos formas, y con eso no se puede contar
+// nada. El detalle en prosa va aparte, en `nota`, y no reemplaza al motivo.
+//
+// Los cuatro cortan por causa, no por sintoma, porque cada uno lleva a una accion distinta:
+//   plan_irreal     - el numero de seguimientos planeados para el dia no era alcanzable.
+//                     Se arregla planeando menos, no trabajando mas.
+//   dia_atravesado  - el dia se atraveso (imprevisto, universidad, reunion que se alargo).
+//                     Capacidad que existia y otra cosa se la comio.
+//   tiempo_no_usado - hubo tiempo disponible y no se uso. Ni el plan ni el dia tienen la
+//                     culpa; es el unico de los cuatro que habla de ejecucion.
+//   cuenta_evitada  - esa cuenta en particular se esta evitando (la incomoda, la que
+//                     siempre queda de ultima). Se ve al repetirse sobre la MISMA cuenta.
+//
+// NULL no es un quinto valor: significa "no lo dijo". Nunca se infiere el motivo desde la
+// fecha, el owner ni la cuenta.
+export const MOTIVOS_APLAZO = ['plan_irreal', 'dia_atravesado', 'tiempo_no_usado', 'cuenta_evitada'] as const;
+export type MotivoAplazo = (typeof MOTIVOS_APLAZO)[number];
+
 // V3.4: variantes de "hubo conversacion real", disparan la busqueda en Granola.
 // no_contesto nunca la dispara (nunca hubo con quien hablar, nada que buscar).
 export const RESULTADOS_CONTESTO: readonly Resultado[] = ['contesto_reunion', 'contesto_sigue_seguimiento', 'contesto_no'];
@@ -270,6 +290,11 @@ export const registrarToqueSchema = z
     pasarela: z.string().min(1).optional(),
     razonPerdida: z.string().min(1).optional(),
     objecion: z.string().min(1).optional(),
+    // Quien hizo la llamada o mando el mensaje. Opcional y sin default: si no viene, el
+    // toque queda sin atribuir (NULL). No se rellena con el owner del deal ni con el
+    // usuario de la sesion -- suponer quien ejecuto es exactamente el dato falso que esta
+    // columna existe para no tener.
+    ejecutadoPor: z.string().min(1).optional(),
     kdm: kdmSchema.optional(),
   })
   .superRefine((data, ctx) => {

@@ -51,6 +51,7 @@ import {
   mensajeWhatsapp,
   lineaWhatsapp,
   empresaEstadoHistorial,
+  seguimientoAplazado,
   organizacionMiembro,
   empresaClasificacion,
   empresaCategoriaView,
@@ -121,6 +122,7 @@ import {
   CANALES,
   RESULTADOS,
   RESULTADO_LABELS,
+  MOTIVOS_APLAZO,
   type Canal,
   type Resultado,
   RITMOS_INGRESO,
@@ -684,6 +686,8 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
         proximoFollowUpFecha: parsed.proximoFollowUp ?? null,
         razonPerdida: parsed.razonPerdida ?? null,
         objecion: parsed.objecion ?? null,
+        // null explicito cuando no viene: el toque queda sin atribuir, no se asume el owner.
+        ejecutadoPor: parsed.ejecutadoPor ?? null,
         fuente: 'cockpit',
         idOrganizacion,
         createdAt: ahora,
@@ -910,6 +914,123 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
         detalle: `reprograma seguimiento -> ${parsed.proximoFollowUp ?? '-'} / ${parsed.proximoCanal ?? '-'}`,
       })
       .run();
+  });
+}
+
+// --- Aplazar un seguimiento (lo que NO se hizo) ---------------------------------------
+//
+// cambiarCadencia reprograma y PISA proximo_follow_up_fecha: la fecha incumplida se pierde y
+// la cuenta se ve igual de sana que una que nunca se corrio. aplazarSeguimiento escribe el
+// evento ANTES de mover la fecha, en la misma transaccion, asi que correr una cuenta cinco
+// veces deja cinco filas y se puede contar.
+//
+// NO registra un toque, a proposito: aplazar no es actividad. Meterlo como toque inflaria el
+// conteo de trabajo hecho con trabajo que justamente no se hizo.
+//
+// Sin follow-up programado no hay aplazo posible: se lanza en vez de inventar la fecha
+// incumplida (poner hoy, o null, seria fabricar el dato que da sentido a la fila).
+const aplazarSeguimientoSchema = z.object({
+  idEmpresa: z.string().min(1),
+  fechaNueva: z.string().min(1),
+  // Motivo cerrado en cuatro valores (MOTIVOS_APLAZO). Un texto libre no se puede contar:
+  // la pregunta que esto responde es "de las 12 veces que se corrio algo esta semana,
+  // cuantas fueron por plan irreal y cuantas por evitar una cuenta". El detalle en prosa
+  // va en `nota`, que no lo reemplaza.
+  motivo: z.enum(MOTIVOS_APLAZO).optional(),
+  nota: z.string().min(1).optional(),
+  aplazadoPor: z.string().min(1).optional(),
+});
+export type AplazarSeguimientoInput = z.infer<typeof aplazarSeguimientoSchema>;
+
+export type AplazoEscrito = {
+  id: number;
+  idEmpresa: string;
+  fechaIncumplida: string;
+  fechaNueva: string;
+  motivo: string | null;
+  nota: string | null;
+  aplazadoPor: string | null;
+  idOrganizacion: number;
+  createdAt: string | null;
+};
+
+export type AplazarSeguimientoResultado = {
+  empresa: EmpresaEscrita;
+  aplazo: AplazoEscrito;
+};
+
+export function aplazarSeguimiento(
+  input: AplazarSeguimientoInput,
+  idOrganizacion: number,
+): AplazarSeguimientoResultado {
+  const parsed = aplazarSeguimientoSchema.parse(input);
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    const emp = tx
+      .select({
+        organizacionActivaId: empresa.organizacionActivaId,
+        proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .get();
+    if (!emp) throw new Error(`Empresa ${parsed.idEmpresa} no existe`);
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      throw new Error(`La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+    }
+    if (!emp.proximoFollowUpFecha) {
+      throw new Error(
+        `La empresa ${parsed.idEmpresa} no tiene follow-up programado: no hay fecha incumplida que registrar. ` +
+          'Para ponerle una fecha por primera vez, usa cambiar_cadencia.',
+      );
+    }
+
+    const insertado = tx
+      .insert(seguimientoAplazado)
+      .values({
+        idEmpresa: parsed.idEmpresa,
+        fechaIncumplida: emp.proximoFollowUpFecha,
+        fechaNueva: parsed.fechaNueva,
+        // null = no lo dijo. Nunca se rellena con un motivo por defecto ni se deduce.
+        motivo: parsed.motivo ?? null,
+        nota: parsed.nota ?? null,
+        aplazadoPor: parsed.aplazadoPor ?? null,
+        idOrganizacion,
+        createdAt: ahora,
+      })
+      .run();
+
+    tx.update(empresa)
+      .set({ proximoFollowUpFecha: parsed.fechaNueva, updatedAt: sql`datetime('now')` })
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .run();
+
+    // Lo mismo que encola cambiarCadencia para la fecha del proximo paso: para Notion esto ES
+    // una reprogramacion, la fecha que ve tiene que ser la nueva. El motivo del aplazo NO
+    // viaja (no existe en el contrato CambioNotion) y queda solo en la base.
+    encolarOutboxNotion(tx, parsed.idEmpresa, { fechaProximoPaso: parsed.fechaNueva });
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle: `aplaza seguimiento ${emp.proximoFollowUpFecha} -> ${parsed.fechaNueva}${parsed.motivo ? `: ${parsed.motivo}` : ''}`,
+      })
+      .run();
+
+    const aplazo = tx
+      .select()
+      .from(seguimientoAplazado)
+      .where(eq(seguimientoAplazado.id, Number(insertado.lastInsertRowid)))
+      .get();
+    if (!aplazo) throw new Error(`El aplazo de ${parsed.idEmpresa} no quedo escrito`);
+
+    return { empresa: leerEmpresaEscrita(tx, parsed.idEmpresa), aplazo };
   });
 }
 
@@ -6682,6 +6803,126 @@ export function cambiosDesde(desde: string, idOrganizacion: number): CambioEmpre
         .map((t) => ({ de: t.de, a: t.a, fecha: t.fecha })),
     }))
     .sort((a, b) => b.toquesNuevos - a.toquesNuevos);
+}
+
+// --- Actividad de un periodo: lo que se hizo y lo que se corrio -----------------------
+
+export type ToqueActividad = {
+  idToque: number;
+  fecha: string | null;
+  canal: string | null;
+  resultado: string | null;
+  idEmpresa: string;
+  empresa: string;
+  estado: string | null;
+  owner: string | null;
+  ejecutadoPor: string | null;
+  proximoPaso: string | null;
+};
+
+// Los toques de un rango de fechas, cruzados con su empresa. No existia forma de preguntar
+// "que se hizo entre estos dos dias": cambiosDesde agrega por empresa y no dice quien ni
+// cuando, y la ficha de la cuenta solo muestra los ultimos 20 de UNA empresa.
+//
+// Sin LIMIT a proposito: un tope silencioso convierte "esta semana se hicieron 40 toques" en
+// una respuesta falsa, y el volumen real (274 toques en toda la historia de la base) no lo
+// justifica.
+//
+// El rango compara por prefijo de 10 caracteres, igual que cambiosDesde: toque.fecha tiene
+// formatos mezclados en las filas viejas importadas de Notion, y las que nacen en la
+// herramienta se escriben en ISO. Las viejas con formato humano no entran al rango, y eso es
+// correcto para esta pregunta (es actividad de la herramienta, no historia importada).
+//
+// proximoPaso sale de empresa, no de toque: toque.proximo_paso existe en la tabla pero
+// ningun camino de escritura lo llena (ver registrarToque), asi que devolverlo seria una
+// columna siempre nula. Lo que responde "que sigue en esta cuenta" es empresa.proximo_paso.
+export function toquesEnRango(
+  desde: string,
+  hasta: string,
+  idOrganizacion: number,
+  filtros: { owner?: string; ejecutadoPor?: string } = {},
+): ToqueActividad[] {
+  const condiciones = [
+    eq(toque.idOrganizacion, idOrganizacion),
+    sql`substr(${toque.fecha}, 1, 10) >= ${desde}`,
+    sql`substr(${toque.fecha}, 1, 10) <= ${hasta}`,
+  ];
+  if (filtros.owner) condiciones.push(eq(empresa.owner, filtros.owner));
+  // ejecutadoPor filtra por el EJECUTOR real. Una fila sin atribuir (NULL) nunca matchea: no
+  // se le adjudica a nadie por descarte.
+  if (filtros.ejecutadoPor) condiciones.push(eq(toque.ejecutadoPor, filtros.ejecutadoPor));
+
+  return db
+    .select({
+      idToque: toque.idToque,
+      fecha: toque.fecha,
+      canal: toque.canal,
+      resultado: toque.resultado,
+      idEmpresa: toque.idEmpresa,
+      empresa: empresa.nombreOficial,
+      estado: empresa.estadoNotion,
+      owner: empresa.owner,
+      ejecutadoPor: toque.ejecutadoPor,
+      proximoPaso: empresa.proximoPaso,
+    })
+    .from(toque)
+    .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
+    .where(and(...condiciones))
+    .orderBy(desc(toque.fecha), desc(toque.idToque))
+    .all();
+}
+
+export type AplazoActividad = {
+  id: number;
+  idEmpresa: string;
+  empresa: string;
+  estado: string | null;
+  owner: string | null;
+  fechaIncumplida: string;
+  fechaNueva: string;
+  motivo: string | null;
+  nota: string | null;
+  aplazadoPor: string | null;
+  createdAt: string | null;
+};
+
+// Los aplazos del mismo rango. El rango se mide por la fecha INCUMPLIDA (el dia en que el
+// seguimiento debia pasar), no por created_at: la pregunta es "que estaba programado esta
+// semana y no se hizo", y un aplazo decidido con dos dias de anticipacion sigue siendo un
+// incumplimiento de esta semana.
+export function aplazosEnRango(
+  desde: string,
+  hasta: string,
+  idOrganizacion: number,
+  filtros: { owner?: string; aplazadoPor?: string } = {},
+): AplazoActividad[] {
+  const condiciones = [
+    eq(seguimientoAplazado.idOrganizacion, idOrganizacion),
+    sql`substr(${seguimientoAplazado.fechaIncumplida}, 1, 10) >= ${desde}`,
+    sql`substr(${seguimientoAplazado.fechaIncumplida}, 1, 10) <= ${hasta}`,
+  ];
+  if (filtros.owner) condiciones.push(eq(empresa.owner, filtros.owner));
+  if (filtros.aplazadoPor) condiciones.push(eq(seguimientoAplazado.aplazadoPor, filtros.aplazadoPor));
+
+  return db
+    .select({
+      id: seguimientoAplazado.id,
+      idEmpresa: seguimientoAplazado.idEmpresa,
+      empresa: empresa.nombreOficial,
+      estado: empresa.estadoNotion,
+      owner: empresa.owner,
+      fechaIncumplida: seguimientoAplazado.fechaIncumplida,
+      fechaNueva: seguimientoAplazado.fechaNueva,
+      motivo: seguimientoAplazado.motivo,
+      nota: seguimientoAplazado.nota,
+      aplazadoPor: seguimientoAplazado.aplazadoPor,
+      createdAt: seguimientoAplazado.createdAt,
+    })
+    .from(seguimientoAplazado)
+    .innerJoin(empresa, eq(empresa.idEmpresa, seguimientoAplazado.idEmpresa))
+    .where(and(...condiciones))
+    .orderBy(desc(seguimientoAplazado.fechaIncumplida), desc(seguimientoAplazado.id))
+    .all();
 }
 
 // --- Existencia y motivo de exclusion del pipeline ------------------------------------

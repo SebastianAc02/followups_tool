@@ -33,8 +33,11 @@ import {
   reasignarNitTool,
   reconciliarNotionTool,
   cambiosDesdeTool,
+  actividadTool,
+  colaTool,
+  aplazarSeguimientoTool,
 } from './tools';
-import { CANALES, RESULTADOS } from '../db/validation';
+import { CANALES, RESULTADOS, MOTIVOS_APLAZO } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 import { ORIGENES_CAMBIO } from '../core/origen-cambio';
@@ -44,8 +47,10 @@ import { ORIGENES_CAMBIO } from '../core/origen-cambio';
 // registro real: server.test.ts y tools.write.test.ts comparan tools/list contra estas constantes,
 // asi que agregar una tool sin ponerla aca rompe el gate.
 export const TOOLS_LECTURA = [
+  'actividad',
   'buscar_empresa',
   'cambios_desde',
+  'cola',
   'cuentas',
   'deal_historia',
   'embudo',
@@ -55,6 +60,7 @@ export const TOOLS_LECTURA = [
 
 export const TOOLS_ESCRITURA = [
   'actualizar_empresa',
+  'aplazar_seguimiento',
   'cambiar_cadencia',
   'crear_empresa',
   'marcar_perdida',
@@ -106,6 +112,11 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
         pasarela: z.string().min(1).optional(),
         razonPerdida: z.string().min(1).optional(),
         objecion: z.string().min(1).optional(),
+        ejecutadoPor: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Quien HIZO la llamada o el mensaje, si no es el owner del deal. Sin esto el toque queda sin atribuir: no se asume el owner'),
         kdm: kdmShape,
       },
     },
@@ -259,6 +270,42 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
   );
 
   server.registerTool(
+    'aplazar_seguimiento',
+    {
+      description:
+        'Registra que un seguimiento programado NO se ejecuto y se corrio a otra fecha: escribe el ' +
+        'evento con la fecha incumplida y mueve el proximo follow-up a la nueva, en una sola ' +
+        'transaccion. NO registra un toque (aplazar no es actividad). Si la empresa no tiene ' +
+        'follow-up programado falla, porque no habria fecha incumplida que registrar; para poner ' +
+        'la primera fecha usa cambiar_cadencia. Cada aplazo es un evento nuevo: correr la misma ' +
+        'cuenta cinco veces deja cinco filas, que es lo que permite verlo despues en `actividad`.',
+      inputSchema: {
+        idEmpresa: z.string().min(1),
+        fechaNueva: z.string().min(1).describe('YYYY-MM-DD, la fecha a la que se corre el seguimiento'),
+        motivo: z
+          .enum(MOTIVOS_APLAZO)
+          .optional()
+          .describe(
+            'Por que no se hizo, en cuatro valores: plan_irreal (el numero planeado para el dia no era ' +
+              'alcanzable), dia_atravesado (imprevisto, universidad, reunion larga), tiempo_no_usado (hubo ' +
+              'tiempo y no se uso), cuenta_evitada (a esa cuenta en particular se le esta sacando el cuerpo). ' +
+              'Si no viene, queda sin motivo: no se infiere ninguno',
+          ),
+        nota: z.string().min(1).optional().describe('Detalle en prosa, aparte del motivo. Se queda en la base, no viaja a Notion'),
+        aplazadoPor: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Quien lo aplazo. Sin esto queda sin atribuir: no se asume el owner del deal'),
+      },
+    },
+    async (input) => {
+      const r = aplazarSeguimientoTool(input as Parameters<typeof aplazarSeguimientoTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
     'reasignar_nit',
     {
       description:
@@ -386,6 +433,56 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ desde, idOrganizacion }) => {
       const resultado = cambiosDesdeTool({ desde, idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // Que se hizo y que NO se hizo en un periodo. Las otras tools de lectura son fotos del
+  // estado de ahora; esta es la unica que responde por un rango de fechas, y la unica que
+  // muestra los seguimientos que se corrieron.
+  server.registerTool(
+    'actividad',
+    {
+      description:
+        'Actividad de un rango de fechas: los toques (fecha, canal, resultado, empresa, estado, owner, ' +
+        'quien lo ejecuto) y, en una lista APARTE, los seguimientos que se aplazaron (empresa, fecha ' +
+        'incumplida, fecha nueva). Los aplazos no se suman a los toques: son lo que NO se hizo. ' +
+        'Devuelve todas las filas del rango, sin tope. Reporta toquesSinAtribuir: los toques sin ' +
+        'ejecutadoPor, que no se le adjudican a nadie por descarte.',
+      inputSchema: {
+        desde: z.string().min(1).describe('YYYY-MM-DD, incluido'),
+        hasta: z.string().min(1).describe('YYYY-MM-DD, incluido'),
+        owner: z.string().optional().describe('Filtra por el dueno del deal (empresa.owner)'),
+        ejecutadoPor: z
+          .string()
+          .optional()
+          .describe('Filtra por quien EJECUTO el toque o el aplazo. Distinto de owner: un toque sin atribuir nunca matchea'),
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+      },
+    },
+    async ({ desde, hasta, owner, ejecutadoPor, idOrganizacion }) => {
+      const resultado = actividadTool({ desde, hasta, owner, ejecutadoPor, idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // La cola del dia, la misma que ve la web. Estaba solo en la ruta web: para saber que tocaba
+  // hoy habia que abrir el navegador.
+  server.registerTool(
+    'cola',
+    {
+      description:
+        'Que vence hoy y que esta vencido, con empresa, estado, fecha programada y dias de atraso. ' +
+        'Es la misma cola que muestra la web (misma regla: excluye on_hold, firma_pago y lead). ' +
+        'Devuelve las dos listas separadas mas el resumen del home.',
+      inputSchema: {
+        fecha: z.string().optional().describe('YYYY-MM-DD, fecha de corte. Default: hoy'),
+        owner: z.string().optional().describe('Cola de una persona. Sin owner, la de toda la organizacion'),
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+      },
+    },
+    async ({ fecha, owner, idOrganizacion }) => {
+      const resultado = colaTool({ fecha, owner, idOrganizacion });
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );

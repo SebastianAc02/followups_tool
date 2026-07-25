@@ -190,6 +190,14 @@ export const toque = sqliteTable('toque', {
   razonPerdida: text('razon_perdida'),
   objecion: text('objecion'),
   fuente: text('fuente').notNull(),
+  // Quien EJECUTO el toque (hizo la llamada o mando el mensaje), distinto de empresa.owner,
+  // que es el dueno del deal. Los dos coinciden casi siempre y por eso no existia la
+  // columna; cuando no coinciden (alguien cubre la cartera de otro, o el toque lo hace un
+  // SDR sobre un deal ajeno) hoy no hay forma de saber quien lo hizo, porque el owner del
+  // deal se lee como si fuera el ejecutor.
+  // Nullable y SIN default a proposito: NULL significa "no atribuido", nunca "lo hizo el
+  // owner". Las filas viejas quedan en NULL y no se rellenan hacia atras.
+  ejecutadoPor: text('ejecutado_por'),
   // Multi-organización (Parte 1): de qué organización es este toque. A diferencia de
   // empresa.organizacionActivaId (mutable, "quién tiene la relación ahora"), este campo
   // es inmutable: el toque queda para siempre de la organización que lo registró.
@@ -618,6 +626,39 @@ export const empresaEstadoHistorial = sqliteTable('empresa_estado_historial', {
   estadoNuevo: text('estado_nuevo').notNull(),
   fecha: text('fecha').notNull(), // ISO, cuando ocurrio la transicion
   idOrganizacion: integer('id_organizacion').notNull().default(1),
+});
+
+// Seguimiento que estaba programado y NO se ejecuto: se corrio a otra fecha. Una fila por
+// aplazo, append-only (nunca se actualiza ni se borra: cada corrimiento es un evento nuevo).
+//
+// Existe porque cambiarCadencia PISA empresa.proximo_follow_up_fecha, asi que la fecha
+// incumplida se pierde y no se puede responder cuantas veces se corrio una cuenta. La tool
+// registraba lo que se hizo y nada de lo que no se hizo.
+//
+// Solo eventos crudos: no hay contador de rachas ni "veces aplazada" en la base. Quien lee
+// cuenta las filas; una columna derivada se desincroniza sola (mismo criterio que los
+// marcadores del embudo y que empresa_estado_historial).
+export const seguimientoAplazado = sqliteTable('seguimiento_aplazado', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  idEmpresa: text('id_empresa').notNull(),
+  // La fecha que estaba programada y se incumplio (el valor que tenia
+  // empresa.proximo_follow_up_fecha antes del aplazo). Sin ella no hay evento: si la empresa
+  // no tenia follow-up programado, aplazarSeguimiento falla en vez de inventarla.
+  fechaIncumplida: text('fecha_incumplida').notNull(),
+  fechaNueva: text('fecha_nueva').notNull(),
+  // Motivo ACOTADO, uno de MOTIVOS_APLAZO (app/db/validation.ts): plan_irreal |
+  // dia_atravesado | tiempo_no_usado | cuenta_evitada. Se guarda como texto y lo enforza
+  // Zod, mismo patron que canal/resultado en `toque` (un CHECK en SQLite no se puede
+  // ampliar despues sin recrear la tabla, ver docs/playbook-migraciones.md).
+  // NULL = no lo dijo. No se infiere.
+  motivo: text('motivo'),
+  // El detalle en prosa, aparte del motivo y opcional. Es contexto para un humano; no se
+  // agrupa ni se cuenta por aca.
+  nota: text('nota'),
+  // Mismo criterio que toque.ejecutado_por: NULL = no atribuido, nunca se asume el owner.
+  aplazadoPor: text('aplazado_por'),
+  idOrganizacion: integer('id_organizacion').notNull(),
+  createdAt: text('created_at'),
 });
 
 // Fase 2 reconciliacion Notion (T7): clasificacion "el no gana" -- una empresa sale

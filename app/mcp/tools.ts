@@ -31,6 +31,13 @@ import {
   buscarEmpresa,
   crearEmpresa,
   actualizarEmpresa,
+  aplazarSeguimiento,
+  toquesEnRango,
+  aplazosEnRango,
+  colaDelDia,
+  resumenHome,
+  type AplazarSeguimientoInput,
+  type AplazarSeguimientoResultado,
   type CambiarCadenciaInput,
   type MarcarPerdidaInput,
   type BuscarEmpresaInput,
@@ -421,4 +428,117 @@ export type ReasignarNitInput = { idEmpresa: string; nit: string };
 
 export function reasignarNitTool(input: ReasignarNitInput, idOrganizacion: number) {
   return reasignarNit(input.idEmpresa, input.nit, idOrganizacion);
+}
+
+// --- actividad (que se hizo y que no se hizo en un periodo) ---------------------------
+//
+// La tool que faltaba para responder la semana. `cambios_desde` cuenta toques por empresa y
+// no dice cuando, con quien ni con que resultado; `pipeline` y `embudo` son fotos del estado
+// de AHORA, no de lo que paso. Y lo que no se hizo no aparecia en ninguna: hasta que existio
+// seguimiento_aplazado, correr una cuenta no dejaba rastro.
+//
+// Los aplazos van en una LISTA APARTE, no mezclados con los toques: un aplazo no es
+// actividad, y sumarlos en el mismo arreglo dejaria "40 movimientos esta semana" donde 12
+// son trabajo que no se hizo.
+
+export type ActividadInput = {
+  desde: string;
+  hasta: string;
+  owner?: string;
+  ejecutadoPor?: string;
+  idOrganizacion?: number;
+};
+
+export function actividadTool(input: ActividadInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const filtros = { owner: input.owner, ejecutadoPor: input.ejecutadoPor };
+  const toques = toquesEnRango(input.desde, input.hasta, idOrganizacion, filtros);
+  // El filtro de persona sobre los aplazos es aplazadoPor, no ejecutadoPor: son el mismo
+  // criterio (quien lo hizo) sobre dos eventos distintos.
+  const aplazos = aplazosEnRango(input.desde, input.hasta, idOrganizacion, {
+    owner: input.owner,
+    aplazadoPor: input.ejecutadoPor,
+  });
+
+  return {
+    organizacion: idOrganizacion,
+    desde: input.desde,
+    hasta: input.hasta,
+    owner: input.owner ?? null,
+    ejecutadoPor: input.ejecutadoPor ?? null,
+    totalToques: toques.length,
+    totalAplazos: aplazos.length,
+    // Sin atribucion: la porcion del periodo de la que no se sabe quien la ejecuto. Se
+    // reporta explicito para que nadie lea el reparte por persona como si fuera completo.
+    toquesSinAtribuir: toques.filter((t) => !t.ejecutadoPor).length,
+    // Sin tope: se devuelven TODAS las filas del rango, no hay truncado silencioso.
+    truncado: false,
+    toques,
+    aplazos,
+  };
+}
+
+// --- cola (que vence hoy y que esta vencido) ------------------------------------------
+//
+// Lo que la ruta web ya mostraba y el MCP no podia ver. Reusa colaDelDia y resumenHome tal
+// cual (las mismas funciones que alimentan /cola y el home), no una query nueva: si la regla
+// de que entra a la cola cambia, cambia en un solo lugar.
+
+export type ColaInput = { fecha?: string; owner?: string; idOrganizacion?: number };
+
+// Dias de atraso contra la fecha de corte. UTC en las dos puntas para que el resultado no
+// dependa del huso del proceso (mismo criterio que app/core/actividad.ts).
+function diasDeAtraso(programada: string | null, corte: string): number {
+  if (!programada) return 0;
+  const dia = (iso: string) => {
+    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  const diff = Math.round((dia(corte) - dia(programada)) / 86_400_000);
+  return diff > 0 ? diff : 0;
+}
+
+export function colaTool(input: ColaInput = {}) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const fecha = input.fecha ?? hoy();
+  const filas = colaDelDia(fecha, input.owner, idOrganizacion).map((f) => ({
+    idEmpresa: f.id,
+    empresa: f.empresa,
+    estado: f.estado,
+    fechaProgramada: f.fecha,
+    diasAtraso: diasDeAtraso(f.fecha, fecha),
+    canal: f.canal,
+    proximoPaso: f.proximoPaso,
+    contacto: f.contacto,
+    usuarios: f.usuarios,
+  }));
+
+  // colaDelDia ya trae vencidos + de hoy juntos (fecha <= corte); se parten aca por la misma
+  // regla que usa resumenHome para contar vencidos (fecha < corte).
+  const vencidos = filas.filter((f) => (f.fechaProgramada ?? '') < fecha);
+  const venceHoy = filas.filter((f) => (f.fechaProgramada ?? '') >= fecha);
+
+  return {
+    organizacion: idOrganizacion,
+    fecha,
+    owner: input.owner ?? null,
+    resumen: resumenHome(input.owner, fecha, idOrganizacion),
+    totalVenceHoy: venceHoy.length,
+    totalVencidos: vencidos.length,
+    venceHoy,
+    vencidos,
+  };
+}
+
+// --- aplazar_seguimiento (ESCRITURA) ---------------------------------------------------
+//
+// Adaptador delgado, igual que las demas de escritura. Devuelve la empresa RELEIDA mas el
+// evento insertado, no un { ok: true }: quien aplaza necesita ver que fecha quedo y que
+// fecha se incumplio, que es justo el dato que antes se perdia.
+
+export function aplazarSeguimientoTool(
+  input: AplazarSeguimientoInput,
+  idOrganizacion: number,
+): AplazarSeguimientoResultado {
+  return aplazarSeguimiento(input, idOrganizacion);
 }

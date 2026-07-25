@@ -1,0 +1,1 @@
+ALTER TABLE `toque` ADD `ejecutado_por` text;
