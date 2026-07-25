@@ -46,8 +46,32 @@ export function crearDbPrueba() {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
       id_plan INTEGER,
-      pct_digital REAL
+      pct_digital REAL,
+      -- Las 11 columnas de CRM portable (commit d637713). Faltaban aca y el harness lo
+      -- toleraba porque nadie INSERTABA en empresa desde el codigo, solo UPDATE: Drizzle
+      -- mete TODAS las columnas mapeadas en un INSERT, aunque el caller no las nombre, asi
+      -- que crearEmpresa reventaba con "table empresa has no column named fuente_lead". Es
+      -- la misma clase de desincronizacion que ya documenta la cabecera de este archivo.
+      fuente_lead TEXT,
+      fecha_primer_contacto TEXT,
+      fecha_ultimo_contacto TEXT,
+      razon_perdida TEXT,
+      contactado INTEGER,
+      respondio INTEGER,
+      agendado INTEGER,
+      se_presento INTEGER,
+      califica INTEGER,
+      tier TEXT,
+      tipo_empresa TEXT
     );
+
+    -- Mismo indice UNICO PARCIAL que isps.db real (ux_empresa_notion_page_id): dos cuentas
+    -- no pueden apuntar a la misma pagina de Notion, pero muchas pueden no apuntar a ninguna.
+    -- Se replica aca (2026-07-24) porque crearEmpresa/actualizarEmpresa dependen de el como
+    -- ultima red debajo de su chequeo con mensaje claro; sin el indice, el harness no puede
+    -- probar que la red existe.
+    CREATE UNIQUE INDEX ux_empresa_notion_page_id
+      ON empresa(notion_page_id) WHERE notion_page_id IS NOT NULL;
 
     CREATE TABLE plan (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +196,19 @@ export function crearDbPrueba() {
       alias TEXT NOT NULL,
       fuente TEXT NOT NULL,
       confianza TEXT NOT NULL DEFAULT 'alta',
+      created_at TEXT
+    );
+
+    CREATE TABLE prospeccion (
+      id_prospeccion INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_empresa TEXT,
+      empresa_nombre_raw TEXT NOT NULL,
+      usuarios_estimados REAL,
+      ciudad_principal TEXT,
+      departamento TEXT,
+      website TEXT,
+      telefonos_raw TEXT,
+      fuente TEXT NOT NULL DEFAULT 'prospeccion_7',
       created_at TEXT
     );
 

@@ -98,15 +98,21 @@ async function toolsDe(server: any): Promise<string[]> {
   return tools.map((t: any) => t.name).sort();
 }
 
-test('crearMcpServer() (default, standalone legacy) expone SOLO las 3 tools de lectura', async () => {
+// buscar_empresa entra a esta lista y NO a la de escritura a proposito: no escribe nada, y
+// es la que responde "esta cuenta ya existe?". Un lector sin escritura_mcp tiene que poder
+// preguntarlo.
+test('crearMcpServer() (default, standalone legacy) expone SOLO las tools de lectura', async () => {
   const nombres = await toolsDe(crearMcpServer());
-  assert.deepEqual(nombres, ['deal_historia', 'panel_metricas', 'pipeline']);
+  assert.deepEqual(nombres, ['buscar_empresa', 'deal_historia', 'panel_metricas', 'pipeline']);
 });
 
-test('crearMcpServer({escritura:true}) expone ademas las 4 write tools', async () => {
+test('crearMcpServer({escritura:true}) expone ademas las 6 write tools', async () => {
   const nombres = await toolsDe(crearMcpServer({ escritura: true, idOrganizacion: 1 }));
   assert.deepEqual(nombres, [
+    'actualizar_empresa',
+    'buscar_empresa',
     'cambiar_cadencia',
+    'crear_empresa',
     'deal_historia',
     'marcar_perdida',
     'mover_estado',
@@ -114,6 +120,15 @@ test('crearMcpServer({escritura:true}) expone ademas las 4 write tools', async (
     'pipeline',
     'registrar_toque',
   ]);
+});
+
+// El contrapositivo del test de arriba, escrito aparte porque es la garantia que importa:
+// ninguna de las que escriben aparece sin el permiso.
+test('sin escritura_mcp no se lista NINGUNA tool que escriba', async () => {
+  const nombres = await toolsDe(crearMcpServer());
+  for (const escritora of ['registrar_toque', 'mover_estado', 'cambiar_cadencia', 'marcar_perdida', 'crear_empresa', 'actualizar_empresa']) {
+    assert.equal(nombres.includes(escritora), false, `${escritora} no debe listarse sin el permiso`);
+  }
 });
 
 test.after(() => borrarDbPrueba(dbPath));

@@ -25,8 +25,13 @@ import {
   moverEstadoTool,
   cambiarCadenciaTool,
   marcarPerdidaTool,
+  buscarEmpresaTool,
+  crearEmpresaTool,
+  actualizarEmpresaTool,
 } from './tools';
 import { CANALES, RESULTADOS } from '../db/validation';
+import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
+import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 
 const NOMBRE_SERVIDOR = 'followups-panel-mcp';
 const VERSION_SERVIDOR = '1.0.0';
@@ -131,6 +136,55 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
       return { content: [{ type: 'text', text: JSON.stringify(r) }] };
     },
   );
+
+  server.registerTool(
+    'crear_empresa',
+    {
+      description:
+        'Crea una cuenta nueva en el pipeline. Antes de insertar corre la misma busqueda de buscar_empresa: ' +
+        'si aparece un candidato de confianza alta NO crea, devuelve el candidato para enlazarlo (forzar:true lo salta). ' +
+        'El id sale del NIT si viene, si no de la convencion sintetica de la base. Envuelve crearEmpresa() del dominio.',
+      inputSchema: {
+        nombreOficial: z.string().min(1).describe('Nombre como se va a ver en el pipeline'),
+        categoria: z.enum(CATEGORIAS_EMPRESA).describe('Obligatoria: decide el alcance del barrido'),
+        estadoNotion: z.enum(ESTADOS_NOTION).describe('Etapa inicial del embudo'),
+        owner: z.string().min(1).describe('Duenio comercial de la cuenta, tal como se escribe en el pipeline'),
+        notionPageId: z.string().min(1).optional().describe('Pagina de Notion a enlazar. Unica: si ya esta tomada, falla'),
+        nit: z.string().min(1).optional().describe('NIT sin puntos ni digito de verificacion. Si viene, ES el id de la cuenta'),
+        forzar: z
+          .boolean()
+          .optional()
+          .describe('Crea aunque haya un candidato de confianza alta. Solo cuando de verdad es otra empresa'),
+      },
+    },
+    async (input) => {
+      const r = crearEmpresaTool(input as Parameters<typeof crearEmpresaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'actualizar_empresa',
+    {
+      description:
+        'Cambia campos puntuales de una cuenta que ya existe y devuelve la fila releida. Solo escribe los campos ' +
+        'que vengan; los que no vengan quedan como estaban. La etapa del embudo NO se cambia aca: para eso esta ' +
+        'mover_estado, que ademas escribe el historial. Envuelve actualizarEmpresa() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1),
+        owner: z.string().min(1).optional(),
+        categoria: z.enum(CATEGORIAS_EMPRESA).optional(),
+        notionPageId: z.string().min(1).optional().describe('Enlaza la cuenta a una pagina de Notion. Unica'),
+        proximoPaso: z.string().min(1).optional(),
+        proximoFollowUpFecha: z.string().min(1).optional().describe('YYYY-MM-DD'),
+        proximoCanal: z.string().min(1).optional(),
+      },
+    },
+    async (input) => {
+      const r = actualizarEmpresaTool(input as Parameters<typeof actualizarEmpresaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
 }
 
 // Un McpServer nuevo por request (modo "stateless" del SDK, sessionIdGenerator: undefined,
@@ -197,6 +251,30 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ idOrganizacion }) => {
       const resultado = pipeline({ idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // LECTURA, aunque su razon de ser sea alimentar una escritura: buscar_empresa no toca
+  // nada, y exigirle el permiso de escritura dejaria a un lector sin poder responder "esta
+  // cuenta ya existe?" -- que es la pregunta que evita el duplicado.
+  server.registerTool(
+    'buscar_empresa',
+    {
+      description:
+        'Busca si una cuenta ya existe, por los CUATRO frentes a la vez: empresa (nombre oficial y normalizado), ' +
+        'alias, lista de prospeccion (nombre crudo, website, telefonos) y contactos (telefono, dominio del email). ' +
+        'Devuelve cada candidato con de que frente salio y con que confianza. Correrla antes de crear es lo que ' +
+        'evita duplicados.',
+      inputSchema: {
+        nombre: z.string().min(1).describe('Nombre a buscar. Se normaliza quitando sufijos legales (SAS, SA, ESP, LTDA...)'),
+        telefono: z.string().min(1).optional().describe('Cruza contra contactos y prospeccion. Se usan los 10 digitos, sin indicativo ni signos'),
+        dominio: z.string().min(1).optional().describe('Dominio, URL o email. Cruza contra el website de prospeccion y el email de los contactos'),
+        nit: z.string().min(1).optional().describe('Match exacto contra el id de la cuenta'),
+      },
+    },
+    async ({ nombre, telefono, dominio, nit }) => {
+      const resultado = buscarEmpresaTool({ nombre, telefono, dominio, nit });
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );

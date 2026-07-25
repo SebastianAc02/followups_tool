@@ -22,8 +22,17 @@ import {
   actualizarEstadoNotion,
   cambiarCadencia,
   marcarPerdida,
+  buscarEmpresa,
+  crearEmpresa,
+  actualizarEmpresa,
   type CambiarCadenciaInput,
   type MarcarPerdidaInput,
+  type BuscarEmpresaInput,
+  type BuscarEmpresaResultado,
+  type CrearEmpresaInput,
+  type CrearEmpresaResultado,
+  type ActualizarEmpresaInput,
+  type EmpresaEscrita,
 } from '../db/repository';
 import type { RegistrarToqueInput } from '../db/validation';
 import { calcularConversionStage } from '../core/panel/conversionStage';
@@ -243,4 +252,24 @@ export function cambiarCadenciaTool(input: CambiarCadenciaInput, idOrganizacion:
 export function marcarPerdidaTool(input: MarcarPerdidaInput, idOrganizacion: number): ResultadoEscritura {
   marcarPerdida(input, idOrganizacion);
   return { ok: true };
+}
+
+// --- Identidad de cuentas (2026-07-24) --------------------------------------------------
+//
+// Los mismos adaptadores delgados de arriba, para las tres funciones de identidad del
+// dominio. A diferencia de las cuatro de escritura, estas SI devuelven dato: buscar devuelve
+// candidatos y crear/actualizar devuelven la fila releida, no un { ok: true } -- quien las
+// consume necesita ver que quedo escrito para decidir el siguiente paso.
+
+// LECTURA: no exige escritura_mcp. Se registra junto a las tools de lectura en server.ts.
+export function buscarEmpresaTool(input: BuscarEmpresaInput): BuscarEmpresaResultado {
+  return buscarEmpresa(input);
+}
+
+export function crearEmpresaTool(input: CrearEmpresaInput, idOrganizacion: number): CrearEmpresaResultado {
+  return crearEmpresa(input, idOrganizacion);
+}
+
+export function actualizarEmpresaTool(input: ActualizarEmpresaInput, idOrganizacion: number): EmpresaEscrita {
+  return actualizarEmpresa(input, idOrganizacion);
 }
