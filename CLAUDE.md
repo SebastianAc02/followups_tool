@@ -80,12 +80,21 @@ Caso que originó la regla: crear una cuenta antes de conseguir su NIT deja el i
 (`ntn-`/`999`), y ninguna tool reasignaba el id. Corregirlo a mano habría sido tocar una PK por
 SSH. Se construyó `reasignar_nit` en su lugar.
 
-## Playbooks de operación
+## Playbooks
 
-Cada operación entre Notion y la herramienta tiene su procedimiento fijo en
-`docs/playbooks-notion.md`: página nueva, cambio de estado u owner, página borrada, toque de una
-empresa que no está en Notion, y subir a Notion lo que nació aquí. Si aparece un caso que no está
-y se resuelve a mano, se agrega al documento.
+Cada proceso que ya costó tiempo una vez tiene su procedimiento escrito. Si aparece un caso que
+no está y se resuelve a mano, se agrega al documento que corresponda.
+
+| Documento | Cuándo abrirlo |
+|---|---|
+| `docs/playbooks-notion.md` | Página nueva en Notion, cambio de estado u owner, página borrada, toque de una empresa que no está en Notion, subir a Notion lo que nació aquí |
+| `docs/playbook-deploy-mcp.md` | Cambiaste algo del MCP y hay que desplegarlo y verificar que el cliente lo ve |
+| `docs/playbook-migraciones.md` | Vas a tocar el esquema de la base |
+| `docs/playbook-diagnostico.md` | Vas a investigar un descuadre o cualquier cosa que implique traer datos |
+| `docs/playbook-cartera-owner.md` | Auditar lo que tiene una persona contra lo que ve en Notion |
+| `docs/playbook-subagentes.md` | Vas a delegar trabajo en paralelo |
+| `docs/base-de-produccion.md` | Cualquier duda sobre la base: cuál es cuál, cómo se cruza, qué campo es qué |
+| `docs/reconciliacion-notion.md` | Cuadrar el pipeline completo contra Notion |
 
 Se confirma siempre con Sebastián antes de escribir, pero llegando con la propuesta hecha: la
 página ya leída, `buscar_empresa` ya corrido, y una acción concreta con su evidencia. La pregunta
