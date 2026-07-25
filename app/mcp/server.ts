@@ -21,6 +21,8 @@ import {
   panelMetricas,
   dealHistoria,
   pipeline,
+  embudoTool,
+  cuentasTool,
   registrarToqueTool,
   moverEstadoTool,
   cambiarCadenciaTool,
@@ -32,6 +34,7 @@ import {
 import { CANALES, RESULTADOS } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
+import { ORIGENES_CAMBIO } from '../core/origen-cambio';
 
 const NOMBRE_SERVIDOR = 'followups-panel-mcp';
 const VERSION_SERVIDOR = '1.0.0';
@@ -83,16 +86,23 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
     'mover_estado',
     {
       description:
-        'Mueve la etapa comercial (estado_notion) de una empresa y encola el cambio DB -> Notion. ' +
-        'Envuelve actualizarEstadoNotion() del dominio.',
+        'Mueve la etapa comercial (estado_notion) de una empresa y escribe la transicion en el ' +
+        'historico. `origen` decide si el cambio ademas viaja DB -> Notion: usa "notion" cuando ' +
+        'estas alineando la base a lo que Notion YA dice (reconciliacion) y el cambio se queda ' +
+        'aca; usa "herramienta" cuando el movimiento nace en la herramienta y el CRM espejo debe ' +
+        'enterarse. Envuelve actualizarEstadoNotion() del dominio.',
       inputSchema: {
         idEmpresa: z.string().min(1),
         estado: z.string().min(1).describe('slug de estado_notion: lead|contacto_iniciado|reunion_agendada|oportunidad|cierre_documentacion|enviar_contrato|firma_pago|on_hold'),
         fecha: z.string().optional().describe('YYYY-MM-DD para el historico. Default: hoy'),
+        origen: z
+          .enum(ORIGENES_CAMBIO)
+          .optional()
+          .describe('"notion" (el dato ya estaba en Notion, no se devuelve) o "herramienta" (nace aca, se encola a Notion)'),
       },
     },
-    async ({ idEmpresa, estado, fecha }) => {
-      const r = moverEstadoTool({ idEmpresa, estado, fecha }, idOrganizacion);
+    async ({ idEmpresa, estado, fecha, origen }) => {
+      const r = moverEstadoTool({ idEmpresa, estado, fecha, origen }, idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r) }] };
     },
   );
@@ -236,6 +246,45 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     async ({ idEmpresa, idOrganizacion }) => {
       const resultado = dealHistoria({ idEmpresa, idOrganizacion });
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // Conteo por etapa. Es la primera llamada de cualquier reconciliacion contra Notion: ocho
+  // numeros en vez de las 476 empresas que hay que traerse por `pipeline` para contarlas afuera.
+  server.registerTool(
+    'embudo',
+    {
+      description:
+        'Cuantas cuentas hay en cada etapa del pipeline, con sus usuarios. Devuelve tambien ' +
+        'sinEtapa: cuentas que existen en la base pero no estan en el embudo (estado_notion null), ' +
+        'que NO aparecen en `pipeline`. Empieza por aca al cuadrar contra Notion.',
+      inputSchema: {
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+        owner: z.string().optional().describe('Filtra a la cartera de una persona, tal como se escribe en el pipeline'),
+      },
+    },
+    async ({ idOrganizacion, owner }) => {
+      const resultado = embudoTool({ idOrganizacion, owner });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // La lista para cruzar contra Notion. La llave es notionPageId, nunca el nombre: cruzar 482
+  // paginas contra 476 cuentas por nombre dio 326 falsas diferencias, y por page_id dio 9.
+  server.registerTool(
+    'cuentas',
+    {
+      description:
+        'Lista minima de cuentas para cruzar contra Notion: idEmpresa, nombre (razon social), ' +
+        'nombreNotion (marca comercial), estado, owner y notionPageId. CRUZA SIEMPRE POR ' +
+        'notionPageId, nunca por nombre. Incluye cuentas sin etapa, que `pipeline` no muestra.',
+      inputSchema: {
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+      },
+    },
+    async ({ idOrganizacion }) => {
+      const resultado = cuentasTool({ idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado) }] };
     },
   );
 
