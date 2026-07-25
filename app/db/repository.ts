@@ -1,5 +1,6 @@
 import {
   and,
+  or,
   eq,
   ne,
   lte,
@@ -6553,6 +6554,48 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
     .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
     .leftJoin(plan, eq(plan.id, empresa.idPlan))
     .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
+    .orderBy(asc(empresa.nombreOficial))
+    .all();
+}
+
+// --- Cuentas para reconciliar contra Notion ------------------------------------------
+
+export type FilaCuenta = {
+  idEmpresa: string;
+  nombre: string;
+  nombreNotion: string | null;
+  estado: string | null;
+  owner: string | null;
+  notionPageId: string | null;
+};
+
+// Lista minima para cruzar contra Notion: seis campos y nada mas. Existe porque
+// pipelineParaEndpoint (la unica lista que habia) trae usuarios, plan, tarifa y %digital, o sea
+// 142 KB de JSON, para responder una pregunta que solo necesita el page_id y el estado.
+//
+// El universo NO es el mismo que el de `pipeline`. Aqui entra toda cuenta que este en el embudo
+// (estado_notion no null) O que tenga notion_page_id, aunque no tenga etapa. Esa segunda mitad
+// es la que faltaba: el 2026-07-25, REDVIVA existia en produccion con su NIT, dominio y telefono,
+// pero sin estado_notion, asi que no salia en `pipeline` y se concluyo que habia que crearla
+// cuando en realidad solo habia que enlazarla.
+export function cuentasParaReconciliar(idOrganizacion: number): FilaCuenta[] {
+  return db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      nombreNotion: empresa.nombreNotion,
+      estado: empresa.estadoNotion,
+      owner: empresa.owner,
+      notionPageId: empresa.notionPageId,
+    })
+    .from(empresa)
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
+        or(isNotNull(empresa.estadoNotion), isNotNull(empresa.notionPageId)),
+      ),
+    )
     .orderBy(asc(empresa.nombreOficial))
     .all();
 }

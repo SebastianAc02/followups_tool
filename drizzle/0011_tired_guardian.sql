@@ -1,0 +1,12 @@
+-- Nombre de la empresa tal como aparece en la propiedad "Empresa" de Notion (marca
+-- comercial), al lado de la razon social del RUES que ya guarda `nombre_oficial`. Existe para
+-- cruzar con Notion sin fuzzy matching: el 2026-07-24 cruzar 482 paginas contra 476 cuentas
+-- por nombre normalizado dio 166 falsos positivos de un lado y 160 del otro.
+--
+-- NOTA para quien regenere esta migracion: `drizzle-kit generate` agrega aqui un
+-- `CREATE TABLE prospeccion` que hay que BORRAR a mano. Esa tabla ya existe en las dos bases
+-- (670 filas en local y en produccion, verificado el 2026-07-25): la creo el ETL de Python por
+-- fuera de Drizzle, asi que nunca entro al snapshot y el generador cree que falta. Dejarla
+-- correr revienta el deploy con "table prospeccion already exists". El snapshot 0011 ya la
+-- registra, asi que a partir de aqui deja de proponerse.
+ALTER TABLE `empresa` ADD `nombre_notion` text;

@@ -23,6 +23,25 @@ las que hay. Tablas relevantes: `empresa` (con `categoria` isp/utility/otro), `c
 `toque` (id_empresa, id_contacto, canal, que_paso, proximo_follow_up_fecha, transcript_proveedor/id/url),
 `empresa_alias` (dedup, el matcher escribe aquí), `sync_cambios` (log de auditoría).
 
+## Dónde corre el MCP, y contra qué base
+
+Descubierto el 2026-07-25 a costa de 5 llamadas y una conclusión errada. Si esto no está claro,
+se vuelve a perder el tiempo igual.
+
+- **El MCP no es un contenedor.** Es una route de `followups-web` (`app/api/mcp`), protegida por
+  el plugin `mcp` de Better Auth, servida en `mcp.followupsonepay.duckdns.org` y conectada como
+  conector de claude.ai. Se despliega con el web, no necesita nada extra.
+- `docker-compose.mcp.yml` quedó **deprecado** el 2026-07-23 (ver `Caddyfile:13`). No agregarlo al
+  `up -d` del deploy: revive un servicio muerto. En el VPS no existe ningún contenedor `followups_mcp`.
+- **El MCP lee la base de PRODUCCIÓN** (volumen `followups_data` del VPS), no la isps.db local. Los
+  conteos difieren de verdad: el 2026-07-24 la local decía 141 on_hold y 102 firma_pago mientras el
+  MCP devolvía 125 y 87. Para estado y existencia se le pregunta al MCP, nunca a la local.
+- `followups-tool/isps.db` es un archivo de 0 bytes. La base real vive un nivel arriba (`../isps.db`),
+  y aun así es la local, no la de prod.
+- `deal_historia` responde `empresa_no_encontrada` en DOS casos distintos: la empresa no existe, o
+  existe pero sin `estado_notion`. No los distingue. Para saber cuál de los dos es, usar
+  `buscar_empresa`, que cruza nombre, alias, prospección (website, teléfono) y contactos.
+
 ## Arquitectura (no negociable)
 
 - El **core** (dominio: empresa, contacto, toque) NO importa Granola, Notion, Claude ni el driver de DB.

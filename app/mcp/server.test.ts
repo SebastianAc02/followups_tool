@@ -94,7 +94,7 @@ test('cliente MCP real: handshake + tools/list expone las tools de solo lectura'
   const { tools } = await client.listTools();
   assert.deepEqual(
     tools.map((t) => t.name).sort(),
-    ['buscar_empresa', 'deal_historia', 'panel_metricas', 'pipeline'],
+    ['buscar_empresa', 'cuentas', 'deal_historia', 'embudo', 'panel_metricas', 'pipeline'],
   );
 
   await client.close();

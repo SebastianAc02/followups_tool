@@ -44,9 +44,9 @@ test('registrarToqueTool escribe el toque via el dominio y encola outbox', () =>
   assert.equal(fila!.payload.proximoPaso, 'quedamos en hablar');
 });
 
-test('moverEstadoTool mueve la etapa y encola el estado al outbox (DB->Notion)', () => {
+test('moverEstadoTool con origen herramienta mueve la etapa y encola el estado al outbox (DB->Notion)', () => {
   seedEmpresa('w2', 'contacto_iniciado', 'page-w2');
-  moverEstadoTool({ idEmpresa: 'w2', estado: 'oportunidad', fecha: '2026-07-24' }, 1);
+  moverEstadoTool({ idEmpresa: 'w2', estado: 'oportunidad', fecha: '2026-07-24', origen: 'herramienta' }, 1);
 
   const raw = new Database(dbPath);
   const e = raw.prepare(`SELECT estado_notion FROM empresa WHERE id_empresa = 'w2'`).get() as any;
@@ -56,6 +56,29 @@ test('moverEstadoTool mueve la etapa y encola el estado al outbox (DB->Notion)',
   const fila = outboxPendientes().find((p) => p.payload.notionPageId === 'page-w2');
   assert.ok(fila);
   assert.equal(fila!.payload.estado, 'oportunidad');
+});
+
+// El caso de la reconciliacion: el estado ya estaba en Notion, la DB venia atrasada. Escribir la
+// etapa SI, devolverla a Notion NO. Sin esto el sync rebota (Notion -> DB -> Notion) y termina
+// escribiendo sobre el CRM de otra persona un valor que esa persona ya tenia.
+test('moverEstadoTool con origen notion mueve la etapa y NO encola nada al outbox', () => {
+  seedEmpresa('w2b', 'contacto_iniciado', 'page-w2b');
+  moverEstadoTool({ idEmpresa: 'w2b', estado: 'oportunidad', fecha: '2026-07-25', origen: 'notion' }, 1);
+
+  const raw = new Database(dbPath);
+  const e = raw.prepare(`SELECT estado_notion FROM empresa WHERE id_empresa = 'w2b'`).get() as any;
+  raw.close();
+  assert.equal(e.estado_notion, 'oportunidad');
+
+  assert.equal(outboxPendientes().find((p) => p.payload.notionPageId === 'page-w2b'), undefined);
+});
+
+// Default: sin origen tampoco encola. Hoy nada sale hacia Notion de forma automatica.
+test('moverEstadoTool sin origen NO encola', () => {
+  seedEmpresa('w2c', 'contacto_iniciado', 'page-w2c');
+  moverEstadoTool({ idEmpresa: 'w2c', estado: 'oportunidad', fecha: '2026-07-25' }, 1);
+
+  assert.equal(outboxPendientes().find((p) => p.payload.notionPageId === 'page-w2c'), undefined);
 });
 
 test('cambiarCadenciaTool reprograma el seguimiento', () => {
@@ -103,7 +126,7 @@ async function toolsDe(server: any): Promise<string[]> {
 // preguntarlo.
 test('crearMcpServer() (default, standalone legacy) expone SOLO las tools de lectura', async () => {
   const nombres = await toolsDe(crearMcpServer());
-  assert.deepEqual(nombres, ['buscar_empresa', 'deal_historia', 'panel_metricas', 'pipeline']);
+  assert.deepEqual(nombres, ['buscar_empresa', 'cuentas', 'deal_historia', 'embudo', 'panel_metricas', 'pipeline']);
 });
 
 test('crearMcpServer({escritura:true}) expone ademas las 6 write tools', async () => {
@@ -113,7 +136,9 @@ test('crearMcpServer({escritura:true}) expone ademas las 6 write tools', async (
     'buscar_empresa',
     'cambiar_cadencia',
     'crear_empresa',
+    'cuentas',
     'deal_historia',
+    'embudo',
     'marcar_perdida',
     'mover_estado',
     'panel_metricas',

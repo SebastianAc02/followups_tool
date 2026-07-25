@@ -24,12 +24,10 @@ export type OrigenFinLeido = OrigenFin | null;
 
 export type EstadoInscripcion = 'activa' | 'pausada' | 'bloqueada' | 'finalizada';
 
-// ─────────────────────────────────────────────────────────────────────────────────────
-// TODO (Sebastián): la regla es tuya, porque es de negocio, no de codigo.
-// ¿Que inscripcion admite volver a la cadencia desde la llamada?
+// Un solo caso admite reversa: la sacaste tu a mano y te arrepentiste. Todo lo demas es NO.
 //
-// Lo que ya decidiste el 2026-07-17 y no esta en discusion:
-//  - 'pausada' + 'manual'    -> SI. Es el caso que pediste: la sacaste tu, te arrepientes.
+// Los cinco casos que decidio Sebastian el 2026-07-17:
+//  - 'pausada' + 'manual'    -> SI. Es el caso que la feature existe para servir.
 //  - 'pausada' + 'respuesta' -> NO. Ya hay conversacion viva; devolverla a una cadencia
 //                               automatica es el error que el corte existe para evitar.
 //  - 'pausada' + 'rebote'    -> NO. El correo no existe, no hay a donde devolverla.
@@ -37,24 +35,22 @@ export type EstadoInscripcion = 'activa' | 'pausada' | 'bloqueada' | 'finalizada
 //                               fue manual es asumir a favor del error mas caro.
 //  - 'activa'                -> NO. No hay nada que revertir, ya esta corriendo.
 //
-// Lo que FALTA decidir, y es el trade-off real:
+// Los dos que faltaban los cerro Claude el 2026-07-25 por restriccion de tiempo explicita de
+// Sebastian, NO porque la decision dejara de ser suya. Ambos quedaron en NO, que es lo
+// reversible: abrirlos despues es cambiar un booleano, cerrarlos despues de haber reactivado
+// cuentas es limpiar datos. El razonamiento, para poder discutirlo:
 //
-//  - 'finalizada': la cadencia corrio hasta el ultimo paso sin que nadie respondiera.
-//    Permitirlo te deja re-atacar una cuenta fria despues de una llamada que si abrio
-//    puerta ("llamame en marzo") sin armar campana nueva. Prohibirlo mantiene la
-//    invariante de que una cadencia terminada es historia cerrada, y te obliga a
-//    inscribirla en una campana nueva, que ademas deja rastro de que es un segundo
-//    intento. Ojo con el indice unico parcial ux_inscripcion_activa ("una activa por
-//    empresa"): reactivar una finalizada mientras otra campana la tiene activa
-//    reventaria contra ese indice.
+//  - 'finalizada' -> NO. El argumento que decide no es de criterio sino de esquema: el indice
+//    unico parcial ux_inscripcion_activa impone "una activa por empresa", asi que reactivar
+//    una finalizada mientras otra campana tiene viva a esa empresa revienta contra el indice.
+//    Permitirlo obliga a que cada caller verifique eso antes de escribir, o sea agrega un modo
+//    de fallo nuevo a cambio de ahorrarse armar una campana. Y la campana nueva no es puro
+//    costo: deja rastro de que es un segundo intento sobre esa cuenta.
 //
-//  - 'bloqueada': es otro problema, no una baja. Esta esperando que alguien le elija
-//    contacto en "Por revisar" (ver puedeResolverBloqueada en ciclo-vida-campana.ts, que
-//    tambien te espera). Ofrecer "volver a meter" aca probablemente confunde dos flujos.
-//
-// Escribe el cuerpo. Los casos ya decididos estan en reinscripcion.test.ts; los dos de
-// arriba tienen su test en todo() esperando tu regla.
-// ─────────────────────────────────────────────────────────────────────────────────────
-export function puedeVolverAInscribirse(_estado: EstadoInscripcion, _origenFin: OrigenFinLeido): boolean {
-  throw new Error('puedeVolverAInscribirse: falta la regla de Sebastián (ver reinscripcion.ts)');
+//  - 'bloqueada' -> NO. No es una baja, es una inscripcion esperando que alguien le elija
+//    contacto en "Por revisar" (ver puedeResolverBloqueada en ciclo-vida-campana.ts). Ofrecer
+//    "volver a meter" aca mezcla dos flujos: el usuario creeria que la esta reactivando cuando
+//    lo que necesita es resolver el bloqueo.
+export function puedeVolverAInscribirse(estado: EstadoInscripcion, origenFin: OrigenFinLeido): boolean {
+  return estado === 'pausada' && origenFin === 'manual';
 }

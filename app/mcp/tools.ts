@@ -18,6 +18,8 @@ import {
   empresasParaConversionStage,
   historialEtapasEmpresa,
   pipelineParaEndpoint,
+  embudoPipeline,
+  cuentasParaReconciliar,
   registrarToque,
   actualizarEstadoNotion,
   cambiarCadencia,
@@ -39,6 +41,8 @@ import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
+import { debeEncolarHaciaNotion, type OrigenCambio } from '../core/origen-cambio';
+import { CLAVE_SIN_ETAPA } from '../core/embudo';
 import { hoy } from '../lib/reloj';
 
 // Unica organizacion real hoy (scripts/seed_organizacion.ts crea "Onepay" como la primera
@@ -235,12 +239,77 @@ export function registrarToqueTool(input: RegistrarToqueInput, idOrganizacion: n
   return { ok: true };
 }
 
-export type MoverEstadoInput = { idEmpresa: string; estado: string; fecha?: string };
+// --- embudo (conteo por etapa) -------------------------------------------------------
+//
+// La pregunta "cuantas cuentas hay en cada etapa" costaba traerse las 476 empresas por
+// `pipeline` y contarlas afuera: 142 KB de JSON para producir ocho numeros. Reconciliar
+// contra Notion arranca SIEMPRE por este conteo (es el paso 1 de
+// docs/reconciliacion-notion.md), asi que vale su propia tool. La funcion del Repository ya
+// existia, servia al panel; aca solo se expone.
+//
+// sinEtapa NO es ruido: son las cuentas que existen en la base pero no estan en el embudo, y
+// es justo la categoria que hizo falta el 2026-07-25 (REDVIVA existia y no aparecia en
+// `pipeline` porque su estado_notion era null).
+
+export type EmbudoInput = { idOrganizacion?: number; owner?: string };
+
+export function embudoTool(input: EmbudoInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const conteos = embudoPipeline(idOrganizacion, input.owner ? { owner: input.owner } : undefined);
+  const porEtapa = conteos
+    .filter((c) => c.estado !== CLAVE_SIN_ETAPA)
+    .map((c) => ({ etapa: c.estado, total: c.total, usuarios: c.usuarios }))
+    .sort((a, b) => b.total - a.total);
+  const sinEtapa = conteos.find((c) => c.estado === CLAVE_SIN_ETAPA)?.total ?? 0;
+  return {
+    organizacion: idOrganizacion,
+    owner: input.owner ?? null,
+    porEtapa,
+    totalEnEmbudo: porEtapa.reduce((s, e) => s + e.total, 0),
+    sinEtapa,
+  };
+}
+
+// --- cuentas (lista minima para cruzar contra Notion) ---------------------------------
+//
+// Seis campos por cuenta. `pipeline` trae usuarios, plan, tarifa, %digital y probabilidad para
+// responder lo mismo, y pesa 142 KB. Cruzar contra Notion no necesita nada de eso: necesita el
+// page_id (la llave) y los dos campos que de verdad cambian, estado y owner.
+
+export type CuentasInput = { idOrganizacion?: number };
+
+export function cuentasTool(input: CuentasInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const filas = cuentasParaReconciliar(idOrganizacion);
+  return {
+    organizacion: idOrganizacion,
+    total: filas.length,
+    // Se reportan aparte porque son las dos poblaciones que rompen un cruce ingenuo: las que no
+    // tienen page_id no se pueden cruzar por llave, y las que no tienen etapa no salen en
+    // `pipeline` aunque existan.
+    sinPageId: filas.filter((f) => !f.notionPageId).length,
+    sinEtapa: filas.filter((f) => !f.estado).length,
+    cuentas: filas,
+  };
+}
+
+// --- mover_estado --------------------------------------------------------------------
+
+export type MoverEstadoInput = {
+  idEmpresa: string;
+  estado: string;
+  fecha?: string;
+  origen?: OrigenCambio;
+};
 
 export function moverEstadoTool(input: MoverEstadoInput, idOrganizacion: number): ResultadoEscritura {
-  // encolarNotion:true -- este SI es un cambio DB -> Notion (a diferencia del sync que baja de
-  // Notion). fecha default hoy() para el historico de la transicion.
-  actualizarEstadoNotion(input.idEmpresa, input.estado, idOrganizacion, input.fecha ?? hoy(), { encolarNotion: true });
+  // El encolado DB -> Notion ya no se decide aca: lo resuelve el core segun de donde vino el
+  // cambio (app/core/origen-cambio.ts). Reconciliar contra Notion pasa origen:'notion' y el
+  // cambio se queda en la DB; mover una cuenta desde el brain pasa 'herramienta' y el CRM
+  // espejo se entera. fecha default hoy() para el historico de la transicion.
+  actualizarEstadoNotion(input.idEmpresa, input.estado, idOrganizacion, input.fecha ?? hoy(), {
+    encolarNotion: debeEncolarHaciaNotion(input.origen),
+  });
   return { ok: true };
 }
 

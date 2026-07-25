@@ -42,6 +42,10 @@ export function crearDbPrueba() {
       proximo_canal TEXT,
       pbx_forma TEXT,
       notion_page_id TEXT,
+      -- Migracion 0011: el nombre como aparece en Notion (marca comercial), al lado de la razon
+      -- social del RUES que guarda nombre_oficial. Misma clase de desincronizacion que la nota de
+      -- abajo: si falta aca, cualquier INSERT de Drizzle sobre empresa revienta.
+      nombre_notion TEXT,
       organizacion_activa_id INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
