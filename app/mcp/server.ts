@@ -30,6 +30,7 @@ import {
   buscarEmpresaTool,
   crearEmpresaTool,
   actualizarEmpresaTool,
+  reasignarNitTool,
 } from './tools';
 import { CANALES, RESULTADOS } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
@@ -192,6 +193,26 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
     },
     async (input) => {
       const r = actualizarEmpresaTool(input as Parameters<typeof actualizarEmpresaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'reasignar_nit',
+    {
+      description:
+        'Corrige el id de una cuenta que se creo sin NIT (id provisional ntn- o 999xxxxxxx) y le pone ' +
+        'su NIT real, arrastrando todas las referencias. Usala cuando consigas el NIT despues de haber ' +
+        'creado la cuenta. SOLO va de provisional a NIT: si el id ya es un NIT, o si el NIT destino ya ' +
+        'pertenece a otra cuenta, falla a proposito, porque eso seria fusionar dos cuentas y esa ' +
+        'decision no la toma una tool.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('El id provisional actual (ntn-... o 999...)'),
+        nit: z.string().min(1).describe('NIT real, 8 a 10 digitos, sin puntos ni digito de verificacion'),
+      },
+    },
+    async ({ idEmpresa, nit }) => {
+      const r = reasignarNitTool({ idEmpresa, nit }, idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );

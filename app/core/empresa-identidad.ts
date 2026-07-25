@@ -76,6 +76,20 @@ export function esNitValido(nit: string): boolean {
   return NIT_VALIDO.test(nit.trim());
 }
 
+// Los ids sinteticos son de dos formas, las dos vivas en isps.db: el prefijo 'ntn-' que pone
+// crearEmpresa/seed_apply.py, y el rango 999xxxxxxx que uso una carga anterior (9990000019
+// Vivercom, 9990000157 LATITUDE-SH, 9990000164 S3WIRELESS).
+//
+// Para que serve saberlo: un id sintetico es provisional, se puso porque no habia NIT a la
+// mano. Un NIT real es definitivo. reasignarNit() solo acepta ir de provisional a definitivo,
+// nunca al reves ni entre dos NITs, y esta funcion es el guard de esa direccion.
+const RANGO_SINTETICO_999 = /^999\d{7}$/;
+
+export function esIdSintetico(idEmpresa: string): boolean {
+  const id = idEmpresa.trim();
+  return id.startsWith(PREFIJO_SINTETICO) || RANGO_SINTETICO_999.test(id);
+}
+
 // Los 10 digitos de un telefono colombiano, sin indicativo ni signos: es la forma con la que
 // se cruza contra contacto.telefono y prospeccion.telefonos_raw, que guardan las dos formas
 // ('+573184634523' y '3184634523' conviven hoy en contacto para la MISMA persona). Se toman

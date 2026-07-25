@@ -20,6 +20,7 @@ import {
   pipelineParaEndpoint,
   embudoPipeline,
   cuentasParaReconciliar,
+  reasignarNit,
   registrarToque,
   actualizarEstadoNotion,
   cambiarCadencia,
@@ -341,4 +342,14 @@ export function crearEmpresaTool(input: CrearEmpresaInput, idOrganizacion: numbe
 
 export function actualizarEmpresaTool(input: ActualizarEmpresaInput, idOrganizacion: number): EmpresaEscrita {
   return actualizarEmpresa(input, idOrganizacion);
+}
+
+// Corrige el id provisional de una cuenta por su NIT real. Es una escritura estructural (mueve
+// la PK y arrastra las referencias), asi que devuelve el detalle de que se movio y no un
+// { ok: true }: quien la corre necesita ver cuantas filas cambiaron para saber que no quedo a
+// medias.
+export type ReasignarNitInput = { idEmpresa: string; nit: string };
+
+export function reasignarNitTool(input: ReasignarNitInput, idOrganizacion: number) {
+  return reasignarNit(input.idEmpresa, input.nit, idOrganizacion);
 }

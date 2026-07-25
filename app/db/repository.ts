@@ -94,6 +94,7 @@ import {
   ESTADO_COMERCIAL_POR_ETAPA,
   dominioDe,
   esNitValido,
+  esIdSintetico,
   idEmpresaSintetico,
   telefonoNormalizado,
 } from '../core/empresa-identidad';
@@ -6556,6 +6557,100 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
     .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
     .orderBy(asc(empresa.nombreOficial))
     .all();
+}
+
+// --- Reasignar el id de una cuenta sintetica a su NIT real ----------------------------
+
+export type ReasignarNitResultado = {
+  idAnterior: string;
+  idNuevo: string;
+  nombreOficial: string;
+  filasActualizadas: Record<string, number>;
+};
+
+// Las tablas hijas NO se listan a mano: se le preguntan al esquema. Son 21 hoy y la lista
+// escrita se desactualizaria en silencio la primera vez que alguien agregue una tabla, dejando
+// filas apuntando a un id que ya no existe.
+//
+// Se descubren por NOMBRE DE COLUMNA y no por pragma_foreign_key_list, que seria lo obvio:
+// cinco tablas vivas (inscripcion, empresa_estado_historial, notificacion_respuesta,
+// segmento_exclusion, empresa_inactiva) tienen id_empresa SIN la FK declarada, asi que el
+// pragma de foreign keys se las salta. Verificado contra isps.db el 2026-07-25.
+type TxReasignar = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+function tablasConIdEmpresa(tx: TxReasignar): string[] {
+  const filas = tx.all<{ name: string }>(sql`
+    SELECT DISTINCT m.name AS name
+    FROM sqlite_master m
+    JOIN pragma_table_info(m.name) p
+    WHERE m.type = 'table' AND p.name = 'id_empresa' AND m.name <> 'empresa'
+  `);
+  return filas.map((f) => f.name);
+}
+
+// Cambia el id de una cuenta de sintetico (ntn-/999) a su NIT real, arrastrando las
+// referencias. Existe porque crear una cuenta y conseguir el NIT despues es el flujo normal (el
+// NIT casi nunca esta en la primera llamada), y hasta el 2026-07-25 arreglarlo era tocar una PK
+// a mano por SSH.
+//
+// SOLO va de provisional a definitivo. Reasignar entre dos NITs, o de NIT a sintetico, se
+// rechaza: eso ya no es corregir un id, es afirmar que dos cuentas son la misma, y esa decision
+// no la toma una tool (ver el caso Fibermax/Fibermat). Por lo mismo, si el NIT destino YA existe
+// se falla en vez de fusionar.
+export function reasignarNit(idViejo: string, nitNuevo: string, idOrganizacion: number): ReasignarNitResultado {
+  const viejo = idViejo.trim();
+  const nuevo = nitNuevo.trim();
+
+  if (!esIdSintetico(viejo)) {
+    throw new Error(
+      `reasignar_nit solo corrige ids provisionales (ntn- o 999xxxxxxx). "${viejo}" ya es un NIT: cambiarlo seria afirmar que es otra empresa.`,
+    );
+  }
+  if (!esNitValido(nuevo)) {
+    throw new Error(`NIT invalido: "${nuevo}". Se esperan 8 a 10 digitos, sin puntos ni digito de verificacion.`);
+  }
+  if (viejo === nuevo) throw new Error('el id nuevo es igual al actual');
+
+  return db.transaction((tx) => {
+    const actual = tx
+      .select({ nombre: empresa.nombreOficial })
+      .from(empresa)
+      .where(and(eq(empresa.idEmpresa, viejo), eq(empresa.organizacionActivaId, idOrganizacion)))
+      .get();
+    if (!actual) throw new Error(`empresa_no_encontrada: ${viejo} en la organizacion ${idOrganizacion}`);
+
+    const ocupado = tx.select({ id: empresa.idEmpresa }).from(empresa).where(eq(empresa.idEmpresa, nuevo)).get();
+    if (ocupado) {
+      throw new Error(
+        `el NIT ${nuevo} ya es de otra cuenta. Esto seria una fusion, no una reasignacion: revisalo a mano antes.`,
+      );
+    }
+
+    // Diferir la verificacion de FK al commit. Sin esto el UPDATE del padre deja a las hijas
+    // apuntando a un id inexistente por un instante y SQLite aborta, porque las FK de esta base
+    // son ON DELETE CASCADE pero NO ON UPDATE CASCADE.
+    tx.run(sql`PRAGMA defer_foreign_keys = ON`);
+
+    const filasActualizadas: Record<string, number> = {};
+    for (const tabla of tablasConIdEmpresa(tx)) {
+      const r = tx.run(sql`UPDATE ${sql.identifier(tabla)} SET id_empresa = ${nuevo} WHERE id_empresa = ${viejo}`);
+      if (r.changes > 0) filasActualizadas[tabla] = r.changes;
+    }
+
+    // Las dos autorreferencias de empresa: otras cuentas pueden estar colgando de esta.
+    const rMatriz = tx.run(sql`UPDATE empresa SET id_empresa_matriz = ${nuevo} WHERE id_empresa_matriz = ${viejo}`);
+    if (rMatriz.changes > 0) filasActualizadas['empresa.id_empresa_matriz'] = rMatriz.changes;
+    const rOpera = tx.run(sql`UPDATE empresa SET opera_bajo_id = ${nuevo} WHERE opera_bajo_id = ${viejo}`);
+    if (rOpera.changes > 0) filasActualizadas['empresa.opera_bajo_id'] = rOpera.changes;
+
+    // El padre de ultimo, y con tipo_id 'nit': el id dejo de ser provisional.
+    const rEmpresa = tx.run(
+      sql`UPDATE empresa SET id_empresa = ${nuevo}, tipo_id = 'nit' WHERE id_empresa = ${viejo}`,
+    );
+    filasActualizadas['empresa'] = rEmpresa.changes;
+
+    return { idAnterior: viejo, idNuevo: nuevo, nombreOficial: actual.nombre, filasActualizadas };
+  });
 }
 
 // --- Cuentas para reconciliar contra Notion ------------------------------------------

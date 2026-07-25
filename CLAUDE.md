@@ -65,6 +65,21 @@ se vuelve a perder el tiempo igual.
 Frío puro, cadencia automática, sugerir números alternos, multipersona en la UI, scoring, colas pesadas
 (Redis), sync de dos vías, cosecha de WhatsApp, archivar audio a Drive. El modelo deja la puerta abierta.
 
+## Toda corrección manual repetible se vuelve una tool del MCP
+
+Regla de Sebastián, 2026-07-25. Cuando aparezca un arreglo que tocaría hacer a mano (por SSH,
+por SQL suelto, o pidiéndole a alguien que lo haga en Notion), la primera pregunta es si el MCP
+puede manejarlo. Si puede, se construye la tool y se usa; no se hace el arreglo manual "solo esta
+vez".
+
+El criterio no es que el caso sea frecuente, es que sea **repetible**: si el proceso se puede
+describir en pasos, va al MCP. Un arreglo manual no deja rastro, no tiene pruebas, no se puede
+delegar y hay que volver a explicarlo la próxima vez. Una tool sí.
+
+Caso que originó la regla: crear una cuenta antes de conseguir su NIT deja el id sintético
+(`ntn-`/`999`), y ninguna tool reasignaba el id. Corregirlo a mano habría sido tocar una PK por
+SSH. Se construyó `reasignar_nit` en su lugar.
+
 ## Cómo se trabaja
 
 - Una tarea de `planning/tasks.md` por delegación. Diff pequeño y revisable.

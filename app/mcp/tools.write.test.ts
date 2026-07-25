@@ -129,7 +129,7 @@ test('crearMcpServer() (default, standalone legacy) expone SOLO las tools de lec
   assert.deepEqual(nombres, ['buscar_empresa', 'cuentas', 'deal_historia', 'embudo', 'panel_metricas', 'pipeline']);
 });
 
-test('crearMcpServer({escritura:true}) expone ademas las 6 write tools', async () => {
+test('crearMcpServer({escritura:true}) expone ademas las 7 write tools', async () => {
   const nombres = await toolsDe(crearMcpServer({ escritura: true, idOrganizacion: 1 }));
   assert.deepEqual(nombres, [
     'actualizar_empresa',
@@ -143,6 +143,7 @@ test('crearMcpServer({escritura:true}) expone ademas las 6 write tools', async (
     'mover_estado',
     'panel_metricas',
     'pipeline',
+    'reasignar_nit',
     'registrar_toque',
   ]);
 });
@@ -151,7 +152,7 @@ test('crearMcpServer({escritura:true}) expone ademas las 6 write tools', async (
 // ninguna de las que escriben aparece sin el permiso.
 test('sin escritura_mcp no se lista NINGUNA tool que escriba', async () => {
   const nombres = await toolsDe(crearMcpServer());
-  for (const escritora of ['registrar_toque', 'mover_estado', 'cambiar_cadencia', 'marcar_perdida', 'crear_empresa', 'actualizar_empresa']) {
+  for (const escritora of ['registrar_toque', 'mover_estado', 'cambiar_cadencia', 'marcar_perdida', 'crear_empresa', 'actualizar_empresa', 'reasignar_nit']) {
     assert.equal(nombres.includes(escritora), false, `${escritora} no debe listarse sin el permiso`);
   }
 });
