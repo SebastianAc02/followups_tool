@@ -49,6 +49,10 @@ export const empresa = sqliteTable('empresa', {
   // FormaPaso en app/core/pbx.ts), null cuando la empresa no esta en el bucle. Los
   // intentos NO se persisten aqui, se cuentan desde `toque`.
   pbxForma: text('pbx_forma'),
+  // Nombre tal como aparece en la propiedad "Empresa" de Notion (marca comercial, ej.
+  // "Atlantel" vs "ATLANTEL S.A.S" del RUES). Nullable, se puebla solo al reconciliar.
+  // Permite cruzar sin fuzzy matching cuando es exacto.
+  nombreNotion: text('nombre_notion'),
   // V3.1b: enlace directo a la pagina real de Notion. Se llena una vez (script de
   // enlace, V3.7) y de ahi en adelante el sync escribe por ID, nunca busca por nombre
   // (hay nombres normalizados duplicados reales en la base).
