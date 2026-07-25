@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 import { registrarToqueAction, estructurarDictadoAction, type BorradorConFusion } from "./actions";
-import { RESULTADO_LABELS, RESULTADOS, RESULTADOS_CONTESTO, type Resultado } from "../../db/validation";
+import {
+  RESULTADO_LABELS,
+  RESULTADOS_CAPTURA_WEB,
+  RESULTADOS_CONTESTO,
+  RESULTADOS_PERDIDA,
+  RAZONES_PERDIDA,
+  RAZON_PERDIDA_LABELS,
+  type Resultado,
+} from "../../db/validation";
 import { plusDias } from "../../lib/date-utils";
 import type { ToqueEstructurado } from "../../core/estructurar-toque";
 import type { Calificacion } from "../../core/calificacion";
@@ -11,7 +19,8 @@ import { ProximoToque } from "./ProximoToque";
 function outcomesPara(estado: string | null): { v: Resultado; l: string }[] {
   // "No llego a la reunion" solo tiene sentido cuando la empresa esta en reunion_agendada
   // (2026-07-14) -- no se ofrece para el resto de estados.
-  const disponibles = estado === "reunion_agendada" ? RESULTADOS : RESULTADOS.filter((v) => v !== "no_llego");
+  const disponibles =
+    estado === "reunion_agendada" ? RESULTADOS_CAPTURA_WEB : RESULTADOS_CAPTURA_WEB.filter((v) => v !== "no_llego");
   return disponibles.map((v) => ({ v, l: RESULTADO_LABELS[v] }));
 }
 
@@ -237,11 +246,39 @@ export default function CapturaLlamada({
             </>
           )}
 
-          {outcome === "contesto_no" && (
+          {outcome === "no_llego" && (
             <label className="flex flex-col gap-1">
-              <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Razón de pérdida</span>
-              <input name="razonPerdida" placeholder="Precio, timing, sin presupuesto..." required className={inputClase} />
+              <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">
+                Fecha en que estaba la reunión
+              </span>
+              {/* Obligatoria desde el 2026-07-25: sin la fecha que se incumplio, un no-show no se
+                  puede contar contra nada y el no-show rate no existe. */}
+              <input type="date" name="reunionFechaPropuesta" required className={inputClase} />
             </label>
+          )}
+
+          {RESULTADOS_PERDIDA.includes(outcome as Resultado) && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Razón de pérdida</span>
+                {/* Lista cerrada desde el 2026-07-25: en texto libre esto llego a UNA fila llena
+                    sobre 285 toques y en prosa. Lo que no cabe en la lista va en la nota de abajo. */}
+                <select name="razonPerdida" required defaultValue="" className={inputClase}>
+                  <option value="" disabled>
+                    Elegir
+                  </option>
+                  {RAZONES_PERDIDA.map((r) => (
+                    <option key={r} value={r}>
+                      {RAZON_PERDIDA_LABELS[r]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-toque-mono text-[9.5px] uppercase tracking-wide text-faint">Detalle</span>
+                <input name="razonPerdidaNota" placeholder="En sus palabras, si vale la pena guardarlo" className={inputClase} />
+              </label>
+            </>
           )}
 
           <ProximoToque fecha={fecha} onChange={setFecha} name="fecha" />

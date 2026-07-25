@@ -38,7 +38,7 @@ test('caso 1: contesto_no con razonPerdida Precio y kdm nuevo crea toque + conta
       idEmpresa: 'emp-1',
       canal: 'llamada',
       resultado: 'contesto_no',
-      razonPerdida: 'Precio',
+      razonPerdida: 'precio',
       kdm: { nombre: 'Juan Perez', telefono: '3001234567' },
     },
     1,
@@ -47,7 +47,7 @@ test('caso 1: contesto_no con razonPerdida Precio y kdm nuevo crea toque + conta
   const raw = leerRaw();
   const toqueRow = raw.prepare('SELECT * FROM toque WHERE id_empresa = ?').get('emp-1') as any;
   assert.equal(toqueRow.resultado, 'contesto_no');
-  assert.equal(toqueRow.razon_perdida, 'Precio');
+  assert.equal(toqueRow.razon_perdida, 'precio');
   assert.ok(toqueRow.id_contacto, 'el toque debe enlazar a un contacto');
 
   const contactoRow = raw
@@ -67,7 +67,7 @@ test('caso 2: segundo registro con mismo idEmpresa + mismo telefono de kdm actua
       idEmpresa: 'emp-2',
       canal: 'llamada',
       resultado: 'contesto_no',
-      razonPerdida: 'Precio',
+      razonPerdida: 'precio',
       kdm: { nombre: 'Ana Gomez', telefono: '3009999999' },
     },
     1,

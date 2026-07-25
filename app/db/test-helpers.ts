@@ -107,8 +107,13 @@ export function crearDbPrueba() {
       id_empresa TEXT NOT NULL,
       id_contacto INTEGER,
       fecha TEXT,
+      -- Migracion 0014: el dia canonico del toque (ISO) y el texto que no se pudo parsear.
+      fecha_dia TEXT,
+      fecha_texto TEXT,
       canal TEXT,
       resultado TEXT,
+      -- Migracion 0014: cuanto duro, en segundos.
+      duracion_segundos INTEGER,
       que_paso TEXT,
       proximo_paso TEXT,
       proximo_follow_up_fecha TEXT,
@@ -118,7 +123,13 @@ export function crearDbPrueba() {
       resumen TEXT,
       transcript_resumen TEXT,
       razon_perdida TEXT,
+      -- Migracion 0014: la prosa que acompania al valor acotado, en razon de perdida y objecion.
+      razon_perdida_nota TEXT,
       objecion TEXT,
+      objecion_nota TEXT,
+      -- Migracion 0014: las dos fechas de la reunion, la que se agendo y la que ocurrio.
+      reunion_fecha_propuesta TEXT,
+      reunion_fecha_ocurrida TEXT,
       fuente TEXT NOT NULL,
       -- Migracion 0012: quien ejecuto el toque, distinto del owner del deal. Nullable, sin
       -- default (NULL = no atribuido). Si falta aca, cualquier INSERT de Drizzle sobre toque
@@ -442,8 +453,28 @@ export function crearDbPrueba() {
       estado_anterior TEXT,
       estado_nuevo TEXT NOT NULL,
       fecha TEXT NOT NULL,
+      -- Migracion 0014: de donde salio la fila (toque | perdida | manual | reconciliacion |
+      -- backfill). NULL = no lo dijo, que es lo que tienen las filas anteriores a la columna.
+      origen TEXT,
       id_organizacion INTEGER NOT NULL DEFAULT 1
     );
+
+    -- Migracion 0014: foto diaria de la etapa de cada empresa. De comparar dos fotos
+    -- consecutivas salen las transiciones del tramo que se mueve a mano en Notion.
+    CREATE TABLE empresa_estado_snapshot (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_empresa TEXT NOT NULL,
+      estado TEXT,
+      fecha_snapshot TEXT NOT NULL,
+      id_organizacion INTEGER NOT NULL,
+      created_at TEXT
+    );
+
+    CREATE UNIQUE INDEX idx_snapshot_empresa_fecha
+      ON empresa_estado_snapshot (id_empresa, fecha_snapshot, id_organizacion);
+
+    CREATE INDEX idx_snapshot_fecha
+      ON empresa_estado_snapshot (fecha_snapshot, id_organizacion);
 
     -- Migracion 0013: cada vez que un seguimiento programado no se ejecuto y se corrio a
     -- otra fecha. Append-only.

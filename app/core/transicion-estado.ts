@@ -25,7 +25,7 @@
 // mas facil de auditar que un ranking, y no obliga a mantenerla sincronizada con
 // FUNNEL_ETAPAS cada vez que se agregue una etapa nueva al funnel.
 
-import type { Resultado } from '../db/validation';
+import { RESULTADOS_AGENDA, type Resultado } from '../db/validation';
 
 export const ESTADO_ON_HOLD = 'on_hold';
 export const ESTADO_CONTACTO_INICIADO = 'contacto_iniciado';
@@ -36,7 +36,12 @@ export function estadoDestinoPorToque(estadoActual: string | null, resultado: Re
   const vieneDeOnHold = estadoActual === ESTADO_ON_HOLD;
   const vieneDeContactoIniciado = estadoActual === ESTADO_CONTACTO_INICIADO;
 
-  if (resultado === 'contesto_reunion' && (vieneDeOnHold || vieneDeContactoIniciado)) {
+  // La condicion es "el resultado AGENDA una reunion", no el literal 'contesto_reunion'
+  // (2026-07-25): con la taxonomia ampliada, gerente_interesado_agenda y
+  // reactivacion_reinteres significan exactamente lo mismo, y dejarlos fuera habria dejado
+  // quieta una cuenta que acaba de agendar. La lista vive en validation.ts junto al enum,
+  // para que agregar un resultado que agenda sea una linea alla y no una regla escondida aca.
+  if (RESULTADOS_AGENDA.includes(resultado) && (vieneDeOnHold || vieneDeContactoIniciado)) {
     return ESTADO_REUNION_AGENDADA;
   }
   if (vieneDeOnHold) {

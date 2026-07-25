@@ -112,7 +112,13 @@ function main() {
       continue;
     }
 
-    actualizarEstadoNotion(empresaDb.idEmpresa, estadoMapeado, ID_ORGANIZACION, fecha);
+    // origenTransicion 'reconciliacion' (2026-07-25): este barrido baja lo que Notion YA decia,
+    // asi que su `fecha` es la de la corrida y no la del cambio. Marcarlo es lo que permite
+    // excluir estas filas del ciclo de venta en la consulta. El dia real de esos movimientos lo
+    // fecha el snapshot diario (snapshotEstados), no esto.
+    actualizarEstadoNotion(empresaDb.idEmpresa, estadoMapeado, ID_ORGANIZACION, fecha, {
+      origenTransicion: 'reconciliacion',
+    });
     actualizadas++;
   }
 

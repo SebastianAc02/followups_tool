@@ -92,23 +92,32 @@ test('cambiarCadenciaTool reprograma el seguimiento', () => {
   assert.equal(e.proximo_paso, 'reintentar');
 });
 
-test('marcarPerdidaTool pone la empresa on_hold y registra la razon', () => {
+test('marcarPerdidaTool pone la empresa on_hold y registra la razon acotada', () => {
   seedEmpresa('w4', 'oportunidad');
-  marcarPerdidaTool({ idEmpresa: 'w4', canal: 'llamada', razonPerdida: 'eligio a otro' } as any, 1);
+  // razonPerdida es vocabulario cerrado desde el 2026-07-25 ("eligio a otro" ya no entra); la
+  // prosa va en razonPerdidaNota.
+  const r = marcarPerdidaTool(
+    { idEmpresa: 'w4', canal: 'llamada', razonPerdida: 'ya_tiene_pasarela', razonPerdidaNota: 'eligio a otro' } as any,
+    1,
+  );
 
   const raw = new Database(dbPath);
   const e = raw.prepare(`SELECT estado_notion FROM empresa WHERE id_empresa = 'w4'`).get() as any;
-  const t = raw.prepare(`SELECT resultado, razon_perdida FROM toque WHERE id_empresa = 'w4'`).get() as any;
+  const t = raw.prepare(`SELECT resultado, razon_perdida, razon_perdida_nota FROM toque WHERE id_empresa = 'w4'`).get() as any;
   raw.close();
   assert.equal(e.estado_notion, 'on_hold');
-  assert.equal(t.resultado, 'contesto_no');
-  assert.equal(t.razon_perdida, 'eligio a otro');
+  assert.equal(t.resultado, 'perdido');
+  assert.equal(t.razon_perdida, 'ya_tiene_pasarela');
+  assert.equal(t.razon_perdida_nota, 'eligio a otro');
+  // La tool devuelve lo que quedo escrito, releido, no un { ok: true }.
+  assert.equal(r.empresa.estadoNotion, 'on_hold');
+  assert.equal(r.toque.razonPerdida, 'ya_tiene_pasarela');
 });
 
 // La organizacion la fija la sesion, no el cliente: un idOrganizacion equivocado no escribe.
 test('las write tools respetan el guard de organizacion de la sesion', () => {
   seedEmpresa('w5', 'oportunidad');
-  assert.throws(() => marcarPerdidaTool({ idEmpresa: 'w5', canal: 'llamada', razonPerdida: 'x' } as any, 999));
+  assert.throws(() => marcarPerdidaTool({ idEmpresa: 'w5', canal: 'llamada', razonPerdida: 'precio' } as any, 999));
 });
 
 async function toolsDe(server: any): Promise<string[]> {

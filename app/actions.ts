@@ -28,11 +28,14 @@ export async function registrarTapAction(formData: FormData) {
   if (!idEmpresa) return;
   if (canal !== "whatsapp" && canal !== "correo") return;
 
-  const objecion = String(formData.get("objecion") ?? "").trim() || undefined;
+  // objecion pasa a vocabulario cerrado (2026-07-25), y este tap no tiene de donde sacar el
+  // valor acotado: lo que venga del form es prosa. Entra como objecionNota, que es justo para
+  // eso, y el campo contable queda vacio en vez de forzado a una categoria inventada.
+  const objecionNota = String(formData.get("objecion") ?? "").trim() || undefined;
 
   const proximoFollowUp = plusDias(1);
 
-  registrarToque({ idEmpresa, canal, resultado: "no_contesto", proximoFollowUp, objecion }, idOrganizacion);
+  registrarToque({ idEmpresa, canal, resultado: "no_contesto", proximoFollowUp, objecionNota }, idOrganizacion);
 
   revalidatePath("/");
 }

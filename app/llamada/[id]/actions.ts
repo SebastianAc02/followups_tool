@@ -54,8 +54,15 @@ export async function registrarToqueAction(formData: FormData) {
   const crm = String(formData.get("crm") ?? "").trim() || undefined;
   const pasarela = String(formData.get("pasarela") ?? "").trim() || undefined;
 
+  // Vocabulario cerrado + nota libre (2026-07-25). El select del form manda el slug; el texto
+  // que escriba el humano va a la nota y no se fuerza a la lista.
   const razonPerdida = String(formData.get("razonPerdida") ?? "").trim() || undefined;
+  const razonPerdidaNota = String(formData.get("razonPerdidaNota") ?? "").trim() || undefined;
   const objecion = String(formData.get("objecion") ?? "").trim() || undefined;
+  const objecionNota = String(formData.get("objecionNota") ?? "").trim() || undefined;
+  // Solo la propuesta: la ocurrida no la puede llenar este formulario, que es de captura de
+  // llamada. Una reunion con su fecha de ocurrida se registra por MCP con canal 'reunion'.
+  const reunionFechaPropuesta = String(formData.get("reunionFechaPropuesta") ?? "").trim() || undefined;
 
   const kdmNombre = String(formData.get("kdmNombre") ?? "").trim() || undefined;
   const kdmTelefono = String(formData.get("kdmTelefono") ?? "").trim() || undefined;
@@ -74,7 +81,10 @@ export async function registrarToqueAction(formData: FormData) {
     crm,
     pasarela,
     razonPerdida,
+    razonPerdidaNota,
     objecion,
+    objecionNota,
+    reunionFechaPropuesta,
     kdm,
   });
 

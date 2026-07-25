@@ -36,8 +36,9 @@ import {
   actividadTool,
   colaTool,
   aplazarSeguimientoTool,
+  snapshotEstadosTool,
 } from './tools';
-import { CANALES, RESULTADOS, MOTIVOS_APLAZO } from '../db/validation';
+import { CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 import { ORIGENES_CAMBIO } from '../core/origen-cambio';
@@ -68,6 +69,7 @@ export const TOOLS_ESCRITURA = [
   'reasignar_nit',
   'reconciliar_notion',
   'registrar_toque',
+  'snapshot_estados',
 ] as const;
 
 // Momento en que arranco ESTE proceso. Es la forma barata de saber si el contenedor se recreo
@@ -98,31 +100,83 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
     'registrar_toque',
     {
       description:
-        'Registra un toque comercial (llamada/whatsapp/correo) sobre una empresa: escribe el evento, ' +
-        'mueve el embudo si aplica y encola el sync a Notion. Envuelve registrarToque() del dominio.',
+        'Registra un toque comercial (llamada, whatsapp, correo o reunion) sobre una empresa: escribe el ' +
+        'evento, mueve el embudo si aplica y encola el sync a Notion. Devuelve el toque RELEIDO de la base, ' +
+        'la empresa releida y la transicion de etapa que disparo (null si no movio nada). Envuelve ' +
+        'registrarToque() del dominio.',
       inputSchema: {
         idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
-        canal: z.enum(CANALES),
-        resultado: z.enum(RESULTADOS).describe("razonPerdida es obligatoria si resultado='contesto_no'"),
+        canal: z.enum(CANALES_TOQUE).describe('reunion es un canal de toque valido; no es un canal de cadencia'),
+        resultado: z
+          .enum(RESULTADOS)
+          .describe(
+            'Que paso, en el vocabulario cerrado del negocio. razonPerdida es obligatoria en contesto_no, ' +
+              'no_interesado y perdido. no_llego (no-show) exige reunionFechaPropuesta',
+          ),
+        fecha: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('YYYY-MM-DD, el dia en que PASO el toque. Default: hoy. Para el toque que se dicta al dia siguiente'),
+        duracionSegundos: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe('Cuanto duro la llamada o la reunion, en segundos. Sin esto no se puede separar el intento de 40 segundos de la conversacion real'),
         quePaso: z.string().min(1).optional(),
         proximoFollowUp: z.string().min(1).optional().describe('YYYY-MM-DD'),
         proximoCanal: z.string().min(1).optional(),
         usuarios: z.number().optional(),
         crm: z.string().min(1).optional(),
         pasarela: z.string().min(1).optional(),
-        razonPerdida: z.string().min(1).optional(),
-        objecion: z.string().min(1).optional(),
+        razonPerdida: z
+          .enum(RAZONES_PERDIDA)
+          .optional()
+          .describe('Vocabulario cerrado. Lo que no cabe va en razonPerdidaNota, no se fuerza a la lista'),
+        razonPerdidaNota: z.string().min(1).optional().describe('El detalle en prosa, aparte del valor acotado'),
+        objecion: z
+          .enum(OBJECIONES)
+          .optional()
+          .describe(
+            'La objecion viva, mismo vocabulario que razonPerdida mas duda_adopcion. LISTA INFERIDA de ' +
+              'ventas/frameworks/embudo.md el 2026-07-25, pendiente de que el operador dicte la suya. Si la ' +
+              'objecion no cabe en ninguna, se deja vacia y se escribe objecionNota: nunca se fuerza a la lista',
+          ),
+        objecionNota: z.string().min(1).optional(),
+        reunionFechaPropuesta: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('YYYY-MM-DD (hora opcional, YYYY-MM-DDTHH:MM): cuando quedo agendada la reunion. Obligatoria si resultado=no_llego'),
+        reunionFechaOcurrida: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Cuando la reunion de verdad paso. Solo con canal=reunion. La diferencia contra la propuesta es el no-show'),
+        transcriptProveedor: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Donde quedo la grabacion. Las REUNIONES se graban en tldv y las LLAMADAS en granola, nunca al ' +
+              'reves. Queda abierto como dato, no cerrado como enum: un proveedor nuevo no deberia obligar a ' +
+              'tocar codigo. Los tres campos de puntero son opcionales y pueden quedar vacios: una llamada por ' +
+              'telefono o por WhatsApp puede no quedar grabada en ningun lado, y eso no invalida el toque',
+          ),
+        transcriptId: z.string().min(1).optional().describe('El id de la sesion en ese proveedor'),
+        transcriptUrl: z.string().min(1).optional().describe('El link directo a la grabacion'),
         ejecutadoPor: z
           .string()
           .min(1)
           .optional()
-          .describe('Quien HIZO la llamada o el mensaje, si no es el owner del deal. Sin esto el toque queda sin atribuir: no se asume el owner'),
+          .describe('Quien HIZO la llamada o el mensaje. Mandalo cuando ejecuta otra persona (Felipe Castro, Camilo Fonseca); si no viene, queda Sebastian Acosta Molina'),
         kdm: kdmShape,
       },
     },
     async (input) => {
       const r = registrarToqueTool(input as Parameters<typeof registrarToqueTool>[0], idOrganizacion);
-      return { content: [{ type: 'text', text: JSON.stringify(r) }] };
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
 
@@ -134,7 +188,9 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
         'historico. `origen` decide si el cambio ademas viaja DB -> Notion: usa "notion" cuando ' +
         'estas alineando la base a lo que Notion YA dice (reconciliacion) y el cambio se queda ' +
         'aca; usa "herramienta" cuando el movimiento nace en la herramienta y el CRM espejo debe ' +
-        'enterarse. Envuelve actualizarEstadoNotion() del dominio.',
+        'enterarse. Devuelve la empresa RELEIDA y la transicion que quedo escrita con su origen, o ' +
+        'transicion null con motivo sin_cambio si la cuenta ya estaba en esa etapa. Envuelve ' +
+        'actualizarEstadoNotion() del dominio.',
       inputSchema: {
         idEmpresa: z.string().min(1),
         estado: z.string().min(1).describe('slug de estado_notion: lead|contacto_iniciado|reunion_agendada|oportunidad|cierre_documentacion|enviar_contrato|firma_pago|on_hold'),
@@ -156,7 +212,10 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
     {
       description:
         'Reprograma el seguimiento de una empresa (fecha/canal/proximo paso) y opcionalmente la mueve ' +
-        'a otra cadencia (idCampana). Envuelve cambiarCadencia() del dominio.',
+        'a otra cadencia (idCampana). Devuelve la empresa RELEIDA con su proximo follow-up y sus ' +
+        'cadencias vivas, mas el resultado de la inscripcion cuando se pidio mover de cadencia ' +
+        '(puede decir ya_inscrita, que no es error pero tampoco es un cambio). Envuelve ' +
+        'cambiarCadencia() del dominio.',
       inputSchema: {
         idEmpresa: z.string().min(1),
         idCampana: z.number().int().positive().optional().describe('Inscribe la empresa en la cadencia de esta campana'),
@@ -175,19 +234,25 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
     'marcar_perdida',
     {
       description:
-        'Marca una empresa como perdida/parqueada: registra un toque de perdida (razon obligatoria) y ' +
-        'la pone en on_hold, encolando el sync a Notion. Envuelve marcarPerdida() del dominio.',
+        'Marca una empresa como perdida/parqueada: registra un toque con resultado perdido (razon ' +
+        'obligatoria, de la lista cerrada) y la pone en on_hold, encolando el sync a Notion. Devuelve el ' +
+        'toque releido, la empresa releida y la transicion (null si ya estaba on_hold). Envuelve ' +
+        'marcarPerdida() del dominio.',
       inputSchema: {
         idEmpresa: z.string().min(1),
-        canal: z.enum(CANALES),
-        razonPerdida: z.string().min(1).describe('Por que se pierde/parquea la cuenta (obligatorio)'),
+        canal: z.enum(CANALES_TOQUE),
+        razonPerdida: z.enum(RAZONES_PERDIDA).describe('Por que se pierde/parquea la cuenta (obligatorio, vocabulario cerrado)'),
+        razonPerdidaNota: z.string().min(1).optional().describe('El detalle en prosa, aparte del valor acotado'),
         quePaso: z.string().min(1).optional(),
-        objecion: z.string().min(1).optional(),
+        objecion: z.enum(OBJECIONES).optional(),
+        objecionNota: z.string().min(1).optional(),
+        fecha: z.string().min(1).optional().describe('YYYY-MM-DD, el dia en que se perdio. Default: hoy'),
+        ejecutadoPor: z.string().min(1).optional().describe('Si no viene, queda Sebastian Acosta Molina'),
       },
     },
     async (input) => {
       const r = marcarPerdidaTool(input as Parameters<typeof marcarPerdidaTool>[0], idOrganizacion);
-      return { content: [{ type: 'text', text: JSON.stringify(r) }] };
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
 
@@ -296,11 +361,33 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
           .string()
           .min(1)
           .optional()
-          .describe('Quien lo aplazo. Sin esto queda sin atribuir: no se asume el owner del deal'),
+          .describe('Quien lo aplazo. Mandalo cuando aplace otra persona; si no viene, queda Sebastian Acosta Molina'),
       },
     },
     async (input) => {
       const r = aplazarSeguimientoTool(input as Parameters<typeof aplazarSeguimientoTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'snapshot_estados',
+    {
+      description:
+        'Toma la foto del dia de la etapa de cada cuenta y deriva las transiciones comparandola con la ' +
+        'foto anterior. CORRELA ANTES del barrido de la manana: la foto tiene que ser del estado con el ' +
+        'que arranco el dia. Es lo que fecha bien el tramo que se mueve a mano en Notion (cierre a pago): ' +
+        'la cuenta que el lunes esta en cierre y el martes en firma_pago deja una transicion fechada el ' +
+        'MARTES. Idempotente: correrla dos veces el mismo dia no pisa la primera foto ni duplica una ' +
+        'transicion que ya escribio un toque. Limites: dos cambios el mismo dia se ven como uno, y no ' +
+        'reconstruye nada del pasado (empieza a producir dato la primera vez que corre). Devuelve las ' +
+        'transiciones RELEIDAS de la tabla.',
+      inputSchema: {
+        fecha: z.string().min(1).optional().describe('YYYY-MM-DD, el dia de la foto. Default: hoy'),
+      },
+    },
+    async ({ fecha }) => {
+      const r = snapshotEstadosTool({ fecha }, idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
@@ -444,11 +531,14 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     'actividad',
     {
       description:
-        'Actividad de un rango de fechas: los toques (fecha, canal, resultado, empresa, estado, owner, ' +
-        'quien lo ejecuto) y, en una lista APARTE, los seguimientos que se aplazaron (empresa, fecha ' +
-        'incumplida, fecha nueva). Los aplazos no se suman a los toques: son lo que NO se hizo. ' +
-        'Devuelve todas las filas del rango, sin tope. Reporta toquesSinAtribuir: los toques sin ' +
-        'ejecutadoPor, que no se le adjudican a nadie por descarte.',
+        'Actividad de un rango de fechas: los toques (dia, canal, resultado, duracion, razon de perdida y ' +
+        'objecion con su nota, fechas de reunion propuesta y ocurrida, puntero de grabacion, empresa, ' +
+        'estado, owner, quien lo ejecuto) y, en una lista APARTE, los seguimientos que se aplazaron ' +
+        '(empresa, fecha incumplida, fecha nueva). Los aplazos no se suman a los toques: son lo que NO se ' +
+        'hizo. Trae ademas conteos por canal, por resultado, por ejecutor, de duracion, y el par de ' +
+        'reuniones (conFechaPropuesta / ocurridas / noShow) que da el no-show rate. Devuelve todas las ' +
+        'filas del rango, sin tope. Reporta toquesSinAtribuir y toquesSinFecha: la porcion de la que no se ' +
+        'puede decir quien la hizo ni cuando.',
       inputSchema: {
         desde: z.string().min(1).describe('YYYY-MM-DD, incluido'),
         hasta: z.string().min(1).describe('YYYY-MM-DD, incluido'),

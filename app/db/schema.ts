@@ -1,4 +1,4 @@
-import { sqliteTable, sqliteView, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, sqliteView, text, integer, real, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 // Refleja las tablas que YA existen en isps.db (no se crean aquí). Solo las que usa el cockpit.
@@ -170,8 +170,37 @@ export const toque = sqliteTable('toque', {
   idEmpresa: text('id_empresa').notNull(),
   idContacto: integer('id_contacto'),
   fecha: text('fecha'),
+  // El DIA calendario del toque, ISO YYYY-MM-DD y nada mas (2026-07-25). `fecha` de arriba es
+  // texto libre historico: de 285 filas de produccion, 97 estan en NULL, 142 en ISO de dia, 39
+  // en ISO con hora, 4 con hora separada por espacio y 3 en prosa ("~inicios jun",
+  // "oct-2025 (aprox)"). El resultado medido es que 100 toques se caen de cualquier consulta
+  // con fecha y que solo 35 toques tienen fecha Y resultado a la vez.
+  //
+  // fechaDia es la columna sobre la que se cuenta: la escribe el dominio ya normalizada y Zod
+  // la valida contra ^\d{4}-\d{2}-\d{2}$ (mismo patron que canal/resultado: la garantia es del
+  // dominio, no un CHECK -- un CHECK en SQLite no se amplia sin recrear la tabla, ver
+  // docs/playbook-migraciones.md). `fecha` se sigue escribiendo con el timestamp completo, que
+  // es el que dice a que hora paso.
+  fechaDia: text('fecha_dia'),
+  // Lo que no se pudo convertir a un dia, guardado tal cual en vez de botado. Dos filas de
+  // produccion viven aca ("~inicios jun", "oct-2025 (aprox)"): son toques reales con una fecha
+  // que nadie sabe, y borrar el texto seria perder el unico rastro que queda de cuando fueron.
+  fechaTexto: text('fecha_texto'),
   canal: text('canal'),
   resultado: text('resultado'),
+  // Cuanto duro, en segundos. Nullable: un correo no dura, y un toque viejo no lo sabe. Sin
+  // esta columna no se puede separar la llamada de 40 segundos que no fue conversacion de la
+  // de 12 minutos que si lo fue, y las dos contaban igual en el conteo del dia.
+  duracionSegundos: integer('duracion_segundos'),
+  // Las dos fechas de la reunion, que son dos cosas distintas y por eso son dos columnas
+  // (2026-07-25): la PROPUESTA es cuando quedo agendada, la OCURRIDA es cuando de verdad
+  // paso. La diferencia entre las dos ES el dato: iguales = se cumplio, propuesta sin ocurrida
+  // = no-show o reagendamiento (lo dice el resultado: no_llego vs una reunion nueva), y la
+  // distancia entre la ocurrida y el pago es el ciclo de reunion a plata. Ninguna de las 90
+  // columnas de fecha del esquema respondia esto: un toque podia decir "quedamos en reunion"
+  // sin dejar cuando era ni si paso.
+  reunionFechaPropuesta: text('reunion_fecha_propuesta'),
+  reunionFechaOcurrida: text('reunion_fecha_ocurrida'),
   quePaso: text('que_paso'),
   proximoPaso: text('proximo_paso'),
   proximoFollowUpFecha: text('proximo_follow_up_fecha'),
@@ -187,8 +216,16 @@ export const toque = sqliteTable('toque', {
   // toques viejos. Es el "resumen cacheado" que pide el CLAUDE.md: el consumidor (CRO/MCP)
   // lo lee sin credencial.
   transcriptResumen: text('transcript_resumen'),
+  // Razon de perdida ACOTADA, uno de RAZONES_PERDIDA (app/db/validation.ts). La columna ya
+  // existia como texto libre y llego con UNA fila llena sobre 285 toques, en prosa. El
+  // vocabulario cerrado es lo que se cuenta; la prosa va en razonPerdidaNota y no la reemplaza.
+  // Mismo patron que motivo/nota en seguimiento_aplazado.
   razonPerdida: text('razon_perdida'),
+  razonPerdidaNota: text('razon_perdida_nota'),
+  // Objecion VIVA, uno de OBJECIONES. Misma historia: 5 filas llenas sobre 285, todas en
+  // prosa, tres de ellas diciendo "precio" con distintas palabras.
   objecion: text('objecion'),
+  objecionNota: text('objecion_nota'),
   fuente: text('fuente').notNull(),
   // Quien EJECUTO el toque (hizo la llamada o mando el mensaje), distinto de empresa.owner,
   // que es el dueno del deal. Los dos coinciden casi siempre y por eso no existia la
@@ -625,8 +662,58 @@ export const empresaEstadoHistorial = sqliteTable('empresa_estado_historial', {
   estadoAnterior: text('estado_anterior'), // null si es el primer registro
   estadoNuevo: text('estado_nuevo').notNull(),
   fecha: text('fecha').notNull(), // ISO, cuando ocurrio la transicion
+  // De donde salio esta fila, uno de ORIGENES_TRANSICION (app/db/validation.ts): toque |
+  // perdida | manual | reconciliacion | backfill (2026-07-25). Sin esta columna, separar una
+  // transicion real de un backfill se hacia agrupando por timestamp identico -- de las 63
+  // filas, 57 caen en ocho lotes con la misma marca de tiempo al milisegundo y solo 5 se
+  // escribieron una a una. Esa heuristica funciona hasta que dos transiciones reales caen en el
+  // mismo segundo. Con la columna, el ciclo de venta excluye el ruido en el WHERE en vez de en
+  // la interpretacion.
+  // NULL = las 63 filas viejas y cualquier caller que no lo diga. No se infiere hacia atras.
+  origen: text('origen'),
   idOrganizacion: integer('id_organizacion').notNull().default(1),
 });
+
+// Foto diaria de la etapa de cada empresa (2026-07-25). Una fila por empresa por dia. De aca
+// salen las transiciones del tramo que se mueve a mano en Notion (cierre_documentacion ->
+// firma_pago), que hasta hoy quedaban fechadas el dia en que corrio el barrido y no el dia en
+// que pasaron: "cuanto tarda del cierre al pago" era incontestable.
+//
+// Por que una foto y no la fecha de Notion: last_edited_time es de la PAGINA entera, asi que se
+// mueve cuando alguien corrige un telefono o una nota. Fechar transiciones con eso inventa
+// movimiento comercial cada vez que alguien arregla una coma. La foto no depende de ningun
+// proveedor: comparar la de ayer con la de hoy dice que cambio, y si el barrido se cae dos dias
+// la foto del tercero igual lo detecta, con un error acotado y conocido en vez de una fecha
+// inventada.
+//
+// Lo que esta tecnica NO hace, y no se disimula:
+//   - dos cambios de etapa el mismo dia colapsan en uno (se ve el neto, no el camino).
+//   - no recupera nada del pasado: empieza a producir dato el dia que corre por primera vez.
+//   - la resolucion es de un dia. Nadie pregunta cuantas HORAS tardo del cierre al pago.
+//
+// Se corre ANTES del barrido de /dia-sales, para que la foto sea del estado con el que arranco
+// el dia. Volver a correrla el mismo dia no pisa la foto (INSERT ... DO NOTHING): la primera
+// del dia es la buena.
+//
+// Costo: ~2.000 filas por dia de texto corto.
+export const empresaEstadoSnapshot = sqliteTable(
+  'empresa_estado_snapshot',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    idEmpresa: text('id_empresa').notNull(),
+    // La etapa tal cual estaba. NULL es un valor legitimo: la empresa existe y no esta en el
+    // embudo. Una cuenta que pasa de null a lead ES una transicion.
+    estado: text('estado'),
+    fechaSnapshot: text('fecha_snapshot').notNull(), // ISO YYYY-MM-DD
+    idOrganizacion: integer('id_organizacion').notNull(),
+    createdAt: text('created_at'),
+  },
+  (t) => [
+    // Una foto por empresa por dia. Es lo que hace idempotente volver a correr el snapshot.
+    uniqueIndex('idx_snapshot_empresa_fecha').on(t.idEmpresa, t.fechaSnapshot, t.idOrganizacion),
+    index('idx_snapshot_fecha').on(t.fechaSnapshot, t.idOrganizacion),
+  ],
+);
 
 // Seguimiento que estaba programado y NO se ejecuto: se corrio a otra fecha. Una fila por
 // aplazo, append-only (nunca se actualiza ni se borra: cada corrimiento es un evento nuevo).

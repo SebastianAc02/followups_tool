@@ -108,7 +108,27 @@ test('no_llego es un resultado valido, con label, y no dispara busqueda de trans
   assert.ok(!RESULTADOS_CONTESTO.includes('no_llego'));
 });
 
-test('registrarToqueSchema acepta no_llego sin exigir razonPerdida', () => {
-  const r = registrarToqueSchema.safeParse({ idEmpresa: 'e1', canal: 'llamada', resultado: 'no_llego' });
-  assert.equal(r.success, true);
+test('registrarToqueSchema acepta no_llego sin exigir razonPerdida, pero SI la fecha que se incumplio', () => {
+  const conFecha = registrarToqueSchema.safeParse({
+    idEmpresa: 'e1',
+    canal: 'reunion',
+    resultado: 'no_llego',
+    reunionFechaPropuesta: '2026-07-27',
+  });
+  assert.equal(conFecha.success, true, 'no_llego no pide razonPerdida');
+
+  // Sin la fecha propuesta el no-show no se puede contar contra nada: se rechaza en vez de
+  // guardar media fila.
+  const sinFecha = registrarToqueSchema.safeParse({ idEmpresa: 'e1', canal: 'reunion', resultado: 'no_llego' });
+  assert.equal(sinFecha.success, false);
+
+  // Y no puede decir a la vez que la reunion no ocurrio y cuando ocurrio.
+  const contradictorio = registrarToqueSchema.safeParse({
+    idEmpresa: 'e1',
+    canal: 'reunion',
+    resultado: 'no_llego',
+    reunionFechaPropuesta: '2026-07-27',
+    reunionFechaOcurrida: '2026-07-27',
+  });
+  assert.equal(contradictorio.success, false);
 });

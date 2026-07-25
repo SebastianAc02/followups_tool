@@ -8,6 +8,18 @@ import { z } from 'zod';
 export const CANALES = ['llamada', 'whatsapp', 'correo'] as const;
 export type Canal = (typeof CANALES)[number];
 
+// Canal de un TOQUE, que es un superset del canal de una CADENCIA (2026-07-25). La reunion es
+// un toque real -- 115 de los 285 toques de produccion ya tienen canal='reunion', metidos por
+// el importador de Notion -- pero NO es un canal de cadencia: un paso programado no puede ser
+// "reunion" (no hay proveedor que la mande, no se puede encolar ni gotear). Por eso son dos
+// listas y no una:
+//   CANALES       -> lo que un paso de cadencia puede pedir (pasoParseadoSchema, readiness de
+//                    campanas, CANALES_AUTOMATICOS).
+//   CANALES_TOQUE -> lo que un toque puede registrar (registrarToqueSchema, marcarPerdida, MCP).
+// Meter 'reunion' en CANALES habria abierto un canal de campana que nadie puede ejecutar.
+export const CANALES_TOQUE = [...CANALES, 'reunion'] as const;
+export type CanalToque = (typeof CANALES_TOQUE)[number];
+
 // Canales con proveedor automatico HOY (sesion 2026-07-09, registro por canal en
 // app/adapters/registro-envio.ts). Vive aca -- no en el adaptador -- porque el
 // Repository (capa de datos) necesita esta lista para validar/filtrar sin depender de
@@ -30,6 +42,25 @@ export function validarCanalAutomatico(canal: Canal, esManual: boolean): void {
   }
 }
 
+// La taxonomia de lo que puede pasar en un toque (2026-07-25). Los CINCO primeros son los
+// originales y NO se renombran ni se borran: 285 filas de produccion ya escribieron esos
+// valores, y renombrar un enum de texto en SQLite significa reescribir filas historicas.
+// Los 15 de abajo son los que faltaban para cubrir la taxonomia real del negocio (la outcome
+// library del brain, ventas/frameworks/outcome-library.md): antes todo colapsaba a "contesto /
+// no contesto / agendo", asi que "contesto la recepcionista y no paso al gerente" y "el gerente
+// dijo que no" quedaban escritos igual.
+//
+// Mapeo viejo -> nuevo (el viejo sigue siendo valido; el nuevo es el que dice mas):
+//   no_contesto                 = no-contesto de la library. Se queda tal cual, no se duplica.
+//   contesto_reunion            -> gerente_interesado_agenda (o reactivacion_reinteres si la
+//                                  cuenta venia de on_hold). Los tres agendan.
+//   contesto_sigue_seguimiento  -> gerente_interesado_sin_agenda (interes sin fecha) o
+//                                  reprogramar ("llamame mas tarde"), que no son lo mismo.
+//   contesto_no                 -> no_interesado (dijo que no) o perdido (no va) o ghosting
+//                                  (dejo de responder). Antes los tres eran "contesto_no".
+//   no_llego                    = no-show de una reunion agendada. No esta en la library
+//                                  porque la library describe toques, no ausencias.
+// Nada obliga a migrar los toques viejos: los cinco valores siguen escribiendose.
 export const RESULTADOS = [
   'contesto_reunion',
   'contesto_sigue_seguimiento',
@@ -40,19 +71,89 @@ export const RESULTADOS = [
   // calendario. A proposito NO entra a RESULTADOS_CONTESTO -- no hubo conversacion, nada
   // que buscar en Granola ni que calificar.
   'no_llego',
+  // Contacto y conexion: donde se cae la mayoria de los intentos y donde el enum viejo no
+  // distinguia nada. Un PBX que no pasa y un PBX que pasa al gerente llevan a acciones
+  // opuestas (dejar de llamar vs llamar ya), y los dos eran 'no_contesto'.
+  'pbx_sin_decisor',
+  'pbx_paso_gerente',
+  'reprogramar',
+  // Interes y reunion.
+  'gerente_interesado_agenda',
+  'gerente_interesado_sin_agenda',
+  'reactivacion_reinteres',
+  'no_interesado',
+  // Reunion: como salio la reunion que SI se dio. Con no_llego arriba, estos cuatro son los
+  // que permiten el no-show rate (no_llego / reuniones que estaban agendadas).
+  'reunion_fria',
+  'reunion_buena',
+  'se_presento',
+  // Cierre.
+  'objecion_precio',
+  'push_cierre',
+  'pago',
+  // Perdida.
+  'ghosting',
+  'perdido',
 ] as const;
 export type Resultado = (typeof RESULTADOS)[number];
 
-// Labels legibles de las 4 salidas (voz-onepay: sin emojis, sin em dash, directo).
-// Un solo export reusable: CaptureForm.tsx (botones) y page.tsx (historial de toques) lo
-// comparten para no duplicar el mapeo de texto en dos lugares.
+// Labels legibles (voz-onepay: sin emojis, sin em dash, directo). Un solo export reusable:
+// CaptureForm.tsx (botones) y page.tsx (historial de toques) lo comparten para no duplicar el
+// mapeo de texto en dos lugares. Tambien es lo que renderToquesHechos manda a Notion, asi que
+// aca no entra ni una palabra de la maquinaria interna.
 export const RESULTADO_LABELS: Record<Resultado, string> = {
   contesto_reunion: 'Reunión agendada',
   contesto_sigue_seguimiento: 'Sigue en follow-up',
   contesto_no: 'No sigue',
   no_contesto: 'No contestó',
   no_llego: 'No llegó a la reunión',
+  pbx_sin_decisor: 'PBX, no pasó al que decide',
+  pbx_paso_gerente: 'PBX pasó al gerente',
+  reprogramar: 'Pidió que lo llamaran después',
+  gerente_interesado_agenda: 'Interesado y agenda',
+  gerente_interesado_sin_agenda: 'Interesado, sin agendar',
+  reactivacion_reinteres: 'Se re-interesa',
+  no_interesado: 'No interesado',
+  reunion_fria: 'Reunión fría',
+  reunion_buena: 'Reunión buena',
+  se_presento: 'Se presentó',
+  objecion_precio: 'Objeción de precio',
+  push_cierre: 'Push de cierre',
+  pago: 'Pagó',
+  ghosting: 'Ghosting',
+  perdido: 'Perdido',
 };
+
+// Los resultados que AGENDAN una reunion. Se lista aparte porque es lo que dispara la
+// transicion de embudo a reunion_agendada (core/transicion-estado.ts): antes esa regla estaba
+// escrita contra el literal 'contesto_reunion' y los dos valores nuevos que significan lo mismo
+// habrian dejado la cuenta quieta.
+export const RESULTADOS_AGENDA: readonly Resultado[] = [
+  'contesto_reunion',
+  'gerente_interesado_agenda',
+  'reactivacion_reinteres',
+];
+
+// Los resultados que cierran la cuenta en negativo. Son los que EXIGEN razonPerdida: sin esto,
+// 'perdido' y 'no_interesado' entrarian sin razon mientras 'contesto_no' sigue pidiendola, que
+// es el hueco por donde razon_perdida se quedo con 1 fila llena sobre 285 toques.
+export const RESULTADOS_PERDIDA: readonly Resultado[] = ['contesto_no', 'no_interesado', 'perdido'];
+
+// Los cinco que ofrece el formulario web, que son los cinco originales. La taxonomia completa
+// (20 valores) es para el registro por MCP, donde el resultado se elige leyendo la lista y no
+// apretando un boton: veinte botones en una pantalla de captura no se leen, se ignoran. El
+// formulario sigue escribiendo valores del mismo enum, solo que un subconjunto.
+export const RESULTADOS_CAPTURA_WEB: readonly Resultado[] = [
+  'contesto_reunion',
+  'contesto_sigue_seguimiento',
+  'contesto_no',
+  'no_contesto',
+  'no_llego',
+];
+
+// Los resultados de una reunion que SI ocurrio. Con 'no_llego' son el par que responde el
+// no-show rate; se listan para no tener que repetir la lista en cada consumidor.
+export const RESULTADOS_REUNION_OCURRIDA: readonly Resultado[] = ['reunion_fria', 'reunion_buena', 'se_presento'];
 
 // Por que no se hizo un seguimiento programado (2026-07-25, tabla seguimiento_aplazado).
 // Cerrado en cuatro valores a proposito: en texto libre "no me dio el dia" y "se me
@@ -75,8 +176,148 @@ export const MOTIVOS_APLAZO = ['plan_irreal', 'dia_atravesado', 'tiempo_no_usado
 export type MotivoAplazo = (typeof MOTIVOS_APLAZO)[number];
 
 // V3.4: variantes de "hubo conversacion real", disparan la busqueda en Granola.
-// no_contesto nunca la dispara (nunca hubo con quien hablar, nada que buscar).
-export const RESULTADOS_CONTESTO: readonly Resultado[] = ['contesto_reunion', 'contesto_sigue_seguimiento', 'contesto_no'];
+// no_contesto nunca la dispara (nunca hubo con quien hablar, nada que buscar). Tampoco los
+// tres de PBX/reprogramar (hubo alguien al otro lado, pero no una conversacion comercial que
+// valga la pena buscar grabada) ni ghosting (justamente, no hubo).
+export const RESULTADOS_CONTESTO: readonly Resultado[] = [
+  'contesto_reunion',
+  'contesto_sigue_seguimiento',
+  'contesto_no',
+  'gerente_interesado_agenda',
+  'gerente_interesado_sin_agenda',
+  'reactivacion_reinteres',
+  'no_interesado',
+  'reunion_fria',
+  'reunion_buena',
+  'se_presento',
+  'objecion_precio',
+  'push_cierre',
+  'pago',
+  'perdido',
+];
+
+// Por que se pierde o se parquea una cuenta (2026-07-25). Los siete valores que el negocio ya
+// usa, dictados por el operador y escritos tal cual en el pipeline. Cerrado por la misma razon
+// que MOTIVOS_APLAZO: en texto libre "muy caro" y "el costo fijo le pesa" son la misma causa
+// escrita de dos formas, y con eso no se puede contar nada. El detalle en prosa va aparte, en
+// razonPerdidaNota, y no reemplaza al valor.
+//
+// Evidencia de que hacia falta: sobre 285 toques de produccion hay UNA sola razon_perdida
+// escrita, y es prosa ("Tamano insuficiente, el ISP es muy pequeno para el pricing actual"),
+// que en esta lista es no_califica_icp con su nota. Esa fila NO se toca.
+//
+// Ghosting no esta aca a proposito, aunque el pipeline lo tenga como opcion: es un RESULTADO
+// del toque ('ghosting'), no una causa de perdida. Quien se pierde por ghosting deja las dos
+// cosas escritas, el resultado y la razon real si se conoce.
+export const RAZONES_PERDIDA = [
+  'precio',
+  'ya_tiene_pasarela',
+  'no_toma_decisiones',
+  'timing_malo',
+  'no_califica_icp',
+  'sin_presupuesto',
+  'disputa_interna',
+] as const;
+export type RazonPerdida = (typeof RAZONES_PERDIDA)[number];
+
+// Como se escribe cada razon donde la lee alguien de afuera. Es lo que viaja al outbox de
+// Notion en vez del slug: el slug es la llave para contar, la etiqueta es lo que el pipeline
+// muestra.
+export const RAZON_PERDIDA_LABELS: Record<RazonPerdida, string> = {
+  precio: 'Precio',
+  ya_tiene_pasarela: 'Ya tiene pasarela',
+  no_toma_decisiones: 'No toma decisiones',
+  timing_malo: 'Timing malo',
+  no_califica_icp: 'No califica ICP',
+  sin_presupuesto: 'Sin presupuesto',
+  disputa_interna: 'Disputa interna',
+};
+
+// La objecion VIVA, el mismo bloqueo antes de que mate el deal.
+//
+// OJO, ESTA LISTA ES UNA INFERENCIA, NO DICTADO DEL OPERADOR. Vocabulario inferido de
+// ventas/frameworks/embudo.md el 2026-07-25, pendiente de que el operador dicte el suyo. Los
+// siete primeros son la lista de razones de perdida que el si dicto, reusada aca bajo la
+// hipotesis de que es el mismo bloqueo en dos momentos distintos (vivo mientras se maneja,
+// terminal cuando se pierde) -- compartir la llave es lo que permitiria preguntar cuantas
+// objeciones de precio se manejaron y cuantas terminaron en perdida por precio. duda_adopcion es
+// el octavo y sale del embudo del brain, que distingue dos sabores de la objecion de precio
+// ("ROI" vs "duda de adopcion") porque se manejan distinto.
+//
+// El doc de objeciones del brain (producto/onepay/objeciones.md) esta en estado "pendiente" y
+// dice explicito "no inventar contenido", asi que esto no se presenta como suyo. Cuando el
+// dicte la lista real, esta se reemplaza y el comentario se borra. Que quien lo lea en tres
+// meses sepa que no salio de el.
+//
+// Cerrada en ESCRITURA, abierta a crecer: agregar un valor es una linea aca. Si la objecion no
+// cabe en ninguna, se deja en null y se escribe objecionNota -- igual que el motivo de un
+// aplazo. Nunca bloquea el registro del toque, que es lo que hace tolerable que la lista sea
+// una hipotesis: lo que no encaje queda en prosa y no se pierde.
+export const OBJECIONES = [...RAZONES_PERDIDA, 'duda_adopcion'] as const;
+export type Objecion = (typeof OBJECIONES)[number];
+
+// Quien ejecuta un toque cuando el caller no lo dice (decision del operador, 2026-07-25).
+// Revierte la regla anterior ("NULL = no atribuido, nunca se asume"): en la practica dejo 71 de
+// 71 toques del ultimo mes sin ejecutor, o sea el 100% del dato perdido por proteger un caso
+// que casi no pasa. El campo sigue existiendo y se sigue mandando explicito cuando ejecuta otra
+// persona (Felipe Castro, Camilo Fonseca); el default solo cubre el silencio.
+export const EJECUTOR_POR_DEFECTO = 'Sebastian Acosta Molina';
+
+// De donde salio una fila de empresa_estado_historial (2026-07-25). Los cinco cortan por
+// QUIEN la escribio, que es lo que decide si cuenta para el ciclo de venta:
+//   toque          - la gradua un toque real (registrarToque). Es movimiento comercial.
+//   perdida        - la baja a on_hold de marcarPerdida. Tambien es real.
+//   manual         - alguien movio la etapa a proposito, una cuenta a la vez (mover_estado).
+//   snapshot       - la derivo comparar la foto de hoy contra la de ayer (empresa_estado_
+//                    snapshot). Es OBSERVADA, no inferida: la cuenta estaba en cierre en la
+//                    foto del lunes y en firma_pago en la del martes, asi que el cambio pasó el
+//                    martes. Resolucion de un dia. Es el unico camino que fecha bien el tramo
+//                    que se mueve a mano en Notion (cierre -> pago).
+//   reconciliacion - la base se alineo a lo que Notion YA decia. La fecha es la de la CORRIDA
+//                    del barrido, o sea un limite superior, no el dia del cambio: si el
+//                    operador movio la cuenta el martes y el barrido corrio el jueves, la fila
+//                    dice jueves. Por eso queda fuera de ORIGENES_FECHA_CONFIABLE y por eso
+//                    existe el snapshot.
+//   backfill       - corrida de script sobre muchas filas. Ruido puro para el ciclo.
+// NULL = no lo dijo. Las 63 filas anteriores a esta columna quedan asi y no se rellenan.
+export const ORIGENES_TRANSICION = [
+  'toque',
+  'perdida',
+  'manual',
+  'snapshot',
+  'reconciliacion',
+  'backfill',
+] as const;
+export type OrigenTransicion = (typeof ORIGENES_TRANSICION)[number];
+
+// Los origenes cuya FECHA se puede usar para medir tiempo entre etapas. reconciliacion queda
+// fuera: su fecha es la de la corrida del barrido, no la del cambio. backfill tambien.
+export const ORIGENES_FECHA_CONFIABLE: readonly OrigenTransicion[] = ['toque', 'perdida', 'manual', 'snapshot'];
+
+// Un dia calendario, y solo eso: 2026-07-27. Sin hora, sin prosa, sin "inicios de junio".
+// Se valida el FORMATO y la existencia real del dia (2026-02-31 no pasa).
+export const FECHA_DIA_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+export const fechaDiaSchema = z
+  .string()
+  .regex(FECHA_DIA_REGEX, 'la fecha tiene que ser un dia ISO YYYY-MM-DD')
+  .refine((v) => {
+    const d = new Date(`${v}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+  }, 'ese dia no existe en el calendario');
+
+// Una fecha de reunion: el dia, con hora opcional. La hora sirve para el calendario; el dia es
+// lo que se cuenta. Se acepta 2026-07-27 y 2026-07-27T15:00 (o con segundos y Z).
+export const FECHA_REUNION_REGEX = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{3})?)?Z?)?$/;
+
+export const fechaReunionSchema = z
+  .string()
+  .regex(FECHA_REUNION_REGEX, 'la fecha de la reunion tiene que ser YYYY-MM-DD, con hora opcional YYYY-MM-DDTHH:MM')
+  .refine((v) => {
+    const dia = v.slice(0, 10);
+    const d = new Date(`${dia}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === dia;
+  }, 'ese dia no existe en el calendario');
 
 export const kdmSchema = z.object({
   nombre: z.string().min(1),
@@ -280,31 +521,84 @@ export type CampanaInput = z.input<typeof campanaInputSchema>;
 export const registrarToqueSchema = z
   .object({
     idEmpresa: z.string().min(1),
-    canal: z.enum(CANALES),
+    canal: z.enum(CANALES_TOQUE),
     resultado: z.enum(RESULTADOS),
+    // El DIA del toque. Opcional: sin fecha se usa hoy, que es el caso normal (se registra el
+    // mismo dia). Existe para el toque que se dicta al dia siguiente, que antes entraba con la
+    // fecha de cuando se escribio y no de cuando paso.
+    fecha: fechaDiaSchema.optional(),
+    duracionSegundos: z.number().int().nonnegative().optional(),
     quePaso: z.string().min(1).optional(),
     proximoFollowUp: z.string().min(1).optional(),
     proximoCanal: z.string().min(1).optional(),
     usuarios: z.number().optional(),
     crm: z.string().min(1).optional(),
     pasarela: z.string().min(1).optional(),
-    razonPerdida: z.string().min(1).optional(),
-    objecion: z.string().min(1).optional(),
-    // Quien hizo la llamada o mando el mensaje. Opcional y sin default: si no viene, el
-    // toque queda sin atribuir (NULL). No se rellena con el owner del deal ni con el
-    // usuario de la sesion -- suponer quien ejecuto es exactamente el dato falso que esta
-    // columna existe para no tener.
-    ejecutadoPor: z.string().min(1).optional(),
+    // Vocabulario cerrado + nota libre, el mismo par que motivo/nota en aplazar_seguimiento.
+    // Lo que no cabe en la lista NO se fuerza: se deja la nota y el campo acotado en null.
+    razonPerdida: z.enum(RAZONES_PERDIDA).optional(),
+    razonPerdidaNota: z.string().min(1).optional(),
+    objecion: z.enum(OBJECIONES).optional(),
+    objecionNota: z.string().min(1).optional(),
+    // Puntero a la grabacion, si existe. Las tres columnas ya estaban en la tabla y ningun
+    // camino de escritura las llenaba, asi que un toque no podia enlazar su grabacion. Se
+    // exponen; el pipeline de audio detras queda aplazado por decision del operador.
+    //
+    // Dos proveedores distintos y no intercambiables: las REUNIONES se graban en tldv, las
+    // LLAMADAS en granola. El proveedor se guarda como DATO (string abierto), no como enum, por
+    // la misma regla del repo que ya aplica a canal. Y los tres son OPCIONALES de verdad: una
+    // llamada por telefono o por WhatsApp puede no quedar grabada en ninguna parte, y eso no
+    // invalida el toque ni bloquea la escritura.
+    transcriptProveedor: z.string().min(1).optional(),
+    transcriptId: z.string().min(1).optional(),
+    transcriptUrl: z.string().min(1).optional(),
+    // Las dos fechas de la reunion. Solo tienen sentido con canal 'reunion' o con un resultado
+    // que agenda; se enforza abajo.
+    reunionFechaPropuesta: fechaReunionSchema.optional(),
+    reunionFechaOcurrida: fechaReunionSchema.optional(),
+    // Quien hizo la llamada o mando el mensaje. Con default desde el 2026-07-25: sin default,
+    // 71 de 71 toques del ultimo mes quedaron sin atribuir. Se sigue mandando explicito cuando
+    // ejecuta otra persona.
+    ejecutadoPor: z.string().min(1).optional().default(EJECUTOR_POR_DEFECTO),
     kdm: kdmSchema.optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.resultado === 'contesto_no' && !data.razonPerdida) {
+    if (RESULTADOS_PERDIDA.includes(data.resultado) && !data.razonPerdida) {
       ctx.addIssue({
         code: 'custom',
         path: ['razonPerdida'],
-        message: "razonPerdida es obligatoria cuando resultado es 'contesto_no'",
+        message: `razonPerdida es obligatoria cuando resultado es '${data.resultado}': uno de ${RAZONES_PERDIDA.join(' | ')}`,
+      });
+    }
+    // Un no-show es el desenlace de una reunion que estaba en el calendario: sin la fecha
+    // propuesta no se puede calcular el no-show rate, que es justo para lo que existe el
+    // resultado. Se exige en vez de dejarlo pasar a medias.
+    if (data.resultado === 'no_llego' && !data.reunionFechaPropuesta) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reunionFechaPropuesta'],
+        message: "reunionFechaPropuesta es obligatoria cuando resultado es 'no_llego': sin la fecha que se incumplio no hay no-show que contar",
+      });
+    }
+    // Una reunion que ocurrio y un no-show son excluyentes. Dejar las dos escritas produce una
+    // fila que dice que la reunion paso y no paso.
+    if (data.resultado === 'no_llego' && data.reunionFechaOcurrida) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reunionFechaOcurrida'],
+        message: "un toque con resultado 'no_llego' no puede tener reunionFechaOcurrida: la reunion no ocurrio",
+      });
+    }
+    if (data.reunionFechaOcurrida && data.canal !== 'reunion') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reunionFechaOcurrida'],
+        message: "reunionFechaOcurrida solo aplica con canal 'reunion': una llamada no es una reunion",
       });
     }
   });
 
-export type RegistrarToqueInput = z.infer<typeof registrarToqueSchema>;
+// z.input, no z.infer: ejecutadoPor tiene default(), asi que en la salida ya parseada queda
+// obligatorio pero el caller no esta obligado a mandarlo. Mismo caso que CampanaInput.
+export type RegistrarToqueInput = z.input<typeof registrarToqueSchema>;
+export type RegistrarToqueParsed = z.output<typeof registrarToqueSchema>;

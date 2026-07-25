@@ -97,16 +97,21 @@ test('los cuatro motivos validos se aceptan tal cual', () => {
 
 // NULL significa "no lo dijo", y es distinto de cualquiera de los cuatro motivos. Rellenarlo
 // con un default convertiria un dato que no existe en una causa inventada.
-test('sin motivo la columna queda en NULL, no en un valor por defecto', () => {
+test('sin motivo la columna queda en NULL; el ejecutor SI tiene default', () => {
   seedEmpresa('a12', '2026-08-01');
   aplazarSeguimientoTool({ idEmpresa: 'a12', fechaNueva: '2026-08-05' }, 1);
 
   const raw = new Database(dbPath);
   const fila = raw.prepare(`SELECT motivo, nota, aplazado_por FROM seguimiento_aplazado WHERE id_empresa = 'a12'`).get() as any;
   raw.close();
+  // motivo y nota siguen sin default: por que no se hizo lo dice el operador o no se sabe, y
+  // eso no se infiere nunca desde la fecha, el owner ni la cuenta.
   assert.equal(fila.motivo, null);
   assert.equal(fila.nota, null);
-  assert.equal(fila.aplazado_por, null);
+  // aplazadoPor SI, desde el 2026-07-25 (orden del operador, misma logica que ejecutadoPor en un
+  // toque): hoy el unico que aplaza dictando es el, y una columna que nunca se llena no protege
+  // nada. QUIEN lo hizo se sabe; POR QUE no se hizo, no.
+  assert.equal(fila.aplazado_por, 'Sebastian Acosta Molina');
 });
 
 test('el valor de retorno trae la empresa releida con la fecha nueva y el aplazo insertado (no un ok)', () => {
@@ -237,15 +242,20 @@ test('registrarToqueTool con ejecutadoPor persiste el valor en toque.ejecutado_p
   assert.equal(t.ejecutado_por, 'felipe-castro');
 });
 
-test('registrarToqueTool sin ejecutadoPor deja la columna en NULL, nunca en el owner', () => {
+// Revierte la regla del 2026-07-24 (sin ejecutadoPor la columna quedaba en NULL). Decision del
+// operador el 2026-07-25: dejarla vacia produjo 71 de 71 toques del mes sin atribuir, o sea el
+// 100% del dato perdido para proteger el caso raro de que ejecute otro. El caso raro se sigue
+// cubriendo mandando ejecutadoPor explicito, como prueba el test de arriba.
+test('registrarToqueTool sin ejecutadoPor deja el ejecutor por defecto, no NULL', () => {
   seedEmpresa('a9', '2026-08-01');
-  registrarToqueTool({ idEmpresa: 'a9', canal: 'llamada', resultado: 'contesto_sigue_seguimiento' } as any, 1);
+  const r = registrarToqueTool({ idEmpresa: 'a9', canal: 'llamada', resultado: 'contesto_sigue_seguimiento' } as any, 1);
 
   const raw = new Database(dbPath);
   const t = raw.prepare(`SELECT ejecutado_por FROM toque WHERE id_empresa = 'a9'`).get() as any;
   raw.close();
-  // Aserto explicito a null: undefined o '' esconderian que la columna quedo sin llenar.
-  assert.equal(t.ejecutado_por, null);
+  assert.equal(t.ejecutado_por, 'Sebastian Acosta Molina');
+  // Y lo que devuelve la tool es lo que quedo en la base, releido: no un eco del input.
+  assert.equal(r.toque.ejecutadoPor, 'Sebastian Acosta Molina');
 });
 
 test.after(() => borrarDbPrueba(dbPath));

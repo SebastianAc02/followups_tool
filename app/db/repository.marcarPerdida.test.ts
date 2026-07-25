@@ -33,15 +33,15 @@ function leer(id: string) {
   return { estado: emp.estado_notion, toques, historial };
 }
 
-test('marcarPerdida escribe el toque de perdida (contesto_no + razon_perdida) y pone la empresa on_hold', () => {
+test('marcarPerdida escribe el toque de perdida (resultado perdido + razon_perdida acotada) y pone la empresa on_hold', () => {
   seedEmpresa('mp1', 'oportunidad');
-  marcarPerdida({ idEmpresa: 'mp1', canal: 'llamada', razonPerdida: 'precio muy alto' }, 1);
+  marcarPerdida({ idEmpresa: 'mp1', canal: 'llamada', razonPerdida: 'precio', razonPerdidaNota: 'precio muy alto' }, 1);
 
   const { estado, toques, historial } = leer('mp1');
   assert.equal(estado, 'on_hold');
   assert.equal(toques.length, 1);
-  assert.equal(toques[0].resultado, 'contesto_no');
-  assert.equal(toques[0].razon_perdida, 'precio muy alto');
+  assert.equal(toques[0].resultado, 'perdido');
+  assert.equal(toques[0].razon_perdida, 'precio');
   assert.equal(historial.length, 1);
   assert.equal(historial[0].estado_anterior, 'oportunidad');
   assert.equal(historial[0].estado_nuevo, 'on_hold');
@@ -49,7 +49,7 @@ test('marcarPerdida escribe el toque de perdida (contesto_no + razon_perdida) y 
 
 test('marcarPerdida NO gradua la etapa: una empresa on_hold no vuelve a contacto_iniciado (no pasa por estadoDestinoPorToque)', () => {
   seedEmpresa('mp2', 'on_hold');
-  marcarPerdida({ idEmpresa: 'mp2', canal: 'whatsapp', razonPerdida: 'ya tiene proveedor' }, 1);
+  marcarPerdida({ idEmpresa: 'mp2', canal: 'whatsapp', razonPerdida: 'ya_tiene_pasarela' }, 1);
 
   const { estado, historial } = leer('mp2');
   assert.equal(estado, 'on_hold'); // sigue on_hold, NO graduo a contacto_iniciado
@@ -58,12 +58,12 @@ test('marcarPerdida NO gradua la etapa: una empresa on_hold no vuelve a contacto
 
 test('marcarPerdida encola estado + razonPerdida al outbox cuando la empresa tiene notion_page_id', () => {
   seedEmpresa('mp3', 'oportunidad', 'page-mp3');
-  marcarPerdida({ idEmpresa: 'mp3', canal: 'llamada', razonPerdida: 'no hay presupuesto' }, 1);
+  marcarPerdida({ idEmpresa: 'mp3', canal: 'llamada', razonPerdida: 'sin_presupuesto' }, 1);
 
   const fila = outboxPendientes().find((p) => p.payload.notionPageId === 'page-mp3');
   assert.ok(fila, 'debe haber una fila de outbox para la empresa');
   assert.equal(fila!.payload.estado, 'on_hold');
-  assert.equal(fila!.payload.razonPerdida, 'no hay presupuesto');
+  assert.equal(fila!.payload.razonPerdida, 'Sin presupuesto', 'a Notion viaja la etiqueta legible, no el slug');
 });
 
 test('marcarPerdida exige razonPerdida (Zod): sin ella, lanza', () => {
@@ -73,7 +73,7 @@ test('marcarPerdida exige razonPerdida (Zod): sin ella, lanza', () => {
 
 test('marcarPerdida respeta el guard de organizacion: no toca una empresa de otra org', () => {
   seedEmpresa('mp5', 'oportunidad');
-  assert.throws(() => marcarPerdida({ idEmpresa: 'mp5', canal: 'llamada', razonPerdida: 'x' }, 999), /otra organizacion|no existe/);
+  assert.throws(() => marcarPerdida({ idEmpresa: 'mp5', canal: 'llamada', razonPerdida: 'precio' }, 999), /otra organizacion|no existe/);
 });
 
 test.after(() => borrarDbPrueba(dbPath));

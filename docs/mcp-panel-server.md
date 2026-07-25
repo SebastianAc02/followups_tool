@@ -121,6 +121,48 @@ usar `origen: "notion"` y el cambio queda en la base sin levantar un evento sync
 Sebastián lo decide), pero hoy permanece en BD como el otro -- nada sale a Notion
 de forma automatica.
 
+## Vocabularios cerrados de la captura (2026-07-25)
+
+Cuatro campos dejaron de ser texto libre. La fuente de verdad es `app/db/validation.ts`; esta
+tabla dice de donde salio cada lista, que es lo que no se puede leer del codigo.
+
+| Constante | Valores | De donde salio |
+|---|---|---|
+| `CANALES_TOQUE` | llamada, whatsapp, correo, **reunion** | Dictado. `reunion` NO entra a `CANALES` (canales de cadencia): un paso programado no puede ser una reunion. |
+| `RESULTADOS` | los 5 originales + 15 | La outcome library del brain (`ventas/frameworks/outcome-library.md`), dictada por el operador el 2026-07-24. Los 5 viejos no se renombran: 285 filas de produccion los usan. |
+| `RAZONES_PERDIDA` | precio, ya_tiene_pasarela, no_toma_decisiones, timing_malo, no_califica_icp, sin_presupuesto, disputa_interna | Dictado por el operador. Los siete que ya usa el pipeline. |
+| `OBJECIONES` | las 7 de arriba + duda_adopcion | **Inferencia, no dictado.** Ver abajo. |
+
+**La lista de objeciones es una inferencia.** Vocabulario inferido de
+`ventas/frameworks/embudo.md` el 2026-07-25, pendiente de que el operador dicte el suyo. El doc
+de objeciones del brain (`producto/onepay/objeciones.md`) esta en estado "pendiente" y dice
+explicito "no inventar contenido", asi que estos ocho valores no se presentan como suyos: son la
+lista de razones de perdida que el si dicto, reusada bajo la hipotesis de que una objecion es el
+mismo bloqueo antes de matar el deal, mas `duda_adopcion`, que el embudo del brain distingue como
+el segundo sabor de la objecion de precio. Cuando el dicte la lista real, se reemplaza y esta
+nota se borra.
+
+Que la lista sea una hipotesis es tolerable porque **nunca bloquea una escritura**: si la
+objecion no cabe en ninguna, el campo acotado queda vacio y el texto va a `objecionNota`. Mismo
+patron que `motivo`/`nota` en `aplazar_seguimiento`. Lo mismo aplica a `razonPerdida` y
+`razonPerdidaNota`.
+
+## Toda tool de escritura devuelve lo que quedo escrito
+
+Desde el 2026-07-25 ninguna responde `{ ok: true }`: releen la fila dentro de la misma
+transaccion y la devuelven. Un "ok" no es verificable, y ademas escondia casos distintos bajo la
+misma respuesta (mover una cuenta que ya estaba en esa etapa devolvia lo mismo que moverla de
+verdad).
+
+| Tool | Que devuelve |
+|---|---|
+| `registrar_toque` | `{ toque, empresa, transicion }` releidos. `transicion` es null si el toque no movio el embudo. |
+| `marcar_perdida` | `{ toque, empresa, transicion }`. `transicion` null si ya estaba on_hold. |
+| `mover_estado` | `{ empresa, transicion, motivo? }`. `transicion` trae su `origen`; `motivo` dice `sin_cambio` o `empresa_no_encontrada`. |
+| `cambiar_cadencia` | `{ empresa, cadencias, inscripcion }`. `inscripcion` puede decir `ya_inscrita`, que no es error pero tampoco es un cambio. |
+| `aplazar_seguimiento` | `{ empresa, aplazo }`. |
+| `snapshot_estados` | las transiciones releidas de `empresa_estado_historial`. |
+
 ## Auth (OAuth, plugin `mcp` de Better Auth)
 
 `app/lib/auth.ts` habilita el plugin `mcp` de better-auth (`mcp({ loginPage: '/login',

@@ -32,6 +32,7 @@ import {
   crearEmpresa,
   actualizarEmpresa,
   aplazarSeguimiento,
+  snapshotEstados,
   toquesEnRango,
   aplazosEnRango,
   colaDelDia,
@@ -40,6 +41,12 @@ import {
   type AplazarSeguimientoResultado,
   type CambiarCadenciaInput,
   type MarcarPerdidaInput,
+  type MarcarPerdidaResultado,
+  type MoverEstadoResultado,
+  type CambiarCadenciaResultado,
+  type RegistrarToqueResultado,
+  type SnapshotResultado,
+  type ToqueActividad,
   type BuscarEmpresaInput,
   type BuscarEmpresaResultado,
   type CrearEmpresaInput,
@@ -47,7 +54,7 @@ import {
   type ActualizarEmpresaInput,
   type EmpresaEscrita,
 } from '../db/repository';
-import type { RegistrarToqueInput } from '../db/validation';
+import { RESULTADOS_REUNION_OCURRIDA, type RegistrarToqueInput } from '../db/validation';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
@@ -273,9 +280,12 @@ export function pipeline(input: PipelineInput = {}): PipelineOutput {
 
 export type ResultadoEscritura = { ok: true };
 
-export function registrarToqueTool(input: RegistrarToqueInput, idOrganizacion: number): ResultadoEscritura {
-  registrarToque(input, idOrganizacion);
-  return { ok: true };
+// Devuelve el toque RELEIDO, la empresa releida y la transicion de embudo que disparo, no un
+// { ok: true } (2026-07-25, regla 18 del brain: una escritura devuelve lo que quedo escrito,
+// porque un "ok" no se puede verificar). Quien registra ve el idToque, el dia que quedo, y si
+// la cuenta se movio de etapa sin que el lo pidiera.
+export function registrarToqueTool(input: RegistrarToqueInput, idOrganizacion: number): RegistrarToqueResultado {
+  return registrarToque(input, idOrganizacion);
 }
 
 // --- embudo (conteo por etapa) -------------------------------------------------------
@@ -341,25 +351,36 @@ export type MoverEstadoInput = {
   origen?: OrigenCambio;
 };
 
-export function moverEstadoTool(input: MoverEstadoInput, idOrganizacion: number): ResultadoEscritura {
+// Devuelve la empresa releida y la transicion que quedo escrita, con su origen (2026-07-25,
+// regla 18). Antes devolvia { ok: true }, que no distingue "la movi" de "ya estaba ahi" de "esa
+// empresa no es de esta organizacion": los tres casos respondian lo mismo.
+export function moverEstadoTool(input: MoverEstadoInput, idOrganizacion: number): MoverEstadoResultado {
   // El encolado DB -> Notion ya no se decide aca: lo resuelve el core segun de donde vino el
   // cambio (app/core/origen-cambio.ts). Reconciliar contra Notion pasa origen:'notion' y el
   // cambio se queda en la DB; mover una cuenta desde el brain pasa 'herramienta' y el CRM
   // espejo se entera. fecha default hoy() para el historico de la transicion.
-  actualizarEstadoNotion(input.idEmpresa, input.estado, idOrganizacion, input.fecha ?? hoy(), {
+  // origenTransicion (2026-07-25) queda en el historico: 'reconciliacion' cuando el dato ya
+  // estaba en Notion y la base se pone al dia (no es movimiento comercial), 'manual' cuando el
+  // movimiento nace aca. Es el mismo `origen` del input leido para otra pregunta: uno decide si
+  // viaja a Notion, el otro si cuenta para el ciclo de venta.
+  return actualizarEstadoNotion(input.idEmpresa, input.estado, idOrganizacion, input.fecha ?? hoy(), {
     encolarNotion: debeEncolarHaciaNotion(input.origen),
+    origenTransicion: input.origen === 'notion' ? 'reconciliacion' : 'manual',
   });
-  return { ok: true };
 }
 
-export function cambiarCadenciaTool(input: CambiarCadenciaInput, idOrganizacion: number): ResultadoEscritura {
-  cambiarCadencia(input, idOrganizacion);
-  return { ok: true };
+// Devuelve la empresa releida (con su proximo follow-up ya escrito) y sus cadencias vivas.
+// Misma razon que las demas: reprogramar y devolver { ok: true } obliga a ir a mirar la base
+// aparte para saber que fecha quedo.
+export function cambiarCadenciaTool(input: CambiarCadenciaInput, idOrganizacion: number): CambiarCadenciaResultado {
+  return cambiarCadencia(input, idOrganizacion);
 }
 
-export function marcarPerdidaTool(input: MarcarPerdidaInput, idOrganizacion: number): ResultadoEscritura {
-  marcarPerdida(input, idOrganizacion);
-  return { ok: true };
+// Misma regla que registrarToqueTool: devuelve el toque de perdida releido, la empresa releida
+// (con su estado_notion ya en on_hold) y si de verdad hubo transicion -- una cuenta que ya
+// estaba on_hold no genera fila de historico, y eso hay que poder verlo.
+export function marcarPerdidaTool(input: MarcarPerdidaInput, idOrganizacion: number): MarcarPerdidaResultado {
+  return marcarPerdida(input, idOrganizacion);
 }
 
 // --- Identidad de cuentas (2026-07-24) --------------------------------------------------
@@ -424,6 +445,23 @@ export function cambiosDesdeTool(input: CambiosDesdeInput) {
   };
 }
 
+// --- snapshot_estados (ESCRITURA) ------------------------------------------------------
+//
+// La foto diaria de la etapa de cada cuenta, y las transiciones que salen de compararla con la
+// anterior. Se corre ANTES del barrido de /dia-sales: la foto tiene que ser del estado con el
+// que arranco el dia, no del que quedo despues de mover cuentas.
+//
+// Es la unica forma de fechar bien el tramo que se mueve a mano en Notion (cierre_documentacion
+// -> firma_pago). Fecharlo con la ultima edicion de la pagina de Notion se descarto: ese
+// timestamp es de la pagina entera y se mueve cuando alguien corrige un telefono, asi que
+// inventaria movimiento comercial.
+
+export type SnapshotEstadosInput = { fecha?: string };
+
+export function snapshotEstadosTool(input: SnapshotEstadosInput, idOrganizacion: number): SnapshotResultado {
+  return snapshotEstados(input.fecha ?? hoy(), idOrganizacion);
+}
+
 export type ReasignarNitInput = { idEmpresa: string; nit: string };
 
 export function reasignarNitTool(input: ReasignarNitInput, idOrganizacion: number) {
@@ -471,10 +509,57 @@ export function actividadTool(input: ActividadInput) {
     // Sin atribucion: la porcion del periodo de la que no se sabe quien la ejecuto. Se
     // reporta explicito para que nadie lea el reparte por persona como si fuera completo.
     toquesSinAtribuir: toques.filter((t) => !t.ejecutadoPor).length,
+    // Toques que no se pueden fechar: `fecha` en prosa o vacia y sin fecha_dia. Se reporta por
+    // la misma razon que toquesSinAtribuir -- son las filas de las que no se puede decir nada
+    // en el tiempo, y esconderlas hace ver completo un conteo que no lo es.
+    toquesSinFecha: toques.filter((t) => !t.fechaDia).length,
+    conteos: conteosActividad(toques),
     // Sin tope: se devuelven TODAS las filas del rango, no hay truncado silencioso.
     truncado: false,
     toques,
     aplazos,
+  };
+}
+
+// Los cortes que se le piden a `actividad` apenas la devuelve. Se calculan aca (composicion
+// pura sobre las filas que ya vinieron) y no con otra query: son las mismas filas.
+//
+// reuniones es el par que responde el NO-SHOW RATE: agendadas = las que tenian fecha propuesta
+// en el periodo, ocurridas = las que de verdad pasaron, noShow = las que se cayeron. La tasa se
+// saca afuera (noShow / agendadas) para no fijar aca un denominador que despues no se pueda
+// discutir.
+function conteosActividad(toques: ToqueActividad[]) {
+  const contar = <T extends string>(valores: (T | null)[]): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const v of valores) {
+      const k = v ?? 'sin_valor';
+      out[k] = (out[k] ?? 0) + 1;
+    }
+    return out;
+  };
+
+  const conFechaPropuesta = toques.filter((t) => t.reunionFechaPropuesta);
+  const ocurridas = toques.filter(
+    (t) => t.reunionFechaOcurrida || (t.resultado && RESULTADOS_REUNION_OCURRIDA.includes(t.resultado as never)),
+  );
+  const noShow = toques.filter((t) => t.resultado === 'no_llego');
+
+  return {
+    porCanal: contar(toques.map((t) => t.canal)),
+    porResultado: contar(toques.map((t) => t.resultado)),
+    porEjecutor: contar(toques.map((t) => t.ejecutadoPor)),
+    // Segundos totales de lo que SI trae duracion, y cuantos toques no la traen. Un promedio
+    // calculado sobre los que la traen y presentado como si fuera de todos seria falso.
+    duracion: {
+      toquesConDuracion: toques.filter((t) => t.duracionSegundos != null).length,
+      toquesSinDuracion: toques.filter((t) => t.duracionSegundos == null).length,
+      segundosTotales: toques.reduce((s, t) => s + (t.duracionSegundos ?? 0), 0),
+    },
+    reuniones: {
+      conFechaPropuesta: conFechaPropuesta.length,
+      ocurridas: ocurridas.length,
+      noShow: noShow.length,
+    },
   };
 }
 

@@ -51,6 +51,7 @@ import {
   mensajeWhatsapp,
   lineaWhatsapp,
   empresaEstadoHistorial,
+  empresaEstadoSnapshot,
   seguimientoAplazado,
   organizacionMiembro,
   empresaClasificacion,
@@ -120,11 +121,19 @@ import {
   MODOS_CAMPANA,
   type ModoCampana,
   CANALES,
+  CANALES_TOQUE,
   RESULTADOS,
   RESULTADO_LABELS,
   MOTIVOS_APLAZO,
+  RAZONES_PERDIDA,
+  RAZON_PERDIDA_LABELS,
+  OBJECIONES,
+  EJECUTOR_POR_DEFECTO,
+  fechaDiaSchema,
   type Canal,
+  type CanalToque,
   type Resultado,
+  type OrigenTransicion,
   RITMOS_INGRESO,
   type RitmoIngresoInput,
   validarCanalAutomatico,
@@ -161,10 +170,11 @@ function encolarOutboxNotion(tx: Tx, idEmpresa: string, cambio: Omit<CambioNotio
 // Nombres de canal legibles para el render de "Toques" (Tarea 6). CANALES en validation.ts
 // vive en minuscula porque es un valor de dominio (enum de Zod), esto es solo texto de
 // presentacion para Notion, no se reusa como valor de negocio en otro lado.
-const CANAL_LEGIBLE: Record<Canal, string> = {
+const CANAL_LEGIBLE: Record<CanalToque, string> = {
   llamada: 'Llamada',
   whatsapp: 'WhatsApp',
   correo: 'Correo',
+  reunion: 'Reunión',
 };
 
 // Tarea 6: arma la tabla en texto plano de "toques hechos" que se manda a Notion (una
@@ -174,7 +184,7 @@ function renderToquesHechos(filas: { fecha: string | null; canal: string | null;
   return filas
     .map((f) => {
       const fecha = f.fecha ? f.fecha.slice(0, 10) : '?';
-      const canal = f.canal && f.canal in CANAL_LEGIBLE ? CANAL_LEGIBLE[f.canal as Canal] : (f.canal ?? '?');
+      const canal = f.canal && f.canal in CANAL_LEGIBLE ? CANAL_LEGIBLE[f.canal as CanalToque] : (f.canal ?? '?');
       const resultado = f.resultado && f.resultado in RESULTADO_LABELS ? RESULTADO_LABELS[f.resultado as Resultado] : (f.resultado ?? '?');
       return `${fecha} · ${canal} · ${resultado}`;
     })
@@ -605,15 +615,95 @@ export function getCuenta(id: string, idOrganizacion: number) {
   return { emp, contactos, toques };
 }
 
+// Lo que quedó escrito de un toque, releído de la tabla. Es lo que devuelve registrarToque:
+// un { ok: true } no es verificable, y quien registra necesita ver el id, el día que quedó y
+// los campos acotados tal como los guardó la base, no como los mandó.
+export type ToqueEscrito = {
+  idToque: number;
+  idEmpresa: string;
+  fecha: string | null;
+  fechaDia: string | null;
+  canal: string | null;
+  resultado: string | null;
+  duracionSegundos: number | null;
+  quePaso: string | null;
+  proximoFollowUpFecha: string | null;
+  razonPerdida: string | null;
+  razonPerdidaNota: string | null;
+  objecion: string | null;
+  objecionNota: string | null;
+  transcriptProveedor: string | null;
+  transcriptId: string | null;
+  transcriptUrl: string | null;
+  reunionFechaPropuesta: string | null;
+  reunionFechaOcurrida: string | null;
+  ejecutadoPor: string | null;
+  idContacto: number | null;
+  idOrganizacion: number;
+  createdAt: string | null;
+};
+
+export type RegistrarToqueResultado = {
+  toque: ToqueEscrito;
+  empresa: EmpresaEscrita;
+  // La transición de embudo que ESTE toque disparó, si disparó alguna. null = la cuenta se
+  // quedó donde estaba. Se devuelve porque es el efecto menos evidente de registrar un toque.
+  transicion: { de: string | null; a: string } | null;
+};
+
+function leerToqueEscrito(lector: typeof db | Tx, idToque: number): ToqueEscrito {
+  const fila = lector
+    .select({
+      idToque: toque.idToque,
+      idEmpresa: toque.idEmpresa,
+      fecha: toque.fecha,
+      fechaDia: toque.fechaDia,
+      canal: toque.canal,
+      resultado: toque.resultado,
+      duracionSegundos: toque.duracionSegundos,
+      quePaso: toque.quePaso,
+      proximoFollowUpFecha: toque.proximoFollowUpFecha,
+      razonPerdida: toque.razonPerdida,
+      razonPerdidaNota: toque.razonPerdidaNota,
+      objecion: toque.objecion,
+      objecionNota: toque.objecionNota,
+      transcriptProveedor: toque.transcriptProveedor,
+      transcriptId: toque.transcriptId,
+      transcriptUrl: toque.transcriptUrl,
+      reunionFechaPropuesta: toque.reunionFechaPropuesta,
+      reunionFechaOcurrida: toque.reunionFechaOcurrida,
+      ejecutadoPor: toque.ejecutadoPor,
+      idContacto: toque.idContacto,
+      idOrganizacion: toque.idOrganizacion,
+      createdAt: toque.createdAt,
+    })
+    .from(toque)
+    .where(eq(toque.idToque, idToque))
+    .get();
+  if (!fila) throw new Error(`El toque ${idToque} no quedo escrito`);
+  return fila;
+}
+
 // Registrar un toque: escribe el evento (toque) y actualiza el estado actual (empresa). Atómico.
-// La regla de negocio (4 salidas cerradas, razonPerdida obligatoria si contesto_no) es de
-// DOMINIO y se enforza aquí con Zod, no en la UI: cualquier caller futuro (ingest worker,
-// EnvioAdapter) pasa por esta misma garantía. `.parse()` lanza si el input no cumple.
-export function registrarToque(input: RegistrarToqueInput, idOrganizacion: number) {
+// La regla de negocio (el enum de resultados, razonPerdida obligatoria en los resultados de
+// pérdida, la fecha propuesta obligatoria en un no-show) es de DOMINIO y se enforza aquí con
+// Zod, no en la UI: cualquier caller futuro (ingest worker, EnvioAdapter) pasa por esta misma
+// garantía. `.parse()` lanza si el input no cumple.
+//
+// Devuelve el toque RELEÍDO más la empresa releída (2026-07-25). Antes devolvía void y el MCP
+// respondía { ok: true }: eso obliga a creerle a la escritura en vez de verificarla, y no
+// muestra el efecto colateral que más importa (si el toque movió la etapa).
+export function registrarToque(input: RegistrarToqueInput, idOrganizacion: number): RegistrarToqueResultado {
   const parsed = registrarToqueSchema.parse(input);
   const ahora = new Date().toISOString();
+  // El día del toque: el que mandó el caller (un toque de ayer dictado hoy) o el de este
+  // instante. `fecha` guarda el timestamp completo y `fecha_dia` el día sobre el que se cuenta;
+  // cuando el caller fija el día, el timestamp se ancla a ese día para que las dos no se
+  // contradigan.
+  const fechaDia = parsed.fecha ?? ahora.slice(0, 10);
+  const fechaCompleta = parsed.fecha ? `${parsed.fecha}T12:00:00.000Z` : ahora;
 
-  db.transaction((tx) => {
+  return db.transaction((tx) => {
     // Guard de organizacion (Parte 1): un toque solo se registra sobre un lead cuya
     // organizacion_activa_id coincide con la del que llama. Evita que dos organizaciones
     // se pisen el estado de un lead compartido por error (ver spec 2026-07-09).
@@ -675,19 +765,32 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
       .get();
     const esPrimerToque = (previos?.n ?? 0) === 0;
 
-    tx.insert(toque)
+    const insertado = tx
+      .insert(toque)
       .values({
         idEmpresa: parsed.idEmpresa,
         idContacto,
-        fecha: ahora,
+        fecha: fechaCompleta,
+        // El día canónico, siempre lleno en todo toque que nazca aquí. fecha_texto se queda en
+        // null: solo se llena hacia atrás, para el historial importado que no se pudo parsear.
+        fechaDia,
         canal: parsed.canal,
         resultado: parsed.resultado,
+        duracionSegundos: parsed.duracionSegundos ?? null,
         quePaso: parsed.quePaso ?? null,
         proximoFollowUpFecha: parsed.proximoFollowUp ?? null,
         razonPerdida: parsed.razonPerdida ?? null,
+        razonPerdidaNota: parsed.razonPerdidaNota ?? null,
         objecion: parsed.objecion ?? null,
-        // null explicito cuando no viene: el toque queda sin atribuir, no se asume el owner.
-        ejecutadoPor: parsed.ejecutadoPor ?? null,
+        objecionNota: parsed.objecionNota ?? null,
+        transcriptProveedor: parsed.transcriptProveedor ?? null,
+        transcriptId: parsed.transcriptId ?? null,
+        transcriptUrl: parsed.transcriptUrl ?? null,
+        reunionFechaPropuesta: parsed.reunionFechaPropuesta ?? null,
+        reunionFechaOcurrida: parsed.reunionFechaOcurrida ?? null,
+        // Con default de dominio desde el 2026-07-25 (EJECUTOR_POR_DEFECTO): el schema ya lo
+        // resolvió, aquí nunca llega vacío.
+        ejecutadoPor: parsed.ejecutadoPor,
         fuente: 'cockpit',
         idOrganizacion,
         createdAt: ahora,
@@ -710,7 +813,9 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
     // sobre un lead dormido no toca estado_notion.
     const estadoDestino = estadoDestinoPorToque(emp.estadoNotion, parsed.resultado);
     if (estadoDestino) {
-      escribirTransicionEstado(tx, parsed.idEmpresa, emp.estadoNotion, estadoDestino, idOrganizacion, ahora);
+      // origen 'toque': la escribio un toque real, cuenta para el ciclo de venta. Es lo que la
+      // distingue de un backfill o de un cuadre contra Notion (ORIGENES_TRANSICION).
+      escribirTransicionEstado(tx, parsed.idEmpresa, emp.estadoNotion, estadoDestino, idOrganizacion, fechaCompleta, 'toque');
     }
 
     // V3.7: outbox en la MISMA transaccion que el cambio (patron outbox). Si la empresa
@@ -730,8 +835,8 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
     encolarOutboxNotion(tx, parsed.idEmpresa, {
       proximoPaso: parsed.quePaso,
       fechaProximoPaso: parsed.proximoFollowUp,
-      fechaUltimoContacto: ahora.slice(0, 10),
-      ...(esPrimerToque ? { fechaPrimerContacto: ahora.slice(0, 10) } : {}),
+      fechaUltimoContacto: fechaDia,
+      ...(esPrimerToque ? { fechaPrimerContacto: fechaDia } : {}),
       toquesHechos: renderToquesHechos(todosLosToques),
       // write-path del MCP (2026-07-24): si el toque graduo la etapa, ese cambio de estado
       // tambien viaja DB -> Notion (su emision esta gateada en el adaptador). Sin transicion,
@@ -757,6 +862,14 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
         detalle: `${parsed.resultado} -> next ${parsed.proximoFollowUp ?? '-'}`,
       })
       .run();
+
+    // Relectura DENTRO de la transaccion: lo que se devuelve es lo que quedo en la base, no un
+    // eco del input.
+    return {
+      toque: leerToqueEscrito(tx, Number(insertado.lastInsertRowid)),
+      empresa: leerEmpresaEscrita(tx, parsed.idEmpresa),
+      transicion: estadoDestino ? { de: emp.estadoNotion, a: estadoDestino } : null,
+    };
   });
 }
 
@@ -772,18 +885,32 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
 // por escribirTransicionEstado igual que el sync de Notion.
 const marcarPerdidaSchema = z.object({
   idEmpresa: z.string().min(1),
-  canal: z.enum(CANALES),
-  razonPerdida: z.string().min(1),
+  canal: z.enum(CANALES_TOQUE),
+  // Cerrada en los siete valores del negocio (2026-07-25). Era texto libre y produjo UNA fila
+  // en 285 toques, en prosa: no se podia agrupar nada. La prosa sigue entrando, en la nota.
+  razonPerdida: z.enum(RAZONES_PERDIDA),
+  razonPerdidaNota: z.string().min(1).optional(),
   quePaso: z.string().min(1).optional(),
-  objecion: z.string().min(1).optional(),
+  objecion: z.enum(OBJECIONES).optional(),
+  objecionNota: z.string().min(1).optional(),
+  fecha: fechaDiaSchema.optional(),
+  ejecutadoPor: z.string().min(1).optional().default(EJECUTOR_POR_DEFECTO),
 });
-export type MarcarPerdidaInput = z.infer<typeof marcarPerdidaSchema>;
+export type MarcarPerdidaInput = z.input<typeof marcarPerdidaSchema>;
 
-export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number) {
+export type MarcarPerdidaResultado = {
+  toque: ToqueEscrito;
+  empresa: EmpresaEscrita;
+  transicion: { de: string | null; a: string } | null;
+};
+
+export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number): MarcarPerdidaResultado {
   const parsed = marcarPerdidaSchema.parse(input);
   const ahora = new Date().toISOString();
+  const fechaDia = parsed.fecha ?? ahora.slice(0, 10);
+  const fechaCompleta = parsed.fecha ? `${parsed.fecha}T12:00:00.000Z` : ahora;
 
-  db.transaction((tx) => {
+  return db.transaction((tx) => {
     const emp = tx
       .select({ organizacionActivaId: empresa.organizacionActivaId, estadoNotion: empresa.estadoNotion })
       .from(empresa)
@@ -794,15 +921,23 @@ export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number)
       throw new Error(`La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
     }
 
-    tx.insert(toque)
+    const insertado = tx
+      .insert(toque)
       .values({
         idEmpresa: parsed.idEmpresa,
-        fecha: ahora,
+        fecha: fechaCompleta,
+        fechaDia,
         canal: parsed.canal,
-        resultado: 'contesto_no',
+        // 'perdido' desde el 2026-07-25: con la taxonomia ampliada, "la cuenta no va" tiene su
+        // propio valor. 'contesto_no' (el que escribia antes) sigue siendo valido y sigue
+        // significando lo mismo; se deja de escribir aca porque perdido es mas preciso.
+        resultado: 'perdido',
         quePaso: parsed.quePaso ?? null,
         razonPerdida: parsed.razonPerdida,
+        razonPerdidaNota: parsed.razonPerdidaNota ?? null,
         objecion: parsed.objecion ?? null,
+        objecionNota: parsed.objecionNota ?? null,
+        ejecutadoPor: parsed.ejecutadoPor,
         fuente: 'cockpit',
         idOrganizacion,
         createdAt: ahora,
@@ -811,8 +946,9 @@ export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number)
 
     // on_hold es el destino de una perdida; solo se registra la transicion si de verdad
     // cambia (una cuenta ya on_hold no genera una fila de historico redundante).
-    if (emp.estadoNotion !== ESTADO_ON_HOLD) {
-      escribirTransicionEstado(tx, parsed.idEmpresa, emp.estadoNotion, ESTADO_ON_HOLD, idOrganizacion, ahora);
+    const huboTransicion = emp.estadoNotion !== ESTADO_ON_HOLD;
+    if (huboTransicion) {
+      escribirTransicionEstado(tx, parsed.idEmpresa, emp.estadoNotion, ESTADO_ON_HOLD, idOrganizacion, fechaCompleta, 'perdida');
     }
 
     const todosLosToques = tx
@@ -824,8 +960,10 @@ export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number)
 
     encolarOutboxNotion(tx, parsed.idEmpresa, {
       estado: ESTADO_ON_HOLD,
-      razonPerdida: parsed.razonPerdida,
-      fechaUltimoContacto: ahora.slice(0, 10),
+      // A Notion viaja la ETIQUETA ("Ya tiene pasarela"), no el slug: el slug es la llave para
+      // contar adentro, la etiqueta es como se escribe el campo en el pipeline.
+      razonPerdida: RAZON_PERDIDA_LABELS[parsed.razonPerdida],
+      fechaUltimoContacto: fechaDia,
       toquesHechos: renderToquesHechos(todosLosToques),
     });
 
@@ -840,6 +978,12 @@ export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number)
         detalle: `perdida on_hold: ${parsed.razonPerdida}`,
       })
       .run();
+
+    return {
+      toque: leerToqueEscrito(tx, Number(insertado.lastInsertRowid)),
+      empresa: leerEmpresaEscrita(tx, parsed.idEmpresa),
+      transicion: huboTransicion ? { de: emp.estadoNotion, a: ESTADO_ON_HOLD } : null,
+    };
   });
 }
 
@@ -871,7 +1015,39 @@ const cambiarCadenciaSchema = z
   });
 export type CambiarCadenciaInput = z.infer<typeof cambiarCadenciaSchema>;
 
-export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: number): void {
+export type CambiarCadenciaResultado = {
+  empresa: EmpresaEscrita;
+  // Las cadencias VIVAS de la empresa despues del cambio, releidas. Es la mitad del resultado
+  // que la empresa sola no muestra: reprogramar la fecha y moverla de cadencia son dos efectos
+  // distintos, y devolver solo la fila de empresa esconde el segundo.
+  cadencias: { idInscripcion: number; idCampana: number; campana: string | null; estado: string; pasoActual: number | null }[];
+  // Lo que devolvio inscribirEmpresaEnCadencia cuando se pidio mover de cadencia. null cuando
+  // solo se reprogramo. Se expone porque puede decir 'ya_inscrita' y eso no es un error, pero
+  // tampoco es un cambio: sin esto, "no pasó nada" y "ya estaba" se ven igual.
+  inscripcion: ResultadoInscripcionEmpresa | null;
+};
+
+function leerCadenciasVivas(idEmpresa: string): CambiarCadenciaResultado['cadencias'] {
+  return db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      idCampana: inscripcion.idCampana,
+      campana: campana.nombre,
+      estado: inscripcion.estado,
+      pasoActual: inscripcion.pasoActual,
+    })
+    .from(inscripcion)
+    .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(and(eq(inscripcion.idEmpresa, idEmpresa), isNull(inscripcion.fechaFin)))
+    .orderBy(desc(inscripcion.idInscripcion))
+    .all();
+}
+
+// Devuelve la empresa RELEIDA con su proximo follow-up y sus cadencias vivas (2026-07-25,
+// regla 18: una escritura devuelve lo que quedo escrito). Antes devolvia void y el MCP
+// respondia { ok: true }, o sea que reprogramar una cuenta no dejaba forma de comprobar la
+// fecha que quedo sin ir a mirar la base aparte.
+export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: number): CambiarCadenciaResultado {
   const parsed = cambiarCadenciaSchema.parse(input);
 
   const emp = db
@@ -884,12 +1060,20 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
     throw new Error(`La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
   }
 
+  let inscripcionResultado: ResultadoInscripcionEmpresa | null = null;
   if (parsed.idCampana !== undefined) {
-    inscribirEmpresaEnCadencia(parsed.idEmpresa, parsed.idCampana);
+    inscripcionResultado = inscribirEmpresaEnCadencia(parsed.idEmpresa, parsed.idCampana);
   }
 
-  // Sin reprogramacion (solo se pidio mover de cadencia): no hay nada mas que escribir.
-  if (!parsed.proximoFollowUp && !parsed.proximoCanal && !parsed.proximoPaso) return;
+  // Sin reprogramacion (solo se pidio mover de cadencia): no hay nada mas que escribir, pero se
+  // relee igual -- el resultado tiene que mostrar como quedo la cuenta, no solo si se escribio.
+  if (!parsed.proximoFollowUp && !parsed.proximoCanal && !parsed.proximoPaso) {
+    return {
+      empresa: leerEmpresaEscrita(db, parsed.idEmpresa),
+      cadencias: leerCadenciasVivas(parsed.idEmpresa),
+      inscripcion: inscripcionResultado,
+    };
+  }
 
   db.transaction((tx) => {
     const sets: Record<string, unknown> = { updatedAt: sql`datetime('now')` };
@@ -915,6 +1099,12 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
       })
       .run();
   });
+
+  return {
+    empresa: leerEmpresaEscrita(db, parsed.idEmpresa),
+    cadencias: leerCadenciasVivas(parsed.idEmpresa),
+    inscripcion: inscripcionResultado,
+  };
 }
 
 // --- Aplazar un seguimiento (lo que NO se hizo) ---------------------------------------
@@ -938,9 +1128,13 @@ const aplazarSeguimientoSchema = z.object({
   // va en `nota`, que no lo reemplaza.
   motivo: z.enum(MOTIVOS_APLAZO).optional(),
   nota: z.string().min(1).optional(),
-  aplazadoPor: z.string().min(1).optional(),
+  // Mismo default que ejecutadoPor en un toque (2026-07-25, orden del operador): hoy el unico
+  // que aplaza dictando es el, y un campo que nunca se llena no protege nada. Se sigue pudiendo
+  // pasar explicito cuando aplace otra persona.
+  aplazadoPor: z.string().min(1).optional().default(EJECUTOR_POR_DEFECTO),
 });
-export type AplazarSeguimientoInput = z.infer<typeof aplazarSeguimientoSchema>;
+// z.input: aplazadoPor tiene default, asi que el caller no esta obligado a mandarlo.
+export type AplazarSeguimientoInput = z.input<typeof aplazarSeguimientoSchema>;
 
 export type AplazoEscrito = {
   id: number;
@@ -995,7 +1189,8 @@ export function aplazarSeguimiento(
         // null = no lo dijo. Nunca se rellena con un motivo por defecto ni se deduce.
         motivo: parsed.motivo ?? null,
         nota: parsed.nota ?? null,
-        aplazadoPor: parsed.aplazadoPor ?? null,
+        // El schema ya resolvio el default: aca nunca llega vacio.
+        aplazadoPor: parsed.aplazadoPor,
         idOrganizacion,
         createdAt: ahora,
       })
@@ -1675,7 +1870,10 @@ export function leerTranscriptResumen(idToque: number): string {
 }
 
 export type ContadoresHoy = {
-  porCanal: Record<Canal, number>;
+  // CanalToque, no Canal (2026-07-25): la reunion es un toque y tiene que caer en un bucket. Con
+  // los tres canales de cadencia, los 115 toques de reunion de produccion subian el total y no
+  // aparecian en ningun canal.
+  porCanal: Record<CanalToque, number>;
   porResultado: Record<Resultado, number>;
   total: number;
 };
@@ -1703,7 +1901,7 @@ export function contadoresHoy(hoy: string, owner: string | undefined, idOrganiza
     .where(and(...condiciones))
     .all();
 
-  const porCanal = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
+  const porCanal = Object.fromEntries(CANALES_TOQUE.map((c) => [c, 0])) as Record<CanalToque, number>;
   const porResultado = Object.fromEntries(RESULTADOS.map((r) => [r, 0])) as Record<Resultado, number>;
 
   // Decisión a propósito: `total` cuenta TODOS los toques de hoy del owner, incluyendo
@@ -1714,8 +1912,8 @@ export function contadoresHoy(hoy: string, owner: string | undefined, idOrganiza
   // (total > suma de buckets), pero es intencional: perder de vista un toque real del día
   // (no contarlo en total) sería peor que un descuadre visible entre el total y sus buckets.
   for (const fila of filas) {
-    if (fila.canal && (CANALES as readonly string[]).includes(fila.canal)) {
-      porCanal[fila.canal as Canal] += 1;
+    if (fila.canal && (CANALES_TOQUE as readonly string[]).includes(fila.canal)) {
+      porCanal[fila.canal as CanalToque] += 1;
     }
     if (fila.resultado && (RESULTADOS as readonly string[]).includes(fila.resultado)) {
       porResultado[fila.resultado as Resultado] += 1;
@@ -5845,14 +6043,14 @@ export function leadsTocadosEnRango(desde: string, hasta: string, owner?: string
   return r?.n ?? 0;
 }
 
-export function toquesPorCanal(desde: string, hasta: string, owner?: string): Record<Canal, number> {
+export function toquesPorCanal(desde: string, hasta: string, owner?: string): Record<CanalToque, number> {
   const filas = !owner
     ? db.select({ canal: toque.canal, n: sql<number>`count(*)` }).from(toque).where(enRango(desde, hasta)).groupBy(toque.canal).all()
     : db.select({ canal: toque.canal, n: sql<number>`count(*)` }).from(toque)
         .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
         .where(and(enRango(desde, hasta), eq(empresa.owner, owner))).groupBy(toque.canal).all();
-  const out = Object.fromEntries(CANALES.map((c) => [c, 0])) as Record<Canal, number>;
-  for (const f of filas) if (f.canal && f.canal in out) out[f.canal as Canal] = f.n;
+  const out = Object.fromEntries(CANALES_TOQUE.map((c) => [c, 0])) as Record<CanalToque, number>;
+  for (const f of filas) if (f.canal && f.canal in out) out[f.canal as CanalToque] = f.n;
   return out;
 }
 
@@ -6116,6 +6314,11 @@ function escribirTransicionEstado(
   estadoNuevo: string,
   idOrganizacion: number,
   fecha: string,
+  // De donde sale la fila (2026-07-25). Sin origen se escribe NULL, que es lo que tienen las 63
+  // filas anteriores a la columna: "no lo dijo". No se pone un default 'manual' porque un
+  // backfill que se olvide de pasarlo quedaria contado como movimiento comercial real, que es
+  // exactamente el ruido que la columna existe para sacar.
+  origen?: OrigenTransicion,
 ): void {
   tx.update(empresa)
     .set({ estadoNotion: estadoNuevo, updatedAt: fecha })
@@ -6128,6 +6331,7 @@ function escribirTransicionEstado(
       estadoAnterior,
       estadoNuevo,
       fecha,
+      origen: origen ?? null,
       idOrganizacion,
     })
     .run();
@@ -6142,27 +6346,70 @@ function escribirTransicionEstado(
 // el sync Notion -> DB (scripts/sync_estados_notion.ts), que NO debe rebotar el estado de
 // vuelta a Notion (bounce-back Notion->DB->Notion). El MCP mover_estado pasa true para que el
 // cambio DB -> Notion viaje por el outbox (su emision final esta gateada en el adaptador).
+// Lo que quedo escrito al mover una etapa: la empresa releida y la transicion que se registro
+// (null si la etapa ya era esa y no habia nada que mover, o si la empresa no es de esta
+// organizacion). Devolver la transicion con su `origen` es lo que permite verificar despues que
+// una fila del historico salio de un movimiento real y no de un cuadre.
+export type MoverEstadoResultado = {
+  empresa: EmpresaEscrita | null;
+  transicion: { de: string | null; a: string; fecha: string; origen: OrigenTransicion | null } | null;
+  // Por que no se movio, cuando no se movio. Sin esto, "ya estaba en esa etapa" y "esa empresa
+  // no es tuya" devolvian lo mismo: nada.
+  motivo?: 'sin_cambio' | 'empresa_no_encontrada';
+};
+
 export function actualizarEstadoNotion(
   idEmpresa: string,
   estadoNuevo: string,
   idOrganizacion: number,
   fecha: string,
-  opts: { encolarNotion?: boolean } = {},
-): void {
-  db.transaction((tx) => {
+  // origenTransicion (2026-07-25) queda en el historico y decide si esta fila cuenta como
+  // movimiento comercial o como cuadre. Es distinto del `origen` de origen-cambio.ts, que
+  // decide si el cambio VIAJA a Notion: uno habla del historico, el otro del outbox.
+  opts: { encolarNotion?: boolean; origenTransicion?: OrigenTransicion } = {},
+): MoverEstadoResultado {
+  return db.transaction((tx) => {
     const emp = tx
       .select({ estadoNotion: empresa.estadoNotion })
       .from(empresa)
       .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
       .get();
-    if (!emp) return;
-    if (emp.estadoNotion === estadoNuevo) return;
+    // No existe, o existe en otra organizacion. Las dos son "no la toco", y se dicen con el
+    // mismo motivo a proposito: el caller no tiene por que enterarse de cuentas ajenas.
+    if (!emp) return { empresa: null, transicion: null, motivo: 'empresa_no_encontrada' as const };
+    // Ya estaba en esa etapa: no se escribe fila de historico redundante. Se devuelve la empresa
+    // igual, releida, porque el estado que el caller queria ES el que hay.
+    if (emp.estadoNotion === estadoNuevo) {
+      return { empresa: leerEmpresaEscrita(tx, idEmpresa), transicion: null, motivo: 'sin_cambio' as const };
+    }
 
-    escribirTransicionEstado(tx, idEmpresa, emp.estadoNotion, estadoNuevo, idOrganizacion, fecha);
+    escribirTransicionEstado(tx, idEmpresa, emp.estadoNotion, estadoNuevo, idOrganizacion, fecha, opts.origenTransicion);
 
     if (opts.encolarNotion) {
       encolarOutboxNotion(tx, idEmpresa, { estado: estadoNuevo });
     }
+
+    // Relectura de la fila de historico recien escrita: el `origen` que se devuelve sale de la
+    // tabla, no del parametro que entro.
+    const escrita = tx
+      .select({
+        de: empresaEstadoHistorial.estadoAnterior,
+        a: empresaEstadoHistorial.estadoNuevo,
+        fecha: empresaEstadoHistorial.fecha,
+        origen: empresaEstadoHistorial.origen,
+      })
+      .from(empresaEstadoHistorial)
+      .where(and(eq(empresaEstadoHistorial.idEmpresa, idEmpresa), eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion)))
+      .orderBy(desc(empresaEstadoHistorial.id))
+      .limit(1)
+      .get();
+
+    return {
+      empresa: leerEmpresaEscrita(tx, idEmpresa),
+      transicion: escrita
+        ? { de: escrita.de, a: escrita.a, fecha: escrita.fecha, origen: escrita.origen as OrigenTransicion | null }
+        : null,
+    };
   });
 }
 
@@ -6699,6 +6946,216 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
     .all();
 }
 
+// --- Snapshot diario de etapas, y las transiciones que se derivan de compararlos ---------
+//
+// El problema que resuelve (medido el 2026-07-25): del cierre de documentacion al pago el
+// pipeline se mueve A MANO en Notion, asi que esa parte del embudo la escribia el barrido y
+// toda transicion quedaba fechada el dia de la corrida. "Cuanto tarda del cierre al pago" no se
+// podia responder, y no se iba a poder aunque se arreglara todo lo demas, porque el dato entraba
+// mal desde el origen.
+//
+// La foto diaria lo resuelve sin depender de ningun proveedor: la cuenta que el lunes esta en
+// cierre y el martes en firma_pago produce una transicion fechada el MARTES, con la etapa
+// anterior tomada de la foto del lunes y no de lo que diga la fila viva.
+//
+// Limites, escritos y no disimulados: dos cambios el mismo dia colapsan en uno, y no se
+// reconstruye nada del pasado -- empieza a producir dato el dia que corre por primera vez.
+
+export type SnapshotResultado = {
+  fecha: string;
+  fechaAnterior: string | null;
+  // Cuantas empresas entraron a la foto de hoy, y cuantas ya estaban (correr dos veces el mismo
+  // dia no pisa la primera: la foto es del estado con el que ARRANCO el dia).
+  filasEscritas: number;
+  filasYaExistian: number;
+  transiciones: { idEmpresa: string; nombre: string; de: string | null; a: string | null }[];
+  salidasDelEmbudoNoEscritas: { idEmpresa: string; nombre: string; de: string | null; a: string | null }[];
+  // Cambios vistos entre las dos fotos que NO se escribieron porque ya habia una fila de
+  // historico para esa empresa y ese estado ese dia (la escribio un toque, una perdida o
+  // mover_estado). Se reportan para que quede claro que no se perdieron, se evitaron.
+  transicionesYaRegistradas: number;
+};
+
+// Toma la foto del dia y deriva las transiciones contra la foto anterior. Una sola operacion y
+// una sola transaccion a proposito: son dos mitades de lo mismo, y tomar la foto sin derivar
+// dejaria el dato crudo esperando a que alguien se acuerde.
+export function snapshotEstados(fecha: string, idOrganizacion: number): SnapshotResultado {
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    // La foto cubre las empresas VIVAS de la organizacion (las satelites cuentan dentro de su
+    // matriz, igual que en el embudo). Sin filtro EN_PIPELINE: una cuenta que todavia no esta en
+    // el embudo puede entrar manana, y esa entrada es justo una transicion que interesa.
+    const vivas = tx
+      .select({ idEmpresa: empresa.idEmpresa, nombre: empresa.nombreOficial, estado: empresa.estadoNotion })
+      .from(empresa)
+      .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA))
+      .all();
+
+    const yaEnLaFoto = new Set(
+      tx
+        .select({ idEmpresa: empresaEstadoSnapshot.idEmpresa })
+        .from(empresaEstadoSnapshot)
+        .where(
+          and(
+            eq(empresaEstadoSnapshot.fechaSnapshot, fecha),
+            eq(empresaEstadoSnapshot.idOrganizacion, idOrganizacion),
+          ),
+        )
+        .all()
+        .map((f) => f.idEmpresa),
+    );
+
+    let filasEscritas = 0;
+    for (const v of vivas) {
+      if (yaEnLaFoto.has(v.idEmpresa)) continue;
+      tx.insert(empresaEstadoSnapshot)
+        .values({
+          idEmpresa: v.idEmpresa,
+          estado: v.estado,
+          fechaSnapshot: fecha,
+          idOrganizacion,
+          createdAt: ahora,
+        })
+        .run();
+      filasEscritas += 1;
+    }
+
+    // La foto anterior es la ULTIMA anterior a hoy, no "ayer": si el snapshot no corrio el
+    // domingo, el del lunes se compara contra el del sabado. El error queda acotado y conocido
+    // (el cambio pasó en algun dia de esa ventana, se fecha en el dia en que se vio) en vez de
+    // perderse.
+    const anterior = tx
+      .select({ fecha: empresaEstadoSnapshot.fechaSnapshot })
+      .from(empresaEstadoSnapshot)
+      .where(
+        and(
+          eq(empresaEstadoSnapshot.idOrganizacion, idOrganizacion),
+          sql`${empresaEstadoSnapshot.fechaSnapshot} < ${fecha}`,
+        ),
+      )
+      .orderBy(desc(empresaEstadoSnapshot.fechaSnapshot))
+      .limit(1)
+      .get();
+
+    if (!anterior) {
+      // Primera corrida: hay foto y no hay contra que compararla. No se inventa una transicion
+      // desde null para las 1.957 cuentas.
+      return {
+        fecha,
+        fechaAnterior: null,
+        filasEscritas,
+        filasYaExistian: vivas.length - filasEscritas,
+        transiciones: [],
+        salidasDelEmbudoNoEscritas: [],
+        transicionesYaRegistradas: 0,
+      };
+    }
+
+    const previo = new Map(
+      tx
+        .select({ idEmpresa: empresaEstadoSnapshot.idEmpresa, estado: empresaEstadoSnapshot.estado })
+        .from(empresaEstadoSnapshot)
+        .where(
+          and(
+            eq(empresaEstadoSnapshot.fechaSnapshot, anterior.fecha),
+            eq(empresaEstadoSnapshot.idOrganizacion, idOrganizacion),
+          ),
+        )
+        .all()
+        .map((f) => [f.idEmpresa, f.estado] as const),
+    );
+
+    const transiciones: SnapshotResultado['transiciones'] = [];
+    let transicionesYaRegistradas = 0;
+
+    for (const v of vivas) {
+      // Una empresa que no estaba en la foto anterior es nueva: no hay cambio que derivar, su
+      // etapa de hoy es su primera etapa conocida.
+      if (!previo.has(v.idEmpresa)) continue;
+      const estadoAnterior = previo.get(v.idEmpresa) ?? null;
+      if (estadoAnterior === v.estado) continue;
+
+      // Dedupe: si el movimiento ya lo escribio un toque, una perdida o mover_estado HOY, la
+      // foto no lo duplica. Esa fila ya tiene mejor procedencia que la derivada.
+      const yaHay = tx
+        .select({ id: empresaEstadoHistorial.id })
+        .from(empresaEstadoHistorial)
+        .where(
+          and(
+            eq(empresaEstadoHistorial.idEmpresa, v.idEmpresa),
+            eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+            sql`substr(${empresaEstadoHistorial.fecha}, 1, 10) = ${fecha}`,
+            v.estado === null ? isNull(empresaEstadoHistorial.estadoNuevo) : eq(empresaEstadoHistorial.estadoNuevo, v.estado),
+          ),
+        )
+        .get();
+      if (yaHay) {
+        transicionesYaRegistradas += 1;
+        continue;
+      }
+
+      // estado_nuevo es NOT NULL en la tabla: una salida del embudo (a null) no se puede
+      // escribir como transicion y se reporta sin escribir, en vez de inventarle un estado.
+      if (v.estado === null) {
+        transiciones.push({ idEmpresa: v.idEmpresa, nombre: v.nombre, de: estadoAnterior, a: null });
+        continue;
+      }
+
+      tx.insert(empresaEstadoHistorial)
+        .values({
+          idEmpresa: v.idEmpresa,
+          estadoAnterior,
+          estadoNuevo: v.estado,
+          // La fecha es el DIA de la foto en que se vio el cambio, no el timestamp de la
+          // corrida: es lo unico que hace comparable "cuanto tardo del cierre al pago".
+          fecha,
+          origen: 'snapshot',
+          idOrganizacion,
+        })
+        .run();
+      transiciones.push({ idEmpresa: v.idEmpresa, nombre: v.nombre, de: estadoAnterior, a: v.estado });
+    }
+
+    // Relectura: lo que se devuelve como transiciones escritas sale de la TABLA, no del arreglo
+    // que se fue armando arriba. Es la diferencia entre "creo que escribi 4 filas" y "hay 4
+    // filas".
+    const escritas = tx
+      .select({
+        idEmpresa: empresaEstadoHistorial.idEmpresa,
+        de: empresaEstadoHistorial.estadoAnterior,
+        a: empresaEstadoHistorial.estadoNuevo,
+      })
+      .from(empresaEstadoHistorial)
+      .where(
+        and(
+          eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+          eq(empresaEstadoHistorial.fecha, fecha),
+          eq(empresaEstadoHistorial.origen, 'snapshot'),
+        ),
+      )
+      .all();
+    const nombres = new Map(vivas.map((v) => [v.idEmpresa, v.nombre] as const));
+
+    return {
+      fecha,
+      fechaAnterior: anterior.fecha,
+      filasEscritas,
+      filasYaExistian: vivas.length - filasEscritas,
+      transiciones: escritas.map((e) => ({
+        idEmpresa: e.idEmpresa,
+        nombre: nombres.get(e.idEmpresa) ?? e.idEmpresa,
+        de: e.de,
+        a: e.a as string | null,
+      })),
+      // Las salidas del embudo (a null) se reportan aparte: se vieron y NO se escribieron,
+      // porque estado_nuevo no admite null. Ocultarlas las haria ver como que no pasaron.
+      salidasDelEmbudoNoEscritas: transiciones.filter((t) => t.a === null),
+      transicionesYaRegistradas,
+    };
+  });
+}
+
 // --- Reconciliar contra Notion en lote ------------------------------------------------
 
 export type ReconciliarNotionResultado = PlanReconciliacion & { aplicado: boolean };
@@ -6723,7 +7180,14 @@ export function reconciliarNotion(
 
   for (const a of plan.alinear) {
     if (a.estadoA !== null) {
-      actualizarEstadoNotion(a.idEmpresa, a.estadoA, idOrganizacion, fecha, { encolarNotion: false });
+      // origenTransicion 'reconciliacion': la etapa ya estaba en Notion y la base se puso al
+      // dia. Su FECHA es la de esta corrida, o sea un limite superior y no el dia del cambio;
+      // el dia real de ese tramo lo fecha el snapshot diario, no esto. Por eso 'reconciliacion'
+      // esta fuera de ORIGENES_FECHA_CONFIABLE.
+      actualizarEstadoNotion(a.idEmpresa, a.estadoA, idOrganizacion, fecha, {
+        encolarNotion: false,
+        origenTransicion: 'reconciliacion',
+      });
     }
     if (a.ownerA !== null) {
       db.update(empresa)
@@ -6810,14 +7274,27 @@ export function cambiosDesde(desde: string, idOrganizacion: number): CambioEmpre
 export type ToqueActividad = {
   idToque: number;
   fecha: string | null;
+  // El dia canonico. Es el que hay que mirar para contar; `fecha` puede traer hora o, en las
+  // filas viejas importadas, cualquier cosa.
+  fechaDia: string | null;
+  fechaTexto: string | null;
   canal: string | null;
   resultado: string | null;
+  duracionSegundos: number | null;
   idEmpresa: string;
   empresa: string;
   estado: string | null;
   owner: string | null;
   ejecutadoPor: string | null;
   proximoPaso: string | null;
+  razonPerdida: string | null;
+  razonPerdidaNota: string | null;
+  objecion: string | null;
+  objecionNota: string | null;
+  reunionFechaPropuesta: string | null;
+  reunionFechaOcurrida: string | null;
+  transcriptProveedor: string | null;
+  transcriptUrl: string | null;
 };
 
 // Los toques de un rango de fechas, cruzados con su empresa. No existia forma de preguntar
@@ -6842,10 +7319,14 @@ export function toquesEnRango(
   idOrganizacion: number,
   filtros: { owner?: string; ejecutadoPor?: string } = {},
 ): ToqueActividad[] {
+  // El rango se mide sobre el DIA canonico, con `fecha` como respaldo para las filas viejas que
+  // todavia no tienen fecha_dia (coalesce, no un OR: una sola expresion que el indice puede
+  // usar igual y que no duplica la fila). Los toques nuevos siempre traen fecha_dia.
+  const diaToque = sql`coalesce(${toque.fechaDia}, substr(${toque.fecha}, 1, 10))`;
   const condiciones = [
     eq(toque.idOrganizacion, idOrganizacion),
-    sql`substr(${toque.fecha}, 1, 10) >= ${desde}`,
-    sql`substr(${toque.fecha}, 1, 10) <= ${hasta}`,
+    sql`${diaToque} >= ${desde}`,
+    sql`${diaToque} <= ${hasta}`,
   ];
   if (filtros.owner) condiciones.push(eq(empresa.owner, filtros.owner));
   // ejecutadoPor filtra por el EJECUTOR real. Una fila sin atribuir (NULL) nunca matchea: no
@@ -6856,14 +7337,25 @@ export function toquesEnRango(
     .select({
       idToque: toque.idToque,
       fecha: toque.fecha,
+      fechaDia: toque.fechaDia,
+      fechaTexto: toque.fechaTexto,
       canal: toque.canal,
       resultado: toque.resultado,
+      duracionSegundos: toque.duracionSegundos,
       idEmpresa: toque.idEmpresa,
       empresa: empresa.nombreOficial,
       estado: empresa.estadoNotion,
       owner: empresa.owner,
       ejecutadoPor: toque.ejecutadoPor,
       proximoPaso: empresa.proximoPaso,
+      razonPerdida: toque.razonPerdida,
+      razonPerdidaNota: toque.razonPerdidaNota,
+      objecion: toque.objecion,
+      objecionNota: toque.objecionNota,
+      reunionFechaPropuesta: toque.reunionFechaPropuesta,
+      reunionFechaOcurrida: toque.reunionFechaOcurrida,
+      transcriptProveedor: toque.transcriptProveedor,
+      transcriptUrl: toque.transcriptUrl,
     })
     .from(toque)
     .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
