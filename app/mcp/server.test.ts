@@ -84,7 +84,7 @@ test('GET /mcp: 405 (modo stateless, no hay sesion que reabrir)', async () => {
   assert.equal(res.status, 405);
 });
 
-test('cliente MCP real: handshake + tools/list expone las 3 tools de solo lectura', async () => {
+test('cliente MCP real: handshake + tools/list expone las tools de solo lectura', async () => {
   const client = new Client({ name: 'test-client', version: '1.0.0' });
   const transport = new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
     requestInit: { headers: { Authorization: 'Bearer secreto-de-prueba' } },
@@ -94,7 +94,7 @@ test('cliente MCP real: handshake + tools/list expone las 3 tools de solo lectur
   const { tools } = await client.listTools();
   assert.deepEqual(
     tools.map((t) => t.name).sort(),
-    ['deal_historia', 'panel_metricas', 'pipeline'],
+    ['buscar_empresa', 'deal_historia', 'panel_metricas', 'pipeline'],
   );
 
   await client.close();

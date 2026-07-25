@@ -4,7 +4,9 @@
 // pares antes de fundir, ver T3/T4). Los tipos de entrada son subconjuntos minimos
 // a proposito: este archivo no importa NotionEmpresaExport del adapter.
 
-import { tokensRazonSocial } from './normalizarRazonSocial.ts';
+// Sin extension .ts: desde 2026-07-24 este modulo tambien lo consume repository.ts (por
+// scoreRazonSocial), y ese arbol entra al bundle de Next, que resuelve como bundler.
+import { tokensRazonSocial } from './normalizarRazonSocial';
 
 const UMBRAL_MINIMO_DEFAULT = 0.5;
 // Por debajo de 1.0 (exacto), solo una similitud de texto casi identica (typo, no
@@ -80,6 +82,19 @@ function calcularScore(tokensDb: string[], tokensNotion: string[]): number {
 
   return Math.max(solapeTokens, señalTypo);
 }
+
+// Mismo criterio de calcularScore, pero para comparar DOS nombres sueltos en vez de cruzar
+// dos listas. Lo usa buscarEmpresa (app/db/repository.ts) para puntuar un nombre de busqueda
+// contra cada candidato de la base. Se exporta en vez de reimplementarse alla: el umbral, la
+// señal de typo y el solape de tokens tienen que ser LOS MISMOS que decide el matcher de
+// gemelos, o el brain veria un duplicado que el matcher no ve (y al reves).
+export function scoreRazonSocial(a: string, b: string): number {
+  return calcularScore(tokensRazonSocial(a), tokensRazonSocial(b));
+}
+
+// Umbral por debajo del cual dos nombres no se reportan como candidatos. Exportado por lo
+// mismo que scoreRazonSocial: una busqueda de duplicados con otro umbral es otra busqueda.
+export const UMBRAL_MINIMO_CANDIDATO = UMBRAL_MINIMO_DEFAULT;
 
 export function encontrarGemelos(
   empresasDb: EmpresaDbParaMatch[],

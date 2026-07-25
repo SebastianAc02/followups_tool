@@ -2,15 +2,25 @@
 // estado_notion de la DB (CHECK constraint en empresa.estado_notion). No toca
 // la DB ni el adapter de Notion; T10 es quien escribe el resultado tras la
 // reconciliacion. Ver planning/spec-carga-reconciliacion-notion.md (Fase 3).
-export type EstadoNotion =
-  | 'lead'
-  | 'contacto_iniciado'
-  | 'oportunidad'
-  | 'reunion_agendada'
-  | 'cierre_documentacion'
-  | 'enviar_contrato'
-  | 'on_hold'
-  | 'firma_pago';
+// Los 8 valores que acepta el CHECK de empresa.estado_notion, como lista en RUNTIME y no
+// solo como tipo: cualquier caller que reciba una etapa de afuera (el MCP, un script) tiene
+// que poder validarla antes de escribir, y un union de tipos se borra al compilar. El tipo
+// se deriva de la lista para que no puedan divergir.
+//
+// El orden es el del CHECK en isps.db, no el del embudo (ese vive en FUNNEL_ETAPAS,
+// app/db/funnel.ts, y a proposito deja on_hold afuera).
+export const ESTADOS_NOTION = [
+  'lead',
+  'contacto_iniciado',
+  'oportunidad',
+  'reunion_agendada',
+  'cierre_documentacion',
+  'enviar_contrato',
+  'on_hold',
+  'firma_pago',
+] as const;
+
+export type EstadoNotion = (typeof ESTADOS_NOTION)[number];
 
 // Uno-a-uno por nombre. "Reunión Agendada" no aparece en el export vivo de
 // Notion hoy (el enum de la DB le sobrevive de una version anterior del

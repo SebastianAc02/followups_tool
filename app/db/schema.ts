@@ -193,6 +193,27 @@ export const toque = sqliteTable('toque', {
   createdAt: text('created_at'),
 });
 
+// Lista cruda de prospeccion (670 filas en isps.db): el nombre tal como venia de la fuente
+// original, con su website y sus telefonos, antes de que existiera la cuenta. Ya existia en
+// isps.db; se mapea ahora (2026-07-24) porque es uno de los cuatro frentes de buscarEmpresa
+// -- una cuenta se encuentra por su nombre crudo de prospeccion cuando el nombre_oficial ya
+// no se le parece. telefonosRaw es UN texto con varios numeros separados por " | ", no una
+// tabla hija; se parte en memoria, no en SQL.
+export const prospeccion = sqliteTable('prospeccion', {
+  idProspeccion: integer('id_prospeccion').primaryKey({ autoIncrement: true }),
+  // Nullable en el DDL real. Hoy las 670 filas apuntan a una empresa, pero el esquema
+  // permite que no, asi que el tipo lo dice.
+  idEmpresa: text('id_empresa'),
+  empresaNombreRaw: text('empresa_nombre_raw').notNull(),
+  usuariosEstimados: real('usuarios_estimados'),
+  ciudadPrincipal: text('ciudad_principal'),
+  departamento: text('departamento'),
+  website: text('website'),
+  telefonosRaw: text('telefonos_raw'),
+  fuente: text('fuente').notNull(),
+  createdAt: text('created_at'),
+});
+
 export const empresaAlias = sqliteTable('empresa_alias', {
   idAlias: integer('id_alias').primaryKey({ autoIncrement: true }),
   idEmpresa: text('id_empresa').notNull(),

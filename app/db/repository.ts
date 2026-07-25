@@ -55,6 +55,7 @@ import {
   empresaCategoriaView,
   identidadDecision,
   plan,
+  prospeccion,
 } from './schema';
 import type { OrigenFin } from '../core/reinscripcion';
 import type { CambioNotion } from '../core/ports/sync';
@@ -84,6 +85,17 @@ import type { CampoCalificacion } from '../core/calificacion';
 import { CLAVE_SIN_ETAPA, type ConteoEtapa } from '../core/embudo';
 import { clasificarCargo } from '../core/reconciliacion/clasificarCargo';
 import { esKdmDesdeNotion } from '../core/reconciliacion/kdmNotion';
+import { normalizarRazonSocial } from '../core/reconciliacion/normalizarRazonSocial';
+import { scoreRazonSocial, UMBRAL_MINIMO_CANDIDATO } from '../core/reconciliacion/matcherGemelos';
+import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
+import {
+  CATEGORIAS_EMPRESA,
+  ESTADO_COMERCIAL_POR_ETAPA,
+  dominioDe,
+  esNitValido,
+  idEmpresaSintetico,
+  telefonoNormalizado,
+} from '../core/empresa-identidad';
 import type { AccionImportacionToque, ToqueDbExistente } from '../core/reconciliacion/toquesNotion';
 import {
   registrarToqueSchema,
@@ -891,6 +903,524 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
         detalle: `reprograma seguimiento -> ${parsed.proximoFollowUp ?? '-'} / ${parsed.proximoCanal ?? '-'}`,
       })
       .run();
+  });
+}
+
+// --- Identidad de cuentas: buscar / crear / actualizar (2026-07-24) --------------------
+//
+// Resuelven el caso "hay una pagina de Notion que no tiene cuenta en la base": primero se
+// busca si ya existe con otro nombre (buscarEmpresa), y segun la respuesta se enlaza
+// (actualizarEmpresa con notionPageId) o se crea (crearEmpresa). Hasta ahora eso solo se
+// podia hacer con SQL crudo por SSH.
+//
+// Las tres viven aca, en el dominio, y no en la tool del MCP: la regla de "que cuenta ya
+// existe" y "que id le toca a una nueva" tiene que valer para CUALQUIER caller, igual que
+// registrarToque/marcarPerdida. El MCP solo las envuelve.
+
+export type FrenteBusqueda = 'empresa' | 'alias' | 'prospeccion' | 'contacto';
+export type ConfianzaCandidato = 'alta' | 'media' | 'baja';
+export type MotivoCandidato = 'nit' | 'nombre_exacto' | 'nombre_parecido' | 'telefono' | 'dominio';
+
+// De donde salio UN candidato. Sin esto el consumidor no puede juzgar: "coincide el nombre
+// normalizado" y "coincide un telefono" pesan distinto, y "sale de la lista de prospeccion"
+// no es lo mismo que "sale de la cuenta misma".
+export type HitBusqueda = {
+  frente: FrenteBusqueda;
+  motivo: MotivoCandidato;
+  confianza: ConfianzaCandidato;
+  score: number; // 0..1. Identificador exacto (nit/telefono/dominio) = 1.
+  coincidencia: string; // el texto concreto que matcheo: el alias, el telefono, el dominio, el nombre crudo
+};
+
+export type CandidatoEmpresa = {
+  idEmpresa: string;
+  nombreOficial: string;
+  categoria: string | null;
+  estadoNotion: string | null;
+  owner: string | null;
+  notionPageId: string | null;
+  // Marca de fusion: si viene con valor, esta fila es una identidad ABSORBIDA por otra
+  // (ver empresa.operaBajoId en schema.ts). Se devuelve en vez de filtrarse porque enlazar
+  // una pagina de Notion a una identidad muerta es exactamente el error que hay que ver.
+  operaBajoId: string | null;
+  confianza: ConfianzaCandidato; // la mas alta de sus hits
+  score: number; // el mas alto de sus hits
+  hits: HitBusqueda[]; // todos los frentes por los que salio, del mas fuerte al mas debil
+};
+
+export type BuscarEmpresaInput = {
+  nombre: string;
+  telefono?: string;
+  dominio?: string;
+  nit?: string;
+};
+
+export type BuscarEmpresaResultado = {
+  raiz: string; // la raiz normalizada con la que se busco (sin sufijos legales)
+  total: number;
+  candidatos: CandidatoEmpresa[];
+};
+
+const buscarEmpresaSchema = z.object({
+  nombre: z.string().trim().min(1),
+  telefono: z.string().trim().optional(),
+  dominio: z.string().trim().optional(),
+  nit: z.string().trim().optional(),
+});
+
+const MAX_CANDIDATOS = 20;
+// Por encima de esto, dos nombres distintos se consideran "casi el mismo" (typo o palabra
+// suelta de diferencia) y el candidato sube a confianza media. Debajo, baja.
+const UMBRAL_CONFIANZA_MEDIA = 0.8;
+const ORDEN_CONFIANZA: Record<ConfianzaCandidato, number> = { alta: 0, media: 1, baja: 2 };
+
+function confianzaPorScore(score: number): ConfianzaCandidato {
+  if (score >= 1) return 'alta';
+  if (score >= UMBRAL_CONFIANZA_MEDIA) return 'media';
+  return 'baja';
+}
+
+// Busca una cuenta por los CUATRO frentes, siempre los cuatro. No es opcional cual se corre:
+// una cuenta que ya existe se encuentra por su nombre oficial, por un alias viejo, por el
+// nombre crudo con el que entro a la lista de prospeccion, o por el telefono/dominio de un
+// contacto -- y cual de los cuatro la encuentra depende de por donde entro a la base, que el
+// que busca no sabe. Correr solo el primero es como fabricar duplicados (Conexa Tech).
+//
+// El criterio de parecido de nombres NO se implementa aca: sale de scoreRazonSocial
+// (app/core/reconciliacion/matcherGemelos.ts), el mismo que usa el matcher de gemelos. Si el
+// brain viera duplicados con otro umbral que el matcher, las dos capas se contradirian.
+//
+// Costo: se leen las 4 tablas enteras a memoria (~6.300 filas hoy) y se puntua cada una. Son
+// ~50ms y el volumen no crece rapido; una prefiltrada en SQL por token perderia recall, que
+// es justo lo que esta funcion no puede permitirse.
+export function buscarEmpresa(input: BuscarEmpresaInput): BuscarEmpresaResultado {
+  const parsed = buscarEmpresaSchema.parse(input);
+  const raiz = normalizarRazonSocial(parsed.nombre);
+  const telefonoBuscado = parsed.telefono ? telefonoNormalizado(parsed.telefono) : '';
+  const dominioBuscado = parsed.dominio ? dominioDe(parsed.dominio) : '';
+  const nitBuscado = parsed.nit ?? '';
+
+  // Acumulador por cuenta: una misma empresa puede salir por varios frentes y se reporta
+  // UNA vez, con todos sus hits.
+  const hitsPorEmpresa = new Map<string, HitBusqueda[]>();
+  function anotar(idEmpresa: string | null, hit: HitBusqueda): void {
+    if (!idEmpresa) return;
+    const previos = hitsPorEmpresa.get(idEmpresa);
+    if (previos) previos.push(hit);
+    else hitsPorEmpresa.set(idEmpresa, [hit]);
+  }
+
+  function anotarPorNombre(
+    idEmpresa: string | null,
+    frente: FrenteBusqueda,
+    textoCandidato: string | null,
+  ): void {
+    if (!idEmpresa || !textoCandidato) return;
+    const score = scoreRazonSocial(parsed.nombre, textoCandidato);
+    if (score < UMBRAL_MINIMO_CANDIDATO) return;
+    anotar(idEmpresa, {
+      frente,
+      motivo: score >= 1 ? 'nombre_exacto' : 'nombre_parecido',
+      confianza: confianzaPorScore(score),
+      score,
+      coincidencia: textoCandidato,
+    });
+  }
+
+  // Frente 0 (solo si viene NIT): el id_empresa ES el NIT para las 1.740 cuentas de tipo
+  // 'nit'. Match exacto, la señal mas fuerte que existe.
+  if (nitBuscado !== '') {
+    const porNit = db
+      .select({ idEmpresa: empresa.idEmpresa })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, nitBuscado))
+      .get();
+    if (porNit) {
+      anotar(porNit.idEmpresa, { frente: 'empresa', motivo: 'nit', confianza: 'alta', score: 1, coincidencia: nitBuscado });
+    }
+  }
+
+  // Frente 1: empresa, por nombre_oficial Y por nombre_normalizado. Los dos, no uno: la
+  // columna nombre_normalizado de isps.db NO es esta normalizacion (1.233 de 1.956 filas
+  // vienen de un normalizador viejo que no quitaba sufijos legales), asi que puede aportar
+  // una coincidencia que el nombre oficial no da, y al reves.
+  const empresas = db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombreOficial: empresa.nombreOficial,
+      nombreNormalizado: empresa.nombreNormalizado,
+    })
+    .from(empresa)
+    .all();
+  for (const e of empresas) {
+    anotarPorNombre(e.idEmpresa, 'empresa', e.nombreOficial);
+    if (e.nombreNormalizado !== e.nombreOficial) anotarPorNombre(e.idEmpresa, 'empresa', e.nombreNormalizado);
+  }
+
+  // Frente 2: empresa_alias. 3.267 filas: es donde vive el nombre con el que la cuenta entro
+  // por otra fuente (master, metabase, Notion) y que ya no es el nombre_oficial de hoy.
+  for (const a of db.select({ idEmpresa: empresaAlias.idEmpresa, alias: empresaAlias.alias }).from(empresaAlias).all()) {
+    anotarPorNombre(a.idEmpresa, 'alias', a.alias);
+  }
+
+  // Frente 3: prospeccion, por nombre crudo, website y telefonos. telefonos_raw es un texto
+  // con varios numeros separados por " | ", se parte aca.
+  const prospecciones = db
+    .select({
+      idEmpresa: prospeccion.idEmpresa,
+      empresaNombreRaw: prospeccion.empresaNombreRaw,
+      website: prospeccion.website,
+      telefonosRaw: prospeccion.telefonosRaw,
+    })
+    .from(prospeccion)
+    .all();
+  for (const p of prospecciones) {
+    anotarPorNombre(p.idEmpresa, 'prospeccion', p.empresaNombreRaw);
+    if (dominioBuscado !== '' && p.website) {
+      const dominioFila = dominioDe(p.website);
+      if (dominioFila !== '' && dominioFila === dominioBuscado) {
+        anotar(p.idEmpresa, { frente: 'prospeccion', motivo: 'dominio', confianza: 'alta', score: 1, coincidencia: dominioFila });
+      }
+    }
+    if (telefonoBuscado !== '' && p.telefonosRaw) {
+      for (const crudo of p.telefonosRaw.split('|')) {
+        const tel = telefonoNormalizado(crudo);
+        if (tel !== '' && tel === telefonoBuscado) {
+          anotar(p.idEmpresa, { frente: 'prospeccion', motivo: 'telefono', confianza: 'alta', score: 1, coincidencia: tel });
+          break;
+        }
+      }
+    }
+  }
+
+  // Frente 4: contacto, por telefono o por dominio del email. El nombre de un contacto es de
+  // PERSONA, no de empresa: no entra al match de razon social (normalizarRazonSocial no es
+  // para nombres de persona, ver su cabecera).
+  if (telefonoBuscado !== '' || dominioBuscado !== '') {
+    const contactos = db
+      .select({ idEmpresa: contacto.idEmpresa, telefono: contacto.telefono, email: contacto.email })
+      .from(contacto)
+      .all();
+    for (const c of contactos) {
+      if (telefonoBuscado !== '' && c.telefono) {
+        const tel = telefonoNormalizado(c.telefono);
+        if (tel !== '' && tel === telefonoBuscado) {
+          anotar(c.idEmpresa, { frente: 'contacto', motivo: 'telefono', confianza: 'alta', score: 1, coincidencia: tel });
+        }
+      }
+      if (dominioBuscado !== '' && c.email) {
+        const dominioFila = dominioDe(c.email);
+        if (dominioFila !== '' && dominioFila === dominioBuscado) {
+          anotar(c.idEmpresa, { frente: 'contacto', motivo: 'dominio', confianza: 'alta', score: 1, coincidencia: dominioFila });
+        }
+      }
+    }
+  }
+
+  if (hitsPorEmpresa.size === 0) return { raiz, total: 0, candidatos: [] };
+
+  // Los datos de cabecera de la cuenta salen de UNA query por lote, no de una por candidato.
+  const ids = [...hitsPorEmpresa.keys()];
+  const cabeceras = db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombreOficial: empresa.nombreOficial,
+      categoria: empresa.categoria,
+      estadoNotion: empresa.estadoNotion,
+      owner: empresa.owner,
+      notionPageId: empresa.notionPageId,
+      operaBajoId: empresa.operaBajoId,
+    })
+    .from(empresa)
+    .where(inArray(empresa.idEmpresa, ids))
+    .all();
+
+  const candidatos: CandidatoEmpresa[] = [];
+  for (const cab of cabeceras) {
+    // Un hit por frente+motivo, quedandose con el mas fuerte de cada par: un nombre que
+    // matchea por nombre_oficial y por nombre_normalizado es UN hit, no dos.
+    const mejorPorClave = new Map<string, HitBusqueda>();
+    for (const h of hitsPorEmpresa.get(cab.idEmpresa) ?? []) {
+      const clave = `${h.frente}:${h.motivo}`;
+      const previo = mejorPorClave.get(clave);
+      if (!previo || h.score > previo.score) mejorPorClave.set(clave, h);
+    }
+    const hits = [...mejorPorClave.values()].sort((a, b) => b.score - a.score);
+    const mejor = hits[0];
+    candidatos.push({ ...cab, confianza: mejor.confianza, score: mejor.score, hits });
+  }
+
+  candidatos.sort(
+    (a, b) =>
+      ORDEN_CONFIANZA[a.confianza] - ORDEN_CONFIANZA[b.confianza] ||
+      b.score - a.score ||
+      a.nombreOficial.localeCompare(b.nombreOficial),
+  );
+
+  return { raiz, total: candidatos.length, candidatos: candidatos.slice(0, MAX_CANDIDATOS) };
+}
+
+// --- crearEmpresa ---------------------------------------------------------------------
+
+const crearEmpresaSchema = z.object({
+  nombreOficial: z.string().trim().min(1),
+  categoria: z.enum(CATEGORIAS_EMPRESA),
+  estadoNotion: z.enum(ESTADOS_NOTION),
+  owner: z.string().trim().min(1),
+  notionPageId: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? undefined : v))
+    .optional(),
+  nit: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? undefined : v))
+    .optional()
+    .refine((v) => v === undefined || esNitValido(v), {
+      message: 'El NIT tiene que ser 8 a 10 digitos, sin puntos ni digito de verificacion',
+    }),
+  // Unica salida cuando la salvaguarda de duplicados encuentra un candidato de confianza
+  // alta. Explicito y por llamada: no hay forma de apagarla de fabrica.
+  forzar: z.boolean().optional(),
+});
+export type CrearEmpresaInput = z.input<typeof crearEmpresaSchema>;
+
+export type EmpresaEscrita = {
+  idEmpresa: string;
+  tipoId: string;
+  nombreOficial: string;
+  nombreNormalizado: string;
+  categoria: string | null;
+  estadoNotion: string | null;
+  estadoComercial: string;
+  owner: string | null;
+  notionPageId: string | null;
+  proximoPaso: string | null;
+  proximoFollowUpFecha: string | null;
+  proximoCanal: string | null;
+  organizacionActivaId: number;
+};
+
+export type CrearEmpresaResultado =
+  // candidatosCercanos: lo que la busqueda encontro y NO alcanzo a bloquear (confianza media
+  // o baja). Se crea igual -- bloquear en media haria que la herramienta se niegue a crear
+  // cuentas legitimamente nuevas que comparten tokens con otra -- pero no se esconde: quien
+  // llama ve con que rozo y puede fundir despues si era la misma.
+  | { creada: true; empresa: EmpresaEscrita; candidatosCercanos: CandidatoEmpresa[] }
+  | { creada: false; motivo: 'duplicado_probable'; mensaje: string; candidatos: CandidatoEmpresa[] };
+
+function leerEmpresaEscrita(lector: typeof db | Tx, idEmpresa: string): EmpresaEscrita {
+  const fila = lector
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      tipoId: empresa.tipoId,
+      nombreOficial: empresa.nombreOficial,
+      nombreNormalizado: empresa.nombreNormalizado,
+      categoria: empresa.categoria,
+      estadoNotion: empresa.estadoNotion,
+      estadoComercial: empresa.estadoComercial,
+      owner: empresa.owner,
+      notionPageId: empresa.notionPageId,
+      proximoPaso: empresa.proximoPaso,
+      proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      proximoCanal: empresa.proximoCanal,
+      organizacionActivaId: empresa.organizacionActivaId,
+    })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!fila) throw new Error(`La cuenta ${idEmpresa} no quedo escrita`);
+  return fila;
+}
+
+// Falla claro y temprano si el notion_page_id ya esta tomado. isps.db tiene un indice UNICO
+// parcial (ux_empresa_notion_page_id, WHERE notion_page_id IS NOT NULL) que lo garantiza,
+// pero su error crudo es "UNIQUE constraint failed: empresa.notion_page_id" -- no dice cual
+// cuenta lo tiene, que es lo unico que el que llama necesita para resolverlo.
+function verificarPageIdLibre(lector: typeof db | Tx, notionPageId: string, idEmpresaPropia?: string): void {
+  const duena = lector
+    .select({ idEmpresa: empresa.idEmpresa, nombreOficial: empresa.nombreOficial })
+    .from(empresa)
+    .where(eq(empresa.notionPageId, notionPageId))
+    .get();
+  if (!duena || duena.idEmpresa === idEmpresaPropia) return;
+  throw new Error(
+    `El notion_page_id ${notionPageId} ya esta tomado por la cuenta ${duena.idEmpresa} (${duena.nombreOficial}). ` +
+      'Enlaza esa cuenta con actualizar_empresa en vez de crear otra.',
+  );
+}
+
+// Crea una cuenta nueva. Antes de insertar corre la MISMA busqueda de buscarEmpresa y se
+// niega si aparece un candidato de confianza alta: la base ya tiene duplicados vivos
+// (Conexa Tech, dos filas para la misma empresa) por haberse saltado ese paso, y una
+// herramienta que crea en un segundo puede fabricar mas en un segundo. La salida es
+// devolver el candidato para enlazarlo, o `forzar: true` explicito.
+//
+// El id no se inventa: con NIT, el id ES el NIT (tipo_id 'nit'); sin NIT, sale de
+// idEmpresaSintetico (tipo_id 'interno'), la convencion medida sobre las 97 filas `ntn-`
+// que ya existen. Ver app/core/empresa-identidad.ts.
+export function crearEmpresa(input: CrearEmpresaInput, idOrganizacion: number): CrearEmpresaResultado {
+  const parsed = crearEmpresaSchema.parse(input);
+
+  const busqueda = buscarEmpresa({
+    nombre: parsed.nombreOficial,
+    ...(parsed.nit ? { nit: parsed.nit } : {}),
+  });
+  const altos = busqueda.candidatos.filter((c) => c.confianza === 'alta');
+  if (altos.length > 0 && !parsed.forzar) {
+    return {
+      creada: false,
+      motivo: 'duplicado_probable',
+      mensaje:
+        `No se creo: ya hay ${altos.length} cuenta(s) que coinciden con alta confianza (${altos
+          .map((c) => `${c.idEmpresa} ${c.nombreOficial}`)
+          .join('; ')}). Enlaza una de esas con actualizar_empresa, o repite con forzar:true si de verdad es otra empresa.`,
+      candidatos: altos,
+    };
+  }
+
+  const idEmpresa = parsed.nit ?? idEmpresaSintetico(parsed.nombreOficial);
+  const tipoId = parsed.nit ? 'nit' : 'interno';
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    const yaExiste = tx
+      .select({ nombreOficial: empresa.nombreOficial })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, idEmpresa))
+      .get();
+    if (yaExiste) {
+      throw new Error(
+        `Ya existe una cuenta con id_empresa ${idEmpresa} (${yaExiste.nombreOficial}). ` +
+          'Usa actualizar_empresa sobre esa cuenta en vez de crear otra.',
+      );
+    }
+    if (parsed.notionPageId) verificarPageIdLibre(tx, parsed.notionPageId);
+
+    tx.insert(empresa)
+      .values({
+        idEmpresa,
+        tipoId,
+        nombreOficial: parsed.nombreOficial,
+        nombreNormalizado: normalizarRazonSocial(parsed.nombreOficial),
+        // estado_comercial es NOT NULL con su propio CHECK; se deriva de la etapa del embudo
+        // con la moda real de la base (ver ESTADO_COMERCIAL_POR_ETAPA).
+        estadoComercial: ESTADO_COMERCIAL_POR_ETAPA[parsed.estadoNotion],
+        estadoNotion: parsed.estadoNotion,
+        categoria: parsed.categoria,
+        owner: parsed.owner,
+        notionPageId: parsed.notionPageId ?? null,
+        organizacionActivaId: idOrganizacion,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+
+    // La etapa inicial entra al historico como cualquier otra transicion (desde null): sin
+    // esto, el ciclo de venta de una cuenta creada aca arrancaria en su primer movimiento y
+    // no en su nacimiento.
+    tx.insert(empresaEstadoHistorial)
+      .values({ idEmpresa, estadoAnterior: null, estadoNuevo: parsed.estadoNotion, fecha: ahora, idOrganizacion })
+      .run();
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: idEmpresa,
+        accion: 'insert',
+        detalle: `alta de cuenta: ${parsed.nombreOficial} (${parsed.categoria}, ${parsed.estadoNotion})`,
+      })
+      .run();
+
+    // Relectura, no un eco del input: lo que se devuelve es lo que QUEDO en la base
+    // (incluidos los campos derivados, id y estado_comercial).
+    return {
+      creada: true as const,
+      empresa: leerEmpresaEscrita(tx, idEmpresa),
+      candidatosCercanos: busqueda.candidatos.filter((c) => c.confianza !== 'alta'),
+    };
+  });
+}
+
+// --- actualizarEmpresa ----------------------------------------------------------------
+
+const actualizarEmpresaSchema = z
+  .object({
+    idEmpresa: z.string().trim().min(1),
+    owner: z.string().trim().min(1).optional(),
+    categoria: z.enum(CATEGORIAS_EMPRESA).optional(),
+    notionPageId: z.string().trim().min(1).optional(),
+    proximoPaso: z.string().trim().min(1).optional(),
+    proximoFollowUpFecha: z.string().trim().min(1).optional(),
+    proximoCanal: z.string().trim().min(1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    const { idEmpresa: _id, ...campos } = data;
+    if (Object.values(campos).every((v) => v === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'actualizar_empresa requiere al menos un campo a cambiar (owner, categoria, notionPageId, proximoPaso, proximoFollowUpFecha, proximoCanal)',
+      });
+    }
+  });
+export type ActualizarEmpresaInput = z.input<typeof actualizarEmpresaSchema>;
+
+// Cambia campos puntuales de una cuenta que ya existe. Solo se escribe lo que VINO: un campo
+// ausente no se toca, y `.trim().min(1)` hace que un string vacio sea un error de entrada y
+// no un borrado silencioso de lo que la base ya tenia.
+//
+// estado_notion NO esta aca a proposito: esa etapa se mueve con mover_estado, que ademas
+// escribe la transicion en empresa_estado_historial. Un UPDATE suelto de estado_notion
+// perderia el historico -- por eso escribirTransicionEstado es el unico camino.
+//
+// Tampoco encola al outbox de Notion. Esta funcion es para cuadrar la base contra lo que
+// Notion YA dice (enlazar un page id, corregir un owner o una categoria); rebotar eso de
+// vuelta a Notion seria escribirle lo que el mismo acaba de decir. Lo que si tiene que viajar
+// a Notion (proximo paso con fecha, como parte de una reprogramacion real) sale por
+// cambiarCadencia, que si encola.
+export function actualizarEmpresa(input: ActualizarEmpresaInput, idOrganizacion: number): EmpresaEscrita {
+  const parsed = actualizarEmpresaSchema.parse(input);
+
+  return db.transaction((tx) => {
+    const emp = tx
+      .select({ organizacionActivaId: empresa.organizacionActivaId })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .get();
+    if (!emp) throw new Error(`Empresa ${parsed.idEmpresa} no existe`);
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      throw new Error(`La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+    }
+    if (parsed.notionPageId) verificarPageIdLibre(tx, parsed.notionPageId, parsed.idEmpresa);
+
+    const sets: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    if (parsed.owner !== undefined) sets.owner = parsed.owner;
+    if (parsed.categoria !== undefined) sets.categoria = parsed.categoria;
+    if (parsed.notionPageId !== undefined) sets.notionPageId = parsed.notionPageId;
+    if (parsed.proximoPaso !== undefined) sets.proximoPaso = parsed.proximoPaso;
+    if (parsed.proximoFollowUpFecha !== undefined) sets.proximoFollowUpFecha = parsed.proximoFollowUpFecha;
+    if (parsed.proximoCanal !== undefined) sets.proximoCanal = parsed.proximoCanal;
+
+    tx.update(empresa).set(sets).where(eq(empresa.idEmpresa, parsed.idEmpresa)).run();
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: new Date().toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle: `campos: ${Object.keys(sets).filter((k) => k !== 'updatedAt').join(', ')}`,
+      })
+      .run();
+
+    return leerEmpresaEscrita(tx, parsed.idEmpresa);
   });
 }
 
