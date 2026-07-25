@@ -28,6 +28,7 @@ import {
   bucketDeEtapa,
   pendientesDeHoy,
   vencidasDeHoy,
+  programadasFuturas,
   OWNER_COLA_SPLIT,
   type FilaAgenda,
   type FilaColaConBucket,
@@ -143,6 +144,11 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
     : cola.map((c): FilaColaConBucket => ({ ...c, bucket: 'lead' }));
   const pendientes = pendientesDeHoy(filasParaContar, hoy);
   const vencidos = vencidasDeHoy(filasParaContar, hoy);
+  // Tercera tarjeta (2026-07-24): sin ella, "Para hoy" en 0 sobre 9 filas listadas se leia
+  // como un error de la herramienta. Con las tres el cuadre cierra solo -- para hoy +
+  // programadas + lo que no tiene fecha = las filas de abajo.
+  const programadas = programadasFuturas(filasParaContar, hoy);
+  const totalListado = filasParaContar.length;
 
   // La barra "AHORA" sale de la lista unificada, no de cola[0]: con 0 leads y un WhatsApp
   // debido, cola[0] era undefined y la barra desaparecia aunque hubiera trabajo. unificarCola
@@ -156,12 +162,23 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   return (
     <AppShell>
       <div className="mb-8">
-        <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">{splitActivo ? "Leads" : "Toques de hoy"}</h2>
-        <p className="mt-1 text-sm text-muted">{splitActivo ? "Leads con follow-up vencido o de hoy." : "Tu cola de follow-ups pendientes."}</p>
+        {/* El titulo dice lo que la lista trae de verdad (2026-07-24). Decia "Leads" y "Leads
+            con follow-up vencido o de hoy" sobre una lista que en la practica es casi toda
+            colaCierres: cierres y reuniones agendadas, ninguno lead, ninguno vencido y
+            ninguno de hoy. colaCierres es la unica de las cinco consultas sin filtro de
+            fecha, asi que la lista incluye cosas con fecha futura y cosas sin fecha. */}
+        <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">{splitActivo ? "Tus toques" : "Toques de hoy"}</h2>
+        <p className="mt-1 text-sm text-muted">
+          {splitActivo ? "Deals abiertos y follow-ups, con fecha o sin ella." : "Tu cola de follow-ups pendientes."}
+        </p>
       </div>
 
-      <div className="mb-8 grid grid-cols-3 gap-4">
-        <StatCard label="Pendientes" valor={pendientes} sub="hoy o vencido" />
+      {/* "Para hoy" cuenta fecha <= hoy sobre las mismas filas que se listan abajo, o sea un
+          subconjunto a proposito (ver pendientesDeHoy). El subtitulo dice de cuantas, para que
+          el numero no se lea como si faltaran filas. */}
+      <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Para hoy" valor={pendientes} sub={`de ${totalListado} en la lista`} />
+        <StatCard label="Programadas" valor={programadas} sub="con fecha futura" />
         <StatCard label="Cerradas" valor={cerradas} sub="hoy" tone="done" subTone="done" />
         <StatCard
           label="Vencidas"
@@ -181,7 +198,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
           cargo={actual.cargo}
           canal={actual.canal}
           estado={actual.estado}
-          sev={actual.sev}
+          badge={actual.badge}
           severidadTexto={actual.severidadTexto}
         />
       )}

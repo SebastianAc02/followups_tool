@@ -4,19 +4,13 @@ import { Pill } from "../ui/Pill";
 import { pillParaEstado } from "../ui/pill.variants.ts";
 import { canalPill, CANAL_LABEL, type Canal } from "../ui/canal-tag.variants.ts";
 import { button } from "../ui/button.variants.ts";
-import { canalNormalizado } from "./agenda.ts";
-import type { Severity } from "../ui/severity-text.variants.ts";
+import { canalNormalizado, type BadgeFecha } from "./agenda.ts";
 
 const CTA_POR_CANAL: Record<Canal, string> = {
   llamada: "Llamar ahora",
   whatsapp: "Escribir por WhatsApp",
   correo: "Enviar correo",
 };
-
-// El mockup (Arc, #current-follow-up) pone una hora de reloj (09:00) en la columna
-// izquierda. La base solo guarda fecha, no hora -- se sustituye por severidad real
-// en vez de inventar un horario (decision explicita del 2026-07-07).
-const SEV_LABEL: Record<Severity, string> = { overdue: "VENC.", today: "HOY" };
 
 // Fix 3 (2026-07-08): reestilizada al lenguaje de tarjetas del resto de la app
 // (bg-card, border-line-card, button.variants) y marcada explícitamente como
@@ -30,7 +24,7 @@ export function BarraAhora({
   cargo,
   canal,
   estado,
-  sev,
+  badge,
   severidadTexto,
 }: {
   id: string;
@@ -40,7 +34,11 @@ export function BarraAhora({
   cargo?: string | null;
   canal?: string | null;
   estado?: string | null;
-  sev: Severity;
+  // El mockup (Arc, #current-follow-up) pone una hora de reloj (09:00) en esta columna. La
+  // base solo guarda fecha, no hora, asi que se sustituye por el vencimiento real en vez de
+  // inventar un horario (decision del 2026-07-07). Sale de badgeDeFecha: null cuando la fila
+  // no tiene fecha, y entonces no se pinta nada.
+  badge?: BadgeFecha;
   severidadTexto: string;
 }) {
   const canalReal = canalNormalizado(canal);
@@ -55,7 +53,9 @@ export function BarraAhora({
         <span className="rounded-full bg-accent/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-accent-soft">
           Próximo paso
         </span>
-        <span className="text-xs font-semibold uppercase tracking-widest text-faint">{SEV_LABEL[sev]}</span>
+        {badge && (
+          <span className="text-xs font-semibold uppercase tracking-widest text-faint">{badge.texto}</span>
+        )}
       </div>
 
       <div className="flex flex-col gap-6 md:flex-row md:items-center md:gap-7">

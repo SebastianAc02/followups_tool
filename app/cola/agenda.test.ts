@@ -12,6 +12,8 @@ import {
   aplicarFiltrosUnificados,
   pendientesDeHoy,
   vencidasDeHoy,
+  programadasFuturas,
+  badgeDeFecha,
   type FilaAgenda,
   type FilaCola,
   type Bucket,
@@ -67,12 +69,48 @@ function filaConBucket(id: string, fecha: string | null, bucket: Bucket, campana
 }
 
 test('filaSinVencimiento: con fecha la muestra tal cual, sin fecha dice "sin fecha"', () => {
-  const conFecha = filaSinVencimiento(filaColaBase('c1', '2026-07-20'));
+  const conFecha = filaSinVencimiento(filaColaBase('c1', '2026-07-20'), '2026-07-20');
   assert.equal(conFecha.sev, 'today');
   assert.equal(conFecha.severidadTexto, '2026-07-20');
 
-  const sinFecha = filaSinVencimiento(filaColaBase('c2', null));
+  const sinFecha = filaSinVencimiento(filaColaBase('c2', null), '2026-07-20');
   assert.equal(sinFecha.severidadTexto, 'sin fecha');
+});
+
+// El bug de la barra "AHORA" (2026-07-24): filaSinVencimiento fijaba sev 'today' para todo
+// cierre sin mirar la fecha, y BarraAhora imprimia HOY encima de un follow-up del 25.
+test('filaSinVencimiento: una fecha futura no se pinta como "today"', () => {
+  const futura = filaSinVencimiento(filaColaBase('c1', '2026-07-25'), '2026-07-24');
+  assert.equal(futura.sev, 'upcoming');
+  assert.deepEqual(futura.badge, { texto: 'mañana', sev: 'upcoming' });
+
+  const sinFecha = filaSinVencimiento(filaColaBase('c2', null), '2026-07-24');
+  assert.equal(sinFecha.sev, 'upcoming');
+  assert.equal(sinFecha.badge, null);
+});
+
+// Un cierre no tiene nocion de vencido: con la fecha ya pasada se queda sin badge, no dice
+// VENC. El resto de la fila (la fecha cruda en severidadTexto) ya cuenta la historia.
+test('filaSinVencimiento: fecha pasada no pinta badge de vencido', () => {
+  const vieja = filaSinVencimiento(filaColaBase('c1', '2026-06-01'), '2026-07-24');
+  assert.equal(vieja.badge, null);
+  assert.equal(vieja.sev, 'upcoming');
+});
+
+test('badgeDeFecha: sale de la fecha real, no del bucket', () => {
+  assert.deepEqual(badgeDeFecha('2026-07-24', '2026-07-24'), { texto: 'hoy', sev: 'today' });
+  assert.deepEqual(badgeDeFecha('2026-07-25', '2026-07-24'), { texto: 'mañana', sev: 'upcoming' });
+  assert.deepEqual(badgeDeFecha('2026-07-27', '2026-07-24'), { texto: 'en 3 días', sev: 'upcoming' });
+  assert.deepEqual(badgeDeFecha('2026-07-20', '2026-07-24'), { texto: 'venc.', sev: 'overdue' });
+  assert.equal(badgeDeFecha(null, '2026-07-24'), null);
+});
+
+// Las 9 filas reales del 2026-07-24: 5 para el 25 y 4 para el 27. Ninguna puede anunciarse
+// como HOY, que es lo que hacia la barra antes del fix.
+test('badgeDeFecha: ninguna de las fechas del 25 y el 27 dice "hoy" el 24', () => {
+  for (const fecha of ['2026-07-25', '2026-07-27']) {
+    assert.notEqual(badgeDeFecha(fecha, '2026-07-24')?.texto, 'hoy');
+  }
 });
 
 test('diasVencido: dias de diferencia entre dos fechas ISO', () => {
@@ -223,4 +261,34 @@ test('vencidasDeHoy: solo lo que ya se paso de fecha, no lo de hoy', () => {
     filaConBucket('sin-fecha', null, 'cierre'),
   ];
   assert.equal(vencidasDeHoy(filas, '2026-07-14'), 1);
+});
+
+test('programadasFuturas: solo lo que todavia no llega', () => {
+  const filas: FilaColaConBucket[] = [
+    filaConBucket('vencido', '2026-07-10', 'lead'),
+    filaConBucket('hoy', '2026-07-14', 'lead'),
+    filaConBucket('manana', '2026-07-15', 'cierre'),
+    filaConBucket('en3dias', '2026-07-17', 'cierre'),
+    filaConBucket('sin-fecha', null, 'cierre'),
+  ];
+  assert.equal(programadasFuturas(filas, '2026-07-14'), 2);
+});
+
+// El cuadre que sostiene las tarjetas: lo de hoy (que ya incluye lo vencido), mas lo
+// programado, mas lo que no tiene fecha, da exactamente las filas listadas abajo. Esta es la
+// foto real del 2026-07-24: 9 filas, 5 para el 25 y 4 para el 27, cero para hoy.
+test('las tres tarjetas cuadran contra el total de filas listadas', () => {
+  const filas: FilaColaConBucket[] = [
+    ...['c1', 'c2', 'c3', 'c4', 'c5'].map((id) => filaConBucket(id, '2026-07-25', 'cierre')),
+    ...['c6', 'c7', 'c8', 'c9'].map((id) => filaConBucket(id, '2026-07-27', 'cierre')),
+  ];
+  const hoy = '2026-07-24';
+  const paraHoy = pendientesDeHoy(filas, hoy);
+  const programadas = programadasFuturas(filas, hoy);
+  const sinFecha = filas.filter((f) => f.fecha == null).length;
+
+  assert.equal(paraHoy, 0);
+  assert.equal(vencidasDeHoy(filas, hoy), 0);
+  assert.equal(programadas, 9);
+  assert.equal(paraHoy + programadas + sinFecha, filas.length);
 });

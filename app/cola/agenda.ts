@@ -39,6 +39,9 @@ export type FilaAgenda = {
   pbxForma?: string | null;
   // Aviso de respuesta (V6.1): true = esta empresa tiene una respuesta sin ver.
   respuestaPendiente?: boolean;
+  // Badge de la barra "Próximo paso" (2026-07-24). Opcional: las filas armadas a mano en
+  // fixtures y tests no lo necesitan, y null es una respuesta valida (no pintar badge).
+  badge?: BadgeFecha;
 };
 
 export function filtrarPorCanal(filas: FilaAgenda[], filtro: FiltroCanal): FilaAgenda[] {
@@ -80,7 +83,12 @@ export type FilaCola = {
 // Cierres y Reagendar no tienen nocion de "vencido": una cuenta en negociacion o atascada
 // no se marca overdue solo por no tener proximo_follow_up_fecha. Si tiene fecha, se muestra
 // como texto informativo; si no, "sin fecha".
-export function filaSinVencimiento(c: FilaCola): FilaAgenda {
+export function filaSinVencimiento(c: FilaCola, hoy: string): FilaAgenda {
+  // Un cierre nunca se marca vencido (regla de arriba), asi que del badge se descarta la
+  // rama overdue: una fecha vieja no pinta badge en vez de gritar VENC. Lo que si cambia es
+  // que solo la fecha de HOY se ve como hoy; antes todo cierre entraba en ambar de "today"
+  // sin mirar la fecha, y el color mentia igual que el texto.
+  const badge = badgeDeFecha(c.fecha, hoy);
   return {
     id: c.id,
     empresa: c.empresa,
@@ -89,11 +97,12 @@ export function filaSinVencimiento(c: FilaCola): FilaAgenda {
     cargo: c.cargo,
     canal: canalNormalizado(c.canal),
     estado: c.estado,
-    sev: "today",
+    sev: c.fecha === hoy ? "today" : "upcoming",
     severidadTexto: c.fecha ?? "sin fecha",
     actual: false,
     pbxForma: c.pbxForma ?? null,
     respuestaPendiente: c.respuestaPendiente,
+    badge: badge?.sev === "overdue" ? null : badge,
   };
 }
 
@@ -102,6 +111,23 @@ export function filaSinVencimiento(c: FilaCola): FilaAgenda {
 // aca para que Leads y Reagendar (ambos date-driven) compartan el mismo calculo.
 export function diasVencido(fechaISO: string, hoyISO: string): number {
   return Math.round((Date.parse(hoyISO) - Date.parse(fechaISO)) / 86400000);
+}
+
+// Badge de la barra "Próximo paso": sale de la fecha real de la fila, nunca del bucket al
+// que pertenece. filaSinVencimiento fijaba sev "today" para todo cierre, y la barra imprimia
+// HOY encima de una fecha del 25 (visto el 2026-07-24, con las 9 filas agendadas para el 25
+// y el 27). null = no hay fecha: la barra se calla en vez de inventar urgencia.
+//
+// El texto va en minuscula a proposito; el uppercase lo pone el CSS de la barra.
+export type BadgeFecha = { texto: string; sev: Severity } | null;
+
+export function badgeDeFecha(fecha: string | null, hoy: string): BadgeFecha {
+  if (!fecha) return null;
+  const dias = diasVencido(fecha, hoy); // positivo = la fecha ya paso
+  if (dias > 0) return { texto: "venc.", sev: "overdue" };
+  if (dias === 0) return { texto: "hoy", sev: "today" };
+  if (dias === -1) return { texto: "mañana", sev: "upcoming" };
+  return { texto: `en ${-dias} días`, sev: "upcoming" };
 }
 
 // Fila con noción de vencido: usada por Leads y Reagendar (ambas son follow-ups reales con
@@ -121,6 +147,7 @@ export function filaConVencimiento(c: FilaCola, hoy: string, actual: boolean): F
     actual,
     pbxForma: c.pbxForma ?? null,
     respuestaPendiente: c.respuestaPendiente,
+    badge: badgeDeFecha(c.fecha, hoy),
   };
 }
 
@@ -161,7 +188,7 @@ export type FilaUnificada = FilaAgenda & {
 };
 
 function filaUnificada(c: FilaColaConBucket, hoy: string, actual: boolean): FilaUnificada {
-  const base = c.bucket === "cierre" ? filaSinVencimiento(c) : filaConVencimiento(c, hoy, actual);
+  const base = c.bucket === "cierre" ? filaSinVencimiento(c, hoy) : filaConVencimiento(c, hoy, actual);
   return { ...base, bucket: c.bucket, campana: c.campana ?? null, frescura: frescuraDe(c.fecha, hoy), origen: c.origen, tracking: c.tracking };
 }
 
@@ -200,6 +227,16 @@ export function pendientesDeHoy(filas: FilaColaConBucket[], hoy: string): number
 // esta vencido.
 export function vencidasDeHoy(filas: FilaColaConBucket[], hoy: string): number {
   return filas.filter((f) => f.fecha != null && f.fecha < hoy).length;
+}
+
+// La otra mitad de la lista: lo que tiene fecha y todavia no llega (2026-07-24). Existe para
+// que el cuadre cierre a la vista -- pendientes + programadas + sin fecha = filas listadas --
+// y deje de leerse raro que la tarjeta de hoy diga 0 sobre una lista de 9 filas. Eso es
+// exactamente lo que pasa cuando todo lo agendado es de la semana entrante: colaCierres es la
+// unica de las cinco consultas sin filtro de fecha, asi que trae futuro y la tarjeta de hoy
+// no lo cuenta, con razon. Sin esta tercera tarjeta el numero parecia un error.
+export function programadasFuturas(filas: FilaColaConBucket[], hoy: string): number {
+  return filas.filter((f) => f.fecha != null && f.fecha > hoy).length;
 }
 
 export type FiltrosUnificados = {
