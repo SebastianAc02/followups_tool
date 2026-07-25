@@ -91,6 +91,81 @@ test('actualizarPagina manda fechaPrimerContacto y fechaUltimoContacto como date
   });
 });
 
+// write-path del MCP (2026-07-24): estado y razonPerdida SOLO se emiten con el flag
+// FOLLOWUPS_NOTION_SYNC_EXTENDIDO=1 (default off), porque los nombres de propiedad/opcion
+// de Notion no estan verificados en vivo y una propiedad mal armada rompe el PATCH entero.
+test('con el sync extendido APAGADO (default), estado y razonPerdida NO se emiten (sync base intacto)', async (t) => {
+  delete process.env.FOLLOWUPS_NOTION_SYNC_EXTENDIDO;
+  guardarCredencialConector('notion', 'notion_test_key');
+  let cuerpoEnviado: any = null;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((_path, init) => {
+      cuerpoEnviado = JSON.parse(init.body as string);
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearNotionAdapter();
+  await adapter.actualizarPagina({
+    notionPageId: 'pagina-1',
+    proximoPaso: 'seguir',
+    estado: 'on_hold',
+    razonPerdida: 'precio',
+  });
+
+  // proximoPaso (campo base ya soportado) SI viaja; estado/razonPerdida NO estan en el PATCH.
+  assert.deepEqual(cuerpoEnviado.properties['Próximo Paso'], { rich_text: [{ text: { content: 'seguir' } }] });
+  assert.equal('Estado' in cuerpoEnviado.properties, false);
+  assert.equal('Razón Pérdida' in cuerpoEnviado.properties, false);
+});
+
+test('con el sync extendido ENCENDIDO, estado va como status (nombre mapeado) y razonPerdida como rich_text', async (t) => {
+  process.env.FOLLOWUPS_NOTION_SYNC_EXTENDIDO = '1';
+  guardarCredencialConector('notion', 'notion_test_key');
+  let cuerpoEnviado: any = null;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((_path, init) => {
+      cuerpoEnviado = JSON.parse(init.body as string);
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearNotionAdapter();
+  await adapter.actualizarPagina({
+    notionPageId: 'pagina-1',
+    estado: 'on_hold',
+    razonPerdida: 'precio muy alto',
+  });
+
+  assert.deepEqual(cuerpoEnviado.properties['Estado'], { status: { name: 'On Hold' } });
+  assert.deepEqual(cuerpoEnviado.properties['Razón Pérdida'], { rich_text: [{ text: { content: 'precio muy alto' } }] });
+  delete process.env.FOLLOWUPS_NOTION_SYNC_EXTENDIDO;
+});
+
+test('con el sync extendido ENCENDIDO pero un estado sin mapeo conocido, la propiedad Estado se OMITE (no manda un nombre inventado)', async (t) => {
+  process.env.FOLLOWUPS_NOTION_SYNC_EXTENDIDO = '1';
+  guardarCredencialConector('notion', 'notion_test_key');
+  let cuerpoEnviado: any = null;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    fetchFalso((_path, init) => {
+      cuerpoEnviado = JSON.parse(init.body as string);
+      return { status: 200, body: {} };
+    }),
+  );
+
+  const adapter = crearNotionAdapter();
+  await adapter.actualizarPagina({ notionPageId: 'pagina-1', estado: 'estado_que_no_existe' });
+
+  assert.equal('Estado' in cuerpoEnviado.properties, false);
+  delete process.env.FOLLOWUPS_NOTION_SYNC_EXTENDIDO;
+});
+
 test('actualizarPagina truena con mensaje claro si Notion responde error', async (t) => {
   guardarCredencialConector('notion', 'notion_test_key');
   t.mock.method(

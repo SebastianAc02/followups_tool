@@ -14,6 +14,7 @@ function identidad(overrides: Partial<UsuarioSesion> = {}): UsuarioSesion {
     idOrganizacion: 1,
     soloLectura: false,
     verTodoPipeline: false,
+    escrituraMcp: false,
     ...overrides,
   };
 }
@@ -79,7 +80,7 @@ test('id y email vienen de la identidad, no de las preferencias', () => {
 
 test('construirPerfil pasa idOrganizacion de la identidad tal cual', () => {
   const perfil = construirPerfil(
-    { id: 'u1', email: 'a@b.com', owner: 'Ana Owner', admin: false, idOrganizacion: 3, soloLectura: false, verTodoPipeline: false },
+    { id: 'u1', email: 'a@b.com', owner: 'Ana Owner', admin: false, idOrganizacion: 3, soloLectura: false, verTodoPipeline: false, escrituraMcp: false },
     PREFERENCIAS_DEFAULT,
   );
   assert.equal(perfil.idOrganizacion, 3);

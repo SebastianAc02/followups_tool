@@ -69,7 +69,7 @@ import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { normalizarFechaToque } from '../core/fecha-toque';
-import { estadoDestinoPorToque } from '../core/transicion-estado';
+import { estadoDestinoPorToque, ESTADO_ON_HOLD } from '../core/transicion-estado';
 import { canalesDisponibles, readinessEmpresa, type Readiness, type ReglaFaltante } from '../core/canales-empresa';
 import { aplicaBuclePBX, estaEnPBX, sugerirEscalar, type ContactoPBX, type PasoPropuesto } from '../core/pbx';
 import { calcularDuracionPorEtapa, calcularCicloVenta, type TransicionEtapa } from '../core/tiempoEnEtapa';
@@ -710,6 +710,10 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
       fechaUltimoContacto: ahora.slice(0, 10),
       ...(esPrimerToque ? { fechaPrimerContacto: ahora.slice(0, 10) } : {}),
       toquesHechos: renderToquesHechos(todosLosToques),
+      // write-path del MCP (2026-07-24): si el toque graduo la etapa, ese cambio de estado
+      // tambien viaja DB -> Notion (su emision esta gateada en el adaptador). Sin transicion,
+      // estado queda undefined y no se manda -- no se toca la etapa que Notion ya tenga.
+      ...(estadoDestino ? { estado: estadoDestino } : {}),
     });
 
     if (parsed.usuarios != null && !Number.isNaN(parsed.usuarios)) {
@@ -728,6 +732,163 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
         idRegistro: parsed.idEmpresa,
         accion: 'insert',
         detalle: `${parsed.resultado} -> next ${parsed.proximoFollowUp ?? '-'}`,
+      })
+      .run();
+  });
+}
+
+// write-path del MCP (2026-07-24, integraciones/propuesta-write-path.md). marcarPerdida es
+// el camino de dominio para "parquear/perder" una cuenta: registra un toque de perdida
+// (resultado 'contesto_no' + razon_perdida) y mueve estado_notion a on_hold. Antes esto no
+// tenia camino limpio (docs/operar-data.md Recetas 2 y 4: razon_perdida se quedaba local y
+// on_hold solo se seteaba a mano en Notion).
+//
+// Diferencia clave con registrarToque: una perdida NO pasa por estadoDestinoPorToque a
+// proposito. Esa transicion "solo avanza" (on_hold -> contacto_iniciado) graduaria la cuenta
+// justo al reves de lo que una perdida quiere. Aca el destino es on_hold, explicito, escrito
+// por escribirTransicionEstado igual que el sync de Notion.
+const marcarPerdidaSchema = z.object({
+  idEmpresa: z.string().min(1),
+  canal: z.enum(CANALES),
+  razonPerdida: z.string().min(1),
+  quePaso: z.string().min(1).optional(),
+  objecion: z.string().min(1).optional(),
+});
+export type MarcarPerdidaInput = z.infer<typeof marcarPerdidaSchema>;
+
+export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number) {
+  const parsed = marcarPerdidaSchema.parse(input);
+  const ahora = new Date().toISOString();
+
+  db.transaction((tx) => {
+    const emp = tx
+      .select({ organizacionActivaId: empresa.organizacionActivaId, estadoNotion: empresa.estadoNotion })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .get();
+    if (!emp) throw new Error(`Empresa ${parsed.idEmpresa} no existe`);
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      throw new Error(`La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+    }
+
+    tx.insert(toque)
+      .values({
+        idEmpresa: parsed.idEmpresa,
+        fecha: ahora,
+        canal: parsed.canal,
+        resultado: 'contesto_no',
+        quePaso: parsed.quePaso ?? null,
+        razonPerdida: parsed.razonPerdida,
+        objecion: parsed.objecion ?? null,
+        fuente: 'cockpit',
+        idOrganizacion,
+        createdAt: ahora,
+      })
+      .run();
+
+    // on_hold es el destino de una perdida; solo se registra la transicion si de verdad
+    // cambia (una cuenta ya on_hold no genera una fila de historico redundante).
+    if (emp.estadoNotion !== ESTADO_ON_HOLD) {
+      escribirTransicionEstado(tx, parsed.idEmpresa, emp.estadoNotion, ESTADO_ON_HOLD, idOrganizacion, ahora);
+    }
+
+    const todosLosToques = tx
+      .select({ fecha: toque.fecha, canal: toque.canal, resultado: toque.resultado })
+      .from(toque)
+      .where(eq(toque.idEmpresa, parsed.idEmpresa))
+      .orderBy(desc(toque.idToque))
+      .all();
+
+    encolarOutboxNotion(tx, parsed.idEmpresa, {
+      estado: ESTADO_ON_HOLD,
+      razonPerdida: parsed.razonPerdida,
+      fechaUltimoContacto: ahora.slice(0, 10),
+      toquesHechos: renderToquesHechos(todosLosToques),
+    });
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle: `perdida on_hold: ${parsed.razonPerdida}`,
+      })
+      .run();
+  });
+}
+
+// write-path del MCP (2026-07-24). cambiarCadencia reprograma el seguimiento de UNA empresa
+// (proximo_follow_up_fecha / proximo_canal / proximo_paso) y, opcionalmente, la mueve a otra
+// cadencia (inscribirEmpresaEnCadencia, que ya existe pero no tenia caller de app -- ver
+// docs/operar-data.md Receta 3). Reusa el dominio existente, no duplica SQL de inscripcion.
+//
+// La inscripcion (si se pide idCampana) corre en su propia transaccion adentro de
+// inscribirEmpresaEnCadencia; la reprogramacion + outbox van en una segunda transaccion. Son
+// dos operaciones (mismo criterio que sacar/inscribir en la Receta 3): si la inscripcion
+// falla, lanza y no se reprograma; si la reprogramacion falla despues de inscribir, la
+// inscripcion ya quedo (caso raro, un UPDATE simple). Se documenta por si un humano lo revisa.
+const cambiarCadenciaSchema = z
+  .object({
+    idEmpresa: z.string().min(1),
+    idCampana: z.number().int().positive().optional(),
+    proximoFollowUp: z.string().min(1).optional(),
+    proximoCanal: z.string().min(1).optional(),
+    proximoPaso: z.string().min(1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.idCampana === undefined && !data.proximoFollowUp && !data.proximoCanal && !data.proximoPaso) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'cambiarCadencia requiere al menos idCampana o un campo de reprogramacion (proximoFollowUp/proximoCanal/proximoPaso)',
+      });
+    }
+  });
+export type CambiarCadenciaInput = z.infer<typeof cambiarCadenciaSchema>;
+
+export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: number): void {
+  const parsed = cambiarCadenciaSchema.parse(input);
+
+  const emp = db
+    .select({ organizacionActivaId: empresa.organizacionActivaId })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+    .get();
+  if (!emp) throw new Error(`Empresa ${parsed.idEmpresa} no existe`);
+  if (emp.organizacionActivaId !== idOrganizacion) {
+    throw new Error(`La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+  }
+
+  if (parsed.idCampana !== undefined) {
+    inscribirEmpresaEnCadencia(parsed.idEmpresa, parsed.idCampana);
+  }
+
+  // Sin reprogramacion (solo se pidio mover de cadencia): no hay nada mas que escribir.
+  if (!parsed.proximoFollowUp && !parsed.proximoCanal && !parsed.proximoPaso) return;
+
+  db.transaction((tx) => {
+    const sets: Record<string, unknown> = { updatedAt: sql`datetime('now')` };
+    if (parsed.proximoFollowUp) sets.proximoFollowUpFecha = parsed.proximoFollowUp;
+    if (parsed.proximoCanal) sets.proximoCanal = parsed.proximoCanal;
+    if (parsed.proximoPaso) sets.proximoPaso = parsed.proximoPaso;
+    tx.update(empresa).set(sets).where(eq(empresa.idEmpresa, parsed.idEmpresa)).run();
+
+    encolarOutboxNotion(tx, parsed.idEmpresa, {
+      ...(parsed.proximoFollowUp ? { fechaProximoPaso: parsed.proximoFollowUp } : {}),
+      ...(parsed.proximoPaso ? { proximoPaso: parsed.proximoPaso } : {}),
+    });
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: new Date().toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle: `reprograma seguimiento -> ${parsed.proximoFollowUp ?? '-'} / ${parsed.proximoCanal ?? '-'}`,
       })
       .run();
   });
@@ -5304,11 +5465,17 @@ function escribirTransicionEstado(
 // en una sola transaccion (patron Outbox ligero). Si la etapa no cambia, no registra.
 // Este es el UNICO camino de escritura de estado_notion: el sync de Notion debe llamarlo
 // (no un UPDATE suelto), asi el historico nunca se pierde una transicion.
+//
+// encolarNotion (write-path del MCP, 2026-07-24): por defecto FALSE. El caller historico es
+// el sync Notion -> DB (scripts/sync_estados_notion.ts), que NO debe rebotar el estado de
+// vuelta a Notion (bounce-back Notion->DB->Notion). El MCP mover_estado pasa true para que el
+// cambio DB -> Notion viaje por el outbox (su emision final esta gateada en el adaptador).
 export function actualizarEstadoNotion(
   idEmpresa: string,
   estadoNuevo: string,
   idOrganizacion: number,
   fecha: string,
+  opts: { encolarNotion?: boolean } = {},
 ): void {
   db.transaction((tx) => {
     const emp = tx
@@ -5320,6 +5487,10 @@ export function actualizarEstadoNotion(
     if (emp.estadoNotion === estadoNuevo) return;
 
     escribirTransicionEstado(tx, idEmpresa, emp.estadoNotion, estadoNuevo, idOrganizacion, fecha);
+
+    if (opts.encolarNotion) {
+      encolarOutboxNotion(tx, idEmpresa, { estado: estadoNuevo });
+    }
   });
 }
 
