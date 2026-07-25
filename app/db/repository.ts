@@ -4052,21 +4052,32 @@ export type KpisPipeline = {
 // mapeo del plan a destinatario.estado='salio' (nivel CONTACTO) -- no inscripcion
 // 'finalizada', que tambien se usa para "cambio de campana" o "campana cancelada" y
 // contaria bookkeeping interno como si fuera un opt-out real.
-export function kpisPipeline(idOrganizacion: number, hoy: string): KpisPipeline {
+// owner (2026-07-25): "cada quien ve SUS cuentas" existia como regla desde el 2026-07-15 pero
+// solo estaba implementada en pipelineSinCadencia. Estas cinco cifras contaban el pipeline
+// entero, asi que a Felipe le salian los numeros de Sebastian. owner undefined = ve todo, que
+// es el modo CRO (verTodoPipeline).
+//
+// Se filtra con un subquery y NO con un innerJoin a empresa a proposito: el join cambiaria la
+// cardinalidad de las cinco consultas, y una inscripcion con FK huerfana (las hay sin auditar)
+// desapareceria en silencio TAMBIEN en el modo sin owner, que es justo el que no se quiere tocar.
+export function kpisPipeline(idOrganizacion: number, hoy: string, owner?: string): KpisPipeline {
   const orgActiva = and(eq(campana.idOrganizacion, idOrganizacion), eq(campana.estado, 'activa'));
+  const deLaCartera = owner
+    ? sql`${inscripcion.idEmpresa} IN (SELECT id_empresa FROM empresa WHERE owner = ${owner})`
+    : undefined;
 
   const enSecuencia = db
     .select({ n: sql<number>`count(*)` })
     .from(inscripcion)
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
-    .where(and(orgActiva, eq(inscripcion.estado, 'activa')))
+    .where(and(orgActiva, eq(inscripcion.estado, 'activa'), deLaCartera))
     .get()?.n ?? 0;
 
   const entrandoHoy = db
     .select({ n: sql<number>`count(*)` })
     .from(inscripcion)
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
-    .where(and(orgActiva, eq(inscripcion.estado, 'activa'), sql`substr(${inscripcion.fechaInscripcion}, 1, 10) = ${hoy}`))
+    .where(and(orgActiva, eq(inscripcion.estado, 'activa'), sql`substr(${inscripcion.fechaInscripcion}, 1, 10) = ${hoy}`, deLaCartera))
     .get()?.n ?? 0;
 
   const toquesHoy = db
@@ -4080,6 +4091,7 @@ export function kpisPipeline(idOrganizacion: number, hoy: string): KpisPipeline 
         eq(campana.idOrganizacion, idOrganizacion),
         eq(pasoInscripcion.estado, 'pendiente'),
         sql`substr(${pasoInscripcion.fechaProgramada}, 1, 10) = ${hoy}`,
+        deLaCartera,
       ),
     )
     .get()?.n ?? 0;
@@ -4088,7 +4100,7 @@ export function kpisPipeline(idOrganizacion: number, hoy: string): KpisPipeline 
     .select({ n: sql<number>`count(*)` })
     .from(inscripcion)
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
-    .where(and(eq(campana.idOrganizacion, idOrganizacion), eq(inscripcion.estado, 'pausada')))
+    .where(and(eq(campana.idOrganizacion, idOrganizacion), eq(inscripcion.estado, 'pausada'), deLaCartera))
     .get()?.n ?? 0;
 
   const cerradasOptOut = db
@@ -4096,7 +4108,7 @@ export function kpisPipeline(idOrganizacion: number, hoy: string): KpisPipeline 
     .from(destinatario)
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
     .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
-    .where(and(eq(campana.idOrganizacion, idOrganizacion), eq(destinatario.estado, 'salio')))
+    .where(and(eq(campana.idOrganizacion, idOrganizacion), eq(destinatario.estado, 'salio'), deLaCartera))
     .get()?.n ?? 0;
 
   return { enSecuencia, entrandoHoy, toquesHoy, onHold, cerradasOptOut };
@@ -4124,9 +4136,11 @@ export type FilaPipelineGlobal = {
 // numero de dia NO implica que haya una reunion agendada, solo que le tocan N dias desde
 // que arranco. `etapa` se deja en la fila (dato real, por si sirve como badge por fila mas
 // adelante) pero el AGRUPADOR del overview pasa a ser `diaSecuencia`, sin FUNNEL_ETAPAS.
-export function pipelineGlobal(idOrganizacion: number, hoy: string, idCampana?: number): FilaPipelineGlobal[] {
+export function pipelineGlobal(idOrganizacion: number, hoy: string, idCampana?: number, owner?: string): FilaPipelineGlobal[] {
   const condiciones = [eq(campana.idOrganizacion, idOrganizacion), eq(inscripcion.estado, 'activa'), EMPRESA_VIVA];
   if (idCampana != null) condiciones.push(eq(inscripcion.idCampana, idCampana));
+  // owner undefined = ve todo (modo CRO). Ver el comentario de kpisPipeline.
+  if (owner) condiciones.push(eq(empresa.owner, owner));
 
   // `inscripcion.paso_actual` NUNCA se actualiza despues del insert (queda en 0 para
   // siempre, ver inscribirCampana) -- no es el progreso real. El progreso real es el mismo
@@ -5524,7 +5538,7 @@ export type FilaRespuestaPendiente = {
 // Una fila por respuesta sin ver, org-wide, mas reciente primero; se dedupea a UNA
 // fila por empresa en TS (nos quedamos con la primera = la mas reciente) -- mas
 // simple que un correlated subquery en SQL para "el canal de la fila con MAX(fecha)".
-export function empresasConRespuestaPendiente(idOrganizacion: number): FilaRespuestaPendiente[] {
+export function empresasConRespuestaPendiente(idOrganizacion: number, owner?: string): FilaRespuestaPendiente[] {
   const filas = db
     .select({
       idEmpresa: notificacionRespuesta.idEmpresa,
@@ -5537,7 +5551,7 @@ export function empresasConRespuestaPendiente(idOrganizacion: number): FilaRespu
     .from(notificacionRespuesta)
     .innerJoin(empresa, eq(empresa.idEmpresa, notificacionRespuesta.idEmpresa))
     .leftJoin(contacto, and(eq(contacto.idEmpresa, notificacionRespuesta.idEmpresa), eq(contacto.esPrincipal, 1)))
-    .where(and(isNull(notificacionRespuesta.vistaEn), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .where(and(isNull(notificacionRespuesta.vistaEn), eq(empresa.organizacionActivaId, idOrganizacion), owner ? eq(empresa.owner, owner) : undefined))
     .orderBy(desc(notificacionRespuesta.detectadaEn))
     .all();
 
@@ -6557,6 +6571,45 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
     .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
     .orderBy(asc(empresa.nombreOficial))
     .all();
+}
+
+// --- Existencia y motivo de exclusion del pipeline ------------------------------------
+
+export type EmpresaFuera = {
+  idEmpresa: string;
+  nombreOficial: string;
+  estadoNotion: string | null;
+  operaBajoId: string | null;
+  notionPageId: string | null;
+  tieneToques: boolean;
+};
+
+// Responde "existe esta cuenta, y si no sale en el pipeline, por que". Existe porque
+// pipelineParaEndpoint ya viene filtrado (EN_PIPELINE y EMPRESA_VIVA), asi que desde ahi no se
+// puede distinguir "no existe" de "existe pero esta excluida" -- y confundirlas costo caro el
+// 2026-07-25: cinco empresas respondieron `empresa_no_encontrada`, se concluyo que habia que
+// crearlas, y en realidad solo habia que enlazarlas.
+export function empresaFueraDelPipeline(idEmpresa: string, idOrganizacion: number): EmpresaFuera | null {
+  const fila = db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombreOficial: empresa.nombreOficial,
+      estadoNotion: empresa.estadoNotion,
+      operaBajoId: empresa.operaBajoId,
+      notionPageId: empresa.notionPageId,
+    })
+    .from(empresa)
+    .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .get();
+  if (!fila) return null;
+
+  const toques = db
+    .select({ n: sql<number>`count(*)` })
+    .from(toque)
+    .where(eq(toque.idEmpresa, idEmpresa))
+    .get();
+
+  return { ...fila, tieneToques: Number(toques?.n ?? 0) > 0 };
 }
 
 // --- Reasignar el id de una cuenta sintetica a su NIT real ----------------------------

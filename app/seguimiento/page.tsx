@@ -56,7 +56,7 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
   const usuario = await requireSession();
   const hoy = hoyDemo();
 
-  const kpisRaw = kpisPipeline(usuario.idOrganizacion, hoy);
+  const kpisRaw = kpisPipeline(usuario.idOrganizacion, hoy, usuario.verTodoPipeline ? undefined : usuario.owner);
   const kpis: KpiData = {
     enSecuencia: kpisRaw.enSecuencia,
     entrandoHoy: kpisRaw.entrandoHoy,
@@ -65,7 +65,7 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
     cerradas: kpisRaw.cerradasOptOut,
   };
 
-  const filas = pipelineGlobal(usuario.idOrganizacion, hoy);
+  const filas = pipelineGlobal(usuario.idOrganizacion, hoy, undefined, usuario.verTodoPipeline ? undefined : usuario.owner);
 
   // Distinción pedida por Sebastián (2026-07-22): las que YA arrancan (toque de hoy) van en
   // sus grupos "Toque N"; las que AÚN NO entran (primer paso, programadas para un día futuro,
@@ -137,7 +137,7 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
   // 'activa', y una empresa recién pausada por respuesta cae fuera de esos grupos. No se
   // toca pipelineGlobal: una respuesta es "bandeja de revisión pendiente", no "progreso
   // de cadencia", son conceptos distintos aunque ambos vivan en /seguimiento.
-  const respondieron = empresasConRespuestaPendiente(usuario.idOrganizacion);
+  const respondieron = empresasConRespuestaPendiente(usuario.idOrganizacion, usuario.verTodoPipeline ? undefined : usuario.owner);
   const grupoRespondieron = (() => {
     if (respondieron.length === 0) return null;
     const empresas: EmpresaRowData[] = respondieron.map((f) => ({

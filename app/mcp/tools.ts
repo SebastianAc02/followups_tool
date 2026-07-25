@@ -20,6 +20,7 @@ import {
   pipelineParaEndpoint,
   embudoPipeline,
   cuentasParaReconciliar,
+  empresaFueraDelPipeline,
   reasignarNit,
   registrarToque,
   actualizarEstadoNotion,
@@ -116,7 +117,17 @@ export type DealHistoriaOk = {
   usuariosEfectivos: number | null;
 };
 
-export type DealHistoriaError = { idEmpresa: string; error: 'empresa_no_encontrada' };
+// Dos errores distintos, a proposito. Colapsarlos en uno solo es lo que hizo concluir el
+// 2026-07-25 que cinco cuentas no existian cuando solo estaban excluidas del embudo.
+export type DealHistoriaError = {
+  idEmpresa: string;
+  error: 'empresa_no_encontrada' | 'empresa_fuera_del_pipeline';
+  motivo?: string;
+  nombreOficial?: string;
+  estadoNotion?: string | null;
+  notionPageId?: string | null;
+  operaBajoId?: string | null;
+};
 
 export type DealHistoriaOutput = DealHistoriaOk | DealHistoriaError;
 
@@ -139,7 +150,23 @@ export function dealHistoria(input: DealHistoriaInput): DealHistoriaOutput {
 
   const fila = pipelineParaEndpoint(idOrganizacion).find((f) => f.idEmpresa === input.idEmpresa);
   if (!fila) {
-    return { idEmpresa: input.idEmpresa, error: 'empresa_no_encontrada' };
+    // No esta en el pipeline. Antes de decir "no existe", preguntar si existe: puede estar
+    // excluida por EMPRESA_VIVA (opera bajo otra) o por EN_PIPELINE (sin page_id y sin toques).
+    const fuera = empresaFueraDelPipeline(input.idEmpresa, idOrganizacion);
+    if (!fuera) return { idEmpresa: input.idEmpresa, error: 'empresa_no_encontrada' };
+
+    const motivo = fuera.operaBajoId
+      ? `opera bajo ${fuera.operaBajoId}: el embudo la cuenta dentro de su matriz, no aparte`
+      : 'sin notion_page_id y sin toques: su estado no viene de trabajo real, asi que el embudo la deja fuera';
+    return {
+      idEmpresa: input.idEmpresa,
+      error: 'empresa_fuera_del_pipeline',
+      motivo,
+      nombreOficial: fuera.nombreOficial,
+      estadoNotion: fuera.estadoNotion,
+      notionPageId: fuera.notionPageId,
+      operaBajoId: fuera.operaBajoId,
+    };
   }
 
   const historial = historialEtapasEmpresa(input.idEmpresa, idOrganizacion);
