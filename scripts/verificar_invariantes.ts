@@ -9,10 +9,13 @@ import Database from 'better-sqlite3';
 import { crearNotionExportAdapter } from '../app/adapters/notion/notionExportAdapter.ts';
 import { mapearEstadoNotion } from '../app/core/reconciliacion/mapeoEstados.ts';
 import { embudoPipeline } from '../app/db/repository.ts';
+import { fechaBogotaISO } from '../app/lib/date-utils.ts';
 const DB_PATH = process.env.ISPS_DB_PATH ?? '/Users/sebastianacostamolina/01_Documents/06_onepay/isps.db';
 const db = new Database(DB_PATH, { readonly: true });
 
-const HOY = new Date().toISOString().slice(0, 10);
+// El dia del negocio es el de Bogota. Con toISOString() este chequeo corria contra
+// mañana despues de las 7 pm y reportaba invariantes rotos que no lo estaban.
+const HOY = fechaBogotaISO();
 const ETAPAS_EN_MARCHA = "('contacto_iniciado','oportunidad','enviar_contrato','cierre_documentacion','firma_pago')";
 
 function n(sql: string): number {

@@ -36,7 +36,9 @@ function conGapsDeCalendario(porDia: { fecha: string; cuantos: number }[]): DiaG
   const fin = new Date(`${porDia[porDia.length - 1].fecha}T00:00:00`);
   const dias: DiaGoteoUI[] = [];
   while (cursor.getTime() <= fin.getTime()) {
-    const fecha = cursor.toISOString().slice(0, 10);
+    // `cursor` se armo en medianoche LOCAL (linea de arriba), asi que se lee local. Con
+    // toISOString() se leia en UTC y en un navegador al este de Greenwich la barra se corria un dia.
+    const fecha = fechaLocalISO(cursor);
     const cuantos = porFecha.get(fecha);
     dias.push({ fecha, cuantos: cuantos ?? 0, esGap: cuantos == null });
     cursor.setDate(cursor.getDate() + 1);

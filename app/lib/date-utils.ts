@@ -1,3 +1,25 @@
+// Zona del negocio. Todo "hoy" del sistema es el dia de calendario en Bogota: la cola, los
+// vencidos y las fechas que se guardan. Se fija explicita en vez de depender del huso del
+// proceso, para que el mismo codigo no conteste una cosa en el portatil (America/Bogota) y
+// otra en el contenedor (UTC).
+export const ZONA_BOGOTA = 'America/Bogota';
+
+// Se construye una sola vez: instanciar Intl.DateTimeFormat en cada llamada cuesta, y esto
+// corre por fila en las listas.
+const FORMATO_FECHA_BOGOTA = new Intl.DateTimeFormat('en-CA', {
+  timeZone: ZONA_BOGOTA,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+// Dia de calendario en Bogota, "YYYY-MM-DD". Reemplaza a `toISOString().slice(0, 10)`, que
+// devuelve UTC por contrato e ignora la variable TZ: por eso entre las 7 pm y la medianoche
+// de Colombia el sistema adelantaba el dia. en-CA es el locale que Intl formatea YYYY-MM-DD.
+export function fechaBogotaISO(date: Date = new Date()): string {
+  return FORMATO_FECHA_BOGOTA.format(date);
+}
+
 // Fecha de calendario LOCAL en formato YYYY-MM-DD, sin pasar por UTC. Usar
 // `toISOString()` tras `setDate()` convierte a UTC antes de recortar la fecha, lo
 // que puede correr el día en +-1 si el huso horario del proceso cruza medianoche

@@ -11,15 +11,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { marcarModoPrueba } from '../lib/modo-prueba.ts';
 import { marcarOffsetDias, hoy } from '../lib/reloj.ts';
+import { fechaBogotaISO, sumarDias } from '../lib/date-utils.ts';
 
+// En Bogota, no en UTC: la fecha del sistema es la de Colombia.
 function hoyReal(): string {
-  return new Date().toISOString().slice(0, 10);
+  return fechaBogotaISO();
 }
 
 function masDias(dias: number): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + dias);
-  return d.toISOString().slice(0, 10);
+  return sumarDias(fechaBogotaISO(), dias);
 }
 
 test('en modo prueba con offset, el materializador recibe el dia SIMULADO', () => {

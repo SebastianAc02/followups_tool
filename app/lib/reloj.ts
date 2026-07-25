@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { esModoPrueba } from './modo-prueba';
+import { fechaBogotaISO } from './date-utils';
 
 // Reloj de demo por request. requireSession reserva la caja y la llena con la cookie del
 // reloj; hoy() suma ese offset a la fecha real.
@@ -35,10 +36,18 @@ export function offsetActual(): number {
   return store.getStore()?.dias ?? 0;
 }
 
+const MS_POR_DIA = 86_400_000;
+
 // Reemplaza `new Date().toISOString().slice(0, 10)` en las paginas RSC. En modo prueba,
 // suma el offset del reloj de demo; en real, es la fecha de hoy sin mas.
+//
+// El dia sale en BOGOTA, no en UTC. toISOString() devuelve UTC por contrato e ignora la
+// variable TZ, asi que despues de las 7 pm de Colombia esto contestaba mañana: los
+// follow-ups del dia siguiente entraban al conteo como "de hoy" y los de hoy se pintaban
+// vencidos (visto en vivo el 2026-07-24 21:03 -05).
+//
+// El offset se suma en milisegundos sobre el instante y el dia se formatea despues.
+// Colombia no tiene horario de verano, asi que N*24h cae siempre a la misma hora de pared.
 export function hoy(): string {
-  const base = new Date();
-  base.setUTCDate(base.getUTCDate() + offsetActual());
-  return base.toISOString().slice(0, 10);
+  return fechaBogotaISO(new Date(Date.now() + offsetActual() * MS_POR_DIA));
 }

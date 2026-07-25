@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { resumenHome, colaLeads, colaCierres, colaReagendar, agendaHoyCadencias, contarPorEstado, listarCampanas } from './db/repository';
 import { cargarPerfil } from './lib/perfil';
+import { hoy as hoyDemo } from './lib/reloj';
 import { AppShell } from './ui/shell/AppShell';
 import { SectionLabel } from './ui/SectionLabel';
 import { StatCard } from './ui/home/StatCard';
@@ -24,7 +25,8 @@ export default async function Dashboard() {
   const owner = perfil.soloLectura || perfil.verTodoPipeline ? undefined : perfil.nombre;
 
   const ahora = new Date();
-  const hoy = ahora.toISOString().slice(0, 10);
+  // hoy() y no toISOString(): el dia es el de Bogota, y ademas respeta el reloj de demo igual que /cola.
+  const hoy = hoyDemo();
 
   const resumen = resumenHome(owner, hoy, perfil.idOrganizacion);
   // Split (2026-07-14, corregido 2026-07-22): "toques para hoy"/"vencidos" del home deben

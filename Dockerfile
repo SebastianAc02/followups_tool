@@ -34,6 +34,12 @@ RUN npm run build
 # podada tipo "output: standalone". docker-compose decide cuál arranca con `command:`.
 FROM node:22-alpine AS runner
 WORKDIR /app
+# Alpine viene sin base de zonas horarias. Sin tzdata, TZ=America/Bogota se ignora en
+# silencio y todo lo que lee la hora local del proceso (getDate, getDay, getHours) contesta
+# en UTC: de noche eso corre el dia habil un dia. Intl con zona explicita ya no depende de
+# esto, pero el resto del codigo si.
+RUN apk add --no-cache tzdata
+ENV TZ=America/Bogota
 ENV NODE_ENV=production
 COPY --from=builder /app ./
 EXPOSE 3000

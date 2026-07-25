@@ -77,6 +77,7 @@ import type { EmpresaFunnelInput } from '../core/panel/conversionStage';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { contarToquesAntesDeFecha } from '../core/panel/toquesAntesCerrar';
 import { cifrar, descifrar } from '../lib/crypto';
+import { fechaBogotaISO, sumarDias, diaSemana } from '../lib/date-utils';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
@@ -959,12 +960,15 @@ export function repartirFollowups(owner: string, porDia: number, idOrganizacion:
     .all();
 
   const necesarios = Math.ceil(rows.length / porDia) || 0;
+  // Un solo huso de punta a punta. Antes mezclaba getDay() (local del proceso) con
+  // toISOString() (UTC): con TZ=America/Bogota en el contenedor esos dos dejan de coincidir
+  // de noche y el reparto salta un dia habil.
   const dias: string[] = [];
-  const d = new Date();
+  let cursor = fechaBogotaISO();
   while (dias.length < necesarios) {
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) dias.push(d.toISOString().slice(0, 10));
-    d.setDate(d.getDate() + 1);
+    const dow = diaSemana(cursor);
+    if (dow !== 0 && dow !== 6) dias.push(cursor);
+    cursor = sumarDias(cursor, 1);
   }
 
   db.transaction((tx) => {
@@ -5927,7 +5931,7 @@ export function guardarProximoPasoPBX(idEmpresa: string, paso: PasoPropuesto, id
     }
 
     const proximoFollowUpFecha =
-      paso.diasSugeridos === null ? new Date().toISOString().slice(0, 10) : diasDesdeHoy(paso.diasSugeridos);
+      paso.diasSugeridos === null ? fechaBogotaISO() : diasDesdeHoy(paso.diasSugeridos);
 
     tx.update(empresa)
       .set({
@@ -5942,10 +5946,10 @@ export function guardarProximoPasoPBX(idEmpresa: string, paso: PasoPropuesto, id
   });
 }
 
+// Fecha de calendario en Bogota. La version vieja mezclaba setDate/getDate (local) con
+// toISOString() (UTC), asi que de noche guardaba el follow-up un dia corrido.
 function diasDesdeHoy(dias: number): string {
-  const fecha = new Date();
-  fecha.setDate(fecha.getDate() + dias);
-  return fecha.toISOString().slice(0, 10);
+  return sumarDias(fechaBogotaISO(), dias);
 }
 
 // Estado terminal exitoso del bucle: se consiguio el metodo directo del KDM. Inserta

@@ -1,4 +1,5 @@
 import { getContextoToque, versionesDePaso, marcarRespuestaVista } from "../../db/repository";
+import { hoy as hoyDemo } from "../../lib/reloj";
 import { Confirmacion, type CampoConfirmacion } from "./Confirmacion";
 import { LlamadaCard } from "./LlamadaCard";
 import { PbxPanel } from "./PbxPanel";
@@ -54,7 +55,7 @@ export default async function Llamada({
 
   // El dia se resuelve UNA vez aca (server) y baja como prop: el riel de toques marca
   // "hoy"/"ayer" contra este valor. Mismo criterio que /cola y /panel.
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyDemo();
 
   // Tarea 7: receipt post-submit. registrarToqueAction redirige aca con ?vista=confirmacion
   // tras guardar -- esto SOLO lee lo que ya se persistio (nada de sync nuevo). El resumen de
