@@ -17,7 +17,9 @@ import {
   archivarCampanasCompletadas,
   registrarRespuestaDetectada,
   leerConfiguracionAdmin,
+  guardarConfiguracionAdmin,
   enviosGmailHoy,
+  snapshotEstados,
 } from '../db/repository';
 import { drenarOutbox } from '../core/outbox';
 import { pushPendientes } from '../core/push';
@@ -27,6 +29,7 @@ import { dentroDeVentana, esperaEntreMensajes, VENTANA_DEFAULT, ESPACIADO_WHATSA
 import { crearNotionAdapter } from '../adapters/notion';
 import { crearRegistroEnvio, crearRegistroEntrega, agruparPendientesCorreo } from '../adapters/registro-envio';
 import { hoy } from '../lib/reloj';
+import { fechaBogotaISO, horaBogota } from '../lib/date-utils';
 import type { Canal } from '../db/validation';
 
 // Calendario de la agenda real (sesion 2026-07-08, materializador): sin fin de semana
@@ -285,6 +288,77 @@ export async function materializarYEmpujarAhora(): Promise<void> {
   }
 }
 
+// --- snapshot_estados: la foto diaria de etapas -----------------------------------------
+//
+// APAGADA POR DEFAULT (2026-07-25). Se enciende con SNAPSHOT_ESTADOS_ENABLED=true (o =1) en
+// el entorno del worker y reiniciando, sin volver a tocar codigo. El default apagado es para
+// que desplegar el codigo y empezar a escribir historial sean dos decisiones separadas: la
+// tarea depende de `empresa_estado_snapshot`, que crea la migracion 0014, y un despliegue por
+// delante de su migracion solo llenaria el heartbeat de "no such table".
+//
+// Misma mecanica de gate que outboxNotionHabilitado: apagado quiere decir que la tarea ni
+// siquiera se registra en el ciclo, y solo un valor explicito enciende (vacio, 0, false o
+// cualquier otra cosa es apagado). Se lee en cada llamada, no en una constante de modulo, para
+// que los tests puedan alternarla.
+const ORGANIZACION_SNAPSHOT = 1; // unica organizacion real (misma constante que app/mcp/tools.ts)
+const SNAPSHOT_HORA_DEFAULT = 5; // 5am Bogota: antes del barrido de /dia-sales y nadie mueve tarjetas a esa hora
+const CLAVE_ULTIMA_FOTO = 'snapshot_estados_ultima_fecha';
+
+function snapshotEstadosHabilitado(): boolean {
+  const valor = (process.env.SNAPSHOT_ESTADOS_ENABLED ?? '').trim().toLowerCase();
+  return valor === 'true' || valor === '1';
+}
+
+// Hora objetivo en BOGOTA, no en la del proceso (el host del VPS corre en UTC). Fuera de
+// rango o no numerica cae al default en vez de reventar: una variable mal escrita no puede
+// dejar la foto sin tomarse.
+function snapshotHoraObjetivo(): number {
+  const crudo = (process.env.SNAPSHOT_ESTADOS_HORA ?? '').trim();
+  // El vacio se corta ANTES del Number: Number('') es 0, no NaN, asi que sin este return una
+  // variable ausente daba hora objetivo 0 y la compuerta quedaba abierta las 24 horas.
+  if (crudo === '') return SNAPSHOT_HORA_DEFAULT;
+  const n = Number(crudo);
+  return Number.isInteger(n) && n >= 0 && n <= 23 ? n : SNAPSHOT_HORA_DEFAULT;
+}
+
+// UNA VEZ AL DIA, y esto no es optimizacion: correrla en cada ciclo CORROMPE el historial.
+// snapshotEstados deriva transiciones comparando el estado actual contra la foto ANTERIOR, no
+// contra la de hoy. Si una cuenta va A -> B a las 10am, el ciclo de las 10:05 escribe A -> B;
+// si despues va B -> C a las 3pm, el ciclo de las 15:05 compara contra la misma foto anterior
+// (A) y escribe A -> C, que es un movimiento que nunca ocurrio. El dedupe no lo atrapa porque
+// mira estado_nuevo=C y esa fila no existe. La foto en si es idempotente; las transiciones no.
+//
+// El marcador va en configuracion_admin y NO en el heartbeat de la tarea: ejecutarCiclo estampa
+// ultima_corrida en CADA ciclo, incluso cuando la tarea sale temprano por la hora, asi que
+// usarlo como "ya corrio hoy" la dejaria sin correr nunca. Persiste en la base, asi que un
+// reinicio del worker a media tarde tampoco la vuelve a disparar.
+//
+// El marcador se escribe DESPUES de que snapshotEstados vuelve bien. Si truena, no se marca y
+// el proximo ciclo (5 min) reintenta.
+// `ahora` es parametro (con default) y no `new Date()` adentro para que el test pueda fijar la
+// hora sin tocar el reloj del proceso, mismo criterio que el `modo` de tareaPush.
+export async function tareaSnapshotEstados(ahora: Date = new Date()): Promise<void> {
+  const fecha = fechaBogotaISO(ahora);
+
+  if (horaBogota(ahora) < snapshotHoraObjetivo()) return;
+  if (leerConfiguracionAdmin(CLAVE_ULTIMA_FOTO) === fecha) return;
+
+  // Sin try/catch a proposito: que reviente. ejecutarCiclo lo atrapa y deja
+  // `error: <mensaje>` en el heartbeat de 'snapshot-estados', que es el rastro que se
+  // consulta. Tragarse el error aca y devolver normal es exactamente el modo de falla del
+  // adaptador de Notion (heartbeat en ok mientras no entregaba nada); no se repite.
+  const r = snapshotEstados(fecha, ORGANIZACION_SNAPSHOT);
+  guardarConfiguracionAdmin(CLAVE_ULTIMA_FOTO, fecha);
+
+  console.log(
+    `[snapshot-estados] ${fecha} (anterior: ${r.fechaAnterior ?? 'ninguna'}): ` +
+      `${r.filasEscritas} filas de foto, ${r.filasYaExistian} ya estaban, ` +
+      `${r.transiciones.length} transiciones escritas, ` +
+      `${r.transicionesYaRegistradas} ya registradas por otra via, ` +
+      `${r.salidasDelEmbudoNoEscritas.length} salidas del embudo no escritas`,
+  );
+}
+
 // Heartbeat por canal: hoy solo 'correo' tiene proveedor real (Apollo, mismo id que
 // app/conectores/catalogo.ts para que la pantalla /conectores muestre el estado
 // correcto). Un canal nuevo sin entrada aca cae al nombre del canal como heartbeat --
@@ -309,6 +383,11 @@ export function construirTareas(): Tarea[] {
   return [
     ...(outboxNotionHabilitado()
       ? ([{ nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox }] as Tarea[])
+      : []),
+    // Primera del ciclo cuando esta encendida: la foto es del estado con el que arranco el dia,
+    // asi que se toma antes de que nada mas del ciclo corra.
+    ...(snapshotEstadosHabilitado()
+      ? ([{ nombre: 'snapshot-estados', proveedorHeartbeat: 'snapshot-estados', ejecutar: () => tareaSnapshotEstados() }] as Tarea[])
       : []),
     { nombre: 'materializar', proveedorHeartbeat: 'materializador', ejecutar: tareaMaterializar },
     { nombre: 'push:correo', proveedorHeartbeat: 'apollo', ejecutar: tareaPushCorreo },

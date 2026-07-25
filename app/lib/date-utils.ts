@@ -20,6 +20,20 @@ export function fechaBogotaISO(date: Date = new Date()): string {
   return FORMATO_FECHA_BOGOTA.format(date);
 }
 
+// Hora del dia en Bogota, 0-23. Misma razon que fechaBogotaISO: el contenedor puede correr
+// en UTC (el host del VPS lo hace) y getHours() contestaria la hora del proceso, no la del
+// negocio. hourCycle 'h23' y no hour12:false, que en algunas versiones de ICU devuelve "24"
+// a medianoche en vez de "00".
+const FORMATO_HORA_BOGOTA = new Intl.DateTimeFormat('en-GB', {
+  timeZone: ZONA_BOGOTA,
+  hour: '2-digit',
+  hourCycle: 'h23',
+});
+
+export function horaBogota(date: Date = new Date()): number {
+  return Number(FORMATO_HORA_BOGOTA.format(date));
+}
+
 // Fecha de calendario LOCAL en formato YYYY-MM-DD, sin pasar por UTC. Usar
 // `toISOString()` tras `setDate()` convierte a UTC antes de recortar la fecha, lo
 // que puede correr el día en +-1 si el huso horario del proceso cruza medianoche
