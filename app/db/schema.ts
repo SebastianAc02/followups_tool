@@ -69,6 +69,47 @@ export const empresa = sqliteTable('empresa', {
   // capture; digitalPctConDefault() aplica el 40% (igual que la formula de Notion,
   // verificada contra un deal real) mientras tanto.
   pctDigital: real('pct_digital'),
+
+  // --- CRM portable (2026-07-24) ---
+  // Todo lo de abajo entra nullable y sin default: son 1.956 filas vivas y ninguna
+  // tiene el dato todavia. NULL significa "nunca se evaluo", distinto de 0 = "no".
+  // Backfill hacia adelante, no hay script de relleno.
+
+  // De donde salio el lead: inbound, outbound, evento, referido. Es el corte que mas se
+  // va a pedir y hoy no existe a nivel empresa. Existe cliente.fuente_lead, pero solo
+  // cubre las 73 filas que ya son cliente y viene de Notion, no del origen real.
+  fuenteLead: text('fuente_lead'),
+  // Primer y ultimo toque en fecha ISO. No son derivables limpio de toque: 97 de 274
+  // toques tienen fecha NULL, y los contactos por WhatsApp viven en mensaje_whatsapp,
+  // fuera de toque. max(toque.fecha) daria una respuesta incompleta y silenciosa.
+  fechaPrimerContacto: text('fecha_primer_contacto'),
+  fechaUltimoContacto: text('fecha_ultimo_contacto'),
+  // Razon de perdida a nivel cuenta. Ya existe toque.razon_perdida, pero con 0 filas
+  // llenas en 274 toques: la perdida se decide sobre la cuenta, no sobre un toque suelto.
+  razonPerdida: text('razon_perdida'),
+
+  // Marcadores del embudo, 0/1. Son monotonos ("alguna vez llego"), distintos de
+  // estado_notion que es la etapa de AHORA. No se pueden derivar de
+  // empresa_estado_historial: esa tabla tiene 47 filas contra 1.956 empresas, arranco
+  // el 2026-07-15 y no cubre nada anterior.
+  contactado: integer('contactado'),
+  respondio: integer('respondio'),
+  agendado: integer('agendado'),
+  sePresento: integer('se_presento'),
+  califica: integer('califica'),
+
+  // Tier comercial de la cuenta. Existe cliente.tier_notion, otra vez solo para clientes.
+  // prioridad_comercial (1..5, 9) y score_outbound son del motor de prospeccion, no del
+  // tamano del deal.
+  tier: text('tier'),
+  // Tipo de empresa. Se solapa con `categoria` (isp/utility/otro, 1.950 filas llenas) y
+  // con la vista empresa_categoria, que ya derivan si la cuenta es atacable. Entra
+  // aparte porque eso responde "sirve de target", no "que es".
+  tipoEmpresa: text('tipo_empresa'),
+
+  // pag_web NO entra aca a proposito: empresa_web.url_website ya es 1:1 con empresa por
+  // la misma PK y cubre 1.777 de 1.956 filas. Meterlo aqui crea una segunda verdad que
+  // se desincroniza sola. Se resuelve con join.
 });
 
 // Catalogo de planes (2026-07-22, plan-panel-metricas-tiempo-real.md): NO se refleja de
