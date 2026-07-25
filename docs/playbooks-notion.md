@@ -19,6 +19,22 @@ conflicto posible.
 Notion es de solo lectura. Escribir en Notion requiere aprobación explícita de Sebastián, cada
 vez. El sync hacia Notion no es automático y hoy no debe serlo: se dispara a través de Claude.
 
+### El owner está disparejo a propósito desde el 2026-07-25
+
+Ese día se reasignaron **42 owners y 5 categorías desde el cockpit web**, en lote, sobre cuentas en
+`firma_pago` (clientes). Esos cambios viven **solo en la base**: Notion conserva los owners
+anteriores. Decisión de Sebastián: se deja así, no se sube a Notion y no se revierte la base.
+
+Lo que hay que saber al operar: **`reconciliar_notion` va a proponer alinear esos owners a lo que
+dice Notion, y esa propuesta se ignora.** Notion ahí no está más al día, está más viejo. Alinear
+seria revertir un cambio deliberado.
+
+Cómo reconocerlos: son cuentas en `firma_pago` cuyo owner cambió el 2026-07-25 entre las 20:06 y
+las 20:07. Quedan en `sync_cambios` con `fuente = 'cockpit'` y `detalle = 'campos: owner'`.
+
+El estado NO tiene este problema: cuadra al 100% entre los dos lados. Este es un caso de un solo
+campo.
+
 ## Playbook 1: apareció una página nueva en Notion
 
 **Paso 1. Traerse la página entera de una vez.** Una sola lectura, no tres. Estado, owner,
