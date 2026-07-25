@@ -27,12 +27,19 @@ const MAPA_DIRECTO: Record<string, EstadoNotion> = {
   'Firma y Pago Realizado': 'firma_pago',
 };
 
-// Huerfanos decididos (spec): "firmado" aun no es "pago hecho", asi que ambos
-// caen en cierre_documentacion en vez de firma_pago. Excepcion explicita, no
-// una regla general de fuzzy-match.
+// Huerfanos decididos: los dos caen en enviar_contrato, que engloba las dos etapas de
+// cierre de Notion (la del contrato y la de la firma). Asi Notion suma 2 en esa etapa y
+// la base tambien. Sigue valiendo que "firmado" no es "pago hecho": ninguno cae en
+// firma_pago. Excepcion explicita, no una regla general de fuzzy-match.
+//
+// Apuntar a un estado que el CHECK de empresa.estado_notion YA acepta es lo que evita el
+// cambio de esquema: ampliar ese CHECK de 8 a 10 valores obliga en SQLite a recrear
+// `empresa` con sus 1.956 filas, 8 indices, su trigger y 3 vistas, y revienta dentro de la
+// transaccion de Drizzle. Por eso drizzle/manual/0011_estado_notion_check.sql queda
+// cancelado: no se corre ni entra al journal.
 const HUERFANOS: Record<string, EstadoNotion> = {
-  'Contrato Firmado': 'cierre_documentacion',
-  'Firma Pendiente': 'cierre_documentacion',
+  'Contrato Firmado': 'enviar_contrato',
+  'Firma Pendiente': 'enviar_contrato',
 };
 
 export function mapearEstadoNotion(estadoNotion: string): EstadoNotion {
