@@ -13,7 +13,7 @@ const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
 const { registrarToqueTool, moverEstadoTool, cambiarCadenciaTool, marcarPerdidaTool } = await import('./tools.ts');
-const { crearMcpServer } = await import('./server.ts');
+const { crearMcpServer, TOOLS_LECTURA, TOOLS_ESCRITURA } = await import('./server.ts');
 const { outboxPendientes } = await import('../db/repository.ts');
 const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
@@ -126,33 +126,21 @@ async function toolsDe(server: any): Promise<string[]> {
 // preguntarlo.
 test('crearMcpServer() (default, standalone legacy) expone SOLO las tools de lectura', async () => {
   const nombres = await toolsDe(crearMcpServer());
-  assert.deepEqual(nombres, ['buscar_empresa', 'cuentas', 'deal_historia', 'embudo', 'panel_metricas', 'pipeline']);
+  // Contra la constante, no contra una lista repetida: TOOLS_LECTURA es lo que publica
+  // /api/mcp/version, y este assert es lo que impide que ese endpoint mienta.
+  assert.deepEqual(nombres, [...TOOLS_LECTURA].sort());
 });
 
 test('crearMcpServer({escritura:true}) expone ademas las 7 write tools', async () => {
   const nombres = await toolsDe(crearMcpServer({ escritura: true, idOrganizacion: 1 }));
-  assert.deepEqual(nombres, [
-    'actualizar_empresa',
-    'buscar_empresa',
-    'cambiar_cadencia',
-    'crear_empresa',
-    'cuentas',
-    'deal_historia',
-    'embudo',
-    'marcar_perdida',
-    'mover_estado',
-    'panel_metricas',
-    'pipeline',
-    'reasignar_nit',
-    'registrar_toque',
-  ]);
+  assert.deepEqual(nombres, [...TOOLS_LECTURA, ...TOOLS_ESCRITURA].sort());
 });
 
 // El contrapositivo del test de arriba, escrito aparte porque es la garantia que importa:
 // ninguna de las que escriben aparece sin el permiso.
 test('sin escritura_mcp no se lista NINGUNA tool que escriba', async () => {
   const nombres = await toolsDe(crearMcpServer());
-  for (const escritora of ['registrar_toque', 'mover_estado', 'cambiar_cadencia', 'marcar_perdida', 'crear_empresa', 'actualizar_empresa', 'reasignar_nit']) {
+  for (const escritora of TOOLS_ESCRITURA) {
     assert.equal(nombres.includes(escritora), false, `${escritora} no debe listarse sin el permiso`);
   }
 });

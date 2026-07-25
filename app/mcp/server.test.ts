@@ -12,7 +12,7 @@ const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 process.env.MCP_TOKEN = 'secreto-de-prueba';
 
-const { crearServidorMcp } = await import('./server.ts');
+const { crearServidorMcp, TOOLS_LECTURA } = await import('./server.ts');
 const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
 
@@ -92,10 +92,8 @@ test('cliente MCP real: handshake + tools/list expone las tools de solo lectura'
   await client.connect(transport);
 
   const { tools } = await client.listTools();
-  assert.deepEqual(
-    tools.map((t) => t.name).sort(),
-    ['buscar_empresa', 'cuentas', 'deal_historia', 'embudo', 'panel_metricas', 'pipeline'],
-  );
+  // Contra la constante que publica /api/mcp/version, no contra una lista repetida a mano.
+  assert.deepEqual(tools.map((t) => t.name).sort(), [...TOOLS_LECTURA].sort());
 
   await client.close();
 });

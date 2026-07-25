@@ -22,6 +22,8 @@ import {
   cuentasParaReconciliar,
   empresaFueraDelPipeline,
   reasignarNit,
+  reconciliarNotion,
+  cambiosDesde,
   registrarToque,
   actualizarEstadoNotion,
   cambiarCadencia,
@@ -45,6 +47,8 @@ import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/pro
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { debeEncolarHaciaNotion, type OrigenCambio } from '../core/origen-cambio';
 import { CLAVE_SIN_ETAPA } from '../core/embudo';
+import { mapearEstadoNotion } from '../core/reconciliacion/mapeoEstados';
+import type { PaginaNotion } from '../core/reconciliacion/planReconciliacion';
 import { hoy } from '../lib/reloj';
 
 // Unica organizacion real hoy (scripts/seed_organizacion.ts crea "Onepay" como la primera
@@ -375,6 +379,44 @@ export function actualizarEmpresaTool(input: ActualizarEmpresaInput, idOrganizac
 // la PK y arrastra las referencias), asi que devuelve el detalle de que se movio y no un
 // { ok: true }: quien la corre necesita ver cuantas filas cambiaron para saber que no quedo a
 // medias.
+// Reconciliar en lote. El estado llega como lo escribe Notion ("Firma y Pago Realizado") y se
+// traduce aca, no en el core del plan: mapearEstadoNotion lanza ante un valor desconocido, y se
+// quiere que una pagina rara ensucie SOLO su fila, no que tumbe el lote entero.
+export type ReconciliarNotionInput = {
+  paginas: { pageId: string; estado: string; owner?: string | null; nombre?: string | null }[];
+  aplicar?: boolean;
+};
+
+export function reconciliarNotionTool(input: ReconciliarNotionInput, idOrganizacion: number) {
+  const traducidas: PaginaNotion[] = [];
+  const sinMapeo: { pageId: string; estado: string }[] = [];
+  for (const p of input.paginas) {
+    try {
+      traducidas.push({ ...p, estado: mapearEstadoNotion(p.estado) });
+    } catch {
+      sinMapeo.push({ pageId: p.pageId, estado: p.estado });
+    }
+  }
+  // aplicar por defecto FALSE: se mira el plan antes de escribir.
+  const r = reconciliarNotion(traducidas, idOrganizacion, input.aplicar === true, hoy());
+  return { ...r, sinMapeo };
+}
+
+export type CambiosDesdeInput = { desde: string; idOrganizacion?: number };
+
+export function cambiosDesdeTool(input: CambiosDesdeInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const cambios = cambiosDesde(input.desde, idOrganizacion);
+  return {
+    desde: input.desde,
+    organizacion: idOrganizacion,
+    total: cambios.length,
+    // Sin page_id no hay a donde subirlo: se reportan aparte para no perderlas de vista.
+    sinPaginaEnNotion: cambios.filter((c) => !c.notionPageId).length,
+    cambios,
+  };
+}
+
 export type ReasignarNitInput = { idEmpresa: string; nit: string };
 
 export function reasignarNitTool(input: ReasignarNitInput, idOrganizacion: number) {

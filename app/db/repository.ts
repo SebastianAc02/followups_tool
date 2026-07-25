@@ -98,6 +98,11 @@ import {
   idEmpresaSintetico,
   telefonoNormalizado,
 } from '../core/empresa-identidad';
+import {
+  planReconciliacion,
+  type PaginaNotion,
+  type PlanReconciliacion,
+} from '../core/reconciliacion/planReconciliacion';
 import type { AccionImportacionToque, ToqueDbExistente } from '../core/reconciliacion/toquesNotion';
 import {
   registrarToqueSchema,
@@ -6571,6 +6576,112 @@ export function pipelineParaEndpoint(idOrganizacion: number): FilaPipelineMrr[] 
     .where(and(eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA, EN_PIPELINE))
     .orderBy(asc(empresa.nombreOficial))
     .all();
+}
+
+// --- Reconciliar contra Notion en lote ------------------------------------------------
+
+export type ReconciliarNotionResultado = PlanReconciliacion & { aplicado: boolean };
+
+// Recibe lo que dice Notion y alinea la base. Ejecuta el plan que arma el core
+// (planReconciliacion): solo escribe el caso "misma pagina, distinto estado u owner", que es el
+// unico que no implica decidir identidad. Todo lo demas sale reportado para que lo mire Sebastian.
+//
+// aplicar:false es dry-run y es el modo por defecto a proposito: se mira el plan antes de que
+// escriba. El costo de equivocarse aca es escribir sobre el CRM de otra persona.
+//
+// El estado se escribe con encolarNotion:false SIEMPRE. Es la definicion misma de esta operacion:
+// el dato vino de Notion, devolverlo es el bounce-back.
+export function reconciliarNotion(
+  paginas: PaginaNotion[],
+  idOrganizacion: number,
+  aplicar: boolean,
+  fecha: string,
+): ReconciliarNotionResultado {
+  const plan = planReconciliacion(paginas, cuentasParaReconciliar(idOrganizacion));
+  if (!aplicar) return { ...plan, aplicado: false };
+
+  for (const a of plan.alinear) {
+    if (a.estadoA !== null) {
+      actualizarEstadoNotion(a.idEmpresa, a.estadoA, idOrganizacion, fecha, { encolarNotion: false });
+    }
+    if (a.ownerA !== null) {
+      db.update(empresa)
+        .set({ owner: a.ownerA })
+        .where(and(eq(empresa.idEmpresa, a.idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+        .run();
+    }
+  }
+  return { ...plan, aplicado: true };
+}
+
+// --- Que se movio en la herramienta desde una fecha -----------------------------------
+
+export type CambioEmpresa = {
+  idEmpresa: string;
+  nombre: string;
+  notionPageId: string | null;
+  estado: string | null;
+  owner: string | null;
+  toquesNuevos: number;
+  transiciones: { de: string | null; a: string; fecha: string }[];
+};
+
+// Lo que hay que subir a Notion: que empresas se movieron desde `desde` (YYYY-MM-DD). Existe para
+// no tener que revisar el pipeline entero en la resincronizacion: la base ya sabe que se toco.
+//
+// Sobre las fechas: toque.fecha tiene formatos mezclados en las filas viejas importadas, asi que
+// la comparacion por prefijo (substr 1..10) no las alcanza a todas. No importa para lo que esta
+// funcion responde: los toques que hay que subir son los que NACIERON en la herramienta, y esos
+// los escribe el codigo en ISO. Las filas viejas no se van a subir a Notion.
+export function cambiosDesde(desde: string, idOrganizacion: number): CambioEmpresa[] {
+  const toques = db
+    .select({ idEmpresa: toque.idEmpresa, n: sql<number>`count(*)` })
+    .from(toque)
+    .where(and(eq(toque.idOrganizacion, idOrganizacion), sql`substr(${toque.fecha}, 1, 10) >= ${desde}`))
+    .groupBy(toque.idEmpresa)
+    .all();
+
+  const transiciones = db
+    .select({
+      idEmpresa: empresaEstadoHistorial.idEmpresa,
+      de: empresaEstadoHistorial.estadoAnterior,
+      a: empresaEstadoHistorial.estadoNuevo,
+      fecha: empresaEstadoHistorial.fecha,
+    })
+    .from(empresaEstadoHistorial)
+    .where(
+      and(
+        eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+        sql`substr(${empresaEstadoHistorial.fecha}, 1, 10) >= ${desde}`,
+      ),
+    )
+    .all();
+
+  const ids = new Set<string>([...toques.map((t) => t.idEmpresa), ...transiciones.map((t) => t.idEmpresa)]);
+  if (ids.size === 0) return [];
+
+  const filas = db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      notionPageId: empresa.notionPageId,
+      estado: empresa.estadoNotion,
+      owner: empresa.owner,
+    })
+    .from(empresa)
+    .where(and(eq(empresa.organizacionActivaId, idOrganizacion), inArray(empresa.idEmpresa, [...ids])))
+    .all();
+
+  const porToques = new Map(toques.map((t) => [t.idEmpresa, Number(t.n)]));
+  return filas
+    .map((f) => ({
+      ...f,
+      toquesNuevos: porToques.get(f.idEmpresa) ?? 0,
+      transiciones: transiciones
+        .filter((t) => t.idEmpresa === f.idEmpresa)
+        .map((t) => ({ de: t.de, a: t.a, fecha: t.fecha })),
+    }))
+    .sort((a, b) => b.toquesNuevos - a.toquesNuevos);
 }
 
 // --- Existencia y motivo de exclusion del pipeline ------------------------------------

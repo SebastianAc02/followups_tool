@@ -31,11 +31,43 @@ import {
   crearEmpresaTool,
   actualizarEmpresaTool,
   reasignarNitTool,
+  reconciliarNotionTool,
+  cambiosDesdeTool,
 } from './tools';
 import { CANALES, RESULTADOS } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 import { ORIGENES_CAMBIO } from '../core/origen-cambio';
+
+// Los nombres que se registran, en un solo lugar. Sirven para /api/mcp/version, que responde
+// "que tools tiene el servidor AHORA" sin entrar por SSH al VPS. No pueden desincronizarse del
+// registro real: server.test.ts y tools.write.test.ts comparan tools/list contra estas constantes,
+// asi que agregar una tool sin ponerla aca rompe el gate.
+export const TOOLS_LECTURA = [
+  'buscar_empresa',
+  'cambios_desde',
+  'cuentas',
+  'deal_historia',
+  'embudo',
+  'panel_metricas',
+  'pipeline',
+] as const;
+
+export const TOOLS_ESCRITURA = [
+  'actualizar_empresa',
+  'cambiar_cadencia',
+  'crear_empresa',
+  'marcar_perdida',
+  'mover_estado',
+  'reasignar_nit',
+  'reconciliar_notion',
+  'registrar_toque',
+] as const;
+
+// Momento en que arranco ESTE proceso. Es la forma barata de saber si el contenedor se recreo
+// con el deploy: si la hora es vieja, el codigo nuevo no esta corriendo por mas que el workflow
+// haya dicho success.
+export const ARRANCADO_EN = new Date().toISOString();
 
 const NOMBRE_SERVIDOR = 'followups-panel-mcp';
 const VERSION_SERVIDOR = '1.0.0';
@@ -198,6 +230,35 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
   );
 
   server.registerTool(
+    'reconciliar_notion',
+    {
+      description:
+        'Alinea la base a lo que dice Notion, en lote. Recibe las paginas (pageId, estado como lo ' +
+        'escribe Notion, owner) y devuelve el plan. Solo escribe el caso "misma pagina, distinto ' +
+        'estado u owner"; las paginas sin cuenta y las cuentas sin pagina las REPORTA, porque eso ' +
+        'implica decidir identidad. Nunca borra. El estado no se devuelve a Notion. ' +
+        'aplicar es false por defecto: correr primero en seco y mirar el plan.',
+      inputSchema: {
+        paginas: z
+          .array(
+            z.object({
+              pageId: z.string().min(1),
+              estado: z.string().min(1).describe('Tal como lo escribe Notion, ej "Firma y Pago Realizado"'),
+              owner: z.string().nullable().optional().describe('Vacio NO borra el owner de la base'),
+              nombre: z.string().nullable().optional(),
+            }),
+          )
+          .min(1),
+        aplicar: z.boolean().optional().describe('false (default) = dry-run, solo devuelve el plan'),
+      },
+    },
+    async ({ paginas, aplicar }) => {
+      const r = reconciliarNotionTool({ paginas, aplicar }, idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
     'reasignar_nit',
     {
       description:
@@ -306,6 +367,26 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     async ({ idOrganizacion }) => {
       const resultado = cuentasTool({ idOrganizacion });
       return { content: [{ type: 'text', text: JSON.stringify(resultado) }] };
+    },
+  );
+
+  // Que subir a Notion. Es el paso 1 de la resincronizacion: en vez de revisar el pipeline
+  // entero, se le pregunta a la base que se movio.
+  server.registerTool(
+    'cambios_desde',
+    {
+      description:
+        'Que empresas se movieron en la herramienta desde una fecha: toques nuevos y transiciones ' +
+        'de etapa, con su notionPageId para saber a que pagina van. Reporta aparte cuantas no ' +
+        'tienen pagina en Notion. Empieza por aca al subir cambios a Notion.',
+      inputSchema: {
+        desde: z.string().min(1).describe('YYYY-MM-DD. Se incluyen los cambios de ese dia en adelante'),
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+      },
+    },
+    async ({ desde, idOrganizacion }) => {
+      const resultado = cambiosDesdeTool({ desde, idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );
 
