@@ -80,6 +80,18 @@ Caso que originó la regla: crear una cuenta antes de conseguir su NIT deja el i
 (`ntn-`/`999`), y ninguna tool reasignaba el id. Corregirlo a mano habría sido tocar una PK por
 SSH. Se construyó `reasignar_nit` en su lugar.
 
+## Playbooks de operación
+
+Cada operación entre Notion y la herramienta tiene su procedimiento fijo en
+`docs/playbooks-notion.md`: página nueva, cambio de estado u owner, página borrada, toque de una
+empresa que no está en Notion, y subir a Notion lo que nació aquí. Si aparece un caso que no está
+y se resuelve a mano, se agrega al documento.
+
+Se confirma siempre con Sebastián antes de escribir, pero llegando con la propuesta hecha: la
+página ya leída, `buscar_empresa` ya corrido, y una acción concreta con su evidencia. La pregunta
+tiene que costarle una palabra. Preguntar algo que se responde mirando la página o corriendo una
+tool no es una pregunta, es trabajo sin hacer.
+
 ## Cómo se trabaja
 
 - Una tarea de `planning/tasks.md` por delegación. Diff pequeño y revisable.
