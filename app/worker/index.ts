@@ -54,6 +54,24 @@ async function tareaOutbox(): Promise<void> {
   );
 }
 
+// Gate del drenado de outbox hacia Notion (2026-07-24). Default APAGADO, y apagado quiere
+// decir que la tarea ni siquiera se registra en el ciclo: el brain escribe Notion por su
+// cuenta y nunca encola en `outbox`, asi que en produccion la tabla tiene 2 filas, las dos
+// fallidas desde julio -- este camino nunca entrego nada. Dejarlo corriendo solo suma
+// reintentos contra Notion y ensucia el heartbeat de 'notion', que ademas termina
+// reportando el conector como caido por un camino que nadie usa.
+//
+// tareaOutbox y core/outbox.ts se quedan intactos a proposito: reencender esto es poner
+// OUTBOX_NOTION_ENABLED=true (o =1) en el entorno, sin volver a tocar codigo.
+//
+// Encendido SOLO con valor explicito: variable ausente, vacia o con cualquier otro valor
+// es apagado. Se lee en cada llamada (no en una constante de modulo) para que los tests
+// puedan alternarla, mismo criterio que syncExtendidoHabilitado en adapters/notion.ts.
+function outboxNotionHabilitado(): boolean {
+  const valor = (process.env.OUTBOX_NOTION_ENABLED ?? '').trim().toLowerCase();
+  return valor === 'true' || valor === '1';
+}
+
 // V? (materializador): antes de esto, inscribirCampana dejaba la inscripcion activa
 // pero nunca escribia paso_inscripcion -- nada llegaba a /cola para NINGUN canal (ver
 // planning/experimento-apollo.md, Hallazgo real #4). Corre primero en el ciclo (antes
@@ -283,11 +301,15 @@ function tareasPush(registro: ReturnType<typeof crearRegistroEntrega>): Tarea[] 
     }));
 }
 
-function construirTareas(): Tarea[] {
+// Exportada (2026-07-24) para que worker.test.ts pueda verificar las dos ramas del gate de
+// outbox sin arrancar el proceso del worker.
+export function construirTareas(): Tarea[] {
   const registroCompleto = crearRegistroEnvio();
   const registroEntrega = crearRegistroEntrega();
   return [
-    { nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox },
+    ...(outboxNotionHabilitado()
+      ? ([{ nombre: 'outbox', proveedorHeartbeat: 'notion', ejecutar: tareaOutbox }] as Tarea[])
+      : []),
     { nombre: 'materializar', proveedorHeartbeat: 'materializador', ejecutar: tareaMaterializar },
     { nombre: 'push:correo', proveedorHeartbeat: 'apollo', ejecutar: tareaPushCorreo },
     ...tareasPush(registroEntrega),

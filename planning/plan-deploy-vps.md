@@ -69,6 +69,7 @@ Puntos clave de diseño:
 | `WHATSAPP_WEBHOOK_TOKEN` | el actual (o rotar) |
 | `APOLLO_MAILBOX_ID` | el actual |
 | `EVOLUTION_API_BASE_URL` | `http://evolution_api:8080` (nombre del contenedor en la red onepay; sin esto la app cae al default `localhost:8080` = ella misma) |
+| `OUTBOX_NOTION_ENABLED` | sin poner. Gate de la tarea `outbox` del worker (drenado hacia Notion): ausente, vacia o cualquier otro valor = apagado, y la tarea ni se registra en el ciclo. Enciende solo con `true` o `1`. Reactivarla es poner la variable y recrear el contenedor: no hay que tocar codigo |
 
 Nota: las API keys de WhatsApp (Evolution) y Apollo NO son env -- viven cifradas en
 la DB (`conector.credencial_ciphertext`), descifradas con `FOLLOWUPS_CRYPTO_KEY`. Por
