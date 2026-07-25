@@ -66,5 +66,9 @@ jobs:
             # vacio y el toggle de modo prueba revienta al primer query. Cero filas de
             # negocio a proposito: en modo prueba no hay ISP real al que escribirle.
             docker compose -f docker-compose.production.yml run --rm -e ISPS_DB_PATH=/data/pruebas.db followups-web npm run migrate
+            # NO agregar `-f docker-compose.mcp.yml` aca: ese contenedor esta deprecado desde
+            # el 2026-07-23 (ver Caddyfile:13). El MCP ya no es un servicio standalone, es una
+            # route de followups-web (app/api/mcp) protegida por OAuth, asi que se despliega
+            # con el web y no necesita nada extra. Levantarlo revive un servicio muerto.
             docker compose -f docker-compose.production.yml up -d
           '

@@ -1,25 +1,32 @@
-# MCP server del panel (solo lectura, login OAuth)
+# MCP server del panel (login OAuth)
 
-Expone las metricas del panel del CRO y la historia de deals por MCP, para consultarlas
-desde Claude sin abrir la UI. Desde el 2026-07-23 la conexion es **login OAuth**: se pega la
-URL en Claude y se entra con la cuenta de la tool (better-auth), sin copiar ningun token a
-mano. Vive en `app/api/mcp/route.ts`, en el MISMO origen que el resto de la app
-(`https://followupsonepay.duckdns.org`) -- ya no es un proceso aparte.
+Expone las metricas del panel del CRO, la historia de deals y el embudo de oportunidades
+por MCP, para consultarlas desde Claude sin abrir la UI. Desde el 2026-07-23 la conexion es
+**login OAuth**: se pega la URL en Claude y se entra con la cuenta de la tool (better-auth),
+sin copiar ningun token a mano.
 
-Las 3 tools (`app/mcp/tools.ts`) y el `McpServer` que las registra (`crearMcpServer` en
+**Donde corre**: `app/api/mcp/route.ts`, integrado en Next.js dentro de `followups-web`.
+Se despliega en el MISMO contenedor que el resto de la app, sin infraestructura extra. URL:
+`https://followupsonepay.duckdns.org/api/mcp` o `https://mcp.followupsonepay.duckdns.org/api/mcp`
+(ambas sirven lo mismo). El VPS corre una sola imagen Docker, sin un contenedor `mcp` separado.
+
+Las 4 tools (`app/mcp/tools.ts`) y el `McpServer` que las registra (`crearMcpServer` en
 `app/mcp/server.ts`) se reusan tal cual del diseño original (Fase 3,
-`docs/plan-panel-metricas-tiempo-real.md`): lo unico que cambio es el transporte y el auth.
+`docs/plan-panel-metricas-tiempo-real.md`), mas las dos nuevas (`embudo` y la escritura en
+`mover_estado`): lo unico que cambio es el transporte y el auth.
 Ver `docs/superpowers/specs/2026-07-23-mcp-oauth-login-design.md` para el diseño del login
 OAuth.
 
 El proceso standalone token-based (`app/mcp/index.ts`, `server.ts`, `auth.ts`,
-`docker-compose.mcp.yml`) sigue en el repo pero queda REDUNDANTE: el trafico real pasa por
-la route de Next. Se documenta abajo solo para desarrollo local rapido con curl/SDK
-directo, no para el uso desde Claude.
+`docker-compose.mcp.yml`) quedó DEPRECADO el 2026-07-23: el trafico real pasa por
+la route de Next dentro de `followups-web`. En deployment NO agregar `-f docker-compose.mcp.yml`,
+no hay un contenedor `mcp` que levantar (el VPS lo verificó el 2026-07-25: ningun proceso en 3900).
+Se documenta abajo solo para desarrollo local rapido con curl/SDK directo, si se quiere testear
+sin pasar por OAuth.
 
-Solo lectura: las tres tools llaman unicamente funciones de consulta del Repository
-(`app/db/repository.ts`) y formulas puras del core. Ninguna escribe en la DB ni sincroniza
-a Notion.
+Lectura y escritura: tres tools solo consultan (`panel_metricas`, `deal_historia`, `pipeline` son
+read-only, llaman unicamente funciones de consulta del Repository `app/db/repository.ts`); una
+escribe (`mover_estado` con `origen` "herramienta", encola cambios a Notion).
 
 ## Tools expuestas
 
@@ -40,6 +47,26 @@ Output: `{ organizacion, tiempoPromedioPorEtapa, cicloVentaPromedio, conversionS
 `cicloVentaPromedio` es `null` cuando ningun deal ha llegado a `firma_pago` todavia (no se
 inventa un 0).
 
+### `embudo`
+
+Conteo de cuentas por etapa del pipeline, con usuarios efectivos totales por etapa.
+
+Input (todo opcional):
+
+| campo | tipo | default |
+|---|---|---|
+| `idOrganizacion` | number | 1 |
+| `owner` | string | sin filtro. Filtra cuentas con ese owner, mismo criterio que `panel_metricas` |
+
+Output: `{ organizacion, porEtapa: [{ etapa, total, usuarios }], totalEnEmbudo, sinEtapa }`.
+
+`porEtapa` lista cada etapa con su conteo y suma de usuarios efectivos de esas cuentas.
+`totalEnEmbudo` es la suma de `total` en todas las etapas. `sinEtapa` es el conteo de cuentas
+que existen en la base pero tienen `estado_notion` en null (no aparecen en el pipeline porque
+la base no les asignó etapa todavia -- reconcialiacion pending). Esta tool existe para evitar
+la carga de traerse 476 empresas via `pipeline` solo para contar (142 KB de JSON) cuando lo
+que se quiere es un conteo rapido.
+
 ### `deal_historia`
 
 Historia de un deal: etapa actual, transiciones con fecha, plan asignado, MRR potencial,
@@ -54,6 +81,12 @@ Output si la empresa existe:
 Output si no existe (o esta fuera del scope de `pipelineParaEndpoint`, ver el comentario en
 `app/mcp/tools.ts`): `{ idEmpresa, error: 'empresa_no_encontrada' }`.
 
+**Trampa**: el error `empresa_no_encontrada` responde en dos casos distintos que no se pueden
+diferenciar desde la respuesta: cuando la empresa no existe en la base, y cuando existe pero
+tiene `estado_notion` en null (sin etapa asignada). Para saber cual es, llamar primero
+`buscar_empresa` -- si devuelve la empresa, el problema es que no tiene etapa; si devuelve
+"no encontrada", la empresa de verdad no existe.
+
 ### `pipeline`
 
 Lista de deals de la organizacion con sus cifras: mismo dato que expone
@@ -62,6 +95,31 @@ Lista de deals de la organizacion con sus cifras: mismo dato que expone
 Input: `{ idOrganizacion?: number }` (default 1).
 
 Output: `{ organizacion, empresas: [{ idEmpresa, nombre, etapa, dealSize, probabilidadCierre, metodoProbabilidad, digitalPct, plan, revenueEstimado }] }`.
+
+### `mover_estado`
+
+Cambia la etapa de un deal (escritura).
+
+Input:
+
+| campo | tipo | default |
+|---|---|---|
+| `idEmpresa` | string | requerido |
+| `nuevoEstado` | string | requerido. Valores validos: `prospecto`, `conversacion_inicial`, `poc`, `evaluacion_comercial`, `propuesta_enviada`, `negociacion`, `firma_pago`, `activo`, `churn`. |
+| `origen` | string | "herramienta". Acepta "notion" (reconciliacion: cambio queda en BD, no sincroniza a Notion) o "herramienta" (cambio se encola hacia Notion, default). Ver abajo. |
+| `razon` | string | opcional. Anotacion en el log de auditoría (`sync_cambios`). |
+
+Output si exito: `{ exito: true }`.
+
+Output si no existe: `{ error: 'empresa_no_encontrada' }`.
+
+**Parametro `origen`**: Por defecto es "herramienta" pero HOY el comportamiento es el mismo
+que "notion" (no se encola a Notion automaticamente). La diferencia existe como interfaz para
+cuando se necesite reconciliacion (alinear la BD a lo que Notion YA dice, sin bounce-back):
+usar `origen: "notion"` y el cambio queda en la base sin levantar un evento sync. Con
+`origen: "herramienta"` el cambio PODRIA encolar (reservado para futura implementacion si
+Sebastián lo decide), pero hoy permanece en BD como el otro -- nada sale a Notion
+de forma automatica.
 
 ## Auth (OAuth, plugin `mcp` de Better Auth)
 
@@ -118,7 +176,7 @@ el vector real (suplantacion silenciosa), asi que queda anotado, no construido.
 
 ## Levantar / desplegar
 
-El MCP ya NO necesita un contenedor aparte: vive dentro de `followups-web` (la misma imagen,
+El MCP NO necesita un contenedor aparte: vive dentro de `followups-web` (la misma imagen,
 el mismo `next start`). El unico paso de deploy es la migracion de las 3 tablas nuevas que
 el plugin `mcp` necesita (`oauth_application`, `oauth_access_token`, `oauth_consent`):
 
@@ -128,17 +186,16 @@ python3 scripts/migrate_mcp_oauth_apply.py
 ```
 
 Es idempotente (`CREATE TABLE IF NOT EXISTS`), mismo criterio que `migrate_auth_apply.py`
-(V2.1). El contenedor `mcp` standalone (`docker-compose.mcp.yml`) puede apagarse sin perder
-funcionalidad -- es un paso de deploy del orquestador, no de este cambio de codigo:
+(V2.1).
 
-```bash
-docker compose -f docker-compose.production.yml -f docker-compose.mcp.yml stop mcp
-```
+**Que NO hacer**: el deploy NO debe incluir `-f docker-compose.mcp.yml`. La imagen `mcp`
+es OBSOLETA desde el 2026-07-23. No existe ningun contenedor `mcp` en el VPS y nada escucha
+en `localhost:3900`. Si algun script o instrucción vieja dice "agregar docker-compose.mcp.yml",
+ignorarla -- el MCP pasa por `followups-web` / `next start`, punto.
 
-`Caddyfile`: `mcp.followupsonepay.duckdns.org` ya no proxea a `mcp:3900`, proxea a
-`followups-web:3000` (mismo contenedor que el dominio principal). El subdominio que Camilo
-ya tenia guardado sigue vivo; tambien se puede usar `https://followupsonepay.duckdns.org/api/mcp`
-directo.
+`Caddyfile`: `mcp.followupsonepay.duckdns.org` proxea a `followups-web:3000` (mismo
+contenedor que el dominio principal). El subdominio sigue vivo; tambien se puede usar
+`https://followupsonepay.duckdns.org/api/mcp` directo.
 
 ## Conectar desde Claude
 
