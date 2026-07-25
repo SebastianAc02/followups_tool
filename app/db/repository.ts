@@ -6851,7 +6851,12 @@ export function cuentasParaReconciliar(idOrganizacion: number): FilaCuenta[] {
     .where(
       and(
         eq(empresa.organizacionActivaId, idOrganizacion),
-        EMPRESA_VIVA,
+        // SIN EMPRESA_VIVA a proposito. Ese filtro (opera_bajo_id IS NULL) es correcto para
+        // CONTAR el embudo, porque una filial no se cuenta aparte de su matriz. Pero para
+        // RECONCILIAR es un error: una filial enlazada a una pagina de Notion SI es una cuenta, y
+        // esconderla hace que su pagina se reporte como "sin cuenta". Detectado el 2026-07-25 con
+        // el dry-run: S3WIRELESS y CABLETELCO, enlazadas ese mismo dia, salian como huerfanas, y
+        // actuar sobre ese reporte habria creado dos duplicados.
         or(isNotNull(empresa.estadoNotion), isNotNull(empresa.notionPageId)),
       ),
     )

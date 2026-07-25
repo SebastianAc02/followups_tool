@@ -98,3 +98,26 @@ test('no mezcla organizaciones', () => {
   const r = cuentasTool({ idOrganizacion: ORG });
   assert.equal(r.cuentas.find((c) => c.idEmpresa === 'otra-org'), undefined);
 });
+
+// Una filial enlazada SI es una cuenta para reconciliar, aunque el embudo no la cuente aparte de
+// su matriz. Si se esconde, su pagina de Notion se reporta como "sin cuenta" y quien actue sobre
+// ese reporte crea un duplicado de una cuenta que ya existe. Paso el 2026-07-25 con S3WIRELESS y
+// CABLETELCO, y lo atrapo el dry-run.
+test('incluye las filiales: para reconciliar, una filial enlazada es una cuenta', () => {
+  seed('c6-matriz', { estado: 'firma_pago', pageId: 'page-c6-matriz' });
+  const raw = new Database(dbPath);
+  raw
+    .prepare(
+      `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial,
+                            estado_notion, organizacion_activa_id, notion_page_id, opera_bajo_id)
+       VALUES ('c6-filial', 'nit', 'FILIAL S.A.S', 'filial', 'activo', 'lead', ?, 'page-c6-filial', 'c6-matriz')`,
+    )
+    .run(ORG);
+  raw.close();
+
+  const r = cuentasTool({ idOrganizacion: ORG });
+  assert.ok(
+    r.cuentas.some((c) => c.idEmpresa === 'c6-filial'),
+    'la filial tiene que salir: su pagina existe en Notion y ya esta enlazada',
+  );
+});
