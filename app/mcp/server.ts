@@ -37,8 +37,11 @@ import {
   colaTool,
   aplazarSeguimientoTool,
   snapshotEstadosTool,
+  editarToqueTool,
+  planearDiaTool,
+  planVsEjecutadoTool,
 } from './tools';
-import { CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES } from '../db/validation';
+import { CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES, TIPOS_PLAN, ORIGENES_PLAN } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 import { ORIGENES_CAMBIO } from '../core/origen-cambio';
@@ -57,6 +60,7 @@ export const TOOLS_LECTURA = [
   'embudo',
   'panel_metricas',
   'pipeline',
+  'plan_vs_ejecutado',
 ] as const;
 
 export const TOOLS_ESCRITURA = [
@@ -64,8 +68,10 @@ export const TOOLS_ESCRITURA = [
   'aplazar_seguimiento',
   'cambiar_cadencia',
   'crear_empresa',
+  'editar_toque',
   'marcar_perdida',
   'mover_estado',
+  'planear_dia',
   'reasignar_nit',
   'reconciliar_notion',
   'registrar_toque',
@@ -171,11 +177,116 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
           .min(1)
           .optional()
           .describe('Quien HIZO la llamada o el mensaje. Mandalo cuando ejecuta otra persona (Felipe Castro, Camilo Fonseca); si no viene, queda Sebastian Acosta Molina'),
+        idContacto: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            'A QUE PERSONA se toco, cuando el contacto YA existe en la base (contacto.id_contacto). ' +
+              'Cinco llamadas a la recepcionista y dos al duenio no son el mismo proceso, y sin esto ' +
+              'los siete se cuentan igual. Tiene que pertenecer a esa empresa o falla. Excluyente con ' +
+              'kdm: idContacto enlaza uno que existe, kdm crea uno nuevo',
+          ),
         kdm: kdmShape,
       },
     },
     async (input) => {
       const r = registrarToqueTool(input as Parameters<typeof registrarToqueTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'editar_toque',
+    {
+      description:
+        'Corrige campos puntuales de un toque YA escrito, por su id. Es lo que registrar_toque no ' +
+        'hace: un dato que llega despues (la duracion que sale de tl;dv horas mas tarde) o un campo ' +
+        'que quedo incompleto no tenian arreglo. Solo escribe lo que de verdad cambia, revalida las ' +
+        'reglas del toque sobre la fila ya mezclada (corregir el resultado a no_llego sin fecha ' +
+        'propuesta falla) y deja rastro con el motivo. Devuelve el toque RELEIDO mas la lista de ' +
+        'campos que se movieron con su antes y su despues; sinCambios:true dice que el parche traia ' +
+        'lo que la fila ya tenia. NO cambia la empresa del toque (eso es reescribir dos historias, ' +
+        'no corregir), NO mueve la etapa del embudo (para eso esta mover_estado) y NO manda nada a ' +
+        'Notion. Envuelve editarToque() del dominio.',
+      inputSchema: {
+        idToque: z.number().int().positive().describe('toque.id_toque, el que devuelve registrar_toque'),
+        motivo: z
+          .string()
+          .min(1)
+          .describe('Por que se edita, en prosa y OBLIGATORIO: "llego la duracion de tl;dv" no es lo mismo que "me equivoque al dictar". Queda en la bitacora junto a los campos que cambiaron'),
+        canal: z.enum(CANALES_TOQUE).optional(),
+        resultado: z.enum(RESULTADOS).optional(),
+        fecha: z.string().min(1).optional().describe('YYYY-MM-DD, el dia en que PASO el toque. Corrige fecha_dia y el timestamp; no toca el texto original de las filas viejas sin fecha parseable'),
+        duracionSegundos: z.number().int().nonnegative().nullable().optional().describe('null borra el valor. Este es el campo que dejo tres reuniones de 55, 71 y 50 minutos sin poder registrarse'),
+        quePaso: z.string().min(1).nullable().optional(),
+        razonPerdida: z.enum(RAZONES_PERDIDA).nullable().optional(),
+        razonPerdidaNota: z.string().min(1).nullable().optional(),
+        objecion: z.enum(OBJECIONES).nullable().optional(),
+        objecionNota: z.string().min(1).nullable().optional(),
+        reunionFechaPropuesta: z.string().min(1).nullable().optional().describe('YYYY-MM-DD, con hora opcional'),
+        reunionFechaOcurrida: z.string().min(1).nullable().optional().describe('Solo con canal=reunion'),
+        transcriptProveedor: z.string().min(1).nullable().optional().describe('tldv para reuniones, granola para llamadas'),
+        transcriptId: z.string().min(1).nullable().optional(),
+        transcriptUrl: z.string().min(1).nullable().optional(),
+        ejecutadoPor: z.string().min(1).optional(),
+        idContacto: z
+          .number()
+          .int()
+          .positive()
+          .nullable()
+          .optional()
+          .describe('Enlaza el toque a la persona que se toco, o null para desenlazar el contacto equivocado. Tiene que ser de esa empresa'),
+      },
+    },
+    async (input) => {
+      const r = editarToqueTool(input as Parameters<typeof editarToqueTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'planear_dia',
+    {
+      description:
+        'Escribe el plan del dia: las cuentas que se va a tocar en una fecha, de que tipo, de donde ' +
+        'salio cada una y por que canal si ya se decidio. Es lo que convierte el plan de markdown a ' +
+        'dato, y sin el plan_vs_ejecutado no tiene contra que comparar. Idempotente por (fecha, ' +
+        'empresa, canal): replanear la misma combinacion CORRIGE la linea en vez de duplicarla, y ' +
+        'planear llamada y correo a la misma cuenta el mismo dia son dos lineas legitimas. Nunca ' +
+        'borra: una cuenta que se saca de la lista se lee despues como no ejecutada, que es la ' +
+        'verdad. Una cuenta que no existe o que es de otra organizacion se RECHAZA y se reporta, sin ' +
+        'tumbar el resto del plan. Devuelve el plan del dia RELEIDO de la tabla, con cuantas lineas ' +
+        'son nuevas, cuantas se corrigieron y cuales se rechazaron.',
+      inputSchema: {
+        fecha: z.string().min(1).describe('YYYY-MM-DD, el dia para el que es el plan'),
+        cuentas: z
+          .array(
+            z.object({
+              idEmpresa: z.string().min(1),
+              tipo: z
+                .enum(TIPOS_PLAN)
+                .describe('Que CLASE de toque es: frio (primer contacto), seguimiento (continua algo que ya existe), cierre (empuja una cuenta de la parte baja del embudo)'),
+              origen: z
+                .enum(ORIGENES_PLAN)
+                .describe(
+                  'De donde salio la linea: cadencia (la pidio un paso de cadencia), rodado (venia del ' +
+                    'plan de un dia anterior que no se ejecuto), manual (la puso el operador)',
+                ),
+              canal: z
+                .enum(CANALES_TOQUE)
+                .optional()
+                .describe('Por donde se piensa tocar, si ya se decidio. Vacio es un valor real: se planeo la cuenta sin decidir el canal, y no se infiere'),
+              nota: z.string().min(1).optional().describe('Por que esta cuenta hoy. Se queda en la base'),
+            }),
+          )
+          .min(1),
+        planeadoPor: z.string().min(1).optional().describe('Quien planeo. Si no viene, queda Sebastian Acosta Molina'),
+      },
+    },
+    async (input) => {
+      const r = planearDiaTool(input as Parameters<typeof planearDiaTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
@@ -552,6 +663,39 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ desde, hasta, owner, ejecutadoPor, idOrganizacion }) => {
       const resultado = actividadTool({ desde, hasta, owner, ejecutadoPor, idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // Lo planeado contra lo hecho. `actividad` responde que se hizo; esta responde que se penso
+  // hacer y no se hizo, que es la pregunta que no tenia fuente hasta que el plan del dia se
+  // volvio dato (planear_dia).
+  server.registerTool(
+    'plan_vs_ejecutado',
+    {
+      description:
+        'Lo planeado contra lo ejecutado, por dia y por rango. Devuelve cuantos toques se planearon, ' +
+        'cuantos se hicieron, cuantos no, y de los NO hechos su tipo y su motivo (el motivo sale del ' +
+        'aplazo de esa cuenta ese dia; null quiere decir que nadie lo dijo, no que no hubiera ' +
+        'motivo). Lista aparte los toques que se hicieron y NO estaban en el plan, que es la porcion ' +
+        'del dia que se va en cuentas que nadie penso tocar. Un toque cuenta como ejecutado aunque ' +
+        'el canal no sea el planeado (se reporta en coincideCanal): cambiar de canal sobre la marcha ' +
+        'es una decision, no un incumplimiento. sinPlanEnElRango:true distingue "planeo cero" de ' +
+        '"nadie escribio el plan". La tasa de cumplimiento NO se calcula aca: se devuelven los ' +
+        'conteos y el denominador se elige afuera.',
+      inputSchema: {
+        desde: z.string().min(1).describe('YYYY-MM-DD, incluido'),
+        hasta: z.string().min(1).optional().describe('YYYY-MM-DD, incluido. Sin esto, el rango es el dia de `desde`'),
+        owner: z.string().optional().describe('Filtra por el dueno del deal (empresa.owner)'),
+        ejecutadoPor: z
+          .string()
+          .optional()
+          .describe('Filtra por la persona: quien EJECUTO el toque y quien PLANEO la linea. Son dos eventos con la misma pregunta detras'),
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+      },
+    },
+    async ({ desde, hasta, owner, ejecutadoPor, idOrganizacion }) => {
+      const resultado = planVsEjecutadoTool({ desde, hasta, owner, ejecutadoPor, idOrganizacion });
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );

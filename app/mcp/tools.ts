@@ -33,10 +33,17 @@ import {
   actualizarEmpresa,
   aplazarSeguimiento,
   snapshotEstados,
+  editarToque,
+  planearDia,
+  planEnRango,
   toquesEnRango,
   aplazosEnRango,
   colaDelDia,
   resumenHome,
+  type EditarToqueResultado,
+  type PlanearDiaResultado,
+  type LineaPlan,
+  type AplazoActividad,
   type AplazarSeguimientoInput,
   type AplazarSeguimientoResultado,
   type CambiarCadenciaInput,
@@ -54,7 +61,7 @@ import {
   type ActualizarEmpresaInput,
   type EmpresaEscrita,
 } from '../db/repository';
-import { RESULTADOS_REUNION_OCURRIDA, type RegistrarToqueInput } from '../db/validation';
+import { RESULTADOS_REUNION_OCURRIDA, type RegistrarToqueInput, type EditarToqueInput, type PlanearDiaInput } from '../db/validation';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
@@ -626,4 +633,254 @@ export function aplazarSeguimientoTool(
   idOrganizacion: number,
 ): AplazarSeguimientoResultado {
   return aplazarSeguimiento(input, idOrganizacion);
+}
+
+// --- editar_toque (ESCRITURA, 2026-07-26) ----------------------------------------------
+//
+// Adaptador delgado sobre editarToque(). Cierra el hueco de que registrar_toque creaba y nada
+// corregia: un dato que llega despues (la duracion que sale de tl;dv horas mas tarde) o un
+// dictado con un campo incompleto no tenian arreglo por el MCP, y la unica salida era un
+// UPDATE a mano contra produccion.
+//
+// Devuelve el toque RELEIDO mas la lista de campos que se movieron, con antes y despues. Los
+// dos, no solo la fila: la fila sola no dice si el parche hizo algo, y sinCambios distingue
+// "se corrigio" de "ya estaba asi".
+
+export function editarToqueTool(input: EditarToqueInput, idOrganizacion: number): EditarToqueResultado {
+  return editarToque(input, idOrganizacion);
+}
+
+// --- planear_dia (ESCRITURA, 2026-07-26) -----------------------------------------------
+//
+// Persiste el plan del dia: que cuentas se va a tocar, con que canal y de donde salio cada
+// una. Es lo que convierte el plan de archivo de texto a dato consultable, y sin el
+// plan_vs_ejecutado no tiene contra que comparar.
+//
+// Idempotente por (fecha, empresa): replanear el mismo dia corrige la linea en vez de
+// duplicarla. Nunca borra: una cuenta que se planeo y despues se saco de la lista se lee como
+// no ejecutada, que es la verdad, en vez de desaparecer del conteo de lo planeado.
+
+export function planearDiaTool(input: PlanearDiaInput, idOrganizacion: number): PlanearDiaResultado {
+  return planearDia(input, idOrganizacion);
+}
+
+// --- plan_vs_ejecutado (LECTURA, 2026-07-26) -------------------------------------------
+//
+// Lo planeado contra lo hecho, por dia y por rango. Tres poblaciones, separadas a proposito:
+//   ejecutados          - estaba en el plan y se toco.
+//   noEjecutados        - estaba en el plan y no se toco. Con su tipo y su motivo.
+//   ejecutadosFueraDelPlan - se toco y no estaba en el plan. No es ruido: es la porcion del dia
+//                       que se va en cuentas que nadie penso tocar, y sin listarla el
+//                       cumplimiento se lee como si el dia hubiera sido solo el plan.
+//
+// El estado no sale de una columna: se DERIVA. Ejecutado = hay un toque de esa empresa ese
+// mismo dia; el motivo de lo no ejecutado sale del aplazo de esa empresa con la fecha
+// incumplida de ese dia. Un toque cuenta como ejecutado aunque el canal no coincida con el
+// planeado (se planeo llamada y se mando WhatsApp): el toque se hizo. La diferencia se reporta
+// en coincideCanal en vez de castigarla, porque cambiar de canal sobre la marcha es una
+// decision, no un incumplimiento.
+//
+// La tasa de cumplimiento NO se calcula aca. Se devuelven los conteos y el denominador se
+// elige afuera, mismo criterio que el no-show rate en `actividad`: fijar aca un cociente es
+// fijar una discusion que despues no se puede reabrir.
+
+export type PlanVsEjecutadoInput = {
+  desde: string;
+  hasta?: string;
+  owner?: string;
+  ejecutadoPor?: string;
+  idOrganizacion?: number;
+};
+
+// El dia de un toque, con el mismo respaldo que usa toquesEnRango: fecha_dia si la tiene, y
+// los 10 primeros caracteres de `fecha` para las filas viejas que no la tienen.
+function diaDelToque(t: ToqueActividad): string | null {
+  return t.fechaDia ?? (t.fecha ? t.fecha.slice(0, 10) : null);
+}
+
+export function planVsEjecutadoTool(input: PlanVsEjecutadoInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  // Un solo dia es el caso normal ("como me fue hoy"): sin `hasta`, el rango es el dia de
+  // `desde`. No se asume hoy() como cierre, que convertiria una consulta de un dia pasado en
+  // un rango de semanas sin que nadie lo pidiera.
+  const hasta = input.hasta ?? input.desde;
+
+  const plan = planEnRango(input.desde, hasta, idOrganizacion, {
+    owner: input.owner,
+    // Quien PLANEO, el mismo criterio de persona que ejecutadoPor sobre los toques. Son dos
+    // eventos distintos con la misma pregunta detras: de quien es esta fila.
+    planeadoPor: input.ejecutadoPor,
+  });
+  const toques = toquesEnRango(input.desde, hasta, idOrganizacion, {
+    owner: input.owner,
+    ejecutadoPor: input.ejecutadoPor,
+  });
+  const aplazos = aplazosEnRango(input.desde, hasta, idOrganizacion, {
+    owner: input.owner,
+    aplazadoPor: input.ejecutadoPor,
+  });
+
+  // Dos formas de saber si una linea del plan se ejecuto, en este orden:
+  //   1. el enlace explicito (toque_planeado.id_toque). Es exacto y es el unico que distingue
+  //      dos lineas planeadas para la misma cuenta el mismo dia por canales distintos.
+  //   2. el cruce por (empresa, dia). Cubre el toque que se hizo por fuera del plan o que se
+  //      registro dictandole al brain sin pasar por la fila planeada, que hoy son la mayoria.
+  // Sin el segundo, la medicion diria "planeado y no hecho" sobre toques que si se hicieron.
+  const llave = (fecha: string, idEmpresa: string) => `${fecha}|${idEmpresa}`;
+  const toquesPorId = new Map<number, ToqueActividad>();
+  const toquesPorLlave = new Map<string, ToqueActividad[]>();
+  for (const t of toques) {
+    toquesPorId.set(t.idToque, t);
+    const dia = diaDelToque(t);
+    if (!dia) continue; // sin dia no se puede cruzar contra un plan que es por dia
+    const k = llave(dia, t.idEmpresa);
+    const lista = toquesPorLlave.get(k);
+    if (lista) lista.push(t);
+    else toquesPorLlave.set(k, [t]);
+  }
+  const aplazosPorLlave = new Map<string, AplazoActividad>();
+  for (const a of aplazos) {
+    const k = llave(a.fechaIncumplida.slice(0, 10), a.idEmpresa);
+    if (!aplazosPorLlave.has(k)) aplazosPorLlave.set(k, a);
+  }
+
+  const ejecutados: {
+    fecha: string;
+    idEmpresa: string;
+    empresa: string;
+    tipo: string;
+    origen: string;
+    canalPlaneado: string | null;
+    canalEjecutado: string | null;
+    // null cuando el plan no fijo canal: no hubo decision que comparar. false es otra cosa (se
+    // planeo llamada y se mando WhatsApp), y colapsar las dos en false seria inventar un
+    // incumplimiento.
+    coincideCanal: boolean | null;
+    resultado: string | null;
+    idToque: number;
+    // Como se supo que se ejecuto: por el enlace explicito o por el cruce de empresa y dia.
+    cruce: 'enlace' | 'empresa_dia';
+  }[] = [];
+  const noEjecutados: {
+    fecha: string;
+    idEmpresa: string;
+    empresa: string;
+    estado: string | null;
+    tipo: string;
+    origen: string;
+    canalPlaneado: string | null;
+    // Por que no se hizo, uno de MOTIVOS_APLAZO. null = nadie lo dijo, y null NO significa que
+    // no hubiera motivo.
+    motivo: string | null;
+    // De donde salio el motivo: de la fila del plan (fuente primaria) o del aplazo de esa
+    // cuenta ese dia (respaldo). Se dice para que nadie lea un motivo prestado como si lo
+    // hubieran escrito sobre el plan.
+    motivoFuente: 'plan' | 'aplazo' | null;
+    notaMotivo: string | null;
+    aplazadoA: string | null;
+  }[] = [];
+
+  // DOS PASADAS, no una. Los enlaces explicitos se resuelven PRIMERO y se quedan con su toque;
+  // solo despues el fallback reparte lo que sobra. En una sola pasada, la linea sin enlace que
+  // aparece de primera en el orden del plan le roba por (empresa, dia) el toque que otra linea
+  // reclamaba explicitamente, y el mismo toque termina contado dos veces.
+  const cubiertas = new Set<number>();
+  const enlacePorLinea = new Map<number, ToqueActividad>();
+  for (const p of plan) {
+    if (p.idToque == null) continue;
+    const t = toquesPorId.get(p.idToque);
+    if (!t) continue; // el enlace apunta fuera del rango o del filtro: cae al fallback
+    enlacePorLinea.set(p.idToquePlaneado, t);
+    cubiertas.add(t.idToque);
+  }
+
+  for (const p of plan) {
+    const k = llave(p.fechaDia, p.idEmpresa);
+    const enlazado = enlacePorLinea.get(p.idToquePlaneado);
+    const porDia = enlazado ? undefined : toquesPorLlave.get(k)?.find((t) => !cubiertas.has(t.idToque));
+    const t = enlazado ?? porDia;
+    if (t) {
+      cubiertas.add(t.idToque);
+      ejecutados.push({
+        fecha: p.fechaDia,
+        idEmpresa: p.idEmpresa,
+        empresa: p.empresa,
+        tipo: p.tipo,
+        origen: p.origen,
+        canalPlaneado: p.canal,
+        canalEjecutado: t.canal,
+        coincideCanal: p.canal === null ? null : t.canal === p.canal,
+        resultado: t.resultado,
+        idToque: t.idToque,
+        cruce: enlazado ? 'enlace' : 'empresa_dia',
+      });
+      continue;
+    }
+    const aplazo = aplazosPorLlave.get(k);
+    const motivo = p.motivoNoEjecutado ?? aplazo?.motivo ?? null;
+    noEjecutados.push({
+      fecha: p.fechaDia,
+      idEmpresa: p.idEmpresa,
+      empresa: p.empresa,
+      estado: p.estado,
+      tipo: p.tipo,
+      origen: p.origen,
+      canalPlaneado: p.canal,
+      motivo,
+      motivoFuente: motivo === null ? null : p.motivoNoEjecutado ? 'plan' : 'aplazo',
+      notaMotivo: p.motivoNoEjecutado ? p.nota : (aplazo?.nota ?? null),
+      aplazadoA: aplazo?.fechaNueva ?? null,
+    });
+  }
+
+  const fueraDelPlan = toques
+    .filter((t) => !cubiertas.has(t.idToque) && diaDelToque(t) !== null)
+    .map((t) => ({
+      fecha: diaDelToque(t) as string,
+      idEmpresa: t.idEmpresa,
+      empresa: t.empresa,
+      canal: t.canal,
+      resultado: t.resultado,
+      idToque: t.idToque,
+    }));
+
+  // El corte por dia. Solo aparecen los dias que tienen plan o toques: un dia vacio en medio
+  // del rango no se inventa como fila de ceros.
+  const dias = new Map<string, { fecha: string; planeados: number; ejecutados: number; noEjecutados: number; ejecutadosFueraDelPlan: number }>();
+  const dia = (fecha: string) => {
+    let d = dias.get(fecha);
+    if (!d) {
+      d = { fecha, planeados: 0, ejecutados: 0, noEjecutados: 0, ejecutadosFueraDelPlan: 0 };
+      dias.set(fecha, d);
+    }
+    return d;
+  };
+  for (const p of plan) dia(p.fechaDia).planeados += 1;
+  for (const e of ejecutados) dia(e.fecha).ejecutados += 1;
+  for (const n of noEjecutados) dia(n.fecha).noEjecutados += 1;
+  for (const f of fueraDelPlan) dia(f.fecha).ejecutadosFueraDelPlan += 1;
+
+  return {
+    organizacion: idOrganizacion,
+    desde: input.desde,
+    hasta,
+    owner: input.owner ?? null,
+    ejecutadoPor: input.ejecutadoPor ?? null,
+    total: {
+      planeados: plan.length,
+      ejecutados: ejecutados.length,
+      noEjecutados: noEjecutados.length,
+      ejecutadosFueraDelPlan: fueraDelPlan.length,
+      // Toques que no se pueden fechar: quedan fuera del cruce porque el plan es por dia. Se
+      // reporta explicito, igual que en `actividad`, para que nadie lea el cruce como completo.
+      toquesSinFecha: toques.filter((t) => diaDelToque(t) === null).length,
+    },
+    // Distingue "planeo cero" de "nadie escribio el plan". Sin esto, un rango sin plan se lee
+    // como un incumplimiento del 100% al reves: todo ejecutado fuera del plan.
+    sinPlanEnElRango: plan.length === 0,
+    porDia: [...dias.values()].sort((a, b) => a.fecha.localeCompare(b.fecha)),
+    noEjecutados,
+    ejecutados,
+    fueraDelPlan,
+  };
 }

@@ -560,40 +560,26 @@ export const registrarToqueSchema = z
     // 71 de 71 toques del ultimo mes quedaron sin atribuir. Se sigue mandando explicito cuando
     // ejecuta otra persona.
     ejecutadoPor: z.string().min(1).optional().default(EJECUTOR_POR_DEFECTO),
+    // A QUE PERSONA se toco, cuando ya existe en `contacto` (2026-07-26). Antes solo se podia
+    // enlazar creando el contacto por `kdm`, asi que quien ya tenia el contacto en la base no
+    // tenia como decirlo y toque.id_contacto se quedaba en NULL. Cinco llamadas a la
+    // recepcionista y dos al dueno no son el mismo proceso, y sin esta columna se cuentan igual.
+    //
+    // Se valida contra la base (existe Y pertenece a esa empresa) dentro de la transaccion de
+    // registrarToque: aca solo se comprueba que sea un id entero positivo.
+    idContacto: z.number().int().positive().optional(),
     kdm: kdmSchema.optional(),
   })
   .superRefine((data, ctx) => {
-    if (RESULTADOS_PERDIDA.includes(data.resultado) && !data.razonPerdida) {
+    invariantesToque(data, ctx);
+    // Las dos formas de decir a quien se toco son excluyentes: idContacto apunta a un contacto
+    // que YA existe, kdm crea o actualiza uno. Mandar las dos deja sin definir cual gana, y
+    // elegir en silencio es lo que produce un enlace equivocado que nadie revisa despues.
+    if (data.idContacto != null && data.kdm) {
       ctx.addIssue({
         code: 'custom',
-        path: ['razonPerdida'],
-        message: `razonPerdida es obligatoria cuando resultado es '${data.resultado}': uno de ${RAZONES_PERDIDA.join(' | ')}`,
-      });
-    }
-    // Un no-show es el desenlace de una reunion que estaba en el calendario: sin la fecha
-    // propuesta no se puede calcular el no-show rate, que es justo para lo que existe el
-    // resultado. Se exige en vez de dejarlo pasar a medias.
-    if (data.resultado === 'no_llego' && !data.reunionFechaPropuesta) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['reunionFechaPropuesta'],
-        message: "reunionFechaPropuesta es obligatoria cuando resultado es 'no_llego': sin la fecha que se incumplio no hay no-show que contar",
-      });
-    }
-    // Una reunion que ocurrio y un no-show son excluyentes. Dejar las dos escritas produce una
-    // fila que dice que la reunion paso y no paso.
-    if (data.resultado === 'no_llego' && data.reunionFechaOcurrida) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['reunionFechaOcurrida'],
-        message: "un toque con resultado 'no_llego' no puede tener reunionFechaOcurrida: la reunion no ocurrio",
-      });
-    }
-    if (data.reunionFechaOcurrida && data.canal !== 'reunion') {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['reunionFechaOcurrida'],
-        message: "reunionFechaOcurrida solo aplica con canal 'reunion': una llamada no es una reunion",
+        path: ['idContacto'],
+        message: 'manda idContacto (contacto que ya existe) o kdm (contacto a crear), no los dos',
       });
     }
   });
@@ -602,3 +588,154 @@ export const registrarToqueSchema = z
 // obligatorio pero el caller no esta obligado a mandarlo. Mismo caso que CampanaInput.
 export type RegistrarToqueInput = z.input<typeof registrarToqueSchema>;
 export type RegistrarToqueParsed = z.output<typeof registrarToqueSchema>;
+
+// Las reglas que un toque tiene que cumplir MIRE COMO MIRE, se este creando o corrigiendo
+// (2026-07-26). Vivian dentro del superRefine de registrarToqueSchema; se extraen porque
+// editarToque tiene que reimponerlas sobre la fila YA MEZCLADA (lo que hay en la base + el
+// parche), no sobre el parche suelto: corregir el resultado a 'no_llego' sin mandar la fecha
+// propuesta tiene que fallar aunque el parche no la mencione. Copiar las cuatro reglas en el
+// segundo camino era garantizar que se desincronizaran.
+//
+// Los mensajes y los `path` quedan identicos a los que ya devolvia registrarToqueSchema: quien
+// los lea no tiene por que enterarse de este refactor.
+export type ToqueInvariantes = {
+  canal?: string | null;
+  resultado?: string | null;
+  razonPerdida?: string | null;
+  reunionFechaPropuesta?: string | null;
+  reunionFechaOcurrida?: string | null;
+};
+
+export function invariantesToque(data: ToqueInvariantes, ctx: z.RefinementCtx): void {
+  if (data.resultado && RESULTADOS_PERDIDA.includes(data.resultado as Resultado) && !data.razonPerdida) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['razonPerdida'],
+      message: `razonPerdida es obligatoria cuando resultado es '${data.resultado}': uno de ${RAZONES_PERDIDA.join(' | ')}`,
+    });
+  }
+  // Un no-show es el desenlace de una reunion que estaba en el calendario: sin la fecha
+  // propuesta no se puede calcular el no-show rate, que es justo para lo que existe el
+  // resultado. Se exige en vez de dejarlo pasar a medias.
+  if (data.resultado === 'no_llego' && !data.reunionFechaPropuesta) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reunionFechaPropuesta'],
+      message: "reunionFechaPropuesta es obligatoria cuando resultado es 'no_llego': sin la fecha que se incumplio no hay no-show que contar",
+    });
+  }
+  // Una reunion que ocurrio y un no-show son excluyentes. Dejar las dos escritas produce una
+  // fila que dice que la reunion paso y no paso.
+  if (data.resultado === 'no_llego' && data.reunionFechaOcurrida) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reunionFechaOcurrida'],
+      message: "un toque con resultado 'no_llego' no puede tener reunionFechaOcurrida: la reunion no ocurrio",
+    });
+  }
+  if (data.reunionFechaOcurrida && data.canal !== 'reunion') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reunionFechaOcurrida'],
+      message: "reunionFechaOcurrida solo aplica con canal 'reunion': una llamada no es una reunion",
+    });
+  }
+}
+
+// --- editar_toque (2026-07-26) ---------------------------------------------------------
+//
+// El parche de un toque YA ESCRITO. Existe porque registrarToque solo crea: tres reuniones con
+// duracion conocida (55, 71 y 50 minutos, sacadas de tl;dv) y un texto de procedencia
+// incompleto se quedaron sin arreglo esta semana, y la unica salida era un UPDATE a mano contra
+// produccion.
+//
+// Que NO se puede cambiar por aca, a proposito:
+//   idEmpresa      - mover un toque de cuenta no es corregir, es reescribir la historia de dos
+//                    cuentas a la vez. Si el toque quedo en la empresa equivocada, se registra
+//                    en la correcta y el otro se corrige con quePaso diciendo que fue un error.
+//   fuente         - dice de donde nacio la fila (cockpit, notion_toques, whatsapp_entrante).
+//                    Es procedencia, no contenido.
+//   idOrganizacion - la fija la sesion, nunca el cliente.
+//
+// null vs ausente: ausente = no se toca, null = se borra. Es la unica forma de vaciar un campo
+// que quedo mal sin inventar un valor centinela. resultado y canal no aceptan null: son la
+// espina del toque y un toque sin ninguno de los dos no se puede contar en nada.
+export const editarToqueSchema = z
+  .object({
+    idToque: z.number().int().positive(),
+    // Por que se edita. OBLIGATORIO y en prosa: es lo unico que distingue "llego el dato de
+    // tl;dv" de "me equivoque al dictar", y sin el la bitacora dice que algo cambio pero no
+    // por que. Se guarda en sync_cambios junto a los campos que se movieron.
+    motivo: z.string().min(1),
+    canal: z.enum(CANALES_TOQUE).optional(),
+    resultado: z.enum(RESULTADOS).optional(),
+    fecha: fechaDiaSchema.optional(),
+    duracionSegundos: z.number().int().nonnegative().nullable().optional(),
+    quePaso: z.string().min(1).nullable().optional(),
+    razonPerdida: z.enum(RAZONES_PERDIDA).nullable().optional(),
+    razonPerdidaNota: z.string().min(1).nullable().optional(),
+    objecion: z.enum(OBJECIONES).nullable().optional(),
+    objecionNota: z.string().min(1).nullable().optional(),
+    reunionFechaPropuesta: fechaReunionSchema.nullable().optional(),
+    reunionFechaOcurrida: fechaReunionSchema.nullable().optional(),
+    transcriptProveedor: z.string().min(1).nullable().optional(),
+    transcriptId: z.string().min(1).nullable().optional(),
+    transcriptUrl: z.string().min(1).nullable().optional(),
+    ejecutadoPor: z.string().min(1).optional(),
+    idContacto: z.number().int().positive().nullable().optional(),
+  })
+  .refine(
+    (d) => Object.keys(d).some((k) => k !== 'idToque' && k !== 'motivo'),
+    { message: 'no viene ningun campo que editar: manda al menos uno ademas de idToque y motivo' },
+  );
+
+export type EditarToqueInput = z.input<typeof editarToqueSchema>;
+export type EditarToqueParsed = z.output<typeof editarToqueSchema>;
+
+// --- plan del dia (2026-07-26) ---------------------------------------------------------
+//
+// Que se PENSABA tocar, frente a lo que se toco. Hasta hoy el plan del dia vivia en un markdown
+// del brain: no se podia preguntar cuantas cuentas se planearon en la semana ni cuantas de las
+// planeadas se quedaron sin tocar.
+//
+// Los dos vocabularios salen del DDL propuesto por experto-followups
+// (drizzle/manual/0016_toque_planeado.sql) y se declaran aca porque es donde vive toda lista
+// cerrada del dominio. No se inventa una lista paralela para lo mismo.
+//
+// tipo = que CLASE de toque es, no por donde va. El canal es aparte y opcional (se puede
+// planear tocar una cuenta sin haber decidido todavia si es llamada o WhatsApp):
+//   frio         - primer contacto, la cuenta no viene de nada.
+//   seguimiento  - continua una conversacion que ya existe.
+//   cierre       - empuja una cuenta que ya esta en la parte baja del embudo.
+export const TIPOS_PLAN = ['frio', 'seguimiento', 'cierre'] as const;
+export type TipoPlan = (typeof TIPOS_PLAN)[number];
+
+// De donde salio la linea del plan. Separa lo que pidio el sistema de lo que decidio la persona,
+// y deja ver la cuenta que lleva dias rodando sin que nadie la toque:
+//   cadencia  - la pidio una cadencia (hay un paso instanciado con su fecha).
+//   rodado    - venia del plan de un dia anterior y no se ejecuto, se rodo a este.
+//   manual    - la puso el operador, sin que ningun motor la pidiera.
+export const ORIGENES_PLAN = ['cadencia', 'rodado', 'manual'] as const;
+export type OrigenPlan = (typeof ORIGENES_PLAN)[number];
+
+export const planearDiaSchema = z.object({
+  fecha: fechaDiaSchema,
+  cuentas: z
+    .array(
+      z.object({
+        idEmpresa: z.string().min(1),
+        tipo: z.enum(TIPOS_PLAN),
+        origen: z.enum(ORIGENES_PLAN),
+        // Opcional de verdad: NULL significa "se planeo tocarla y todavia no se decidio el
+        // canal". No se rellena con el proximo_canal de la cuenta, que seria inventar la
+        // decision que justamente no se tomo.
+        canal: z.enum(CANALES_TOQUE).optional(),
+        nota: z.string().min(1).optional(),
+      }),
+    )
+    .min(1),
+  // Mismo default y misma razon que ejecutadoPor en un toque: hoy el unico que planea dictando
+  // es el operador, y un campo que nunca se llena no protege nada.
+  planeadoPor: z.string().min(1).optional().default(EJECUTOR_POR_DEFECTO),
+});
+export type PlanearDiaInput = z.input<typeof planearDiaSchema>;

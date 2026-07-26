@@ -53,6 +53,7 @@ import {
   empresaEstadoHistorial,
   empresaEstadoSnapshot,
   seguimientoAplazado,
+  toquePlaneado,
   organizacionMiembro,
   empresaClasificacion,
   empresaCategoriaView,
@@ -109,6 +110,11 @@ import type { AccionImportacionToque, ToqueDbExistente } from '../core/reconcili
 import {
   registrarToqueSchema,
   type RegistrarToqueInput,
+  editarToqueSchema,
+  type EditarToqueInput,
+  invariantesToque,
+  planearDiaSchema,
+  type PlanearDiaInput,
   cadenciaParseadaSchema,
   definicionSegmentoSchema,
   type DefinicionSegmento,
@@ -651,7 +657,17 @@ export type RegistrarToqueResultado = {
   transicion: { de: string | null; a: string } | null;
 };
 
-function leerToqueEscrito(lector: typeof db | Tx, idToque: number): ToqueEscrito {
+// Sobrecarga (2026-07-26): el camino normal es "lo acabo de escribir, tiene que estar" y
+// lanza si no aparece. editarToque necesita el otro: preguntar si el toque existe ANTES de
+// tocarlo, y responder "no existe" con su propio mensaje en vez de "no quedo escrito", que
+// diria otra cosa.
+function leerToqueEscrito(lector: typeof db | Tx, idToque: number): ToqueEscrito;
+function leerToqueEscrito(lector: typeof db | Tx, idToque: number, opts: { permitirNoExiste: true }): ToqueEscrito | null;
+function leerToqueEscrito(
+  lector: typeof db | Tx,
+  idToque: number,
+  opts?: { permitirNoExiste: true },
+): ToqueEscrito | null {
   const fila = lector
     .select({
       idToque: toque.idToque,
@@ -680,7 +696,10 @@ function leerToqueEscrito(lector: typeof db | Tx, idToque: number): ToqueEscrito
     .from(toque)
     .where(eq(toque.idToque, idToque))
     .get();
-  if (!fila) throw new Error(`El toque ${idToque} no quedo escrito`);
+  if (!fila) {
+    if (opts?.permitirNoExiste) return null;
+    throw new Error(`El toque ${idToque} no quedo escrito`);
+  }
   return fila;
 }
 
@@ -719,11 +738,32 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
       );
     }
 
-    // KDM opcional: upsert en contacto ANTES del insert del toque, para poder enlazar
-    // toque.idContacto. Matching: mismo idEmpresa + mismo telefono exacto si viene telefono;
-    // si no hay telefono, no hay match posible (el nombre no es clave confiable) -> insertar.
+    // A QUE PERSONA se toco. Dos caminos y solo uno por toque (el schema ya rechaza los dos
+    // juntos):
+    //   idContacto -> el contacto YA existe en la base y se enlaza tal cual. Es el camino que
+    //                 faltaba: hasta el 2026-07-26 la unica forma de llenar toque.id_contacto
+    //                 desde aca era crear un contacto nuevo con kdm, asi que quien ya lo tenia
+    //                 registrado no tenia como decirlo y la columna se quedaba en NULL.
+    //   kdm        -> upsert del contacto ANTES del insert del toque.
     let idContacto: number | null = null;
-    if (parsed.kdm) {
+    if (parsed.idContacto != null) {
+      // Tiene que existir Y ser de ESTA empresa. Enlazar un toque al contacto de otra cuenta es
+      // peor que dejarlo vacio: mezcla dos historias y nada avisa. Se falla explicito en vez de
+      // caer a null en silencio, que dejaria creer que el enlace quedo hecho.
+      const existente = tx
+        .select({ idContacto: contacto.idContacto })
+        .from(contacto)
+        .where(and(eq(contacto.idContacto, parsed.idContacto), eq(contacto.idEmpresa, parsed.idEmpresa)))
+        .get();
+      if (!existente) {
+        throw new Error(
+          `El contacto ${parsed.idContacto} no existe o no pertenece a la empresa ${parsed.idEmpresa}`,
+        );
+      }
+      idContacto = existente.idContacto;
+    } else if (parsed.kdm) {
+      // Matching: mismo idEmpresa + mismo telefono exacto si viene telefono; si no hay
+      // telefono, no hay match posible (el nombre no es clave confiable) -> insertar.
       const { nombre, telefono } = parsed.kdm;
       const existente = telefono
         ? tx
@@ -870,6 +910,167 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
       empresa: leerEmpresaEscrita(tx, parsed.idEmpresa),
       transicion: estadoDestino ? { de: emp.estadoNotion, a: estadoDestino } : null,
     };
+  });
+}
+
+// --- editarToque (2026-07-26) -----------------------------------------------------------
+//
+// Corrige campos puntuales de un toque que YA se escribio. Hasta hoy registrarToque creaba y
+// nada corregia: tres reuniones con duracion conocida (55, 71 y 50 minutos, de tl;dv) y un
+// texto de procedencia incompleto se quedaron sin arreglo, porque la unica salida era un
+// UPDATE a mano contra produccion, que no valida nada y no deja rastro.
+//
+// Tres garantias, en este orden:
+//   1. Solo escribe lo que de verdad cambia. Un campo que llega con el mismo valor que ya tenia
+//      no entra al UPDATE ni a la bitacora: "se edito" tiene que significar que algo se movio.
+//   2. Reimpone las invariantes sobre la fila MEZCLADA (lo de la base + el parche), no sobre el
+//      parche suelto. Cambiar el resultado a 'no_llego' sin fecha propuesta falla aunque el
+//      parche no nombre la fecha.
+//   3. Deja rastro: una fila en sync_cambios con el motivo (obligatorio) y el antes -> despues
+//      de cada campo.
+//
+// Lo que NO hace, a proposito:
+//   - No encola nada hacia Notion. Notion tiene un solo escritor y es el brain; el outbox de
+//     esta base no drena (la tarea del worker esta apagada por default, ver
+//     app/worker/index.ts). Encolar aqui seria dejar basura en una cola que nadie vacia.
+//   - No mueve la etapa del embudo. Corregir la duracion de una reunion no gradua una cuenta;
+//     si un toque se registro con el resultado equivocado y eso movio la etapa, la etapa se
+//     corrige aparte con mover_estado, que deja su propia fila en el historial.
+//   - No toca fecha_texto. Esa columna guarda el original que no se pudo parsear ("~inicios
+//     jun"); es el unico rastro de dos toques reales y no se pisa al fechar bien la fila.
+
+// Un campo que cambio, con su antes y su despues. Es lo que hace verificable la edicion: sin
+// esto, "se actualizo el toque 214" no dice si movio uno o siete campos.
+export type CampoEditado = { campo: string; antes: unknown; despues: unknown };
+
+export type EditarToqueResultado = {
+  toque: ToqueEscrito;
+  cambios: CampoEditado[];
+  motivo: string;
+  // true cuando el parche traia solo valores que la fila YA tenia. No es un error (mandar dos
+  // veces la misma correccion es normal), pero tampoco es una edicion, y decirlo evita que
+  // alguien lea la respuesta como si hubiera escrito algo.
+  sinCambios: boolean;
+};
+
+// Las invariantes de un toque aplicadas a la fila mezclada. Se arma como schema aparte (y no
+// se reusa registrarToqueSchema) porque aqui no hay input de usuario que validar: los tipos ya
+// los valido editarToqueSchema, lo unico que falta es la coherencia ENTRE campos.
+const toqueMezcladoSchema = z
+  .object({
+    canal: z.string().nullable(),
+    resultado: z.string().nullable(),
+    razonPerdida: z.string().nullable(),
+    reunionFechaPropuesta: z.string().nullable(),
+    reunionFechaOcurrida: z.string().nullable(),
+  })
+  .superRefine(invariantesToque);
+
+export function editarToque(input: EditarToqueInput, idOrganizacion: number): EditarToqueResultado {
+  const parsed = editarToqueSchema.parse(input);
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    const actual = leerToqueEscrito(tx, parsed.idToque, { permitirNoExiste: true });
+    if (!actual) throw new Error(`El toque ${parsed.idToque} no existe`);
+    // Guard de organizacion, el mismo de registrarToque: un toque de otra organizacion no se
+    // edita ni se reporta como inexistente a medias -- se dice que no es de esta.
+    if (actual.idOrganizacion !== idOrganizacion) {
+      throw new Error(`El toque ${parsed.idToque} es de otra organizacion, no de ${idOrganizacion}`);
+    }
+
+    // idContacto: mismas dos condiciones que en registrarToque (existe Y es de esta empresa).
+    // null es un valor legitimo del parche: desenlaza el contacto equivocado.
+    if (parsed.idContacto != null) {
+      const existente = tx
+        .select({ idContacto: contacto.idContacto })
+        .from(contacto)
+        .where(and(eq(contacto.idContacto, parsed.idContacto), eq(contacto.idEmpresa, actual.idEmpresa)))
+        .get();
+      if (!existente) {
+        throw new Error(
+          `El contacto ${parsed.idContacto} no existe o no pertenece a la empresa ${actual.idEmpresa} del toque ${parsed.idToque}`,
+        );
+      }
+    }
+
+    // El parche, campo por campo. `undefined` = no vino, `null` = borrar. La distincion es lo
+    // que permite vaciar un campo mal escrito sin un valor centinela.
+    const patch: Partial<Record<keyof ToqueEscrito, unknown>> = {};
+    const tomar = <K extends keyof ToqueEscrito>(campo: K, valor: unknown) => {
+      if (valor !== undefined) patch[campo] = valor;
+    };
+    tomar('canal', parsed.canal);
+    tomar('resultado', parsed.resultado);
+    tomar('duracionSegundos', parsed.duracionSegundos);
+    tomar('quePaso', parsed.quePaso);
+    tomar('razonPerdida', parsed.razonPerdida);
+    tomar('razonPerdidaNota', parsed.razonPerdidaNota);
+    tomar('objecion', parsed.objecion);
+    tomar('objecionNota', parsed.objecionNota);
+    tomar('reunionFechaPropuesta', parsed.reunionFechaPropuesta);
+    tomar('reunionFechaOcurrida', parsed.reunionFechaOcurrida);
+    tomar('transcriptProveedor', parsed.transcriptProveedor);
+    tomar('transcriptId', parsed.transcriptId);
+    tomar('transcriptUrl', parsed.transcriptUrl);
+    tomar('ejecutadoPor', parsed.ejecutadoPor);
+    tomar('idContacto', parsed.idContacto);
+    // Corregir el DIA mueve las dos columnas juntas: fecha_dia es sobre la que se cuenta y
+    // `fecha` es el timestamp. Si el timestamp ya cae en ese mismo dia se respeta su hora (era
+    // buena, solo estaba mal el dia canonico); si no, se ancla al mediodia UTC, el mismo
+    // criterio que usa registrarToque cuando el caller fija el dia.
+    if (parsed.fecha !== undefined) {
+      patch.fechaDia = parsed.fecha;
+      patch.fecha = actual.fecha?.slice(0, 10) === parsed.fecha ? actual.fecha : `${parsed.fecha}T12:00:00.000Z`;
+    }
+
+    // La fila como quedaria. Se valida ANTES de escribir nada.
+    const mezclado = { ...actual, ...patch } as ToqueEscrito;
+    toqueMezcladoSchema.parse({
+      canal: mezclado.canal,
+      resultado: mezclado.resultado,
+      razonPerdida: mezclado.razonPerdida,
+      reunionFechaPropuesta: mezclado.reunionFechaPropuesta,
+      reunionFechaOcurrida: mezclado.reunionFechaOcurrida,
+    });
+
+    const cambios: CampoEditado[] = [];
+    for (const [campo, despues] of Object.entries(patch)) {
+      const antes = actual[campo as keyof ToqueEscrito];
+      // undefined nunca llega aca (tomar lo filtra); null vs null y valor igual no son cambio.
+      if (antes === despues) continue;
+      cambios.push({ campo, antes, despues });
+    }
+
+    if (cambios.length === 0) {
+      return { toque: actual, cambios, motivo: parsed.motivo, sinCambios: true };
+    }
+
+    const sets: Record<string, unknown> = {};
+    for (const { campo, despues } of cambios) sets[campo] = despues;
+    tx.update(toque).set(sets).where(eq(toque.idToque, parsed.idToque)).run();
+
+    // El rastro. entidad 'toque' + idRegistro = el id DEL TOQUE (registrarToque escribe ahi el
+    // id de la empresa, que sirve para "que paso con esta cuenta" pero no para "que le paso a
+    // esta fila"): una edicion se busca por el toque que se edito. La empresa va en el detalle,
+    // que ademas lleva el motivo y el antes -> despues de cada campo.
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'toque',
+        idRegistro: String(parsed.idToque),
+        accion: 'update',
+        detalle:
+          `${actual.idEmpresa} | ${parsed.motivo} | ` +
+          cambios.map((c) => `${c.campo}: ${c.antes ?? '-'} -> ${c.despues ?? '-'}`).join('; '),
+      })
+      .run();
+
+    // Relectura DENTRO de la transaccion: se devuelve la fila de la base, no la mezcla que se
+    // calculo en memoria.
+    return { toque: leerToqueEscrito(tx, parsed.idToque), cambios, motivo: parsed.motivo, sinCambios: false };
   });
 }
 
@@ -7414,6 +7615,225 @@ export function aplazosEnRango(
     .innerJoin(empresa, eq(empresa.idEmpresa, seguimientoAplazado.idEmpresa))
     .where(and(...condiciones))
     .orderBy(desc(seguimientoAplazado.fechaIncumplida), desc(seguimientoAplazado.id))
+    .all();
+}
+
+// --- Plan del dia (2026-07-26) --------------------------------------------------------
+//
+// Lo que se PENSABA tocar. La cola (`empresa.proximo_follow_up_fecha`) responde otra pregunta
+// -- que esta vencido -- y ademas se pisa cada vez que se reprograma, asi que no sirve como
+// registro de lo planeado. Con estas dos funciones el plan del dia deja de ser un markdown y
+// pasa a ser dato: se escribe una vez y se puede preguntar despues.
+//
+// Escriben y leen `toque_planeado`, cuyo DDL propuso experto-followups en
+// drizzle/manual/0016_toque_planeado.sql y NO esta aplicado a produccion. El estado (ejecutado
+// / no ejecutado) no se guarda: se deriva del enlace explicito id_toque y, cuando no lo hay,
+// del cruce por (id_empresa, fecha_dia).
+
+export type LineaPlanEscrita = {
+  idToquePlaneado: number;
+  fechaDia: string;
+  idEmpresa: string;
+  canal: string | null;
+  tipo: string;
+  origen: string;
+  nota: string | null;
+  motivoNoEjecutado: string | null;
+  idToque: number | null;
+  planeadoPor: string | null;
+  idOrganizacion: number;
+  createdAt: string;
+};
+
+// Una cuenta que se pidio planear y no se escribio, con la razon. Se reportan en vez de tumbar
+// el lote entero (mismo criterio que sinMapeo en reconciliarNotion): un plan de quince cuentas
+// no se pierde porque una traiga el id mal escrito.
+export type CuentaRechazada = {
+  idEmpresa: string;
+  motivo: 'empresa_no_existe' | 'otra_organizacion' | 'duplicada_en_el_input';
+};
+
+export type PlanearDiaResultado = {
+  fecha: string;
+  planeadoPor: string;
+  // Lo que quedo escrito, RELEIDO de la tabla. Incluye las lineas que ya existian y se
+  // corrigieron, no solo las nuevas.
+  plan: LineaPlanEscrita[];
+  nuevas: number;
+  actualizadas: number;
+  rechazadas: CuentaRechazada[];
+};
+
+export function planearDia(input: PlanearDiaInput, idOrganizacion: number): PlanearDiaResultado {
+  const parsed = planearDiaSchema.parse(input);
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    const rechazadas: CuentaRechazada[] = [];
+    const vistas = new Set<string>();
+    let nuevas = 0;
+    let actualizadas = 0;
+
+    for (const linea of parsed.cuentas) {
+      // La llave es (dia, empresa, canal), la misma del indice unico: planear llamada Y correo a
+      // la misma cuenta el mismo dia son dos lineas legitimas. Mandar dos veces la misma
+      // combinacion en el mismo lote no lo es -- se queda la primera y la segunda se reporta,
+      // porque dejar que la ultima pise a la primera en silencio esconde un error de dictado.
+      const llave = `${linea.idEmpresa}|${linea.canal ?? ''}`;
+      if (vistas.has(llave)) {
+        rechazadas.push({ idEmpresa: linea.idEmpresa, motivo: 'duplicada_en_el_input' });
+        continue;
+      }
+      vistas.add(llave);
+
+      const emp = tx
+        .select({ organizacionActivaId: empresa.organizacionActivaId })
+        .from(empresa)
+        .where(eq(empresa.idEmpresa, linea.idEmpresa))
+        .get();
+      if (!emp) {
+        rechazadas.push({ idEmpresa: linea.idEmpresa, motivo: 'empresa_no_existe' });
+        continue;
+      }
+      if (emp.organizacionActivaId !== idOrganizacion) {
+        rechazadas.push({ idEmpresa: linea.idEmpresa, motivo: 'otra_organizacion' });
+        continue;
+      }
+
+      const existente = tx
+        .select({ id: toquePlaneado.idToquePlaneado })
+        .from(toquePlaneado)
+        .where(
+          and(
+            eq(toquePlaneado.fechaDia, parsed.fecha),
+            eq(toquePlaneado.idEmpresa, linea.idEmpresa),
+            linea.canal ? eq(toquePlaneado.canal, linea.canal) : isNull(toquePlaneado.canal),
+          ),
+        )
+        .get();
+
+      if (existente) {
+        // Replanear la misma (cuenta, dia, canal) CORRIGE la linea, no agrega una segunda. La
+        // nota se borra si el replan no la trae, para no dejar pegada la razon de un plan
+        // anterior. motivo_no_ejecutado NO se toca: es el registro de lo que paso despues, no
+        // parte del plan, y replanear no puede borrarlo.
+        tx.update(toquePlaneado)
+          .set({ tipo: linea.tipo, origen: linea.origen, nota: linea.nota ?? null, planeadoPor: parsed.planeadoPor })
+          .where(eq(toquePlaneado.idToquePlaneado, existente.id))
+          .run();
+        actualizadas += 1;
+      } else {
+        tx.insert(toquePlaneado)
+          .values({
+            fechaDia: parsed.fecha,
+            idEmpresa: linea.idEmpresa,
+            canal: linea.canal ?? null,
+            tipo: linea.tipo,
+            origen: linea.origen,
+            nota: linea.nota ?? null,
+            planeadoPor: parsed.planeadoPor,
+            idOrganizacion,
+            createdAt: ahora,
+          })
+          .run();
+        nuevas += 1;
+      }
+    }
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'toque_planeado',
+        idRegistro: parsed.fecha,
+        accion: nuevas > 0 ? 'insert' : 'update',
+        detalle: `plan ${parsed.fecha}: ${nuevas} nuevas, ${actualizadas} actualizadas, ${rechazadas.length} rechazadas`,
+      })
+      .run();
+
+    // Relectura DENTRO de la transaccion: el plan que se devuelve es el que quedo en la tabla.
+    const plan = tx
+      .select({
+        idToquePlaneado: toquePlaneado.idToquePlaneado,
+        fechaDia: toquePlaneado.fechaDia,
+        idEmpresa: toquePlaneado.idEmpresa,
+        canal: toquePlaneado.canal,
+        tipo: toquePlaneado.tipo,
+        origen: toquePlaneado.origen,
+        nota: toquePlaneado.nota,
+        motivoNoEjecutado: toquePlaneado.motivoNoEjecutado,
+        idToque: toquePlaneado.idToque,
+        planeadoPor: toquePlaneado.planeadoPor,
+        idOrganizacion: toquePlaneado.idOrganizacion,
+        createdAt: toquePlaneado.createdAt,
+      })
+      .from(toquePlaneado)
+      .where(and(eq(toquePlaneado.fechaDia, parsed.fecha), eq(toquePlaneado.idOrganizacion, idOrganizacion)))
+      .orderBy(toquePlaneado.idToquePlaneado)
+      .all();
+
+    return { fecha: parsed.fecha, planeadoPor: parsed.planeadoPor, plan, nuevas, actualizadas, rechazadas };
+  });
+}
+
+export type LineaPlan = {
+  idToquePlaneado: number;
+  fechaDia: string;
+  idEmpresa: string;
+  empresa: string;
+  estado: string | null;
+  owner: string | null;
+  canal: string | null;
+  tipo: string;
+  origen: string;
+  nota: string | null;
+  // Por que no se hizo, escrito EN la fila del plan. Es la fuente primaria del motivo; el aplazo
+  // de esa cuenta ese dia es el respaldo cuando esta en null. Ninguno de los dos se infiere.
+  motivoNoEjecutado: string | null;
+  // Enlace explicito al toque que ejecuto esta linea. Cuando existe, manda sobre el cruce por
+  // (empresa, dia): es exacto y distingue dos lineas planeadas para la misma cuenta el mismo dia.
+  idToque: number | null;
+  planeadoPor: string | null;
+};
+
+// El plan de un rango, cruzado con su empresa. Mismo par de filtros que toquesEnRango (owner
+// del deal, persona que planeo) para que las dos listas se puedan comparar sin que una traiga
+// filas que la otra no puede traer.
+export function planEnRango(
+  desde: string,
+  hasta: string,
+  idOrganizacion: number,
+  filtros: { owner?: string; planeadoPor?: string } = {},
+): LineaPlan[] {
+  const condiciones = [
+    eq(toquePlaneado.idOrganizacion, idOrganizacion),
+    sql`${toquePlaneado.fechaDia} >= ${desde}`,
+    sql`${toquePlaneado.fechaDia} <= ${hasta}`,
+  ];
+  if (filtros.owner) condiciones.push(eq(empresa.owner, filtros.owner));
+  if (filtros.planeadoPor) condiciones.push(eq(toquePlaneado.planeadoPor, filtros.planeadoPor));
+
+  return db
+    .select({
+      idToquePlaneado: toquePlaneado.idToquePlaneado,
+      fechaDia: toquePlaneado.fechaDia,
+      idEmpresa: toquePlaneado.idEmpresa,
+      empresa: empresa.nombreOficial,
+      estado: empresa.estadoNotion,
+      owner: empresa.owner,
+      canal: toquePlaneado.canal,
+      tipo: toquePlaneado.tipo,
+      origen: toquePlaneado.origen,
+      nota: toquePlaneado.nota,
+      motivoNoEjecutado: toquePlaneado.motivoNoEjecutado,
+      idToque: toquePlaneado.idToque,
+      planeadoPor: toquePlaneado.planeadoPor,
+    })
+    .from(toquePlaneado)
+    .innerJoin(empresa, eq(empresa.idEmpresa, toquePlaneado.idEmpresa))
+    .where(and(...condiciones))
+    .orderBy(toquePlaneado.fechaDia, toquePlaneado.idToquePlaneado)
     .all();
 }
 

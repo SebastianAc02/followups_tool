@@ -774,6 +774,65 @@ export const auditoriaCampo = sqliteTable(
   ],
 );
 
+// El plan del dia: que cuentas se PENSABA tocar, de que tipo, por que entraron a la lista y --
+// cuando se decidio -- por que canal (2026-07-26).
+//
+// EL DDL NO ES DE ESTE ARCHIVO NI DE ESTE AGENTE. Lo escribio experto-followups en
+// drizzle/manual/0016_toque_planeado.sql (PROPUESTA, sin aplicar a produccion) y ahi vive el
+// razonamiento completo: por que una tabla y no columnas en `toque`, por que no hay columna de
+// estado, y los dos caminos de cruce. Esto de aqui es SOLO el mapeo Drizzle de esa tabla, columna
+// por columna, para que planearDia() y planEnRango() puedan hablarle. Si el DDL cambia, cambia
+// este mapeo y esas dos funciones; las firmas de planear_dia y plan_vs_ejecutado no se mueven.
+//
+// Existe porque el plan del dia vivia en un markdown del brain: "cuantas cuentas planee esta
+// semana y cuantas toque de verdad" no tenia fuente. La cola (`empresa.proximo_follow_up_fecha`)
+// responde otra cosa -- que esta VENCIDO, no que se decidio hacer hoy -- y ademas se pisa cada
+// vez que se reprograma.
+export const toquePlaneado = sqliteTable(
+  'toque_planeado',
+  {
+    idToquePlaneado: integer('id_toque_planeado').primaryKey({ autoIncrement: true }),
+    idEmpresa: text('id_empresa').notNull(),
+    // El DIA para el que se planeo, ISO YYYY-MM-DD. Mismo formato y mismo criterio que
+    // toque.fecha_dia, que es la columna sobre la que se cuenta: asi el cruce plan vs ejecucion
+    // es un JOIN y no una heuristica de parseo.
+    fechaDia: text('fecha_dia').notNull(),
+    // NULL = se planeo tocar la cuenta sin decidir el canal. No se infiere de la cadencia ni de
+    // empresa.proximo_canal: si no se dijo, no se sabe.
+    canal: text('canal'),
+    // frio | seguimiento | cierre (TIPOS_PLAN). Que clase de toque es, no por donde va.
+    tipo: text('tipo').notNull(),
+    // cadencia | rodado | manual (ORIGENES_PLAN).
+    origen: text('origen').notNull(),
+    // Puntero al paso real cuando origen='cadencia'. El MCP no lo escribe hoy: lo llena quien
+    // materialice el plan desde una cadencia.
+    idPasoInscripcion: integer('id_paso_inscripcion'),
+    // Cuando origen='rodado', la fila del dia anterior de la que se rodo. Permite seguir la
+    // cadena hacia atras sin una columna contador que se desincronice.
+    idPlaneadoOrigen: integer('id_planeado_origen'),
+    // Enlace explicito al toque ejecutado. NULL no quiere decir "no se hizo": quiere decir "no
+    // hay enlace explicito", y ahi entra el cruce por (id_empresa, fecha_dia).
+    idToque: integer('id_toque'),
+    // Por que no se hizo, uno de MOTIVOS_APLAZO. NULL = no lo dijo, jamas se infiere.
+    motivoNoEjecutado: text('motivo_no_ejecutado'),
+    nota: text('nota'),
+    // Cuando el no-ejecutado ademas movio la fecha, el evento de aplazo que lo registro.
+    idSeguimientoAplazado: integer('id_seguimiento_aplazado'),
+    planeadoPor: text('planeado_por'),
+    idOrganizacion: integer('id_organizacion').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [
+    // Idempotencia del plan, tal como la define el DDL: (dia, empresa, canal) con COALESCE sobre
+    // el canal, porque en SQLite dos NULL no chocan en un UNIQUE. Drizzle no expresa el COALESCE,
+    // asi que aqui se declara la version sin el: el indice REAL es el del .sql, este mapeo solo
+    // existe para que el ORM sepa que la combinacion es unica.
+    uniqueIndex('ux_toque_planeado_dia_empresa_canal').on(t.fechaDia, t.idEmpresa, t.canal),
+    index('idx_toque_planeado_dia').on(t.fechaDia, t.idOrganizacion),
+    index('idx_toque_planeado_empresa').on(t.idEmpresa, t.fechaDia),
+  ],
+);
+
 // Seguimiento que estaba programado y NO se ejecuto: se corrio a otra fecha. Una fila por
 // aplazo, append-only (nunca se actualiza ni se borra: cada corrimiento es un evento nuevo).
 //

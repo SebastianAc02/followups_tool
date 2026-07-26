@@ -500,6 +500,38 @@ export function crearDbPrueba() {
       created_at TEXT
     );
 
+    -- Migracion 0016, SIN APLICAR en produccion al 2026-07-26: el plan del dia. Copiado del
+    -- DDL propuesto en drizzle/manual/0016_toque_planeado.sql, columna por columna. Sin columna
+    -- de estado a proposito: si se ejecuto se deriva del enlace id_toque o, cuando no lo hay,
+    -- del cruce por (id_empresa, fecha_dia).
+    CREATE TABLE toque_planeado (
+      id_toque_planeado INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_empresa TEXT NOT NULL,
+      fecha_dia TEXT NOT NULL,
+      canal TEXT,
+      -- tipo acotado a TIPOS_PLAN, origen a ORIGENES_PLAN y motivo_no_ejecutado a
+      -- MOTIVOS_APLAZO, enforzados por Zod y no por un CHECK: mismo criterio que motivo en
+      -- seguimiento_aplazado.
+      tipo TEXT NOT NULL,
+      origen TEXT NOT NULL,
+      id_paso_inscripcion INTEGER,
+      id_planeado_origen INTEGER,
+      id_toque INTEGER,
+      motivo_no_ejecutado TEXT,
+      nota TEXT,
+      id_seguimiento_aplazado INTEGER,
+      planeado_por TEXT,
+      id_organizacion INTEGER NOT NULL,
+      created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')) NOT NULL
+    );
+
+    -- COALESCE(canal,'') porque en SQLite dos NULL no chocan en un UNIQUE: sin eso, "tocar a X
+    -- el martes, canal sin decidir" entraria dos veces.
+    CREATE UNIQUE INDEX ux_toque_planeado_dia_empresa_canal
+      ON toque_planeado (fecha_dia, id_empresa, COALESCE(canal, ''));
+    CREATE INDEX idx_toque_planeado_dia ON toque_planeado (fecha_dia, id_organizacion);
+    CREATE INDEX idx_toque_planeado_empresa ON toque_planeado (id_empresa, fecha_dia);
+
     CREATE TABLE empresa_clasificacion (
       id_empresa TEXT PRIMARY KEY REFERENCES empresa(id_empresa) ON DELETE CASCADE,
       es_carrier INTEGER NOT NULL DEFAULT 0,
