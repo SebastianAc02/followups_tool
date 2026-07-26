@@ -715,6 +715,65 @@ export const empresaEstadoSnapshot = sqliteTable(
   ],
 );
 
+// Bitacora de campo a nivel de BASE, no de aplicacion (2026-07-25). Una fila por columna que
+// cambio de valor, con el antes y el despues. La escribe un TRIGGER de SQLite
+// (empresa_auditoria_campo, migracion 0015), nunca el codigo TypeScript: por eso esta tabla se
+// mapea aqui SOLO para poder leerla.
+//
+// Por que en la base y no en el Repository: la instrumentacion a nivel de aplicacion ya fallo.
+// Global IP (901174053) paso a on_hold y su historial en empresa_estado_historial tiene una
+// sola linea, del 15-jul a cierre_documentacion; el cambio se escribio por fuera de
+// actualizarEstadoNotion y para efectos de medicion la transicion no existe. Un log que solo
+// corre cuando el cambio pasa por el camino instrumentado tiene exactamente ese punto ciego.
+// El trigger dispara en CUALQUIER UPDATE: MCP, script, migracion, docker exec o alguien
+// conectado directo al archivo.
+//
+// Generica a proposito (columna `tabla`): cubrir contacto o toque despues es un trigger nuevo
+// apuntando aqui, no una tabla nueva.
+//
+// Lo que esta bitacora NO sabe, y no se disimula:
+//   - QUIEN hizo el cambio. SQLite no le pasa al trigger nada del proceso que escribio. Ningun
+//     campo de actor se inventa; correlacionar con toque/sync_cambios por timestamp es lo que
+//     hay.
+//   - POR QUE. Lo mismo: el trigger ve valores, no intencion.
+//   - INSERT y DELETE. Es AFTER UPDATE. Crear o borrar una empresa no deja fila aca.
+//   - El pasado. Empieza a producir dato el dia que se aplica; no hay backfill posible.
+export const auditoriaCampo = sqliteTable(
+  'auditoria_campo',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    // Constante 'empresa' hoy. Existe para que un trigger sobre otra tabla escriba aqui.
+    tabla: text('tabla').notNull(),
+    // La PK del registro, como texto. En empresa es id_empresa (que tambien es auditable:
+    // reasignar_nit cambia la PK, y ahi id_registro guarda el valor NUEVO).
+    idRegistro: text('id_registro').notNull(),
+    campo: text('campo').notNull(),
+    // Sin tipar: SQLite convierte a texto por afinidad, asi que es_cliente=0 llega como '0' y
+    // pct_digital=0.4 como '0.4'. NULL en valor_anterior es un valor real (el campo estaba
+    // vacio), no un dato faltante.
+    valorAnterior: text('valor_anterior'),
+    valorNuevo: text('valor_nuevo'),
+    // ISO UTC con milisegundos, no el datetime('now') a segundos que usan los triggers viejos.
+    // Dos campos de la misma fila cambian en el mismo UPDATE: con resolucion de segundo no se
+    // distingue un lote de una escritura de dos escrituras seguidas.
+    // El DEFAULT vive en el DDL a proposito: el trigger no lo nombra, asi que cualquier trigger
+    // futuro que escriba aqui hereda el mismo formato sin poder equivocarse.
+    cambiadoEn: text('cambiado_en')
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    // Copia de empresa.organizacion_activa_id al momento del cambio. Nullable porque una tabla
+    // futura puede no tenerla.
+    idOrganizacion: integer('id_organizacion'),
+  },
+  (t) => [
+    // "Que le paso a esta cuenta": el acceso normal.
+    index('idx_auditoria_registro').on(t.tabla, t.idRegistro, t.cambiadoEn),
+    // "Todas las transiciones de estado_notion desde X": el acceso de medicion, el que hoy no
+    // se puede responder.
+    index('idx_auditoria_campo_fecha').on(t.tabla, t.campo, t.cambiadoEn),
+  ],
+);
+
 // Seguimiento que estaba programado y NO se ejecuto: se corrio a otra fecha. Una fila por
 // aplazo, append-only (nunca se actualiza ni se borra: cada corrimiento es un evento nuevo).
 //

@@ -66,7 +66,15 @@ export function crearDbPrueba() {
       se_presento INTEGER,
       califica INTEGER,
       tier TEXT,
-      tipo_empresa TEXT
+      tipo_empresa TEXT,
+      -- Las 3 columnas que existen en isps.db y que schema.ts NO mapea (Drizzle nunca las
+      -- toca, por eso faltaban aca sin romper nada). Entran con la migracion 0015: el trigger
+      -- de auditoria las nombra, y SQLite valida el cuerpo de un trigger al crearlo, asi que
+      -- sin ellas el CREATE TRIGGER revienta con "no such column" en cualquier base que se
+      -- arme con este DDL. Verificadas contra produccion el 2026-07-25 (empresa: 45 columnas).
+      metabase_uid TEXT,
+      ubicacion_fuente TEXT,
+      score_outbound REAL
     );
 
     -- Mismo indice UNICO PARCIAL que isps.db real (ux_empresa_notion_page_id): dos cuentas
