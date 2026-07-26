@@ -39,6 +39,7 @@ import {
   snapshotEstadosTool,
   editarToqueTool,
   planearDiaTool,
+  marcarNoEjecutadoTool,
   planVsEjecutadoTool,
 } from './tools';
 import { CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES, TIPOS_PLAN, ORIGENES_PLAN } from '../db/validation';
@@ -69,6 +70,7 @@ export const TOOLS_ESCRITURA = [
   'cambiar_cadencia',
   'crear_empresa',
   'editar_toque',
+  'marcar_no_ejecutado',
   'marcar_perdida',
   'mover_estado',
   'planear_dia',
@@ -287,6 +289,54 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
     },
     async (input) => {
       const r = planearDiaTool(input as Parameters<typeof planearDiaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_no_ejecutado',
+    {
+      description:
+        'El cierre del dia: de lo que estaba planeado, esto NO se hizo y por esto. Escribe el ' +
+        'motivo sobre la linea del plan. Existe porque hasta ahora el motivo solo existia si ' +
+        'ademas se corria un aplazo, y "no lo hice porque el dia se atraveso" no siempre mueve una ' +
+        'fecha: la cuenta que no se toco y cuyo follow-up sigue donde estaba no tenia forma de ' +
+        'tener motivo. NO mueve ninguna fecha y NO crea el aplazo (para correr un seguimiento esta ' +
+        'aplazar_seguimiento); si ya existe un aplazo de esa cuenta ese dia, lo enlaza. RECHAZA, en ' +
+        'vez de escribir: una cuenta sin linea en el plan de ese dia (no se inventa el plan a ' +
+        'posteriori para poder decir que no se cumplio), una cuenta con dos canales planeados ese ' +
+        'dia cuando no se dice cual, y una cuenta que SI tiene toque ese dia, devolviendo el ' +
+        'idToque que la contradice. Devuelve las lineas RELEIDAS, cuantas quedaron sin motivo ' +
+        'porque nadie lo dijo y cuantas sobrescribieron un motivo anterior.',
+      inputSchema: {
+        fecha: z.string().min(1).describe('YYYY-MM-DD, el dia del plan que se esta cerrando'),
+        cuentas: z
+          .array(
+            z.object({
+              idEmpresa: z.string().min(1),
+              canal: z
+                .enum(CANALES_TOQUE)
+                .optional()
+                .describe('Solo hace falta si esa cuenta tiene mas de una linea ese dia. Sin esto y con dos, se rechaza en vez de adivinar cual no se hizo'),
+              motivo: z.enum(MOTIVOS_APLAZO).optional().describe('El de la cuenta gana sobre el del lote'),
+              nota: z.string().min(1).optional(),
+            }),
+          )
+          .min(1),
+        motivo: z
+          .enum(MOTIVOS_APLAZO)
+          .optional()
+          .describe(
+            'Motivo para todas las que no traigan el suyo, que es el caso real del cierre del dia ' +
+              '("estas cuatro no las hice, el dia se atraveso"). Mismo vocabulario que aplazar_seguimiento, ' +
+              'no uno paralelo: plan_irreal, dia_atravesado, tiempo_no_usado, cuenta_evitada. Si no viene ' +
+              'ninguno, la linea queda sin motivo y se cuenta en sinMotivo: no se infiere',
+          ),
+        nota: z.string().min(1).optional().describe('Detalle en prosa para el lote. No pisa la nota que una linea ya tenga si no viene nada'),
+      },
+    },
+    async (input) => {
+      const r = marcarNoEjecutadoTool(input as Parameters<typeof marcarNoEjecutadoTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );

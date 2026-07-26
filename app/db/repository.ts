@@ -115,6 +115,8 @@ import {
   invariantesToque,
   planearDiaSchema,
   type PlanearDiaInput,
+  marcarNoEjecutadoSchema,
+  type MarcarNoEjecutadoInput,
   cadenciaParseadaSchema,
   definicionSegmentoSchema,
   type DefinicionSegmento,
@@ -7774,6 +7776,206 @@ export function planearDia(input: PlanearDiaInput, idOrganizacion: number): Plan
       .all();
 
     return { fecha: parsed.fecha, planeadoPor: parsed.planeadoPor, plan, nuevas, actualizadas, rechazadas };
+  });
+}
+
+// --- marcarNoEjecutado (2026-07-26) ----------------------------------------------------
+//
+// El cierre del dia: escribe motivo_no_ejecutado sobre las lineas del plan que no se
+// ejecutaron. Hasta hoy el motivo solo existia si ademas se corria un aplazo, y "no lo hice
+// porque el dia se atraveso" no siempre mueve una fecha: la cuenta cuyo follow-up sigue donde
+// estaba quedaba sin motivo posible, y su silencio se leia igual que el de una cuenta que nadie
+// planeo.
+//
+// NO crea el aplazo ni mueve ninguna fecha. Correr un seguimiento es otra decision y ya tiene su
+// camino (aplazarSeguimiento). Lo que si hace es ENLAZAR el aplazo que ya exista de esa cuenta
+// ese dia, para que las dos mitades del mismo hecho queden atadas sin duplicar el motivo.
+
+export type LineaNoEjecutadaRechazada = {
+  idEmpresa: string;
+  motivo:
+    | 'sin_linea_en_el_plan'
+    | 'varias_lineas_ese_dia'
+    | 'ya_ejecutada'
+    | 'duplicada_en_el_input'
+    | 'otra_organizacion';
+  // Cuando el rechazo es 'ya_ejecutada', el toque que la contradice. Sin esto, quien lo lea no
+  // sabe si el rechazo es un error suyo o un toque que no recordaba haber registrado.
+  idToque?: number;
+  // Cuando es 'varias_lineas_ese_dia', los canales entre los que hay que elegir.
+  canales?: (string | null)[];
+};
+
+export type MarcarNoEjecutadoResultado = {
+  fecha: string;
+  // Las lineas del plan RELEIDAS despues de escribirles el motivo.
+  marcadas: LineaPlanEscrita[];
+  // Las que ya tenian un motivo y se sobrescribio, contadas aparte: cambiar de opinion sobre por
+  // que no se hizo algo es legitimo, pasar por encima de un motivo sin darse cuenta no.
+  sobrescritas: number;
+  // Cuantas quedaron sin motivo porque nadie lo dijo. Es la metrica que mide la calidad del
+  // registro, no la del operador: un dia con muchas asi no es un mal dia de ventas, es un dia
+  // mal cerrado.
+  sinMotivo: number;
+  rechazadas: LineaNoEjecutadaRechazada[];
+};
+
+export function marcarNoEjecutado(
+  input: MarcarNoEjecutadoInput,
+  idOrganizacion: number,
+): MarcarNoEjecutadoResultado {
+  const parsed = marcarNoEjecutadoSchema.parse(input);
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    const rechazadas: LineaNoEjecutadaRechazada[] = [];
+    const vistas = new Set<string>();
+    const idsMarcados: number[] = [];
+    let sobrescritas = 0;
+    let sinMotivo = 0;
+
+    for (const linea of parsed.cuentas) {
+      const llave = `${linea.idEmpresa}|${linea.canal ?? ''}`;
+      if (vistas.has(llave)) {
+        rechazadas.push({ idEmpresa: linea.idEmpresa, motivo: 'duplicada_en_el_input' });
+        continue;
+      }
+      vistas.add(llave);
+
+      // Las lineas del plan de esa cuenta ese dia, dentro de esta organizacion.
+      const condiciones = [
+        eq(toquePlaneado.fechaDia, parsed.fecha),
+        eq(toquePlaneado.idEmpresa, linea.idEmpresa),
+        eq(toquePlaneado.idOrganizacion, idOrganizacion),
+      ];
+      if (linea.canal) condiciones.push(eq(toquePlaneado.canal, linea.canal));
+      const lineas = tx
+        .select({
+          id: toquePlaneado.idToquePlaneado,
+          canal: toquePlaneado.canal,
+          idToque: toquePlaneado.idToque,
+          motivoNoEjecutado: toquePlaneado.motivoNoEjecutado,
+        })
+        .from(toquePlaneado)
+        .where(and(...condiciones))
+        .all();
+
+      if (lineas.length === 0) {
+        // Sin linea planeada no hay nada que marcar. No se crea una: inventar el plan a
+        // posteriori para poder decir que no se cumplio es fabricar el dato que se quiere medir.
+        // Si de verdad estaba planeada, se escribe con planear_dia y despues se marca.
+        rechazadas.push({ idEmpresa: linea.idEmpresa, motivo: 'sin_linea_en_el_plan' });
+        continue;
+      }
+      if (lineas.length > 1) {
+        // Dos canales planeados el mismo dia y el caller no dijo cual. Elegir uno seria decidir
+        // por el cual de los dos toques no se hizo.
+        rechazadas.push({
+          idEmpresa: linea.idEmpresa,
+          motivo: 'varias_lineas_ese_dia',
+          canales: lineas.map((l) => l.canal),
+        });
+        continue;
+      }
+
+      const fila = lineas[0];
+
+      // Contradiccion dura: la linea dice que no se hizo y hay un toque de esa cuenta ese dia.
+      // Se falla explicito en vez de escribir un motivo que el propio dato desmiente. El enlace
+      // explicito manda; el respaldo es el toque del mismo dia, el mismo criterio de cruce que
+      // usa plan_vs_ejecutado.
+      const yaEjecutada =
+        fila.idToque != null
+          ? { idToque: fila.idToque }
+          : tx
+              .select({ idToque: toque.idToque })
+              .from(toque)
+              .where(
+                and(
+                  eq(toque.idEmpresa, linea.idEmpresa),
+                  eq(toque.idOrganizacion, idOrganizacion),
+                  sql`coalesce(${toque.fechaDia}, substr(${toque.fecha}, 1, 10)) = ${parsed.fecha}`,
+                ),
+              )
+              .get();
+      if (yaEjecutada) {
+        rechazadas.push({ idEmpresa: linea.idEmpresa, motivo: 'ya_ejecutada', idToque: yaEjecutada.idToque });
+        continue;
+      }
+
+      // El motivo de la linea gana sobre el del lote. Si no viene ninguno queda NULL: marcar sin
+      // motivo tambien es registrar (deja escrito que esa linea se reviso), pero se cuenta aparte.
+      const motivo = linea.motivo ?? parsed.motivo ?? null;
+      const nota = linea.nota ?? parsed.nota ?? null;
+      if (motivo === null) sinMotivo += 1;
+      if (fila.motivoNoEjecutado !== null && motivo !== null && fila.motivoNoEjecutado !== motivo) {
+        sobrescritas += 1;
+      }
+
+      // El aplazo de esa cuenta ese dia, si existe. No se crea: mover la fecha es otra decision.
+      const aplazo = tx
+        .select({ id: seguimientoAplazado.id })
+        .from(seguimientoAplazado)
+        .where(
+          and(
+            eq(seguimientoAplazado.idEmpresa, linea.idEmpresa),
+            eq(seguimientoAplazado.idOrganizacion, idOrganizacion),
+            sql`substr(${seguimientoAplazado.fechaIncumplida}, 1, 10) = ${parsed.fecha}`,
+          ),
+        )
+        .orderBy(desc(seguimientoAplazado.id))
+        .get();
+
+      tx.update(toquePlaneado)
+        .set({
+          motivoNoEjecutado: motivo,
+          // La nota solo se pisa si vino una: un lote que manda motivo para cuatro cuentas no
+          // tiene por que borrar el detalle que ya tenia una de ellas.
+          ...(nota !== null ? { nota } : {}),
+          ...(aplazo ? { idSeguimientoAplazado: aplazo.id } : {}),
+        })
+        .where(eq(toquePlaneado.idToquePlaneado, fila.id))
+        .run();
+      idsMarcados.push(fila.id);
+    }
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'toque_planeado',
+        idRegistro: parsed.fecha,
+        accion: 'update',
+        detalle: `no ejecutado ${parsed.fecha}: ${idsMarcados.length} marcadas, ${sinMotivo} sin motivo, ${rechazadas.length} rechazadas`,
+      })
+      .run();
+
+    // Relectura DENTRO de la transaccion, solo de las lineas que se tocaron.
+    const marcadas =
+      idsMarcados.length === 0
+        ? []
+        : tx
+            .select({
+              idToquePlaneado: toquePlaneado.idToquePlaneado,
+              fechaDia: toquePlaneado.fechaDia,
+              idEmpresa: toquePlaneado.idEmpresa,
+              canal: toquePlaneado.canal,
+              tipo: toquePlaneado.tipo,
+              origen: toquePlaneado.origen,
+              nota: toquePlaneado.nota,
+              motivoNoEjecutado: toquePlaneado.motivoNoEjecutado,
+              idToque: toquePlaneado.idToque,
+              planeadoPor: toquePlaneado.planeadoPor,
+              idOrganizacion: toquePlaneado.idOrganizacion,
+              createdAt: toquePlaneado.createdAt,
+            })
+            .from(toquePlaneado)
+            .where(inArray(toquePlaneado.idToquePlaneado, idsMarcados))
+            .orderBy(toquePlaneado.idToquePlaneado)
+            .all();
+
+    return { fecha: parsed.fecha, marcadas, sobrescritas, sinMotivo, rechazadas };
   });
 }
 

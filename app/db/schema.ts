@@ -165,82 +165,92 @@ export const empresaUsuarios = sqliteTable('empresa_usuarios', {
   actualizadoPor: text('actualizado_por'),
 });
 
-export const toque = sqliteTable('toque', {
-  idToque: integer('id_toque').primaryKey({ autoIncrement: true }),
-  idEmpresa: text('id_empresa').notNull(),
-  idContacto: integer('id_contacto'),
-  fecha: text('fecha'),
-  // El DIA calendario del toque, ISO YYYY-MM-DD y nada mas (2026-07-25). `fecha` de arriba es
-  // texto libre historico: de 285 filas de produccion, 97 estan en NULL, 142 en ISO de dia, 39
-  // en ISO con hora, 4 con hora separada por espacio y 3 en prosa ("~inicios jun",
-  // "oct-2025 (aprox)"). El resultado medido es que 100 toques se caen de cualquier consulta
-  // con fecha y que solo 35 toques tienen fecha Y resultado a la vez.
-  //
-  // fechaDia es la columna sobre la que se cuenta: la escribe el dominio ya normalizada y Zod
-  // la valida contra ^\d{4}-\d{2}-\d{2}$ (mismo patron que canal/resultado: la garantia es del
-  // dominio, no un CHECK -- un CHECK en SQLite no se amplia sin recrear la tabla, ver
-  // docs/playbook-migraciones.md). `fecha` se sigue escribiendo con el timestamp completo, que
-  // es el que dice a que hora paso.
-  fechaDia: text('fecha_dia'),
-  // Lo que no se pudo convertir a un dia, guardado tal cual en vez de botado. Dos filas de
-  // produccion viven aca ("~inicios jun", "oct-2025 (aprox)"): son toques reales con una fecha
-  // que nadie sabe, y borrar el texto seria perder el unico rastro que queda de cuando fueron.
-  fechaTexto: text('fecha_texto'),
-  canal: text('canal'),
-  resultado: text('resultado'),
-  // Cuanto duro, en segundos. Nullable: un correo no dura, y un toque viejo no lo sabe. Sin
-  // esta columna no se puede separar la llamada de 40 segundos que no fue conversacion de la
-  // de 12 minutos que si lo fue, y las dos contaban igual en el conteo del dia.
-  duracionSegundos: integer('duracion_segundos'),
-  // Las dos fechas de la reunion, que son dos cosas distintas y por eso son dos columnas
-  // (2026-07-25): la PROPUESTA es cuando quedo agendada, la OCURRIDA es cuando de verdad
-  // paso. La diferencia entre las dos ES el dato: iguales = se cumplio, propuesta sin ocurrida
-  // = no-show o reagendamiento (lo dice el resultado: no_llego vs una reunion nueva), y la
-  // distancia entre la ocurrida y el pago es el ciclo de reunion a plata. Ninguna de las 90
-  // columnas de fecha del esquema respondia esto: un toque podia decir "quedamos en reunion"
-  // sin dejar cuando era ni si paso.
-  reunionFechaPropuesta: text('reunion_fecha_propuesta'),
-  reunionFechaOcurrida: text('reunion_fecha_ocurrida'),
-  quePaso: text('que_paso'),
-  proximoPaso: text('proximo_paso'),
-  proximoFollowUpFecha: text('proximo_follow_up_fecha'),
-  transcriptProveedor: text('transcript_proveedor'),
-  transcriptId: text('transcript_id'),
-  transcriptUrl: text('transcript_url'),
-  // El resumen que ESCRIBIO la tool para este toque (producto). Es lo que se ve al abrir el
-  // toque en el historial. Se llena venga de Granola o del dictado.
-  resumen: text('resumen'),
-  // El resumen que devolvio Granola, tal cual (insumo). Solo lo llena el camino de Granola;
-  // en un toque dictado queda null. Se guarda aparte de `resumen` para poder regenerar el
-  // producto cuando cambie el prompt, sin volver a pedirle a Granola con credencial por
-  // toques viejos. Es el "resumen cacheado" que pide el CLAUDE.md: el consumidor (CRO/MCP)
-  // lo lee sin credencial.
-  transcriptResumen: text('transcript_resumen'),
-  // Razon de perdida ACOTADA, uno de RAZONES_PERDIDA (app/db/validation.ts). La columna ya
-  // existia como texto libre y llego con UNA fila llena sobre 285 toques, en prosa. El
-  // vocabulario cerrado es lo que se cuenta; la prosa va en razonPerdidaNota y no la reemplaza.
-  // Mismo patron que motivo/nota en seguimiento_aplazado.
-  razonPerdida: text('razon_perdida'),
-  razonPerdidaNota: text('razon_perdida_nota'),
-  // Objecion VIVA, uno de OBJECIONES. Misma historia: 5 filas llenas sobre 285, todas en
-  // prosa, tres de ellas diciendo "precio" con distintas palabras.
-  objecion: text('objecion'),
-  objecionNota: text('objecion_nota'),
-  fuente: text('fuente').notNull(),
-  // Quien EJECUTO el toque (hizo la llamada o mando el mensaje), distinto de empresa.owner,
-  // que es el dueno del deal. Los dos coinciden casi siempre y por eso no existia la
-  // columna; cuando no coinciden (alguien cubre la cartera de otro, o el toque lo hace un
-  // SDR sobre un deal ajeno) hoy no hay forma de saber quien lo hizo, porque el owner del
-  // deal se lee como si fuera el ejecutor.
-  // Nullable y SIN default a proposito: NULL significa "no atribuido", nunca "lo hizo el
-  // owner". Las filas viejas quedan en NULL y no se rellenan hacia atras.
-  ejecutadoPor: text('ejecutado_por'),
-  // Multi-organización (Parte 1): de qué organización es este toque. A diferencia de
-  // empresa.organizacionActivaId (mutable, "quién tiene la relación ahora"), este campo
-  // es inmutable: el toque queda para siempre de la organización que lo registró.
-  idOrganizacion: integer('id_organizacion').notNull(),
-  createdAt: text('created_at'),
-});
+export const toque = sqliteTable(
+  'toque',
+  {
+    idToque: integer('id_toque').primaryKey({ autoIncrement: true }),
+    idEmpresa: text('id_empresa').notNull(),
+    idContacto: integer('id_contacto'),
+    fecha: text('fecha'),
+    // El DIA calendario del toque, ISO YYYY-MM-DD y nada mas (2026-07-25). `fecha` de arriba es
+    // texto libre historico: de 285 filas de produccion, 97 estan en NULL, 142 en ISO de dia, 39
+    // en ISO con hora, 4 con hora separada por espacio y 3 en prosa ("~inicios jun",
+    // "oct-2025 (aprox)"). El resultado medido es que 100 toques se caen de cualquier consulta
+    // con fecha y que solo 35 toques tienen fecha Y resultado a la vez.
+    //
+    // fechaDia es la columna sobre la que se cuenta: la escribe el dominio ya normalizada y Zod
+    // la valida contra ^\d{4}-\d{2}-\d{2}$ (mismo patron que canal/resultado: la garantia es del
+    // dominio, no un CHECK -- un CHECK en SQLite no se amplia sin recrear la tabla, ver
+    // docs/playbook-migraciones.md). `fecha` se sigue escribiendo con el timestamp completo, que
+    // es el que dice a que hora paso.
+    fechaDia: text('fecha_dia'),
+    // Lo que no se pudo convertir a un dia, guardado tal cual en vez de botado. Dos filas de
+    // produccion viven aca ("~inicios jun", "oct-2025 (aprox)"): son toques reales con una fecha
+    // que nadie sabe, y borrar el texto seria perder el unico rastro que queda de cuando fueron.
+    fechaTexto: text('fecha_texto'),
+    canal: text('canal'),
+    resultado: text('resultado'),
+    // Cuanto duro, en segundos. Nullable: un correo no dura, y un toque viejo no lo sabe. Sin
+    // esta columna no se puede separar la llamada de 40 segundos que no fue conversacion de la
+    // de 12 minutos que si lo fue, y las dos contaban igual en el conteo del dia.
+    duracionSegundos: integer('duracion_segundos'),
+    // Las dos fechas de la reunion, que son dos cosas distintas y por eso son dos columnas
+    // (2026-07-25): la PROPUESTA es cuando quedo agendada, la OCURRIDA es cuando de verdad
+    // paso. La diferencia entre las dos ES el dato: iguales = se cumplio, propuesta sin ocurrida
+    // = no-show o reagendamiento (lo dice el resultado: no_llego vs una reunion nueva), y la
+    // distancia entre la ocurrida y el pago es el ciclo de reunion a plata. Ninguna de las 90
+    // columnas de fecha del esquema respondia esto: un toque podia decir "quedamos en reunion"
+    // sin dejar cuando era ni si paso.
+    reunionFechaPropuesta: text('reunion_fecha_propuesta'),
+    reunionFechaOcurrida: text('reunion_fecha_ocurrida'),
+    quePaso: text('que_paso'),
+    proximoPaso: text('proximo_paso'),
+    proximoFollowUpFecha: text('proximo_follow_up_fecha'),
+    transcriptProveedor: text('transcript_proveedor'),
+    transcriptId: text('transcript_id'),
+    transcriptUrl: text('transcript_url'),
+    // El resumen que ESCRIBIO la tool para este toque (producto). Es lo que se ve al abrir el
+    // toque en el historial. Se llena venga de Granola o del dictado.
+    resumen: text('resumen'),
+    // El resumen que devolvio Granola, tal cual (insumo). Solo lo llena el camino de Granola;
+    // en un toque dictado queda null. Se guarda aparte de `resumen` para poder regenerar el
+    // producto cuando cambie el prompt, sin volver a pedirle a Granola con credencial por
+    // toques viejos. Es el "resumen cacheado" que pide el CLAUDE.md: el consumidor (CRO/MCP)
+    // lo lee sin credencial.
+    transcriptResumen: text('transcript_resumen'),
+    // Razon de perdida ACOTADA, uno de RAZONES_PERDIDA (app/db/validation.ts). La columna ya
+    // existia como texto libre y llego con UNA fila llena sobre 285 toques, en prosa. El
+    // vocabulario cerrado es lo que se cuenta; la prosa va en razonPerdidaNota y no la reemplaza.
+    // Mismo patron que motivo/nota en seguimiento_aplazado.
+    razonPerdida: text('razon_perdida'),
+    razonPerdidaNota: text('razon_perdida_nota'),
+    // Objecion VIVA, uno de OBJECIONES. Misma historia: 5 filas llenas sobre 285, todas en
+    // prosa, tres de ellas diciendo "precio" con distintas palabras.
+    objecion: text('objecion'),
+    objecionNota: text('objecion_nota'),
+    fuente: text('fuente').notNull(),
+    // Quien EJECUTO el toque (hizo la llamada o mando el mensaje), distinto de empresa.owner,
+    // que es el dueno del deal. Los dos coinciden casi siempre y por eso no existia la
+    // columna; cuando no coinciden (alguien cubre la cartera de otro, o el toque lo hace un
+    // SDR sobre un deal ajeno) hoy no hay forma de saber quien lo hizo, porque el owner del
+    // deal se lee como si fuera el ejecutor.
+    // Nullable y SIN default a proposito: NULL significa "no atribuido", nunca "lo hizo el
+    // owner". Las filas viejas quedan en NULL y no se rellenan hacia atras.
+    ejecutadoPor: text('ejecutado_por'),
+    // Multi-organización (Parte 1): de qué organización es este toque. A diferencia de
+    // empresa.organizacionActivaId (mutable, "quién tiene la relación ahora"), este campo
+    // es inmutable: el toque queda para siempre de la organización que lo registró.
+    idOrganizacion: integer('id_organizacion').notNull(),
+    createdAt: text('created_at'),
+  },
+  (t) => [
+    // El PRIMER indice de `toque` (2026-07-26). Verificado contra produccion: sqlite_master no
+    // devolvia ninguno para tbl_name='toque'. Con 287 filas da igual, pero el cruce de
+    // toque_planeado contra esta tabla es exactamente por (id_empresa, fecha_dia) y corre todos
+    // los dias en el cierre. Cuesta unos KB ahora y evita el full scan cuando crezca.
+    index('idx_toque_empresa_dia').on(t.idEmpresa, t.fechaDia),
+  ],
+);
 
 // Lista cruda de prospeccion (670 filas en isps.db): el nombre tal como venia de la fuente
 // original, con su website y sus telefonos, antes de que existiera la cuenta. Ya existia en
@@ -820,16 +830,35 @@ export const toquePlaneado = sqliteTable(
     idSeguimientoAplazado: integer('id_seguimiento_aplazado'),
     planeadoPor: text('planeado_por'),
     idOrganizacion: integer('id_organizacion').notNull(),
-    createdAt: text('created_at').notNull(),
+    // El DEFAULT vive en el DDL, no solo en el codigo: cualquier INSERT que no nombre la columna
+    // (un script, un docker exec) reventaria contra el NOT NULL. Mismo criterio y mismo formato
+    // que auditoria_campo.cambiado_en.
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
   },
   (t) => [
-    // Idempotencia del plan, tal como la define el DDL: (dia, empresa, canal) con COALESCE sobre
-    // el canal, porque en SQLite dos NULL no chocan en un UNIQUE. Drizzle no expresa el COALESCE,
-    // asi que aqui se declara la version sin el: el indice REAL es el del .sql, este mapeo solo
-    // existe para que el ORM sepa que la combinacion es unica.
+    // Idempotencia del plan: (dia, empresa, canal). OJO, EL INDICE REAL ES MAS ESTRICTO QUE ESTE
+    // MAPEO. En la base es (fecha_dia, id_empresa, COALESCE(canal,'')), porque en SQLite dos NULL
+    // no chocan en un UNIQUE y sin el COALESCE "tocar a X el martes, canal sin decidir" entraria
+    // dos veces, que es JUSTO el caso por defecto de planear_dia.
+    //
+    // Por que no se declara con el COALESCE aca: drizzle-kit 0.31.10 no sabe emitir una expresion
+    // como columna de indice en SQLite. Con sql`coalesce(...)` genera literalmente
+    //   ON `toque_planeado` (`fecha_dia`,`id_empresa`,`coalesce("canal"`,`''`)
+    // partiendo la expresion por la coma y citando los pedazos como identificadores: SQL invalido
+    // que revienta al migrar. Se deja el mapeo plano (que es lo que drizzle SI entiende y lo que
+    // queda en el snapshot) y el COALESCE se escribe a mano en el .sql de la 0016, con el MISMO
+    // NOMBRE de indice. Al coincidir el nombre, un `generate` futuro no ve diferencia y no
+    // intenta recrearlo. La base de prueba (app/db/test-helpers.ts) replica la version estricta,
+    // que es la que corre en produccion.
     uniqueIndex('ux_toque_planeado_dia_empresa_canal').on(t.fechaDia, t.idEmpresa, t.canal),
     index('idx_toque_planeado_dia').on(t.fechaDia, t.idOrganizacion),
     index('idx_toque_planeado_empresa').on(t.idEmpresa, t.fechaDia),
+    // Parcial: la cola de lo que todavia no tiene enlace explicito, que es sobre lo que corre el
+    // cierre del dia. Parcial y no completo porque la tabla crece con el tiempo y lo pendiente
+    // siempre es un pedazo chico.
+    index('idx_toque_planeado_sin_toque').on(t.fechaDia).where(sql`${t.idToque} IS NULL`),
   ],
 );
 

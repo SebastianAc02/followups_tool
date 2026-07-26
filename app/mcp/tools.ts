@@ -35,6 +35,7 @@ import {
   snapshotEstados,
   editarToque,
   planearDia,
+  marcarNoEjecutado,
   planEnRango,
   toquesEnRango,
   aplazosEnRango,
@@ -42,6 +43,7 @@ import {
   resumenHome,
   type EditarToqueResultado,
   type PlanearDiaResultado,
+  type MarcarNoEjecutadoResultado,
   type LineaPlan,
   type AplazoActividad,
   type AplazarSeguimientoInput,
@@ -61,7 +63,7 @@ import {
   type ActualizarEmpresaInput,
   type EmpresaEscrita,
 } from '../db/repository';
-import { RESULTADOS_REUNION_OCURRIDA, type RegistrarToqueInput, type EditarToqueInput, type PlanearDiaInput } from '../db/validation';
+import { RESULTADOS_REUNION_OCURRIDA, type RegistrarToqueInput, type EditarToqueInput, type PlanearDiaInput, type MarcarNoEjecutadoInput } from '../db/validation';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
@@ -662,6 +664,24 @@ export function editarToqueTool(input: EditarToqueInput, idOrganizacion: number)
 
 export function planearDiaTool(input: PlanearDiaInput, idOrganizacion: number): PlanearDiaResultado {
   return planearDia(input, idOrganizacion);
+}
+
+// --- marcar_no_ejecutado (ESCRITURA, 2026-07-26) ---------------------------------------
+//
+// El cierre del dia. Cierra el hueco que dejaba plan_vs_ejecutado: el motivo de lo no hecho
+// solo existia si ademas se corria un aplazo, y "no lo hice porque el dia se atraveso" no
+// siempre mueve una fecha. Sin esto, la cuenta que no se toco y cuyo follow-up sigue donde
+// estaba no tenia forma de tener motivo, y su silencio se leia igual que el de una cuenta que
+// nadie planeo.
+//
+// No mueve ninguna fecha y no crea el aplazo: correr un seguimiento es otra decision y tiene su
+// propia accion. Lo que si hace es enlazar el aplazo que ya exista de esa cuenta ese dia.
+
+export function marcarNoEjecutadoTool(
+  input: MarcarNoEjecutadoInput,
+  idOrganizacion: number,
+): MarcarNoEjecutadoResultado {
+  return marcarNoEjecutado(input, idOrganizacion);
 }
 
 // --- plan_vs_ejecutado (LECTURA, 2026-07-26) -------------------------------------------

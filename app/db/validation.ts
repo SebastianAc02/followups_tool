@@ -739,3 +739,40 @@ export const planearDiaSchema = z.object({
   planeadoPor: z.string().min(1).optional().default(EJECUTOR_POR_DEFECTO),
 });
 export type PlanearDiaInput = z.input<typeof planearDiaSchema>;
+
+// --- marcar_no_ejecutado (2026-07-26) ---------------------------------------------------
+//
+// El cierre del dia: de lo que se planeo, esto no se hizo, y por esto. Escribe
+// motivo_no_ejecutado sobre la linea del plan.
+//
+// Existe porque hasta hoy el motivo SOLO existia si ademas se corrio un aplazo, y las dos cosas
+// no son la misma: "no lo hice porque el dia se atraveso" no siempre mueve una fecha. Una cuenta
+// que no se toco y cuyo follow-up sigue donde estaba quedaba sin motivo posible, y su ausencia
+// se leia igual que la de una cuenta que nadie planeo.
+//
+// El motivo reusa MOTIVOS_APLAZO tal cual, no un vocabulario paralelo: la pregunta es la misma
+// (por que no se hizo lo que estaba para hacerse) y dos listas para lo mismo se desincronizan.
+// Sigue siendo opcional: NULL = no lo dijo, y jamas se infiere. Marcar sin motivo tambien es
+// registrar, porque deja escrito que el operador REVISO esa linea y decidio no dar razon, que es
+// distinto de una linea que nadie miro.
+export const marcarNoEjecutadoSchema = z.object({
+  fecha: fechaDiaSchema,
+  cuentas: z
+    .array(
+      z.object({
+        idEmpresa: z.string().min(1),
+        // Solo hace falta cuando la cuenta tiene mas de una linea ese dia (se planearon dos
+        // canales). Sin canal y con dos lineas, la accion RECHAZA la cuenta en vez de elegir
+        // una: adivinar cual de las dos no se hizo es inventar el dato.
+        canal: z.enum(CANALES_TOQUE).optional(),
+        motivo: z.enum(MOTIVOS_APLAZO).optional(),
+        nota: z.string().min(1).optional(),
+      }),
+    )
+    .min(1),
+  // Motivo y nota para las lineas que no traen los suyos. Es el caso real del cierre del dia:
+  // "estas cuatro no las hice, el dia se atraveso". El de la linea gana sobre este.
+  motivo: z.enum(MOTIVOS_APLAZO).optional(),
+  nota: z.string().min(1).optional(),
+});
+export type MarcarNoEjecutadoInput = z.input<typeof marcarNoEjecutadoSchema>;

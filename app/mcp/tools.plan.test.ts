@@ -15,7 +15,8 @@ import { crearDbPrueba, borrarDbPrueba } from '../db/test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { planearDiaTool, planVsEjecutadoTool, registrarToqueTool, aplazarSeguimientoTool } = await import('./tools.ts');
+const { planearDiaTool, planVsEjecutadoTool, marcarNoEjecutadoTool, registrarToqueTool, aplazarSeguimientoTool } =
+  await import('./tools.ts');
 
 function seedEmpresa(id: string, opts: { owner?: string; proximoFollowUp?: string; idOrganizacion?: number } = {}) {
   const raw = new Database(dbPath);
@@ -290,6 +291,160 @@ test('plan_vs_ejecutado filtra por owner y no mezcla carteras', () => {
   const r = planVsEjecutadoTool({ desde: '2026-09-25', owner: 'Felipe Castro' });
   assert.equal(r.total.planeados, 1);
   assert.equal(r.noEjecutados[0].idEmpresa, 's1');
+});
+
+// --- marcar_no_ejecutado ---------------------------------------------------------------
+//
+// El cierre del dia. El caso que la justifica: el motivo existe sin que se haya movido ninguna
+// fecha, que es lo que aplazar_seguimiento no podia dar.
+
+test('marcarNoEjecutadoTool escribe el motivo sin mover ninguna fecha y devuelve la linea releida', () => {
+  seedEmpresa('n1', { proximoFollowUp: '2026-10-05' });
+  planearDiaTool({ fecha: '2026-10-01', cuentas: [{ idEmpresa: 'n1', tipo: 'seguimiento', origen: 'manual' }] }, 1);
+
+  const r = marcarNoEjecutadoTool(
+    { fecha: '2026-10-01', cuentas: [{ idEmpresa: 'n1' }], motivo: 'dia_atravesado', nota: 'se alargo la reunion de las 3' },
+    1,
+  );
+
+  assert.equal(r.marcadas.length, 1);
+  assert.equal(r.marcadas[0].motivoNoEjecutado, 'dia_atravesado');
+  assert.equal(r.sinMotivo, 0);
+
+  const raw = new Database(dbPath);
+  const fila = raw.prepare(`SELECT * FROM toque_planeado WHERE fecha_dia = '2026-10-01'`).get() as any;
+  const emp = raw.prepare(`SELECT proximo_follow_up_fecha FROM empresa WHERE id_empresa = 'n1'`).get() as any;
+  const aplazos = raw.prepare(`SELECT count(*) AS n FROM seguimiento_aplazado WHERE id_empresa = 'n1'`).get() as any;
+  raw.close();
+  assert.equal(fila.motivo_no_ejecutado, 'dia_atravesado');
+  assert.equal(fila.nota, 'se alargo la reunion de las 3');
+  assert.equal(emp.proximo_follow_up_fecha, '2026-10-05', 'marcar no ejecutado no mueve la fecha de seguimiento');
+  assert.equal(aplazos.n, 0, 'no crea el aplazo: correr una fecha es otra decision');
+});
+
+test('el motivo escrito por marcar_no_ejecutado es el que lee plan_vs_ejecutado, sin aplazo de por medio', () => {
+  seedEmpresa('n2');
+  planearDiaTool({ fecha: '2026-10-02', cuentas: [{ idEmpresa: 'n2', tipo: 'frio', origen: 'manual' }] }, 1);
+  marcarNoEjecutadoTool({ fecha: '2026-10-02', cuentas: [{ idEmpresa: 'n2', motivo: 'cuenta_evitada' }] }, 1);
+
+  const r = planVsEjecutadoTool({ desde: '2026-10-02' });
+  assert.equal(r.noEjecutados[0].motivo, 'cuenta_evitada');
+  assert.equal(r.noEjecutados[0].motivoFuente, 'plan');
+  assert.equal(r.noEjecutados[0].aplazadoA, null);
+});
+
+test('marcarNoEjecutadoTool enlaza el aplazo que ya exista de esa cuenta ese dia', () => {
+  seedEmpresa('n3', { proximoFollowUp: '2026-10-03' });
+  planearDiaTool({ fecha: '2026-10-03', cuentas: [{ idEmpresa: 'n3', tipo: 'seguimiento', origen: 'manual' }] }, 1);
+  aplazarSeguimientoTool({ idEmpresa: 'n3', fechaNueva: '2026-10-08', motivo: 'plan_irreal' }, 1);
+  marcarNoEjecutadoTool({ fecha: '2026-10-03', cuentas: [{ idEmpresa: 'n3', motivo: 'plan_irreal' }] }, 1);
+
+  const raw = new Database(dbPath);
+  const fila = raw.prepare(`SELECT * FROM toque_planeado WHERE fecha_dia = '2026-10-03'`).get() as any;
+  const aplazo = raw.prepare(`SELECT id FROM seguimiento_aplazado WHERE id_empresa = 'n3'`).get() as any;
+  raw.close();
+  assert.equal(fila.id_seguimiento_aplazado, aplazo.id, 'las dos mitades del mismo hecho quedan atadas');
+});
+
+// El motivo es opcional y NULL sigue significando "no lo dijo". Marcar sin motivo igual es
+// registrar, y se cuenta aparte.
+test('marcarNoEjecutadoTool sin motivo deja null y lo reporta en sinMotivo', () => {
+  seedEmpresa('n4');
+  planearDiaTool({ fecha: '2026-10-04', cuentas: [{ idEmpresa: 'n4', tipo: 'frio', origen: 'manual' }] }, 1);
+
+  const r = marcarNoEjecutadoTool({ fecha: '2026-10-04', cuentas: [{ idEmpresa: 'n4' }] }, 1);
+  assert.equal(r.sinMotivo, 1);
+  assert.equal(r.marcadas[0].motivoNoEjecutado, null);
+});
+
+// Camino de error duro: la linea diria que no se hizo y hay un toque de esa cuenta ese dia.
+test('marcarNoEjecutadoTool rechaza una cuenta que SI tiene toque ese dia, con el idToque que la contradice', () => {
+  seedEmpresa('n5');
+  planearDiaTool({ fecha: '2026-10-06', cuentas: [{ idEmpresa: 'n5', tipo: 'seguimiento', origen: 'manual' }] }, 1);
+  const { toque } = registrarToqueTool(
+    { idEmpresa: 'n5', canal: 'llamada', resultado: 'no_contesto', fecha: '2026-10-06' } as never,
+    1,
+  );
+
+  const r = marcarNoEjecutadoTool({ fecha: '2026-10-06', cuentas: [{ idEmpresa: 'n5', motivo: 'tiempo_no_usado' }] }, 1);
+  assert.equal(r.marcadas.length, 0);
+  assert.deepEqual(r.rechazadas, [{ idEmpresa: 'n5', motivo: 'ya_ejecutada', idToque: toque.idToque }]);
+
+  const raw = new Database(dbPath);
+  const fila = raw.prepare(`SELECT motivo_no_ejecutado FROM toque_planeado WHERE fecha_dia = '2026-10-06'`).get() as any;
+  raw.close();
+  assert.equal(fila.motivo_no_ejecutado, null, 'no se escribe un motivo que el propio dato desmiente');
+});
+
+test('marcarNoEjecutadoTool rechaza una cuenta que no estaba en el plan, sin inventar la linea', () => {
+  seedEmpresa('n6');
+
+  const r = marcarNoEjecutadoTool({ fecha: '2026-10-07', cuentas: [{ idEmpresa: 'n6', motivo: 'plan_irreal' }] }, 1);
+  assert.deepEqual(r.rechazadas, [{ idEmpresa: 'n6', motivo: 'sin_linea_en_el_plan' }]);
+  assert.equal(filasPlan('2026-10-07').length, 0);
+});
+
+test('marcarNoEjecutadoTool pide el canal cuando hay dos lineas ese dia, en vez de elegir una', () => {
+  seedEmpresa('n7');
+  planearDiaTool(
+    {
+      fecha: '2026-10-09',
+      cuentas: [
+        { idEmpresa: 'n7', tipo: 'seguimiento', origen: 'manual', canal: 'llamada' },
+        { idEmpresa: 'n7', tipo: 'seguimiento', origen: 'manual', canal: 'correo' },
+      ],
+    },
+    1,
+  );
+
+  const ambiguo = marcarNoEjecutadoTool({ fecha: '2026-10-09', cuentas: [{ idEmpresa: 'n7', motivo: 'plan_irreal' }] }, 1);
+  assert.equal(ambiguo.marcadas.length, 0);
+  assert.equal(ambiguo.rechazadas[0].motivo, 'varias_lineas_ese_dia');
+  assert.deepEqual(ambiguo.rechazadas[0].canales?.sort(), ['correo', 'llamada']);
+
+  // Con el canal, escribe solo esa.
+  const preciso = marcarNoEjecutadoTool(
+    { fecha: '2026-10-09', cuentas: [{ idEmpresa: 'n7', canal: 'correo', motivo: 'plan_irreal' }] },
+    1,
+  );
+  assert.equal(preciso.marcadas.length, 1);
+  assert.equal(preciso.marcadas[0].canal, 'correo');
+});
+
+// El caso del cierre del dia: un motivo para el lote, y el de la linea gana sobre el del lote.
+test('marcarNoEjecutadoTool aplica el motivo del lote y respeta el de cada linea', () => {
+  seedEmpresa('n8');
+  seedEmpresa('n9');
+  planearDiaTool(
+    {
+      fecha: '2026-10-10',
+      cuentas: [
+        { idEmpresa: 'n8', tipo: 'frio', origen: 'manual' },
+        { idEmpresa: 'n9', tipo: 'frio', origen: 'manual' },
+      ],
+    },
+    1,
+  );
+
+  const r = marcarNoEjecutadoTool(
+    { fecha: '2026-10-10', cuentas: [{ idEmpresa: 'n8' }, { idEmpresa: 'n9', motivo: 'cuenta_evitada' }], motivo: 'dia_atravesado' },
+    1,
+  );
+
+  const porEmpresa = Object.fromEntries(r.marcadas.map((m) => [m.idEmpresa, m.motivoNoEjecutado]));
+  assert.equal(porEmpresa.n8, 'dia_atravesado');
+  assert.equal(porEmpresa.n9, 'cuenta_evitada');
+  assert.equal(r.sinMotivo, 0);
+});
+
+test('marcarNoEjecutadoTool cuenta las que sobrescriben un motivo anterior', () => {
+  seedEmpresa('n10');
+  planearDiaTool({ fecha: '2026-10-11', cuentas: [{ idEmpresa: 'n10', tipo: 'frio', origen: 'manual' }] }, 1);
+  marcarNoEjecutadoTool({ fecha: '2026-10-11', cuentas: [{ idEmpresa: 'n10', motivo: 'plan_irreal' }] }, 1);
+
+  const r = marcarNoEjecutadoTool({ fecha: '2026-10-11', cuentas: [{ idEmpresa: 'n10', motivo: 'tiempo_no_usado' }] }, 1);
+  assert.equal(r.sobrescritas, 1);
+  assert.equal(r.marcadas[0].motivoNoEjecutado, 'tiempo_no_usado');
 });
 
 test.after(() => borrarDbPrueba(dbPath));

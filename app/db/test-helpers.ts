@@ -531,6 +531,11 @@ export function crearDbPrueba() {
       ON toque_planeado (fecha_dia, id_empresa, COALESCE(canal, ''));
     CREATE INDEX idx_toque_planeado_dia ON toque_planeado (fecha_dia, id_organizacion);
     CREATE INDEX idx_toque_planeado_empresa ON toque_planeado (id_empresa, fecha_dia);
+    -- Parcial: la cola de lo que todavia no tiene enlace explicito, sobre la que corre el cierre.
+    CREATE INDEX idx_toque_planeado_sin_toque ON toque_planeado (fecha_dia) WHERE id_toque IS NULL;
+    -- El primer indice de la tabla toque. La 0016 lo crea porque el cruce del cierre del dia va
+    -- exactamente por este par y hasta hoy la tabla no tenia ninguno.
+    CREATE INDEX idx_toque_empresa_dia ON toque (id_empresa, fecha_dia);
 
     CREATE TABLE empresa_clasificacion (
       id_empresa TEXT PRIMARY KEY REFERENCES empresa(id_empresa) ON DELETE CASCADE,
