@@ -293,15 +293,22 @@ test('espaciado de whatsapp: min 120000 deja "uno cada dos minutos"', () => {
   assert.deepEqual(espaciadoWhatsapp(), { minMs: 120_000, maxMs: 150_000 });
 });
 
-// Sigue siendo un RANGO y no un numero: un mensaje cada exactamente 120s es tan patron de bot
-// como mandarlos todos juntos. Un max incoherente (menor o igual al min) no puede terminar en
-// un intervalo de reloj.
-test('espaciado de whatsapp: un max por debajo del min no produce intervalo fijo', () => {
+// El intervalo EXACTO se permite (2026-07-26): es lo que el operador pidio para ver como se
+// comporta la linea con un ritmo predecible. Antes la herramienta lo "corregia" sola y abria el
+// maximo un 25%, o sea que desobedecia la config en silencio.
+test('espaciado de whatsapp: min y max iguales dan intervalo exacto, sin jitter', () => {
+  guardarConfiguracionAdmin('whatsapp_espaciado_min_ms', '120000');
+  guardarConfiguracionAdmin('whatsapp_espaciado_max_ms', '120000');
+  assert.deepEqual(espaciadoWhatsapp(), { minMs: 120_000, maxMs: 120_000 });
+});
+
+// Un max MENOR que el min no es una preferencia, es una config incoherente: no hay intervalo
+// que respetar y esperar un rango negativo dejaria el lote saliendo de golpe. Cae al default en
+// vez de inventar un numero.
+test('espaciado de whatsapp: un max por debajo del min cae al default', () => {
   guardarConfiguracionAdmin('whatsapp_espaciado_min_ms', '120000');
   guardarConfiguracionAdmin('whatsapp_espaciado_max_ms', '60000');
-  const e = espaciadoWhatsapp();
-  assert.equal(e.minMs, 120_000);
-  assert.ok(e.maxMs > e.minMs, 'el max se abre por encima del min en vez de quedar fijo');
+  assert.deepEqual(espaciadoWhatsapp(), { minMs: 45_000, maxMs: 90_000 });
 });
 
 test('espaciado de whatsapp: un valor basura cae al default, no a cero', () => {

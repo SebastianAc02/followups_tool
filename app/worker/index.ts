@@ -144,16 +144,24 @@ const ESPACIADO_MANUAL_MS = 3000;
 // cada dos minutos" (min 120000) mientras se mira como se comporta la linea, y para poder
 // bajarlo despues sin tocar codigo. Mismo patron que gmail_tope_diario, que ya vive ahi.
 //
-// Sigue siendo un RANGO y no un numero: un mensaje cada exactamente 120s es tan patron de bot
-// como mandarlos todos juntos, asi que un min sin max se abre un 25% hacia arriba en vez de
-// quedar fijo. Un max menor o igual al min tambien cae ahi: una config incoherente no puede
-// terminar en un intervalo de reloj.
-const ESPACIADO_APERTURA_RELATIVA = 1.25;
-
+// El intervalo EXACTO se permite (2026-07-26): poner min y max en 120000 da un mensaje cada
+// dos minutos clavados, sin jitter, que es lo que el operador pidio para poder ver como se
+// comporta la linea con un ritmo predecible. Antes esto se "corregia" solo y abria el maximo un
+// 25%, o sea que la herramienta desobedecia la config en silencio, que es peor que el riesgo
+// que intentaba cubrir.
+//
+// Lo que si se sigue corrigiendo es un max MENOR que el min, que no es una preferencia sino una
+// config incoherente: ahi no hay intervalo que respetar, y esperar un rango negativo dejaria el
+// lote saliendo de golpe. Se cae al default en vez de inventar un numero.
+//
+// Queda dicho, porque la razon original no desaparecio: un intervalo perfectamente fijo es un
+// patron reconocible, y sostenerlo en volumen alto es lo que arriesga la linea. A siete
+// mensajes es irrelevante; a setenta, no.
 export function espaciadoWhatsapp(): { minMs: number; maxMs: number } {
   const minMs = configNumeroAdmin('whatsapp_espaciado_min_ms', ESPACIADO_WHATSAPP_DEFAULT.minMs);
   const maxConfigurado = configNumeroAdmin('whatsapp_espaciado_max_ms', ESPACIADO_WHATSAPP_DEFAULT.maxMs);
-  return { minMs, maxMs: maxConfigurado > minMs ? maxConfigurado : Math.round(minMs * ESPACIADO_APERTURA_RELATIVA) };
+  if (maxConfigurado >= minMs) return { minMs, maxMs: maxConfigurado };
+  return { minMs: ESPACIADO_WHATSAPP_DEFAULT.minMs, maxMs: ESPACIADO_WHATSAPP_DEFAULT.maxMs };
 }
 
 async function tareaPush(

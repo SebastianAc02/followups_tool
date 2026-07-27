@@ -364,6 +364,8 @@ export function crearDbPrueba() {
       fecha_programada TEXT,
       fecha_enviada TEXT,
       cuerpo_final TEXT,
+      aprobado_en TEXT,
+      aprobado_por TEXT,
       intentos INTEGER NOT NULL DEFAULT 0,
       proximo_intento TEXT,
       created_at TEXT

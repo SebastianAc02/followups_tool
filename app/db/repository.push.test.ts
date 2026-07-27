@@ -29,6 +29,7 @@ const {
   fijarOwnerCampana,
   guardarProveedorCampanaId,
   marcarCampanaAprobadaGmail,
+  aprobarYProgramarPaso,
 } = await import('./repository.ts');
 
 function raw() {
@@ -227,6 +228,11 @@ test('pasoInscripcionesPendientes solo trae filas del canal pedido, y whatsapp r
   );
   fijarEstadoLineaWhatsapp('instancia-activa', 'activa');
 
+  // Aprobacion humana (2026-07-26): desde el gate de revision, un paso de whatsapp no sale sin
+  // aprobado_en, ni con la linea activa ni con la fecha cumplida. Este test mide el RUTEO por
+  // linea, asi que se aprueba primero para que lo que se vea sea el ruteo y no el gate nuevo.
+  aprobarYProgramarPaso(idWhatsapp, 'Hola, texto revisado', '2026-07-01', 'test');
+
   const deCorreo = pasoInscripcionesPendientes('correo');
   const deWhatsapp = pasoInscripcionesPendientes('whatsapp');
 
@@ -313,6 +319,11 @@ test('pasoInscripcionesPendientes: whatsapp rutea por la linea PROPIA del dueno 
   const idDestB = idDestinatarioDe('e-owner-b');
   const idPasoInsA = crearPasoInscripcionPendiente({ idDestinatario: idDestA, idPaso: idPasoOwners, idVersion: idVersionOwners, canal: 'whatsapp' });
   const idPasoInsB = crearPasoInscripcionPendiente({ idDestinatario: idDestB, idPaso: idPasoOwners, idVersion: idVersionOwners, canal: 'whatsapp' });
+
+  // Los dos pasan por la aprobacion humana antes de mirar el ruteo: sin aprobado_en ninguno
+  // sale, y este test es sobre por CUAL linea sale cada uno, no sobre si salen.
+  aprobarYProgramarPaso(idPasoInsA, 'Hola A', '2026-07-01', 'test');
+  aprobarYProgramarPaso(idPasoInsB, 'Hola B', '2026-07-01', 'test');
 
   const pendientes = pasoInscripcionesPendientes('whatsapp');
   const filaA = pendientes.find((f) => f.idPasoInscripcion === idPasoInsA);

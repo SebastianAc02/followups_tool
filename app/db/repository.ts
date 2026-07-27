@@ -5249,6 +5249,123 @@ export function guardarCopyPaso(
   return res.changes > 0;
 }
 
+// Revisar y programar en un solo movimiento (2026-07-26). Para el operador es un gesto solo
+// ("este texto va, a las 11"), asi que guardar el copy y dejarlo aprobado no pueden ser dos
+// llamadas que puedan quedar a medias: si la segunda falla, el paso queda con texto nuevo y
+// sin aprobar, o aprobado con el texto viejo. Va en UNA transaccion.
+//
+// NO es aprobarPasoManual y conviene no confundirlas nunca: aquella marca el paso 'enviada' y
+// escribe el toque porque el humano YA lo mando por su cuenta. Esta deja el paso PENDIENTE
+// para que lo mande la herramienta a su hora, y no escribe ningun toque -- todavia no ha
+// pasado nada que contar.
+//
+// Devuelve la fila releida, no un booleano: quien programa siete mensajes tiene que poder ver
+// que quedo escrito en cada uno sin volver a preguntar. null = no se pudo, y el motivo lo dice
+// `motivo` para poder rechazar uno sin tumbar el lote.
+export type EnvioProgramado = {
+  idPasoInscripcion: number;
+  idEmpresa: string;
+  empresa: string | null;
+  canal: string;
+  cuerpoFinal: string | null;
+  fechaProgramada: string | null;
+  aprobadoEn: string | null;
+  aprobadoPor: string | null;
+  estado: string;
+};
+
+export type ResultadoProgramar =
+  | { ok: true; envio: EnvioProgramado }
+  | { ok: false; idPasoInscripcion: number; motivo: 'no_existe' | 'ya_salio' };
+
+export function aprobarYProgramarPaso(
+  idPasoInscripcion: number,
+  cuerpoFinal: string,
+  fechaProgramada: string,
+  aprobadoPor: string,
+  ahora: string = new Date().toISOString(),
+): ResultadoProgramar {
+  return db.transaction((tx) => {
+    const actual = tx
+      .select({ estado: pasoInscripcion.estado })
+      .from(pasoInscripcion)
+      .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+      .get();
+    if (!actual) return { ok: false as const, idPasoInscripcion, motivo: 'no_existe' as const };
+    // Reescribir el copy de algo que ya salio seria falsificar el registro de lo que se dijo.
+    if (!['pendiente', 'fallo'].includes(actual.estado)) {
+      return { ok: false as const, idPasoInscripcion, motivo: 'ya_salio' as const };
+    }
+
+    tx.update(pasoInscripcion)
+      .set({ cuerpoFinal, fechaProgramada, aprobadoEn: ahora, aprobadoPor })
+      .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+      .run();
+
+    return { ok: true as const, envio: leerEnvioProgramado(tx, idPasoInscripcion)! };
+  });
+}
+
+// Relectura de una fila de envio, con su empresa. Se usa dentro de la transaccion que acaba de
+// escribir (devolver lo que quedo, no lo que se mando) y desde la consulta del dia.
+function leerEnvioProgramado(tx: Tx | typeof db, idPasoInscripcion: number): EnvioProgramado | null {
+  const f = tx
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      canal: pasoInscripcion.canal,
+      cuerpoFinal: pasoInscripcion.cuerpoFinal,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+      aprobadoEn: pasoInscripcion.aprobadoEn,
+      aprobadoPor: pasoInscripcion.aprobadoPor,
+      estado: pasoInscripcion.estado,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .get();
+  return f ?? null;
+}
+
+// Que hay programado para un dia, con su hora, su canal, su copy final y su estado. Es lo que
+// contesta "¿quedaron listas?" sin tener que confiar: hasta hoy, despues de programar siete
+// mensajes no habia forma de comprobarlo salvo creer que la escritura funciono.
+//
+// Trae TODO lo programado para ese dia, aprobado y sin aprobar, porque la mitad util de la
+// respuesta es justo la que falta por revisar. `listo` lo resume en una sola lectura: aprobado
+// y con copy escrito.
+export function enviosProgramadosDelDia(fechaDia: string, canal?: string): (EnvioProgramado & { listo: boolean })[] {
+  const condiciones = [
+    inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
+    sql`substr(${pasoInscripcion.fechaProgramada}, 1, 10) = ${fechaDia}`,
+  ];
+  if (canal) condiciones.push(eq(pasoInscripcion.canal, canal));
+
+  return db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      canal: pasoInscripcion.canal,
+      cuerpoFinal: pasoInscripcion.cuerpoFinal,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+      aprobadoEn: pasoInscripcion.aprobadoEn,
+      aprobadoPor: pasoInscripcion.aprobadoPor,
+      estado: pasoInscripcion.estado,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(and(...condiciones))
+    .orderBy(pasoInscripcion.fechaProgramada)
+    .all()
+    .map((f) => ({ ...f, listo: f.aprobadoEn !== null && f.cuerpoFinal !== null }));
+}
+
 // El copy tal como quedaria si el paso saliera ahora: el revisado si existe, la plantilla si
 // no. Es lo que hay que poder mirar ANTES de mandar, y responde tambien "¿esto ya lo revise?"
 // sin tener que comparar dos textos a ojo.
@@ -5575,9 +5692,19 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
   const condiciones = [
     eq(pasoInscripcion.canal, canal),
     inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
-    // V5.6: un paso manual (Tier 1) NUNCA lo dispara el push automatico. Espera
-    // revision humana via aprobarPasoManual, sin importar cuantos dias pasen.
-    eq(pasoCadencia.esManual, 0),
+    // Un paso manual espera REVISION HUMANA, y desde el 2026-07-26 esa revision se puede dar
+    // de dos formas distintas, no de una:
+    //   - aprobarPasoManual: "ya lo mande yo por mi cuenta". Marca 'enviada' y escribe el
+    //     toque. El paso sale de esta consulta por estado, no por aca.
+    //   - aprobarYProgramarPaso: "lo revise, el texto es este, mandalo tu a las 11". Deja
+    //     aprobado_en y el paso sigue pendiente, para que lo empuje el worker a su hora.
+    //
+    // Hasta hoy solo existia la primera, asi que es_manual significaba en la practica "esto no
+    // lo manda la herramienta nunca". Eso dejaba sin camino el gesto que el operador de verdad
+    // hace: revisar temprano y que salga mas tarde. es_manual sigue queriendo decir lo mismo
+    // que siempre (exige que un humano lo lea antes), y aprobado_en es la constancia de que
+    // ese humano ya lo leyo.
+    sql`(${pasoCadencia.esManual} = 0 OR ${pasoInscripcion.aprobadoEn} IS NOT NULL)`,
     // Fase 7 (pausar campana): defensa en profundidad -- si un paso ya quedo
     // pendiente ANTES de pausar, esto evita que igual se empuje al proveedor.
     eq(campana.estado, 'activa'),
@@ -5596,6 +5723,19 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
   // correo: sin secuencia externa (proveedor_campana_id) no hay a donde mandar. whatsapp
   // no usa esta columna -- su gate de "hay a donde mandar" se resuelve por fila mas abajo.
   if (canal !== 'whatsapp') condiciones.push(isNotNull(campana.proveedorCampanaId));
+
+  // GATE DE REVISION HUMANA PARA WHATSAPP (2026-07-26). "WhatsApp nunca se automatiza en este
+  // sistema": un paso de whatsapp no sale si nadie leyo el texto, por mas que su fecha ya haya
+  // llegado y la linea este activa. Hasta hoy esto no era cierto -- el worker empujaba
+  // cualquier paso de whatsapp que se materializara, y en produccion habia 8 esperando sin que
+  // nadie los hubiera revisado.
+  //
+  // Se aprueba con aprobarYProgramarPaso, que en el mismo movimiento deja el copy revisado: no
+  // hay forma de aprobar sin haber escrito un texto, que es justo lo que "revisado" significa.
+  //
+  // Solo whatsapp. Correo ya tiene su compuerta por campana (aprobada_envio_gmail) y sumarle
+  // una segunda cambiaria el comportamiento de un canal que nadie pidio cambiar.
+  if (canal === 'whatsapp') condiciones.push(isNotNull(pasoInscripcion.aprobadoEn));
 
   const filas = db
     .select({

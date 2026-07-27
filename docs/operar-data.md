@@ -307,8 +307,46 @@ pueden llamar por script, sin tool ni pantalla que las muestre.
 
 | Función / campo | Para qué | Qué falta |
 |---|---|---|
-| `guardarCopyPaso(id, cuerpo, fechaProgramada?)` | Guardar el copy revisado sin mandarlo, y fijarle hora | Quién lo llama |
-| `copyDePaso(id)` | Qué texto saldría y si ya se revisó | Quién lo llama |
+| `copyDePaso(id)` | Qué texto saldría y si ya se revisó | Quién lo llama. `envios_programados` cubre el caso real y esta quedó como consulta de un solo paso |
+
+## Un WhatsApp no sale sin que alguien lo haya leído
+
+Regla desde el 2026-07-26, y ahora el código la cumple: `pasoInscripcionesPendientes` exige
+`paso_inscripcion.aprobado_en` para el canal `whatsapp`. Sin eso, el paso no sale nunca, por
+mucho que su fecha haya llegado y la línea esté activa.
+
+La revisión tiene dos formas y significan cosas opuestas:
+
+| Función | Qué dice | Qué le pasa al paso |
+|---|---|---|
+| `aprobarPasoManual` | "Ya lo mandé yo por mi cuenta" | Queda `enviada` y **se escribe el toque** |
+| `aprobarYProgramarPaso` | "Lo revisé, el texto es este, mándalo tú a las 11" | Sigue `pendiente`, con `aprobado_en` y su hora. **No escribe toque**: todavía no pasó nada |
+
+Hasta hoy solo existía la primera, así que `es_manual` significaba en la práctica "esto no lo
+manda la herramienta nunca", y el gesto real del operador (revisar temprano, que salga más
+tarde) no tenía camino. Ahora `es_manual` sigue queriendo decir lo mismo (exige que un humano
+lo lea antes) y `aprobado_en` es la constancia de que ya lo leyó.
+
+Correo no cambia: su compuerta sigue siendo por campaña (`campana.aprobada_envio_gmail`) y un
+paso manual de correo sin aprobar sigue sin salir.
+
+### La hora programada es un piso, no una promesa
+
+`fecha_programada` decide desde cuándo un envío es **elegible**. Quien manda es el worker, que
+corre cada 5 minutos y separa los de una misma pasada con `whatsapp_espaciado_min_ms` /
+`whatsapp_espaciado_max_ms`. Programar a las 11:00, 11:02 y 11:04 no los hace salir a esas horas
+exactas: los deja habilitados y salen separados por el espaciado configurado.
+
+Para que el ritmo real sea de dos minutos, las dos claves tienen que valer `120000`. Iguales dan
+intervalo exacto sin jitter, que es lo que se pidió; un máximo menor que el mínimo cae al
+default (45-90s) en vez de inventar un número.
+
+```bash
+ssh deploy@62.238.55.238 "docker exec followups_web sqlite3 /data/isps.db \
+  \"INSERT OR REPLACE INTO configuracion_admin (clave, valor, actualizado_por, updated_at)
+     VALUES ('whatsapp_espaciado_min_ms','120000','manual',datetime('now')),
+            ('whatsapp_espaciado_max_ms','120000','manual',datetime('now'));\""
+```
 
 Ya tienen superficie (2026-07-26): `aperturas_whatsapp` es tool de LECTURA del MCP, y
 `accionCliente` es parámetro de `registrar_toque`, `editar_toque` y `marcar_perdida`.

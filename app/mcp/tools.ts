@@ -11,6 +11,8 @@
 //
 // Testeable sin servidor HTTP ni cliente MCP: cada funcion es (input) -> objeto JSON,
 // se prueba igual que un repository.*.test.ts (crearDbPrueba + seeds). Ver tools.test.ts.
+import { calcularHorarioEscalonado } from '../core/horario-escalonado';
+import { EJECUTOR_POR_DEFECTO } from '../db/validation';
 import {
   duracionPromedioPorEtapa,
   cicloVentaPromedio,
@@ -19,6 +21,9 @@ import {
   historialEtapasEmpresa,
   pipelineParaEndpoint,
   aperturasWhatsapp,
+  aprobarYProgramarPaso,
+  enviosProgramadosDelDia,
+  type EnvioProgramado,
   embudoPipeline,
   cuentasParaReconciliar,
   empresaFueraDelPipeline,
@@ -945,5 +950,86 @@ export function aperturasWhatsappTool(input: AperturasWhatsappInput = {}) {
     // que `actividad`).
     truncado: false,
     aperturas,
+  };
+}
+
+// --- programar_envios / envios_programados -------------------------------------------
+//
+// El gesto de la manana: el operador revisa los copys de apertura entre 8:00 y 8:30 y los deja
+// programados para las 11:00, uno cada dos minutos. Despues de las 8:30 no le da enviar a nada.
+//
+// Por que ES UNA sola accion y no dos: para el son un movimiento ("este texto va, a las 11").
+// Partirlo en guardar-copy + aprobar deja el estado a medias cuando la segunda falla, con el
+// texto nuevo sin aprobar o la aprobacion sobre el texto viejo. El repository lo resuelve en
+// una transaccion por paso.
+//
+// PROGRAMA, NO MANDA. Quien manda es el worker, cuando llega la hora. Y no manda nada que no
+// tenga aprobado_en: el gate vive en pasoInscripcionesPendientes, no en esta tool, porque una
+// regla que se cumple solo si pasas por la puerta correcta no es una regla.
+
+export type PasoAProgramar = { idPasoInscripcion: number; cuerpo: string };
+
+export type ProgramarEnviosInput = {
+  pasos: PasoAProgramar[];
+  horaInicio: string;
+  espaciadoMinutos?: number;
+  aprobadoPor?: string;
+};
+
+const ESPACIADO_PROGRAMACION_DEFAULT_MIN = 2;
+
+export function programarEnviosTool(input: ProgramarEnviosInput) {
+  const espaciadoMinutos = input.espaciadoMinutos ?? ESPACIADO_PROGRAMACION_DEFAULT_MIN;
+  const horario = calcularHorarioEscalonado(input.horaInicio, input.pasos.length, espaciadoMinutos * 60_000);
+  const aprobadoPor = input.aprobadoPor ?? EJECUTOR_POR_DEFECTO;
+
+  const programados: EnvioProgramado[] = [];
+  const rechazados: { idPasoInscripcion: number; motivo: string }[] = [];
+
+  // Uno por uno y sin transaccion que los envuelva a todos: un paso que ya salio no puede
+  // tumbar los otros seis. Es el mismo criterio del push (cada destinatario es independiente)
+  // y lo que pidio el encargo: rechazar lo que no cuadre sin tumbar el lote.
+  input.pasos.forEach((paso, i) => {
+    const r = aprobarYProgramarPaso(paso.idPasoInscripcion, paso.cuerpo, horario[i].fechaProgramada, aprobadoPor);
+    if (r.ok) programados.push(r.envio);
+    else rechazados.push({ idPasoInscripcion: r.idPasoInscripcion, motivo: r.motivo });
+  });
+
+  return {
+    horaInicio: input.horaInicio,
+    espaciadoMinutos,
+    aprobadoPor,
+    totalPedidos: input.pasos.length,
+    totalProgramados: programados.length,
+    totalRechazados: rechazados.length,
+    // Lo que quedo ESCRITO, releido de la base fila por fila. No es el eco del input: si algo
+    // no se guardo como se pidio, se ve aca.
+    programados,
+    rechazados,
+    // El ritmo real lo pone el worker, no estas horas. Se dice en la respuesta y no solo en la
+    // documentacion, porque quien programa a las 8:15 no va a ir a leer un comentario.
+    nota:
+      `Las horas son el piso desde el que cada mensaje queda ELEGIBLE, no el instante exacto de salida. ` +
+      `El worker corre cada 5 minutos y separa los de una misma pasada con whatsapp_espaciado_min_ms/max_ms: ` +
+      `para que el ritmo real sea de ${espaciadoMinutos} minutos, esas dos claves tienen que valer ${espaciadoMinutos * 60_000}.`,
+  };
+}
+
+export type EnviosProgramadosInput = { fecha: string; canal?: string };
+
+export function enviosProgramadosTool(input: EnviosProgramadosInput) {
+  const envios = enviosProgramadosDelDia(input.fecha, input.canal);
+  const listos = envios.filter((e) => e.listo);
+
+  return {
+    fecha: input.fecha,
+    canal: input.canal ?? null,
+    total: envios.length,
+    // El corte que importa a las 8:30: cuantas quedaron listas y cuantas siguen esperando
+    // revision. Las que faltan NO van a salir, y por eso se cuentan aparte en vez de sumarse.
+    totalListos: listos.length,
+    totalSinAprobar: envios.length - listos.length,
+    truncado: false,
+    envios,
   };
 }

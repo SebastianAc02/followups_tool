@@ -35,6 +35,8 @@ import {
   cambiosDesdeTool,
   actividadTool,
   aperturasWhatsappTool,
+  enviosProgramadosTool,
+  programarEnviosTool,
   colaTool,
   aplazarSeguimientoTool,
   snapshotEstadosTool,
@@ -43,7 +45,7 @@ import {
   marcarNoEjecutadoTool,
   planVsEjecutadoTool,
 } from './tools';
-import { CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES, ACCIONES_CLIENTE, TIPOS_PLAN, ORIGENES_PLAN } from '../db/validation';
+import { CANALES, CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES, ACCIONES_CLIENTE, TIPOS_PLAN, ORIGENES_PLAN } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 import { ORIGENES_CAMBIO } from '../core/origen-cambio';
@@ -61,6 +63,7 @@ export const TOOLS_LECTURA = [
   'cuentas',
   'deal_historia',
   'embudo',
+  'envios_programados',
   'panel_metricas',
   'pipeline',
   'plan_vs_ejecutado',
@@ -76,6 +79,7 @@ export const TOOLS_ESCRITURA = [
   'marcar_perdida',
   'mover_estado',
   'planear_dia',
+  'programar_envios',
   'reasignar_nit',
   'reconciliar_notion',
   'registrar_toque',
@@ -418,6 +422,46 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
     async (input) => {
       const r = cambiarCadenciaTool(input as Parameters<typeof cambiarCadenciaTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r) }] };
+    },
+  );
+
+  server.registerTool(
+    'programar_envios',
+    {
+      description:
+        'Revisa y programa VARIOS envios de cadencia de una sola vez: guarda el copy final de cada paso y ' +
+        'lo deja aprobado y programado, repartiendo las horas desde horaInicio con el espaciado pedido ' +
+        '(el primero a horaInicio, el segundo horaInicio+espaciado, etc). Es el gesto de la manana: revisar ' +
+        'los copys de apertura y dejarlos listos para mas tarde. ' +
+        'PROGRAMA, NO MANDA: quien manda es el worker cuando llega la hora, y no manda ningun WhatsApp que ' +
+        'no haya pasado por aca (un paso de whatsapp sin aprobar NO sale nunca, por mas que su fecha llegue). ' +
+        'NO confundir con "ya lo mande yo": esta tool no escribe ningun toque, porque todavia no ha pasado ' +
+        'nada que contar. Devuelve cada envio RELEIDO de la base, no el eco del input. Un paso que ya salio ' +
+        'o que no existe se rechaza solo, con su motivo, sin tumbar los demas del lote. ' +
+        'OJO: las horas son el piso desde el que cada mensaje queda elegible, no el instante exacto de ' +
+        'salida; el ritmo real lo pone whatsapp_espaciado_min_ms/max_ms del worker, y para que coincida con ' +
+        'el espaciado pedido esas claves tienen que valer lo mismo. La respuesta lo repite en `nota`.',
+      inputSchema: {
+        pasos: z
+          .array(
+            z.object({
+              idPasoInscripcion: z.number().int().positive().describe('paso_inscripcion.id_paso_inscripcion, el que devuelve envios_programados o la cola'),
+              cuerpo: z.string().min(1).describe('El copy final REVISADO, tal cual va a salir. Reemplaza la plantilla de la cadencia para ESTE envio y no toca la plantilla compartida'),
+            }),
+          )
+          .min(1)
+          .describe('Los pasos a programar, EN EL ORDEN en que deben salir: el primero de la lista sale primero'),
+        horaInicio: z
+          .string()
+          .min(1)
+          .describe('ISO con hora y zona, cuando sale el PRIMERO (ej. 2026-07-27T11:00:00.000Z para las 11:00 UTC). Una fecha sin hora los deja a todos elegibles desde la medianoche'),
+        espaciadoMinutos: z.number().positive().optional().describe('Minutos entre un envio y el siguiente. Default 2'),
+        aprobadoPor: z.string().min(1).optional().describe('Quien reviso. Si no viene, queda Sebastian Acosta Molina'),
+      },
+    },
+    async (input) => {
+      const r = programarEnviosTool(input as Parameters<typeof programarEnviosTool>[0]);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
 
@@ -774,6 +818,30 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ desde, hasta }) => {
       const resultado = aperturasWhatsappTool({ desde, hasta });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // Que quedo programado para un dia. Es la comprobacion de que las cuentas quedaron listas:
+  // hasta hoy, despues de programar siete mensajes no habia forma de verificarlo salvo confiar.
+  server.registerTool(
+    'envios_programados',
+    {
+      description:
+        'Que hay programado para una fecha: por cada envio, la empresa, el canal, la hora prevista, el copy ' +
+        'final tal como saldria, si ya fue aprobado y por quien, y su estado. Trae lo aprobado Y lo que ' +
+        'sigue sin aprobar, porque la mitad util de la respuesta es lo que falta por revisar: totalListos ' +
+        'son los que de verdad van a salir (aprobados y con copy escrito) y totalSinAprobar los que NO van ' +
+        'a salir aunque su hora llegue, porque WhatsApp no sale sin revision humana. La hora es el piso ' +
+        'desde el que el envio queda elegible, no el instante exacto: el ritmo real lo pone el espaciado ' +
+        'del worker. Sin tope, no trunca.',
+      inputSchema: {
+        fecha: z.string().min(1).describe('YYYY-MM-DD, el dia programado'),
+        canal: z.enum(CANALES).optional().describe('Filtra por canal. Sin esto, todos'),
+      },
+    },
+    async ({ fecha, canal }) => {
+      const resultado = enviosProgramadosTool({ fecha, canal });
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );

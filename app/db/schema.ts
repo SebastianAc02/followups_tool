@@ -569,6 +569,22 @@ export const pasoInscripcion = sqliteTable('paso_inscripcion', {
   // que ya salieron (por eso la regla vigente es "iterar copy = version nueva, nunca editar
   // la enviada"). Esto es lo contrario: un texto de UN envio a UNA cuenta.
   cuerpoFinal: text('cuerpo_final'),
+  // Quien reviso este envio y cuando (2026-07-26). NULL = nadie lo reviso todavia.
+  //
+  // Es un GATE, no una marca de auditoria: pasoInscripcionesPendientes exige aprobado_en para
+  // el canal whatsapp, asi que un paso de WhatsApp sin revisar NO sale nunca, por mas que su
+  // fecha ya haya llegado. Es lo que hace cierta la regla "WhatsApp nunca se automatiza en
+  // este sistema": hasta hoy el worker empujaba cualquier paso de whatsapp que se
+  // materializara, sin que nadie hubiera leido el texto.
+  //
+  // No confundir con aprobarPasoManual, que es otra cosa y opuesta: aquella marca el paso como
+  // 'enviada' porque el humano YA lo mando por su cuenta, y escribe el toque. Esto deja el
+  // paso pendiente para que lo mande la herramienta a su hora.
+  //
+  // Solo whatsapp lo exige. Correo ya tiene su propia compuerta por campana
+  // (campana.aprobada_envio_gmail) y no se le agrega una segunda.
+  aprobadoEn: text('aprobado_en'),
+  aprobadoPor: text('aprobado_por'),
   // Backoff (V5.4, mismo patron que outbox): intentos cuenta cuantas veces se
   // intento; proximoIntento es desde cuando vale la pena reintentar (null = ya).
   intentos: integer('intentos').notNull().default(0),
