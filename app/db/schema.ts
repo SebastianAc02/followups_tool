@@ -228,6 +228,19 @@ export const toque = sqliteTable(
     // prosa, tres de ellas diciendo "precio" con distintas palabras.
     objecion: text('objecion'),
     objecionNota: text('objecion_nota'),
+    // Que hizo el CLIENTE en este toque, en escala ordinal de compromiso (2026-07-26). Uno de
+    // ACCIONES_CLIENTE (app/db/validation.ts), con su nivel 0-6 en NIVEL_ACCION_CLIENTE.
+    //
+    // Es la unica columna del toque que mide al otro lado: `resultado` dice como salio el toque
+    // para nosotros, esto dice hasta donde se movio el cliente. Puestas en secuencia por fecha,
+    // las de una cuenta son su buyer journey, y el nivel donde se estancan las perdidas es
+    // donde se frena el embudo. Ordinal y no etiqueta porque tiene que poder BAJAR: volver de
+    // negocia a concede_atencion es la senal, y una lista sin orden no la puede expresar.
+    //
+    // NULL = no se dijo. Nunca se infiere del resultado ni de nada: quien sabe que hizo el
+    // cliente es quien estuvo en la llamada, y un ordinal inventado corrompe la medicion para
+    // la que la columna existe. Las filas viejas quedan en NULL y no se rellenan hacia atras.
+    accionCliente: text('accion_cliente'),
     fuente: text('fuente').notNull(),
     // Quien EJECUTO el toque (hizo la llamada o mando el mensaje), distinto de empresa.owner,
     // que es el dueno del deal. Los dos coinciden casi siempre y por eso no existia la
@@ -545,6 +558,17 @@ export const pasoInscripcion = sqliteTable('paso_inscripcion', {
   estado: text('estado').notNull().default('pendiente'),
   fechaProgramada: text('fecha_programada'),
   fechaEnviada: text('fecha_enviada'),
+  // cuerpoFinal (2026-07-26): el copy REVISADO de este envio concreto, guardado sin mandarlo.
+  // Antes el texto personalizado solo existia como parametro de aprobarPasoManual, o sea que
+  // solo nacia en el mismo acto de darlo por enviado: no habia donde dejarlo escrito para
+  // mirarlo antes. NULL = todavia no se reviso, y el push usa version_paso.cuerpo como
+  // siempre, que es lo que mantiene intacto el camino actual.
+  //
+  // Vive en paso_inscripcion y no en version_paso a proposito: version_paso es la plantilla
+  // compartida por todos los destinatarios del paso y editarla reescribiria el copy de los
+  // que ya salieron (por eso la regla vigente es "iterar copy = version nueva, nunca editar
+  // la enviada"). Esto es lo contrario: un texto de UN envio a UNA cuenta.
+  cuerpoFinal: text('cuerpo_final'),
   // Backoff (V5.4, mismo patron que outbox): intentos cuenta cuantas veces se
   // intento; proximoIntento es desde cuando vale la pena reintentar (null = ya).
   intentos: integer('intentos').notNull().default(0),
@@ -661,6 +685,25 @@ export const mensajeWhatsapp = sqliteTable('mensaje_whatsapp', {
   idContacto: integer('id_contacto'),
   fecha: text('fecha'),
   createdAt: text('created_at'),
+  // direccion (2026-07-26): 'entrante' = nos escribieron, 'saliente' = escribimos nosotros.
+  // Hasta hoy la tabla solo tenia entrantes porque parsearMensajeEntrante descartaba
+  // key.fromMe:true, asi que la base guardaba 636 respuestas sin una sola de las preguntas
+  // que las provocaron. El DEFAULT 'entrante' es lo que hace honesta la migracion: las filas
+  // viejas son todas entrantes de verdad, no un valor inventado para llenar la columna.
+  direccion: text('direccion').notNull().default('entrante'),
+  // esApertura (2026-07-26): 1 si este saliente es el PRIMER mensaje que la herramienta vio
+  // en el hilo de esa cuenta. Es el equivalente escrito del guion de la llamada: se redacta
+  // antes, se compara entre cuentas y de ahi sale la plantilla; lo que sigue es reaccion y no
+  // se compara con nada.
+  //
+  // Se marca al insertar y no se deriva con un MIN(fecha) por empresa, por una razon de
+  // honestidad del dato: derivar diria "apertura" del primer mensaje CAPTURADO, y como el
+  // saliente empieza a guardarse hoy, el primer saliente de una cuenta con hilo viejo seria
+  // una respuesta a mitad de conversacion disfrazada de apertura. Marcar al insertar exige
+  // que no exista NINGUNA fila previa del hilo, entrante o saliente, y ese "no existe" si
+  // es verificable. Un entrante nunca es apertura (no lo redactamos nosotros), y un saliente
+  // a un numero que no matchea contacto tampoco (sin cuenta no hay de que ser el primero).
+  esApertura: integer('es_apertura').notNull().default(0),
 });
 
 // Histórico de transiciones de etapa comercial (estado_notion). Una fila por cambio.

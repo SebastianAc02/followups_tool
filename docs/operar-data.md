@@ -145,10 +145,32 @@ una empresa en `on_hold` hoy es: marcarla "On Hold" en Notion a mano, y correr
 
 ## Receta 5 — Qué llega a Notion (outbox) y qué NO si te saltás la Server Action
 
-El patrón outbox es real y funciona, pero su alcance es más angosto de lo que sugiere el
-nombre "sync". Hay un solo punto de encolado en todo el repo: `encolarOutboxNotion()`
-(`app/db/repository.ts:122`), llamado UNA vez, dentro de `registrarToque`
-(`app/db/repository.ts:706`).
+**Hoy no llega NADA, y no por accidente: el encolado está apagado por compuerta
+(2026-07-26).** `encolarOutboxNotion()` (`app/db/repository.ts`) sale temprano salvo que
+`configuracion_admin.outbox_notion_encolado` valga `'true'` o `'1'`. Ausente (el estado de
+producción) es apagado. Cubre los cinco puntos de encolado de una sola vez:
+`registrarToque`, `marcarPerdida`, `cambiarCadencia`, `aplazarSeguimiento` y
+`actualizarEstadoNotion` (este último, aunque le pases `encolarNotion: true`).
+
+Apagado NO quita funcionalidad: el toque, la pérdida, la fecha y la etapa se escriben en la
+base igual que siempre. Lo único que no pasa es la fila de `outbox`. Encender es una clave,
+sin desplegar:
+
+```bash
+# En producción, dentro del contenedor. Enciende el encolado; el DRENADO es otra compuerta
+# (OUTBOX_NOTION_ENABLED en el entorno del worker) y sigue apagada por su cuenta.
+ssh deploy@62.238.55.238 "docker exec followups_web sqlite3 /data/isps.db \
+  \"INSERT OR REPLACE INTO configuracion_admin (clave, valor, actualizado_por, updated_at)
+     VALUES ('outbox_notion_encolado','true','manual', datetime('now'));\""
+```
+
+Las dos compuertas son distintas a propósito. La del worker corta la ENTREGA; ésta corta la
+ACUMULACIÓN. Apagar solo la entrega dejaba la cola creciendo con filas que nadie iba a
+entregar, y el día que se encienda el drenado sale de golpe un lote de cambios viejos como si
+fueran de hoy. Ninguna de las dos borra lo ya encolado.
+
+Lo de abajo describe el mecanismo con la compuerta ABIERTA. El alcance del outbox es más
+angosto de lo que sugiere el nombre "sync".
 
 Lo que SÍ viaja a Notion en cada toque (tabla `outbox` → `followups-worker` →
 `crearNotionAdapter()`, cada 5 minutos, `app/worker/index.ts`):
@@ -264,21 +286,55 @@ Confirmado contra el código: hay DOS implementaciones del MCP server, no una.
   `/mcp-consent`), más un gate de rol (`puedeQuerearMcp`, `app/lib/mcp-gate.ts`: admin, o
   `verTodoPipeline`, o ser owner real de Onepay). Un Visitante logueado no pasa el gate.
 
-Las dos exponen exactamente las mismas 3 tools (`app/mcp/tools.ts`): `panel_metricas`,
-`deal_historia`, `pipeline`. Confirmado leyendo el archivo: **solo lectura, punto** — cada
-función solo llama a funciones de consulta del Repository (`duracionPromedioPorEtapa`,
-`cicloVentaPromedio`, `pipelineParaEndpoint`, `historialEtapasEmpresa`...) y fórmulas puras
-del core. Ninguna escribe, ninguna llama a `registrarToque` ni a ningún adaptador.
+**El MCP dejó de ser solo lectura el 2026-07-24.** `app/mcp/server.ts` exporta `TOOLS_LECTURA`
+y `TOOLS_ESCRITURA`, y `crearMcpServer({ escritura: true })` registra las de escritura. Solo
+la route de Next (`app/api/mcp/route.ts`) las pide, y solo después de `puedeEscribirMcp`
+(`app/lib/mcp-gate.ts`); el standalone legacy sigue corriendo en modo solo-lectura y nunca las
+registra. Cualquier afirmación de este documento sobre "el MCP no escribe" quedó vieja ahí: se
+verifica contra `app/mcp/server.ts`, no contra este archivo.
+
+Qué acción existe, cómo se llama y qué devuelve lo decide quien es dueño del MCP, no esta
+receta.
 
 ## Camino limpio pendiente (propuesta, no una decisión tomada)
 
-Hoy no existe ningún punto de entrada externo de ESCRITURA a la tool: todo pasa por sesión de
-navegador. Para un agente (Claude, u otro) que quiera registrar un toque real sin que un
-humano abra el navegador, el punto de entrada más limpio sería exponer `registrarToque()`
-como una tool de ESCRITURA en el mismo MCP server que ya existe (`app/mcp/tools.ts` +
-`app/api/mcp/route.ts`), reusando el mismo gate de auth OAuth y agregando una validación de
-rol específica para escritura (el gate actual, `puedeQuerearMcp`, es de lectura). Esto es una
-propuesta para que el dueño del repo la evalúe, no un cambio ejecutado ni decidido.
+La propuesta que vivía acá (exponer `registrarToque()` como tool de escritura del MCP) **se
+ejecutó el 2026-07-24**: existe, con su gate de rol propio (`puedeEscribirMcp`). Ver la
+sección del MCP más arriba.
+
+Lo que sigue sin superficie (2026-07-26): tres funciones nuevas del Repository que hoy solo se
+pueden llamar por script, sin tool ni pantalla que las muestre.
+
+| Función / campo | Para qué | Qué falta |
+|---|---|---|
+| `guardarCopyPaso(id, cuerpo, fechaProgramada?)` | Guardar el copy revisado sin mandarlo, y fijarle hora | Quién lo llama |
+| `copyDePaso(id)` | Qué texto saldría y si ya se revisó | Quién lo llama |
+
+Ya tienen superficie (2026-07-26): `aperturas_whatsapp` es tool de LECTURA del MCP, y
+`accionCliente` es parámetro de `registrar_toque`, `editar_toque` y `marcar_perdida`.
+`empaquetado` y `riesgo_percibido` llegaron solos: las tools referencian `OBJECIONES` directo,
+no una copia de la lista.
+
+## WhatsApp: qué se guarda y qué no
+
+Regla desde el 2026-07-26, en las dos direcciones, **solo hacia adelante**:
+
+| Caso | Se guarda |
+|---|---|
+| Sale hacia un contacto de una cuenta | Todo: texto, teléfono, y si es el primero del hilo, `es_apertura = 1` |
+| Sale hacia un número que no es contacto | **Nada.** Se descarta en el route, sin loguear texto ni número |
+| Entra de un contacto de una cuenta | Todo, como siempre |
+| Entra de un número que no es contacto | La fila (`mensaje_id`, línea, fecha) con `texto` y `telefono` en NULL |
+
+La asimetría entre los dos "sin contacto" es a propósito: la fila del entrante es el mecanismo
+de idempotencia del webhook (`procesarRespuestaEntrante` corta si vuelve `'duplicado'`), así
+que borrarla haría que cada reintento de Evolution reprocesara el mensaje. El saliente no tiene
+esa atadura y se descarta entero.
+
+Las filas anteriores al deploy **no se tocan**: decisión del operador del 2026-07-26. Se quedan
+donde están y cuentan como data que no se usa, igual que la data vieja de Notion. No hay
+filtro retroactivo ni lo va a haber. De ahí en adelante el brain asocia cada WhatsApp a su
+cuenta cuando el operador lo dicte.
 
 Dario queda fuera de este análisis: su arquitectura no se toca ni se propone tocar aquí.
 

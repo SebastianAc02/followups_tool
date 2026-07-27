@@ -150,6 +150,17 @@ test('marcarPasoInscripcionFallo con proximo_intento futuro excluye la fila hast
   const idDestinatario = idDestinatarioDe('e-push-2');
   fijarProveedorCampanaId(idCampanaSinSecuencia, 'seq-real-2'); // ahora si tiene secuencia
   const id = crearPasoInscripcionPendiente({ idDestinatario, idPaso, idVersion, canal: 'correo' });
+  // Se corre la fecha programada por SQL crudo, no pasandola a crearPasoInscripcionPendiente:
+  // esa funcion es search-first y aca ya existe la fila de un test anterior con este mismo
+  // (destinatario, paso), asi que el parametro se ignoraria en silencio.
+  //
+  // Hace falta desde que pasoInscripcionesPendientes respeta la hora programada (2026-07-26):
+  // un paso creado sin fecha nace programado para AHORA (reloj real de la maquina) y este test
+  // pregunta por el 2026-07-06, un instante en que ese paso todavia no estaba programado. Sin
+  // correrla, el test mediria el filtro de fecha en vez del backoff que quiere medir.
+  const dbRaw = raw();
+  dbRaw.prepare('UPDATE paso_inscripcion SET fecha_programada = ? WHERE id_paso_inscripcion = ?').run('2026-07-01', id);
+  dbRaw.close();
 
   marcarPasoInscripcionFallo(id, 1, '2026-07-06T12:00:00.000Z');
 

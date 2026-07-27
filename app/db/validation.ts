@@ -253,8 +253,57 @@ export const RAZON_PERDIDA_LABELS: Record<RazonPerdida, string> = {
 // cabe en ninguna, se deja en null y se escribe objecionNota -- igual que el motivo de un
 // aplazo. Nunca bloquea el registro del toque, que es lo que hace tolerable que la lista sea
 // una hipotesis: lo que no encaje queda en prosa y no se pierde.
-export const OBJECIONES = [...RAZONES_PERDIDA, 'duda_adopcion'] as const;
+// empaquetado y riesgo_percibido los dicto el operador el 2026-07-26, y a diferencia del resto
+// de esta lista NO son inferencia. Los dos caian en `precio` y la respuesta comercial a cada
+// uno es distinta, que es lo unico que justifica separar un valor de otro:
+//   empaquetado      - el plan que SI acepta no soporta lo que necesita. Caso real: acepta
+//                      Essential, y con Essential no hay integracion. No esta discutiendo
+//                      cuanto cuesta, esta diciendo que lo que cabe en su plan no le sirve.
+//                      Se responde moviendo el plan o el alcance, no bajando el precio.
+//   riesgo_percibido - no es precio ni producto: es miedo a que no funcione, o a que la gente
+//                      no lo adopte. Se responde con prueba (piloto, referencia, garantia),
+//                      y un descuento sobre un miedo no lo mueve.
+export const OBJECIONES = [...RAZONES_PERDIDA, 'duda_adopcion', 'empaquetado', 'riesgo_percibido'] as const;
 export type Objecion = (typeof OBJECIONES)[number];
+
+// La ACCION del cliente en el toque, en escala ORDINAL de compromiso (dictado del operador,
+// 2026-07-26). El orden ES el dato, no un detalle de presentacion: por eso hay un nivel
+// numerico y no solo una lista de etiquetas.
+//
+// Para que sirve: la secuencia de niveles de una cuenta, ordenada por fecha, es su buyer
+// journey. Y el nivel donde se estancan las cuentas perdidas es donde se frena el embudo. Eso
+// solo se puede leer si la escala puede SUBIR Y BAJAR: una cuenta que llego a negocia y volvio
+// a concede_atencion retrocedio, y ese retroceso es la senal. Una lista de etiquetas sin orden
+// no puede decir eso.
+//
+// NULL cuando no se dijo, JAMAS inferido. No hay default y no se deduce del resultado del
+// toque: "no contesto" hace pensar en sin_cliente, pero el que sabe que paso es quien estuvo en
+// la llamada. Un ordinal inventado corrompe justo la medicion para la que existe.
+export const ACCIONES_CLIENTE = [
+  'sin_cliente',
+  'concede_atencion',
+  'revela_informacion',
+  'invierte_tiempo',
+  'evaluacion_interna',
+  'negocia',
+  'se_compromete',
+] as const;
+export type AccionCliente = (typeof ACCIONES_CLIENTE)[number];
+
+// El nivel numerico de cada accion. Se guarda el slug en la columna (misma convencion que
+// razon_perdida y objecion: el slug es la llave legible) y el orden se resuelve por este mapa,
+// que es la unica fuente del numero. Derivarlo de indexOf sobre ACCIONES_CLIENTE tambien
+// funcionaria, pero dejaria el nivel atado al orden de escritura del array: reordenarlo por
+// error cambiaria la escala en silencio.
+export const NIVEL_ACCION_CLIENTE: Record<AccionCliente, number> = {
+  sin_cliente: 0, // no contesta, numero malo, gatekeeper bloquea
+  concede_atencion: 1, // contesta. "llamame en media hora" cae aca: pospone sin cerrar
+  revela_informacion: 2, // cuenta su CRM, sus usuarios, su dolor
+  invierte_tiempo: 3, // acepta fecha, se conecta, trae a alguien
+  evaluacion_interna: 4, // pide propuesta, la lleva al contador o a los socios
+  negocia: 5, // objeta con numero, pide otro plan. negociar es senal de compra
+  se_compromete: 6, // "el jueves te confirmo", firma, paga
+};
 
 // Quien ejecuta un toque cuando el caller no lo dice (decision del operador, 2026-07-25).
 // Revierte la regla anterior ("NULL = no atribuido, nunca se asume"): en la practica dejo 71 de
@@ -540,6 +589,10 @@ export const registrarToqueSchema = z
     razonPerdidaNota: z.string().min(1).optional(),
     objecion: z.enum(OBJECIONES).optional(),
     objecionNota: z.string().min(1).optional(),
+    // Hasta donde se movio el CLIENTE en este toque (escala ordinal, ver ACCIONES_CLIENTE).
+    // Opcional de verdad y sin default: ausente queda NULL, que significa "no se dijo". No se
+    // deriva de `resultado` -- quien sabe que hizo el cliente es quien estuvo en la llamada.
+    accionCliente: z.enum(ACCIONES_CLIENTE).optional(),
     // Puntero a la grabacion, si existe. Las tres columnas ya estaban en la tabla y ningun
     // camino de escritura las llenaba, asi que un toque no podia enlazar su grabacion. Se
     // exponen; el pipeline de audio detras queda aplazado por decision del operador.
@@ -676,6 +729,9 @@ export const editarToqueSchema = z
     razonPerdidaNota: z.string().min(1).nullable().optional(),
     objecion: z.enum(OBJECIONES).nullable().optional(),
     objecionNota: z.string().min(1).nullable().optional(),
+    // nullable ademas de optional, igual que sus vecinos: corregir un toque tiene que poder
+    // BORRAR una accion mal puesta (volverla a "no se dijo"), no solo cambiarla por otra.
+    accionCliente: z.enum(ACCIONES_CLIENTE).nullable().optional(),
     reunionFechaPropuesta: fechaReunionSchema.nullable().optional(),
     reunionFechaOcurrida: fechaReunionSchema.nullable().optional(),
     transcriptProveedor: z.string().min(1).nullable().optional(),

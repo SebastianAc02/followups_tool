@@ -18,6 +18,7 @@ import {
   empresasParaConversionStage,
   historialEtapasEmpresa,
   pipelineParaEndpoint,
+  aperturasWhatsapp,
   embudoPipeline,
   cuentasParaReconciliar,
   empresaFueraDelPipeline,
@@ -902,5 +903,47 @@ export function planVsEjecutadoTool(input: PlanVsEjecutadoInput) {
     noEjecutados,
     ejecutados,
     fueraDelPlan,
+  };
+}
+
+// --- aperturas_whatsapp (el copy con el que se abre una cuenta) -----------------------
+//
+// Existe para una pregunta que hasta hoy no se podia contestar: que copy hace que la
+// conversacion se mueva. El mensaje de apertura es el equivalente escrito del guion de la
+// llamada -- se redacta antes, se compara entre cuentas, y de ahi sale la plantilla. Lo que
+// viene despues es reaccion y no se compara con nada.
+//
+// El dato no existia por captura, no por analisis: el adaptador de Evolution descartaba todo
+// lo que salia (key.fromMe), asi que la base tenia las respuestas y ninguna de las preguntas.
+//
+// Va con `respondio`/`fechaRespuesta` al lado y no como dos listas: siete textos sueltos no
+// responden nada. Lo que se compara es el copy CONTRA su resultado.
+//
+// Solo lectura, como todo este archivo. Y solo trae aperturas de cuentas conocidas: un
+// saliente a un numero que no es contacto de ninguna empresa no se guarda (la linea del
+// operador es personal y de trabajo a la vez), asi que aca nunca puede aparecer.
+
+export type AperturasWhatsappInput = {
+  desde?: string;
+  hasta?: string;
+};
+
+export function aperturasWhatsappTool(input: AperturasWhatsappInput = {}) {
+  const aperturas = aperturasWhatsapp({ desde: input.desde, hasta: input.hasta });
+  const conRespuesta = aperturas.filter((a) => a.respondio).length;
+
+  return {
+    desde: input.desde ?? null,
+    hasta: input.hasta ?? null,
+    total: aperturas.length,
+    conRespuesta,
+    // Sin respuesta todavia. Se reporta explicito en vez de dejar que se reste: una apertura de
+    // hoy sin respuesta no es lo mismo que una de hace un mes sin respuesta, y el que lee tiene
+    // que ver las dos mitades antes de sacar una tasa.
+    sinRespuesta: aperturas.length - conRespuesta,
+    // Sin tope: se devuelven TODAS las del rango, no hay truncado silencioso (mismo criterio
+    // que `actividad`).
+    truncado: false,
+    aperturas,
   };
 }

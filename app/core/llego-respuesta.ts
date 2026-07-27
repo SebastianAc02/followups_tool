@@ -21,6 +21,19 @@ export type MensajeEntrante = {
   fecha: string; // ISO
 };
 
+// Lo que SALE por la linea (2026-07-26). Mismos campos que el entrante y a proposito NO es
+// un alias: `telefono` significa lo contrario (el destinatario, no el remitente) y un alias
+// dejaria esa inversion sin decir en ninguna parte. La direccion no es un campo de este tipo
+// porque el tipo YA es la direccion: quien recibe un MensajeSaliente no tiene que chequear
+// nada para saber quien lo escribio.
+export type MensajeSaliente = {
+  referenciaProveedor: string; // instancia/linea por la que salio
+  telefono: string; // solo digitos, del DESTINATARIO
+  texto: string; // el cuerpo del mensaje, tal cual salio
+  mensajeId: string; // key.id de Evolution -- correlator de idempotencia
+  fecha: string; // ISO
+};
+
 // Contacto matcheado + su empresa/organizacion. idOrganizacion se arrastra para poder
 // registrar el toque (toque.id_organizacion es NOT NULL e inmutable).
 export type ContactoMatch = {

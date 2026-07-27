@@ -135,6 +135,7 @@ export function crearDbPrueba() {
       razon_perdida_nota TEXT,
       objecion TEXT,
       objecion_nota TEXT,
+      accion_cliente TEXT,
       -- Migracion 0014: las dos fechas de la reunion, la que se agendo y la que ocurrio.
       reunion_fecha_propuesta TEXT,
       reunion_fecha_ocurrida TEXT,
@@ -362,6 +363,7 @@ export function crearDbPrueba() {
       estado TEXT NOT NULL DEFAULT 'pendiente',
       fecha_programada TEXT,
       fecha_enviada TEXT,
+      cuerpo_final TEXT,
       intentos INTEGER NOT NULL DEFAULT 0,
       proximo_intento TEXT,
       created_at TEXT
@@ -441,7 +443,9 @@ export function crearDbPrueba() {
       texto TEXT,
       id_contacto INTEGER,
       fecha TEXT,
-      created_at TEXT
+      created_at TEXT,
+      direccion TEXT NOT NULL DEFAULT 'entrante',
+      es_apertura INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE linea_whatsapp (
@@ -574,6 +578,20 @@ export function crearDbPrueba() {
 
   sqlite.close();
   return dbPath;
+}
+
+// Enciende la compuerta del encolado hacia Notion (2026-07-26) en una DB de prueba ya
+// creada. Existe porque el default de produccion es APAGADO: un test que verifique que un
+// cambio VIAJA a Notion tiene que decir explicitamente que la compuerta esta abierta, y esa
+// linea es la que deja escrito en el test cual de los dos estados se esta probando. Se
+// escribe con SQL crudo, sin importar el repository, para que el helper sirva igual en los
+// tests que importan el modulo despues de sembrar.
+export function encenderEncoladoNotion(dbPath: string) {
+  const sqlite = new Database(dbPath);
+  sqlite
+    .prepare(`INSERT OR REPLACE INTO configuracion_admin (clave, valor, actualizado_por, updated_at) VALUES (?, 'true', 'test', ?)`)
+    .run('outbox_notion_encolado', new Date().toISOString());
+  sqlite.close();
 }
 
 export function borrarDbPrueba(dbPath: string) {

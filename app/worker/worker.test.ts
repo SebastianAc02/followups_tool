@@ -6,7 +6,8 @@ import { crearDbPrueba, borrarDbPrueba } from '../db/test-helpers.ts';
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
 
-const { ejecutarCiclo, construirTareas, tareaSnapshotEstados } = await import('./index.ts');
+const { ejecutarCiclo, construirTareas, tareaSnapshotEstados, espaciadoWhatsapp } = await import('./index.ts');
+const { guardarConfiguracionAdmin } = await import('../db/repository.ts');
 
 function leerHeartbeat(proveedor: string) {
   const raw = new Database(dbPath);
@@ -277,6 +278,36 @@ test('snapshot-estados: si la tabla no existe, el error llega al heartbeat (no s
   const fila = leerHeartbeat('snapshot-estados');
   assert.match(fila?.ultimo_resultado ?? '', /error: .*empresa_estado_snapshot/);
   assert.strictEqual(marcador(), null, 'un fallo no puede dejar el dia marcado como hecho');
+});
+
+// Cada cuanto sale un WhatsApp del worker, configurable sin desplegar (2026-07-26). Existe
+// para poder decir "uno cada dos minutos" mientras se mira como se comporta la linea, y para
+// poder bajarlo despues sin tocar codigo ni reiniciar con otra variable de entorno.
+test('espaciado de whatsapp: sin config, el 45-90s de siempre', () => {
+  assert.deepEqual(espaciadoWhatsapp(), { minMs: 45_000, maxMs: 90_000 });
+});
+
+test('espaciado de whatsapp: min 120000 deja "uno cada dos minutos"', () => {
+  guardarConfiguracionAdmin('whatsapp_espaciado_min_ms', '120000');
+  guardarConfiguracionAdmin('whatsapp_espaciado_max_ms', '150000');
+  assert.deepEqual(espaciadoWhatsapp(), { minMs: 120_000, maxMs: 150_000 });
+});
+
+// Sigue siendo un RANGO y no un numero: un mensaje cada exactamente 120s es tan patron de bot
+// como mandarlos todos juntos. Un max incoherente (menor o igual al min) no puede terminar en
+// un intervalo de reloj.
+test('espaciado de whatsapp: un max por debajo del min no produce intervalo fijo', () => {
+  guardarConfiguracionAdmin('whatsapp_espaciado_min_ms', '120000');
+  guardarConfiguracionAdmin('whatsapp_espaciado_max_ms', '60000');
+  const e = espaciadoWhatsapp();
+  assert.equal(e.minMs, 120_000);
+  assert.ok(e.maxMs > e.minMs, 'el max se abre por encima del min en vez de quedar fijo');
+});
+
+test('espaciado de whatsapp: un valor basura cae al default, no a cero', () => {
+  guardarConfiguracionAdmin('whatsapp_espaciado_min_ms', 'rapido');
+  guardarConfiguracionAdmin('whatsapp_espaciado_max_ms', '-5');
+  assert.deepEqual(espaciadoWhatsapp(), { minMs: 45_000, maxMs: 90_000 });
 });
 
 test.after(() => borrarDbPrueba(dbPath));

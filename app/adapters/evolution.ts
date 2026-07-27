@@ -1,6 +1,6 @@
 import type { CanalEntrega, DestinatarioEnvio, PasoEnvio, EnvioResultado } from '../core/ports/envio';
 import type { ConexionLinea, InicioConexion, EstadoLinea } from '../core/ports/conexion';
-import type { MensajeEntrante } from '../core/llego-respuesta';
+import type { MensajeEntrante, MensajeSaliente } from '../core/llego-respuesta';
 import { leerCredencialConector } from '../db/repository';
 
 // Base local de Fase 0 (planning/plan-whatsapp-adapter.md, ../whatsapp-osserver/README.md):
@@ -291,10 +291,16 @@ function extraerTexto(message: Record<string, unknown> | null): string | null {
   return ext ? asString(ext.text) : null;
 }
 
-// Traduce el body crudo del webhook de Evolution a un evento de dominio, o null si no es
-// una respuesta entrante que nos interese (otro evento, algo que mandamos nosotros, o
-// un mensaje sin texto). Nunca tira: entrada no confiable, se descarta en silencio.
-export function parsearMensajeEntrante(payload: unknown): MensajeEntrante | null {
+// Cuerpo comun de las dos direcciones. Se separo del parser entrante (2026-07-26) al agregar
+// el saliente: la unica diferencia real entre los dos es el valor esperado de key.fromMe, y
+// duplicar 30 lineas para cambiar un booleano deja dos parsers que se desincronizan en la
+// primera forma de payload nueva que aparezca.
+//
+// fromMeEsperado se compara ESTRICTO contra el booleano, nunca por truthiness: Baileys puede
+// no mandar la clave (undefined) y en ese caso no sabemos quien lo mando. Un undefined tratado
+// como false habria metido nuestros propios mensajes en la cola de "el ISP contesto", que es
+// justo lo que corta cadencias.
+function parsearUpsert(payload: unknown, fromMeEsperado: boolean): MensajeEntrante | null {
   const p = asRecord(payload);
   if (!p) return null;
   // Solo mensajes nuevos. El mismo webhook tambien empuja 'messages.update' (acuses
@@ -304,8 +310,7 @@ export function parsearMensajeEntrante(payload: unknown): MensajeEntrante | null
   const data = asRecord(p.data);
   const key = data ? asRecord(data.key) : null;
   if (!data || !key) return null;
-  // fromMe:true = lo mande yo (incluido el self-chat) -- no es una respuesta entrante.
-  if (key.fromMe !== false) return null;
+  if (key.fromMe !== fromMeEsperado) return null;
 
   const mensajeId = asString(key.id);
   const remoteJid = asString(key.remoteJid);
@@ -330,6 +335,30 @@ export function parsearMensajeEntrante(payload: unknown): MensajeEntrante | null
     typeof ts === 'number' ? new Date(ts * 1000).toISOString() : asString(p.date_time) ?? '';
 
   return { referenciaProveedor, telefono, texto, mensajeId, fecha };
+}
+
+// Traduce el body crudo del webhook de Evolution a un evento de dominio, o null si no es
+// una respuesta entrante que nos interese (otro evento, algo que mandamos nosotros, o
+// un mensaje sin texto). Nunca tira: entrada no confiable, se descarta en silencio.
+export function parsearMensajeEntrante(payload: unknown): MensajeEntrante | null {
+  // fromMe:false = me lo mandaron. fromMe:true (incluido el self-chat) es el saliente y lo
+  // toma parsearMensajeSaliente: sigue sin ser una respuesta entrante y no corta cadencia.
+  return parsearUpsert(payload, false);
+}
+
+// Lo que SALE por la linea, que Evolution devuelve por el mismo webhook con key.fromMe:true.
+// Antes se descartaba y por eso la base tenia respuestas sin la pregunta que las provoco.
+//
+// Captura TODO lo que sale de esa linea, no solo lo que mando la cadencia: si Sebastian
+// escribe desde su telefono, el mensaje pasa por el mismo webhook y queda guardado igual.
+// Eso es exactamente lo que se necesita para "que copy hace que la conversacion se mueva",
+// porque el copy de apertura de una cuenta chica hoy sale escrito a mano, no por campana.
+//
+// telefono aca es el del DESTINATARIO (a quien le escribimos), no el del remitente: en un
+// upsert con fromMe:true el remoteJid sigue siendo el del otro lado del hilo. Es lo correcto
+// para matchear contra el contacto, y es la unica diferencia semantica con el entrante.
+export function parsearMensajeSaliente(payload: unknown): MensajeSaliente | null {
+  return parsearUpsert(payload, true);
 }
 
 export type AcuseLectura = { proveedorMensajeId: string; tipo: 'visto'; referenciaProveedor: string };

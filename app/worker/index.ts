@@ -139,6 +139,23 @@ async function tareaArchivarCampanas(envioCorreo: ReturnType<typeof crearRegistr
 type ModoPush = 'worker' | 'manual';
 const ESPACIADO_MANUAL_MS = 3000;
 
+// Cada cuanto sale un WhatsApp del worker, configurable sin desplegar (2026-07-26). El
+// default sigue siendo el mismo 45-90s de siempre; las claves existen para poder decir "uno
+// cada dos minutos" (min 120000) mientras se mira como se comporta la linea, y para poder
+// bajarlo despues sin tocar codigo. Mismo patron que gmail_tope_diario, que ya vive ahi.
+//
+// Sigue siendo un RANGO y no un numero: un mensaje cada exactamente 120s es tan patron de bot
+// como mandarlos todos juntos, asi que un min sin max se abre un 25% hacia arriba en vez de
+// quedar fijo. Un max menor o igual al min tambien cae ahi: una config incoherente no puede
+// terminar en un intervalo de reloj.
+const ESPACIADO_APERTURA_RELATIVA = 1.25;
+
+export function espaciadoWhatsapp(): { minMs: number; maxMs: number } {
+  const minMs = configNumeroAdmin('whatsapp_espaciado_min_ms', ESPACIADO_WHATSAPP_DEFAULT.minMs);
+  const maxConfigurado = configNumeroAdmin('whatsapp_espaciado_max_ms', ESPACIADO_WHATSAPP_DEFAULT.maxMs);
+  return { minMs, maxMs: maxConfigurado > minMs ? maxConfigurado : Math.round(minMs * ESPACIADO_APERTURA_RELATIVA) };
+}
+
 async function tareaPush(
   canal: Canal,
   envio: ReturnType<typeof crearRegistroEntrega>[Canal],
@@ -166,7 +183,7 @@ async function tareaPush(
     canal !== 'whatsapp'
       ? 0
       : modo === 'worker'
-        ? () => esperaEntreMensajes(ESPACIADO_WHATSAPP_DEFAULT) // jitter, no intervalo fijo
+        ? () => esperaEntreMensajes(espaciadoWhatsapp()) // jitter, no intervalo fijo
         : ESPACIADO_MANUAL_MS;
 
   await pushPendientes(
@@ -191,7 +208,7 @@ async function tareaPush(
 const GMAIL_TOPE_DIARIO_DEFAULT = 300; // conservador a proposito, no el limite oficial de Workspace (~2000)
 const GMAIL_THROTTLE_MS_DEFAULT = 3000;
 
-function configGmailNumero(clave: string, porDefecto: number): number {
+function configNumeroAdmin(clave: string, porDefecto: number): number {
   const val = leerConfiguracionAdmin(clave);
   const n = val ? Number(val) : NaN;
   return Number.isFinite(n) && n > 0 ? n : porDefecto;
@@ -212,8 +229,8 @@ export async function tareaPushCorreo(modo: ModoPush = 'worker'): Promise<void> 
     }
   }
 
-  const topeDiario = configGmailNumero('gmail_tope_diario', GMAIL_TOPE_DIARIO_DEFAULT);
-  const throttleMs = configGmailNumero('gmail_throttle_ms', GMAIL_THROTTLE_MS_DEFAULT);
+  const topeDiario = configNumeroAdmin('gmail_tope_diario', GMAIL_TOPE_DIARIO_DEFAULT);
+  const throttleMs = configNumeroAdmin('gmail_throttle_ms', GMAIL_THROTTLE_MS_DEFAULT);
 
   for (const grupo of agruparPendientesCorreo(ahora.toISOString())) {
     let filas = grupo.filas;

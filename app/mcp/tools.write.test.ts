@@ -7,10 +7,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { crearDbPrueba, borrarDbPrueba } from '../db/test-helpers.ts';
+import { crearDbPrueba, borrarDbPrueba, encenderEncoladoNotion } from '../db/test-helpers.ts';
 
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
+// La compuerta del encolado a Notion nace APAGADA en produccion (2026-07-26). Este archivo
+// prueba el lado ENCENDIDO, asi que la abre explicitamente; el lado apagado tiene su propio
+// archivo (repository.compuertaOutbox.test.ts).
+encenderEncoladoNotion(dbPath);
 
 const { registrarToqueTool, moverEstadoTool, cambiarCadenciaTool, marcarPerdidaTool } = await import('./tools.ts');
 const { crearMcpServer, TOOLS_LECTURA, TOOLS_ESCRITURA } = await import('./server.ts');

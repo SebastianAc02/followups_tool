@@ -34,6 +34,7 @@ import {
   reconciliarNotionTool,
   cambiosDesdeTool,
   actividadTool,
+  aperturasWhatsappTool,
   colaTool,
   aplazarSeguimientoTool,
   snapshotEstadosTool,
@@ -42,7 +43,7 @@ import {
   marcarNoEjecutadoTool,
   planVsEjecutadoTool,
 } from './tools';
-import { CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES, TIPOS_PLAN, ORIGENES_PLAN } from '../db/validation';
+import { CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES, ACCIONES_CLIENTE, TIPOS_PLAN, ORIGENES_PLAN } from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 import { ORIGENES_CAMBIO } from '../core/origen-cambio';
@@ -53,6 +54,7 @@ import { ORIGENES_CAMBIO } from '../core/origen-cambio';
 // asi que agregar una tool sin ponerla aca rompe el gate.
 export const TOOLS_LECTURA = [
   'actividad',
+  'aperturas_whatsapp',
   'buscar_empresa',
   'cambios_desde',
   'cola',
@@ -87,6 +89,23 @@ export const ARRANCADO_EN = new Date().toISOString();
 
 const NOMBRE_SERVIDOR = 'followups-panel-mcp';
 const VERSION_SERVIDOR = '1.0.0';
+
+// La escala ordinal de compromiso del cliente, identica en las tres tools que escriben un
+// toque. Se declara una vez: tres copias del mismo texto se desincronizan a la primera
+// correccion, y esta descripcion es lo unico que le dice al cliente MCP que la escala tiene
+// orden y que no debe rellenarla sola.
+const ACCION_CLIENTE_DESCRIBE =
+  'Hasta donde se movio el CLIENTE en este toque, en escala ordinal de compromiso: ' +
+  '0 sin_cliente (no contesta, numero malo, gatekeeper bloquea), 1 concede_atencion (contesta; ' +
+  '"llamame en media hora" cae aca, pospone sin cerrar), 2 revela_informacion (cuenta su CRM, sus ' +
+  'usuarios, su dolor), 3 invierte_tiempo (acepta fecha, se conecta, trae a alguien), ' +
+  '4 evaluacion_interna (pide propuesta, la lleva al contador o a los socios), 5 negocia (objeta con ' +
+  'numero, pide otro plan; negociar es senal de compra), 6 se_compromete ("el jueves te confirmo", ' +
+  'firma, paga). El ORDEN es el dato: la secuencia de una cuenta por fecha es su buyer journey y ' +
+  'puede SUBIR o BAJAR, y donde se estancan las perdidas es donde se frena el embudo. ' +
+  'OMITILA si el operador no dijo que hizo el cliente: vacia significa "no se dijo" y JAMAS se ' +
+  'infiere del resultado del toque (no_contesto NO es sin_cliente por si solo). Un ordinal ' +
+  'inventado corrompe justo la medicion para la que existe el campo.';
 
 // Organizacion default para las WRITE tools cuando el caller no la fija (solo el server
 // standalone legacy, que hoy corre en modo solo-lectura y por tanto nunca registra escritura).
@@ -147,11 +166,17 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
           .enum(OBJECIONES)
           .optional()
           .describe(
-            'La objecion viva, mismo vocabulario que razonPerdida mas duda_adopcion. LISTA INFERIDA de ' +
-              'ventas/frameworks/embudo.md el 2026-07-25, pendiente de que el operador dicte la suya. Si la ' +
-              'objecion no cabe en ninguna, se deja vacia y se escribe objecionNota: nunca se fuerza a la lista',
+            'La objecion viva: el vocabulario de razonPerdida mas duda_adopcion, empaquetado y ' +
+              'riesgo_percibido. Los tres primeros son INFERIDOS de ventas/frameworks/embudo.md el ' +
+              '2026-07-25; empaquetado y riesgo_percibido los dicto el operador el 2026-07-26 y no son ' +
+              'inferencia. empaquetado = el plan que acepta no soporta lo que necesita (acepta Essential y ' +
+              'con Essential no hay integracion); riesgo_percibido = no es precio ni producto, es miedo a ' +
+              'que no funcione o a que la gente no lo adopte. Antes los dos caian en precio y la respuesta ' +
+              'comercial a cada uno es distinta. Si la objecion no cabe en ninguna, se deja vacia y se ' +
+              'escribe objecionNota: nunca se fuerza a la lista',
           ),
         objecionNota: z.string().min(1).optional(),
+        accionCliente: z.enum(ACCIONES_CLIENTE).optional().describe(ACCION_CLIENTE_DESCRIBE),
         reunionFechaPropuesta: z
           .string()
           .min(1)
@@ -227,6 +252,11 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
         razonPerdidaNota: z.string().min(1).nullable().optional(),
         objecion: z.enum(OBJECIONES).nullable().optional(),
         objecionNota: z.string().min(1).nullable().optional(),
+        accionCliente: z
+          .enum(ACCIONES_CLIENTE)
+          .nullable()
+          .optional()
+          .describe(`null BORRA la accion (la vuelve a "no se dijo"). ${ACCION_CLIENTE_DESCRIBE}`),
         reunionFechaPropuesta: z.string().min(1).nullable().optional().describe('YYYY-MM-DD, con hora opcional'),
         reunionFechaOcurrida: z.string().min(1).nullable().optional().describe('Solo con canal=reunion'),
         transcriptProveedor: z.string().min(1).nullable().optional().describe('tldv para reuniones, granola para llamadas'),
@@ -407,6 +437,10 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
         quePaso: z.string().min(1).optional(),
         objecion: z.enum(OBJECIONES).optional(),
         objecionNota: z.string().min(1).optional(),
+        accionCliente: z
+          .enum(ACCIONES_CLIENTE)
+          .optional()
+          .describe(`El nivel al que LLEGO la cuenta antes de caerse, que es lo que responde donde se frena el embudo. ${ACCION_CLIENTE_DESCRIBE}`),
         fecha: z.string().min(1).optional().describe('YYYY-MM-DD, el dia en que se perdio. Default: hoy'),
         ejecutadoPor: z.string().min(1).optional().describe('Si no viene, queda Sebastian Acosta Molina'),
       },
@@ -713,6 +747,33 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ desde, hasta, owner, ejecutadoPor, idOrganizacion }) => {
       const resultado = actividadTool({ desde, hasta, owner, ejecutadoPor, idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // El copy con el que se abre una cuenta, y si esa cuenta contesto. Es el mensaje que se
+  // redacta ANTES y se compara entre cuentas; el resto del hilo es reaccion. Ninguna otra tool
+  // devuelve el texto de un WhatsApp: `actividad` da el toque, no lo que se escribio.
+  server.registerTool(
+    'aperturas_whatsapp',
+    {
+      description:
+        'Los mensajes de APERTURA de WhatsApp (el primero que sale hacia una cuenta), juntos y en orden, ' +
+        'con su empresa, su contacto, el texto tal como salio, y si esa cuenta contesto despues y cuando. ' +
+        'Es lo que responde "que copy hace que la conversacion se mueva": el patron sale de comparar las ' +
+        'aperturas entre si contra su resultado, no de leer una. Un mensaje solo cuenta como apertura si ' +
+        'no habia NINGUN mensaje previo de esa cuenta en ninguna direccion; una respuesta nuestra a un ISP ' +
+        'que escribio primero no es apertura. Devuelve total, conRespuesta y sinRespuesta por separado: una ' +
+        'apertura de hoy sin respuesta no es lo mismo que una de hace un mes. Sin tope, no trunca. ' +
+        'OJO con el alcance real: solo existen aperturas desde que la herramienta guarda lo que SALE ' +
+        '(2026-07-26); antes de esa fecha no hay ninguna, y no es que no se hayan mandado.',
+      inputSchema: {
+        desde: z.string().min(1).optional().describe('YYYY-MM-DD, incluido. Sin esto, desde el principio'),
+        hasta: z.string().min(1).optional().describe('YYYY-MM-DD, incluido. Sin esto, hasta hoy'),
+      },
+    },
+    async ({ desde, hasta }) => {
+      const resultado = aperturasWhatsappTool({ desde, hasta });
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );

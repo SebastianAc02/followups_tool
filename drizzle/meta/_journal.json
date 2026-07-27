@@ -120,6 +120,20 @@
       "when": 1785106228286,
       "tag": "0016_toque_planeado",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1785108624030,
+      "tag": "0017_whatsapp_saliente_y_copy",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1785109700682,
+      "tag": "0018_accion_cliente",
+      "breakpoints": true
     }
   ]
 }

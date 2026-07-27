@@ -70,7 +70,7 @@ import { calcularGoteo, type RitmoIngreso } from '../core/goteo';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
-import type { MensajeEntrante, ContactoMatch, InscripcionActiva } from '../core/llego-respuesta';
+import type { MensajeEntrante, MensajeSaliente, ContactoMatch, InscripcionActiva } from '../core/llego-respuesta';
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { normalizarFechaToque } from '../core/fecha-toque';
@@ -136,6 +136,7 @@ import {
   RAZONES_PERDIDA,
   RAZON_PERDIDA_LABELS,
   OBJECIONES,
+  ACCIONES_CLIENTE,
   EJECUTOR_POR_DEFECTO,
   fechaDiaSchema,
   type Canal,
@@ -158,7 +159,38 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 // V3.7: encola un cambio a Notion DENTRO de la misma transaccion que lo origino
 // (patron outbox: si el proceso muere entre "cambie la DB" y "avise a Notion", el
 // aviso no se pierde, esta en la misma transaccion o no esta ninguno de los dos).
+// Compuerta del ENCOLADO hacia Notion (2026-07-26), apagada por default. Distinta de
+// OUTBOX_NOTION_ENABLED, que ya existe y apaga el DRENADO en el worker: apagar solo el
+// drenado deja la cola creciendo con filas que nadie va a entregar (19 en dos dias), y esa
+// cola vieja es peor que no tener ninguna, porque el dia que se encienda el drenado sale de
+// golpe un lote de cambios viejos como si fueran de hoy.
+//
+// Apagado no quita el camino: registrarToque, marcarPerdida, cambiarCadencia y
+// aplazarSeguimiento siguen llamando aca igual, y lo unico que cambia es que no se escribe la
+// fila. Encender es una sola clave, sin desplegar nada, porque el dia que alguien del equipo
+// use la herramienta el encolado tiene que volver sin tocar codigo.
+//
+// Vive en configuracion_admin y no en una variable de entorno, a diferencia del gate del
+// worker: el encolado ocurre en el proceso web Y en el MCP, y una variable habria que ponerla
+// en los dos y acordarse de los dos. La clave esta en la base, que es una sola.
+//
+// Se lee con `tx` y no con `db`: estamos dentro de la transaccion del cambio, y leer la
+// compuerta por fuera de ella es abrir la puerta a decidir con un valor de otro instante.
+// Ausente, vacia o cualquier otro valor es APAGADO. Solo 'true' o '1' encienden.
+export const CLAVE_ENCOLADO_NOTION = 'outbox_notion_encolado';
+
+function encoladoNotionHabilitado(tx: Tx): boolean {
+  const fila = tx
+    .select({ valor: configuracionAdmin.valor })
+    .from(configuracionAdmin)
+    .where(eq(configuracionAdmin.clave, CLAVE_ENCOLADO_NOTION))
+    .get();
+  const valor = (fila?.valor ?? '').trim().toLowerCase();
+  return valor === 'true' || valor === '1';
+}
+
 function encolarOutboxNotion(tx: Tx, idEmpresa: string, cambio: Omit<CambioNotion, 'notionPageId'>) {
+  if (!encoladoNotionHabilitado(tx)) return; // compuerta apagada: el cambio queda en la base y no viaja
   const emp = tx.select({ notionPageId: empresa.notionPageId }).from(empresa).where(eq(empresa.idEmpresa, idEmpresa)).get();
   if (!emp?.notionPageId) return; // sin pagina de Notion enlazada todavia, nada que sincronizar
 
@@ -640,6 +672,7 @@ export type ToqueEscrito = {
   razonPerdidaNota: string | null;
   objecion: string | null;
   objecionNota: string | null;
+  accionCliente: string | null;
   transcriptProveedor: string | null;
   transcriptId: string | null;
   transcriptUrl: string | null;
@@ -685,6 +718,7 @@ function leerToqueEscrito(
       razonPerdidaNota: toque.razonPerdidaNota,
       objecion: toque.objecion,
       objecionNota: toque.objecionNota,
+      accionCliente: toque.accionCliente,
       transcriptProveedor: toque.transcriptProveedor,
       transcriptId: toque.transcriptId,
       transcriptUrl: toque.transcriptUrl,
@@ -825,6 +859,7 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
         razonPerdidaNota: parsed.razonPerdidaNota ?? null,
         objecion: parsed.objecion ?? null,
         objecionNota: parsed.objecionNota ?? null,
+        accionCliente: parsed.accionCliente ?? null,
         transcriptProveedor: parsed.transcriptProveedor ?? null,
         transcriptId: parsed.transcriptId ?? null,
         transcriptUrl: parsed.transcriptUrl ?? null,
@@ -1010,6 +1045,7 @@ export function editarToque(input: EditarToqueInput, idOrganizacion: number): Ed
     tomar('razonPerdidaNota', parsed.razonPerdidaNota);
     tomar('objecion', parsed.objecion);
     tomar('objecionNota', parsed.objecionNota);
+    tomar('accionCliente', parsed.accionCliente);
     tomar('reunionFechaPropuesta', parsed.reunionFechaPropuesta);
     tomar('reunionFechaOcurrida', parsed.reunionFechaOcurrida);
     tomar('transcriptProveedor', parsed.transcriptProveedor);
@@ -1096,6 +1132,9 @@ const marcarPerdidaSchema = z.object({
   quePaso: z.string().min(1).optional(),
   objecion: z.enum(OBJECIONES).optional(),
   objecionNota: z.string().min(1).optional(),
+  // Una cuenta que se pierde tambien tiene un ultimo nivel de compromiso, y es justo el dato
+  // que responde donde se frena el embudo: el nivel al que llego antes de caerse.
+  accionCliente: z.enum(ACCIONES_CLIENTE).optional(),
   fecha: fechaDiaSchema.optional(),
   ejecutadoPor: z.string().min(1).optional().default(EJECUTOR_POR_DEFECTO),
 });
@@ -1140,6 +1179,7 @@ export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number)
         razonPerdidaNota: parsed.razonPerdidaNota ?? null,
         objecion: parsed.objecion ?? null,
         objecionNota: parsed.objecionNota ?? null,
+        accionCliente: parsed.accionCliente ?? null,
         ejecutadoPor: parsed.ejecutadoPor,
         fuente: 'cockpit',
         idOrganizacion,
@@ -5170,6 +5210,74 @@ export function crearPasoInscripcionPendiente(input: {
   return Number(resultado.lastInsertRowid);
 }
 
+// Guardar el copy SIN mandarlo, y opcionalmente decir a que hora sale (2026-07-26). Hasta
+// hoy un paso de cadencia era mandar o nada: el texto personalizado solo existia como
+// parametro de aprobarPasoManual, o sea que solo se escribia en el mismo acto de darlo por
+// enviado. Esta funcion separa las dos decisiones, que es lo unico que hacia falta para poder
+// revisar antes.
+//
+// fechaProgramada acepta un ISO con hora ('2026-07-27T09:00:00.000Z') y de ahi en adelante la
+// hora se respeta de verdad, porque pasoInscripcionesPendientes ya la filtra. Sin ella, solo
+// se guarda el texto y el paso sigue programado para cuando estaba.
+//
+// NO toca `estado`: la fila sigue 'pendiente' y sigue siendo la misma fila que el motor ya
+// conoce. Un estado nuevo tipo 'borrador' obligaria a revisar cada consulta que hoy filtra por
+// 'pendiente' (la cola, la agenda, el push, el archivado de campanas) y cualquiera que se
+// olvidara dejaria pasos invisibles. "Programado para el jueves 9am" ya se dice entero con la
+// fecha, sin inventar un estado que signifique lo mismo.
+//
+// Devuelve false si el paso no existe o ya salio ('enviada'/'omitida'): reescribir el copy de
+// algo que ya se mando seria falsificar el registro de lo que se dijo.
+export function guardarCopyPaso(
+  idPasoInscripcion: number,
+  cuerpoFinal: string,
+  fechaProgramada?: string,
+): boolean {
+  const set: { cuerpoFinal: string; fechaProgramada?: string } = { cuerpoFinal };
+  if (fechaProgramada !== undefined) set.fechaProgramada = fechaProgramada;
+
+  const res = db
+    .update(pasoInscripcion)
+    .set(set)
+    .where(
+      and(
+        eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion),
+        inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
+      ),
+    )
+    .run();
+  return res.changes > 0;
+}
+
+// El copy tal como quedaria si el paso saliera ahora: el revisado si existe, la plantilla si
+// no. Es lo que hay que poder mirar ANTES de mandar, y responde tambien "¿esto ya lo revise?"
+// sin tener que comparar dos textos a ojo.
+export function copyDePaso(idPasoInscripcion: number): {
+  cuerpo: string | null;
+  revisado: boolean;
+  fechaProgramada: string | null;
+  estado: string;
+} | null {
+  const f = db
+    .select({
+      cuerpoFinal: pasoInscripcion.cuerpoFinal,
+      cuerpoPlantilla: versionPaso.cuerpo,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+      estado: pasoInscripcion.estado,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .get();
+  if (!f) return null;
+  return {
+    cuerpo: f.cuerpoFinal ?? f.cuerpoPlantilla,
+    revisado: f.cuerpoFinal !== null,
+    fechaProgramada: f.fechaProgramada,
+    estado: f.estado,
+  };
+}
+
 // Tarea B2 (plan-prueba-real-multicanal.md): whatsapp no tiene concepto de "secuencia
 // externa por campana" como Apollo -- Evolution manda por LINEA (una instalacion,
 // compartida entre campanas). Primera fila con estado='activa'; null si ninguna linea
@@ -5475,6 +5583,15 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     eq(campana.estado, 'activa'),
     sql`${pasoInscripcion.intentos} < ${MAX_INTENTOS}`,
     sql`(${pasoInscripcion.proximoIntento} IS NULL OR ${pasoInscripcion.proximoIntento} <= ${ahora})`,
+    // La HORA programada se respeta (2026-07-26). Antes esta consulta no miraba
+    // fecha_programada en absoluto: la fila salia en el primer ciclo del worker despues de
+    // materializarse, asi que "programado" solo podia significar un dia, nunca una hora.
+    // Comparar el texto directo funciona en los dos formatos que hay en la columna, porque
+    // ISO ordena igual como texto que como instante: un dia suelto ('2026-07-27') es prefijo
+    // del datetime completo, asi que '2026-07-27' <= '2026-07-27T09:00:00Z' da true (una fila
+    // programada para hoy sin hora sale hoy, como siempre) y '2026-07-28' da false.
+    // NULL sigue saliendo: es como nacieron las filas viejas y no se les inventa una hora.
+    sql`(${pasoInscripcion.fechaProgramada} IS NULL OR ${pasoInscripcion.fechaProgramada} <= ${ahora})`,
   ];
   // correo: sin secuencia externa (proveedor_campana_id) no hay a donde mandar. whatsapp
   // no usa esta columna -- su gate de "hay a donde mandar" se resuelve por fila mas abajo.
@@ -5492,6 +5609,9 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       empresaNombre: empresa.nombreOficial,
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
+      // El copy revisado gana sobre la plantilla (2026-07-26). NULL = nadie lo reviso y sale
+      // version_paso.cuerpo, que es el comportamiento de siempre.
+      cuerpoFinal: pasoInscripcion.cuerpoFinal,
       proveedorCampanaId: campana.proveedorCampanaId,
       owner: campana.owner,
       idOrganizacion: campana.idOrganizacion,
@@ -5513,7 +5633,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       idPasoInscripcion: f.idPasoInscripcion,
       proveedorCampanaId: f.proveedorCampanaId as string,
       destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
-      paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
+      paso: { asunto: f.asunto, cuerpo: f.cuerpoFinal ?? f.cuerpo ?? '', canal: f.canal },
       intentos: f.intentos,
       owner: f.owner,
       idOrganizacion: f.idOrganizacion,
@@ -5538,7 +5658,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       idPasoInscripcion: f.idPasoInscripcion,
       proveedorCampanaId: linea.referenciaProveedor,
       destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
-      paso: { asunto: f.asunto, cuerpo: f.cuerpo ?? '', canal: f.canal },
+      paso: { asunto: f.asunto, cuerpo: f.cuerpoFinal ?? f.cuerpo ?? '', canal: f.canal },
       intentos: f.intentos,
     });
   }
@@ -5600,7 +5720,15 @@ export function marcarPasoInscripcionFallo(idPasoInscripcion: number, intentos: 
 // cuenta. cuerpoFinal es opcional (compatibilidad con el caller existente).
 export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: string, cuerpoFinal?: string) {
   const fila = db
-    .select({ canal: pasoInscripcion.canal, idContacto: destinatario.idContacto, idEmpresa: inscripcion.idEmpresa })
+    .select({
+      canal: pasoInscripcion.canal,
+      idContacto: destinatario.idContacto,
+      idEmpresa: inscripcion.idEmpresa,
+      // El copy guardado antes de mandar (2026-07-26, guardarCopyPaso). Si el caller no manda
+      // cuerpoFinal, el toque queda con el texto REVISADO y no vacio: antes de la columna, el
+      // unico texto posible era el que llegara en este parametro.
+      cuerpoGuardado: pasoInscripcion.cuerpoFinal,
+    })
     .from(pasoInscripcion)
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
@@ -5628,7 +5756,7 @@ export function aprobarPasoManual(idPasoInscripcion: number, fechaEnviada: strin
         idContacto: fila.idContacto,
         fecha: fechaEnviada,
         canal: fila.canal,
-        quePaso: cuerpoFinal ?? null,
+        quePaso: cuerpoFinal ?? fila.cuerpoGuardado ?? null,
         fuente: 'cadencia_manual',
         idOrganizacion: 1,
         createdAt: fechaEnviada,
@@ -5661,6 +5789,10 @@ export function agendaHoyCadencias(hoy: string, owner?: string) {
       // poder personalizar antes de aprobar, mas el flag de firma y las variables ya
       // detectadas por el parser (evita re-parsear texto en la UI).
       cuerpo: versionPaso.cuerpo,
+      // El copy ya revisado de ESTE envio, si alguien lo guardo antes de mandarlo
+      // (2026-07-26, guardarCopyPaso). Va aparte de `cuerpo` y no lo pisa: hacen falta los dos
+      // para poder ver que se cambio respecto a la plantilla.
+      cuerpoFinal: pasoInscripcion.cuerpoFinal,
       firmaApollo: versionPaso.firmaApollo,
       variables: versionPaso.variables,
       idCampana: campana.idCampana,
@@ -6128,14 +6260,155 @@ export function guardarMensajeEntrante(mensaje: MensajeEntrante, idContacto: num
     .values({
       mensajeId: mensaje.mensajeId,
       referenciaProveedor: mensaje.referenciaProveedor,
+      // PRIVACIDAD (2026-07-26): sin contacto matcheado, el contenido NO se guarda. La linea
+      // del operador es personal y de trabajo a la vez, y un numero que no es contacto de
+      // ninguna cuenta es, por descarte, alguien de su vida privada. La fila SI se escribe,
+      // con texto y telefono en null.
+      //
+      // Por que la fila y no un `return` temprano: esta insercion ES el mecanismo de
+      // idempotencia del webhook. procesarRespuestaEntrante llama aca ANTES de cualquier otro
+      // efecto y corta si vuelve 'duplicado' (mensaje_id es UNIQUE), asi que no escribir la
+      // fila haria que cada reintento de Evolution reprocesara el mensaje desde cero. Se
+      // conserva lo que hace falta para no repetir trabajo (mensaje_id, linea, fecha) y se
+      // tira lo que identifica a la persona y lo que dijo.
+      //
+      // Queda contable "entraron N mensajes de numeros desconocidos" sin decir de quien ni
+      // que decian, que es exactamente lo que se necesita saber de ellos.
+      telefono: idContacto === null ? null : mensaje.telefono,
+      texto: idContacto === null ? null : mensaje.texto,
+      idContacto,
+      fecha: mensaje.fecha,
+      createdAt: new Date().toISOString(),
+      // Explicito aunque el DEFAULT de la columna diga lo mismo: el default existe para las
+      // filas viejas de la migracion, no para que un insert nuevo deje la direccion al azar.
+      direccion: 'entrante',
+    })
+    .run();
+  return 'insertado';
+}
+
+// Lo que SALE por la linea (2026-07-26). Misma tabla y mismo mensaje_id UNIQUE que el
+// entrante: el webhook de Evolution reintenta, y ese UNIQUE es lo unico que impide que un
+// reintento meta el mismo mensaje dos veces. Search-first + UNIQUE, igual que el entrante,
+// que es lo que ya se probo contra reintentos reales.
+//
+// PRIVACIDAD (bloqueante, 2026-07-26): `idContacto` es OBLIGATORIO y no acepta null. La linea
+// de WhatsApp del operador es personal y de trabajo a la vez, asi que guardar todo lo que sale
+// meteria conversaciones privadas en una base comercial. El filtro es por DESTINATARIO: si el
+// numero no corresponde a un contacto de una empresa de la base, el mensaje no llega hasta
+// aca. Se expresa en el TIPO y no en un `if` del caller a proposito -- un caller que se olvide
+// del filtro no compila, en vez de guardar la conversacion con la familia y que se note
+// despues. Quien descarta no puede loguear el texto (ver el route del webhook).
+//
+// esApertura sale de una sola pregunta: ¿existe alguna fila previa de ESTE hilo? El hilo se
+// mide por EMPRESA, no por contacto: escribirle al gerente despues de haberle escrito al
+// tecnico de la misma cuenta no es abrir la conversacion, es seguirla por otra puerta.
+export function guardarMensajeSaliente(mensaje: MensajeSaliente, idContacto: number): 'insertado' | 'duplicado' {
+  const existente = db
+    .select({ id: mensajeWhatsapp.id })
+    .from(mensajeWhatsapp)
+    .where(eq(mensajeWhatsapp.mensajeId, mensaje.mensajeId))
+    .get();
+  if (existente) return 'duplicado';
+
+  db.insert(mensajeWhatsapp)
+    .values({
+      mensajeId: mensaje.mensajeId,
+      referenciaProveedor: mensaje.referenciaProveedor,
       telefono: mensaje.telefono,
       texto: mensaje.texto,
       idContacto,
       fecha: mensaje.fecha,
       createdAt: new Date().toISOString(),
+      direccion: 'saliente',
+      esApertura: esPrimerMensajeDelHilo(idContacto) ? 1 : 0,
     })
     .run();
   return 'insertado';
+}
+
+// ¿La cuenta de este contacto no tiene NINGUN mensaje de WhatsApp guardado todavia, en
+// ninguna direccion? Se resuelve con los contactos de la empresa y no con el contacto suelto
+// por la razon de arriba. Empresa desconocida (contacto huerfano) devuelve false: no se
+// declara apertura de una cuenta que no se pudo identificar.
+function esPrimerMensajeDelHilo(idContacto: number): boolean {
+  const suEmpresa = db
+    .select({ idEmpresa: contacto.idEmpresa })
+    .from(contacto)
+    .where(eq(contacto.idContacto, idContacto))
+    .get();
+  if (!suEmpresa?.idEmpresa) return false;
+
+  const previo = db
+    .select({ id: mensajeWhatsapp.id })
+    .from(mensajeWhatsapp)
+    .innerJoin(contacto, eq(contacto.idContacto, mensajeWhatsapp.idContacto))
+    .where(eq(contacto.idEmpresa, suEmpresa.idEmpresa))
+    .get();
+  return !previo;
+}
+
+// Los mensajes de apertura, juntos y en orden, que es la forma en que sirven: el patron sale
+// de compararlos entre si, no de leer uno. Rango de fechas opcional para poder pedir "los
+// siete del lunes" sin traer la historia entera.
+export type AperturaWhatsapp = {
+  idEmpresa: string | null;
+  empresa: string | null;
+  contacto: string | null;
+  telefono: string | null;
+  fecha: string | null;
+  texto: string | null;
+  // Si esa cuenta contesto DESPUES de la apertura, y cuando. Es la mitad que convierte la
+  // lista en respuesta a "que copy mueve la conversacion": sin esto son siete textos sueltos.
+  respondio: boolean;
+  fechaRespuesta: string | null;
+};
+
+export function aperturasWhatsapp(opts: { desde?: string; hasta?: string } = {}): AperturaWhatsapp[] {
+  const condiciones = [eq(mensajeWhatsapp.esApertura, 1)];
+  // Comparacion por prefijo de 10 caracteres contra la fecha ISO: `desde`/`hasta` son dias
+  // ('2026-07-27') y el rango es inclusivo en los dos extremos, que es como se pide un dia
+  // en voz alta. Comparar el ISO completo contra un dia dejaria fuera todo lo del dia `hasta`.
+  if (opts.desde) condiciones.push(sql`substr(${mensajeWhatsapp.fecha}, 1, 10) >= ${opts.desde}`);
+  if (opts.hasta) condiciones.push(sql`substr(${mensajeWhatsapp.fecha}, 1, 10) <= ${opts.hasta}`);
+
+  const filas = db
+    .select({
+      idEmpresa: contacto.idEmpresa,
+      empresa: empresa.nombreOficial,
+      contacto: contacto.nombre,
+      telefono: mensajeWhatsapp.telefono,
+      fecha: mensajeWhatsapp.fecha,
+      texto: mensajeWhatsapp.texto,
+    })
+    .from(mensajeWhatsapp)
+    .leftJoin(contacto, eq(contacto.idContacto, mensajeWhatsapp.idContacto))
+    .leftJoin(empresa, eq(empresa.idEmpresa, contacto.idEmpresa))
+    .where(and(...condiciones))
+    .orderBy(mensajeWhatsapp.fecha)
+    .all();
+
+  return filas.map((f) => {
+    // La primera entrante de esa cuenta posterior a la apertura. Se resuelve por consulta y
+    // no por columna: es un hecho derivado que cambia solo cuando llega una respuesta nueva,
+    // y una columna habria que mantenerla al dia desde el camino de entrada.
+    const respuesta = f.idEmpresa
+      ? db
+          .select({ fecha: mensajeWhatsapp.fecha })
+          .from(mensajeWhatsapp)
+          .innerJoin(contacto, eq(contacto.idContacto, mensajeWhatsapp.idContacto))
+          .where(
+            and(
+              eq(contacto.idEmpresa, f.idEmpresa),
+              eq(mensajeWhatsapp.direccion, 'entrante'),
+              f.fecha ? sql`${mensajeWhatsapp.fecha} > ${f.fecha}` : undefined,
+            ),
+          )
+          .orderBy(mensajeWhatsapp.fecha)
+          .get()
+      : null;
+    return { ...f, respondio: Boolean(respuesta), fechaRespuesta: respuesta?.fecha ?? null };
+  });
 }
 
 // Paso "recibir" del dialogo de prueba (tarea 8): busca el mensaje entrante mas
@@ -6157,7 +6430,16 @@ export function mensajeWhatsappMasRecienteDesde(referenciaProveedor: string, des
     })
     .from(mensajeWhatsapp)
     .leftJoin(contacto, eq(contacto.idContacto, mensajeWhatsapp.idContacto))
-    .where(and(eq(mensajeWhatsapp.referenciaProveedor, referenciaProveedor), gt(mensajeWhatsapp.createdAt, desde)))
+    .where(
+      and(
+        eq(mensajeWhatsapp.referenciaProveedor, referenciaProveedor),
+        gt(mensajeWhatsapp.createdAt, desde),
+        // Desde que el saliente tambien se guarda (2026-07-26) esta tabla dejo de ser solo
+        // inbound. Sin este filtro, el boton "Ya me escribio, verificar" daria por buena la
+        // prueba mostrando el mensaje que acabamos de mandar nosotros.
+        eq(mensajeWhatsapp.direccion, 'entrante'),
+      ),
+    )
     .orderBy(desc(mensajeWhatsapp.createdAt))
     .get();
   return fila ?? null;
@@ -7494,6 +7776,7 @@ export type ToqueActividad = {
   razonPerdidaNota: string | null;
   objecion: string | null;
   objecionNota: string | null;
+  accionCliente: string | null;
   reunionFechaPropuesta: string | null;
   reunionFechaOcurrida: string | null;
   transcriptProveedor: string | null;
@@ -7555,6 +7838,7 @@ export function toquesEnRango(
       razonPerdidaNota: toque.razonPerdidaNota,
       objecion: toque.objecion,
       objecionNota: toque.objecionNota,
+      accionCliente: toque.accionCliente,
       reunionFechaPropuesta: toque.reunionFechaPropuesta,
       reunionFechaOcurrida: toque.reunionFechaOcurrida,
       transcriptProveedor: toque.transcriptProveedor,

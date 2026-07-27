@@ -1,0 +1,1 @@
+ALTER TABLE `toque` ADD `accion_cliente` text;
