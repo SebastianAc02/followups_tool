@@ -164,6 +164,35 @@ test('actividad: owner (de la empresa) filtra toques Y aplazos', () => {
   assert.equal(r.aplazos[0].idEmpresa, 'a4-fc');
 });
 
+// 2026-07-27: el webhook de WhatsApp deja un toque por cada mensaje ENTRANTE del ISP
+// (fuente='whatsapp_entrante'). Caso real: un solo hilo de una sola empresa mando 42 en un
+// dia, y antes de este fix totalToques los contaba igual que un toque real del operador.
+test('actividad: los toques entrantes (whatsapp_entrante) no suman a totalToques ni a los conteos, pero siguen en `toques`', () => {
+  const ORG = 9007;
+  seedEmpresa('a7', ORG, { nombre: 'Empresa A7' });
+  seedToque('a7', '2026-07-27', ORG, { canal: 'llamada', resultado: 'contesto_sigue_seguimiento', ejecutadoPor: 'Sebastian Acosta Molina' });
+  // 3 respuestas entrantes del mismo hilo, escritas con SQL crudo (seedToque no cubre fuente).
+  const raw = new Database(dbPath);
+  for (let i = 0; i < 3; i++) {
+    raw
+      .prepare(
+        `INSERT INTO toque (id_empresa, fecha, canal, resultado, fuente, ejecutado_por, id_organizacion)
+         VALUES ('a7', '2026-07-27', 'whatsapp', NULL, 'whatsapp_entrante', NULL, ?)`,
+      )
+      .run(ORG);
+  }
+  raw.close();
+
+  const r = actividadTool({ desde: '2026-07-27', hasta: '2026-07-27', idOrganizacion: ORG });
+
+  assert.equal(r.totalToques, 1, 'solo el toque ejecutado por el operador cuenta');
+  assert.equal(r.toquesEntrantes, 3, 'los 3 mensajes del ISP se reportan aparte');
+  assert.equal(r.toques.length, 4, '`toques` sigue trayendo TODAS las filas, entrantes incluidos: no se ocultan');
+  assert.equal(r.conteos.porCanal.whatsapp, undefined, 'los conteos no ven los entrantes: el unico toque real fue llamada');
+  assert.equal(r.conteos.porCanal.llamada, 1);
+  assert.equal(r.toquesSinAtribuir, 0, 'un entrante sin ejecutado_por no cuenta como "sin atribuir": no es del operador');
+});
+
 test('actividad: respeta idOrganizacion, un toque de otra organizacion no aparece', () => {
   const ORG = 9005;
   const OTRA_ORG = 9006;

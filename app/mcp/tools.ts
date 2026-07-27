@@ -513,22 +513,39 @@ export function actividadTool(input: ActividadInput) {
     aplazadoPor: input.ejecutadoPor,
   });
 
+  // fuente='whatsapp_entrante' (2026-07-27): el webhook de WhatsApp deja un toque por cada
+  // mensaje ENTRANTE del ISP, sin ejecutor y sin resultado. Antes de este fix esas filas
+  // subian totalToques igual que un toque real -- 42 mensajes de un solo hilo se leian como
+  // 42 movimientos del dia con cero trabajo del operador. `toques` sigue trayendo TODAS las
+  // filas del rango (nada se oculta, cada una trae su `fuente`); los totales y `conteos` de
+  // aca abajo se calculan solo sobre lo EJECUTADO. totalToques no se renombra -- ya
+  // significaba "lo que se hizo"; se agrega toquesEntrantes aparte, mismo patron que
+  // totalAplazos/aplazos (lo que no cuenta como toque va separado, nunca sumado).
+  const ejecutados = toques.filter((t) => t.fuente !== 'whatsapp_entrante');
+  const entrantes = toques.length - ejecutados.length;
+
   return {
     organizacion: idOrganizacion,
     desde: input.desde,
     hasta: input.hasta,
     owner: input.owner ?? null,
     ejecutadoPor: input.ejecutadoPor ?? null,
-    totalToques: toques.length,
+    totalToques: ejecutados.length,
+    // Mensajes entrantes del ISP en el rango (fuente='whatsapp_entrante'), aparte de
+    // totalToques por la misma razon que totalAplazos va aparte de totalToques: no es
+    // trabajo que hizo el operador.
+    toquesEntrantes: entrantes,
     totalAplazos: aplazos.length,
     // Sin atribucion: la porcion del periodo de la que no se sabe quien la ejecuto. Se
     // reporta explicito para que nadie lea el reparte por persona como si fuera completo.
-    toquesSinAtribuir: toques.filter((t) => !t.ejecutadoPor).length,
+    // Solo sobre lo ejecutado -- un entrante nunca tiene ejecutadoPor y no es "sin atribuir",
+    // es "no es del operador".
+    toquesSinAtribuir: ejecutados.filter((t) => !t.ejecutadoPor).length,
     // Toques que no se pueden fechar: `fecha` en prosa o vacia y sin fecha_dia. Se reporta por
     // la misma razon que toquesSinAtribuir -- son las filas de las que no se puede decir nada
     // en el tiempo, y esconderlas hace ver completo un conteo que no lo es.
-    toquesSinFecha: toques.filter((t) => !t.fechaDia).length,
-    conteos: conteosActividad(toques),
+    toquesSinFecha: ejecutados.filter((t) => !t.fechaDia).length,
+    conteos: conteosActividad(ejecutados),
     // Sin tope: se devuelven TODAS las filas del rango, no hay truncado silencioso.
     truncado: false,
     toques,

@@ -21,7 +21,7 @@ import { BarraAhora } from "./BarraAhora";
 import { AgendaHoy } from "./AgendaHoy";
 import { ColaUnificada } from "./ColaUnificada";
 import { ContactoIniciadoSinSeguimiento } from "./ContactoIniciadoSinSeguimiento";
-import { contarCerradas } from "./stats";
+import { contarToquesHoy } from "./stats";
 import {
   filaConVencimiento,
   unificarCola,
@@ -157,7 +157,7 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   // dias no sabia expresar).
   const actual = splitActivo ? filasUnificadas[0] : cola[0] ? filaConVencimiento(cola[0], hoy, true) : undefined;
 
-  const cerradas = contarCerradas(contadores);
+  const toquesHoy = contarToquesHoy(contadores);
 
   return (
     <AppShell>
@@ -179,7 +179,16 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
       <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Para hoy" valor={pendientes} sub={`de ${totalListado} en la lista`} />
         <StatCard label="Programadas" valor={programadas} sub="con fecha futura" />
-        <StatCard label="Cerradas" valor={cerradas} sub="hoy" tone="done" subTone="done" />
+        <StatCard
+          label="Toques hoy"
+          valor={toquesHoy}
+          // Los mensajes que MANDA el ISP no son actividad del operador (2026-07-27): un
+          // hilo entero de respuestas del cliente antes se colaba en "Cerradas" y lo
+          // inflaba sin que el operador tocara nada. Se muestran aparte, informativos.
+          sub={contadores.entrantes > 0 ? `+${contadores.entrantes} respuestas` : "hoy"}
+          tone="done"
+          subTone="done"
+        />
         <StatCard
           label="Vencidas"
           valor={vencidos}

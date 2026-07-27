@@ -2118,7 +2118,15 @@ export type ContadoresHoy = {
   // aparecian en ningun canal.
   porCanal: Record<CanalToque, number>;
   porResultado: Record<Resultado, number>;
+  // Solo actividad EJECUTADA por el owner (excluye fuente='whatsapp_entrante', ver 2026-07-27
+  // abajo). Antes de esta fecha `total` sumaba tambien las respuestas del ISP.
   total: number;
+  // Mensajes entrantes del dia que el webhook dejo como toque (fuente='whatsapp_entrante').
+  // Aparte de `total` a proposito: un reply del cliente es trabajo suyo, no del operador, y
+  // mezclarlo infla "toques de hoy" sin que el operador haya tocado nada. Caso real 2026-07-27:
+  // un solo hilo de una sola empresa mando 42 mensajes en el dia, el contador viejo (que sumaba
+  // TODAS las filas de hoy sin filtrar fuente) marco 42 "cerradas" con cero toques del operador.
+  entrantes: number;
 };
 
 // Contadores del día (F0.3 mínimo): toques de HOY de un owner, por canal y por resultado.
@@ -2138,7 +2146,7 @@ export function contadoresHoy(hoy: string, owner: string | undefined, idOrganiza
   ];
   if (owner) condiciones.push(eq(empresa.owner, owner));
   const filas = db
-    .select({ canal: toque.canal, resultado: toque.resultado })
+    .select({ canal: toque.canal, resultado: toque.resultado, fuente: toque.fuente })
     .from(toque)
     .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
     .where(and(...condiciones))
@@ -2147,14 +2155,26 @@ export function contadoresHoy(hoy: string, owner: string | undefined, idOrganiza
   const porCanal = Object.fromEntries(CANALES_TOQUE.map((c) => [c, 0])) as Record<CanalToque, number>;
   const porResultado = Object.fromEntries(RESULTADOS.map((r) => [r, 0])) as Record<Resultado, number>;
 
-  // Decisión a propósito: `total` cuenta TODOS los toques de hoy del owner, incluyendo
-  // cualquier valor legado de canal/resultado que no esté en el enum actual (ej. el
-  // "contesto" viejo pre-V1.2 visto en V1.3). Los buckets de porCanal/porResultado solo
+  // Decisión a propósito: `total` cuenta TODOS los toques EJECUTADOS de hoy del owner,
+  // incluyendo cualquier valor legado de canal/resultado que no esté en el enum actual (ej.
+  // el "contesto" viejo pre-V1.2 visto en V1.3). Los buckets de porCanal/porResultado solo
   // cuentan los valores reconocidos del enum actual, así que un toque con valor legado
   // sube el total pero no incrementa ningún bucket. Esto puede verse como un descuadre
   // (total > suma de buckets), pero es intencional: perder de vista un toque real del día
   // (no contarlo en total) sería peor que un descuadre visible entre el total y sus buckets.
+  //
+  // "Ejecutado" excluye fuente='whatsapp_entrante' (2026-07-27): el webhook de WhatsApp
+  // inserta un toque por cada mensaje ENTRANTE del ISP (registrarToqueEntrante, sin
+  // ejecutor y sin resultado), y antes de este fix ese toque sumaba a `total` igual que uno
+  // hecho por el operador. Caso real: 42 mensajes de un solo hilo de una sola empresa
+  // marcaron 42 "cerradas" en el dashboard con cero toques reales del operador ese día. Se
+  // cuentan aparte en `entrantes`, nunca se descartan (siguen en el historial de la cuenta).
+  let entrantes = 0;
   for (const fila of filas) {
+    if (fila.fuente === 'whatsapp_entrante') {
+      entrantes += 1;
+      continue;
+    }
     if (fila.canal && (CANALES_TOQUE as readonly string[]).includes(fila.canal)) {
       porCanal[fila.canal as CanalToque] += 1;
     }
@@ -2163,7 +2183,8 @@ export function contadoresHoy(hoy: string, owner: string | undefined, idOrganiza
     }
   }
 
-  return { porCanal, porResultado, total: filas.length };
+  const total = filas.length - entrantes;
+  return { porCanal, porResultado, total, entrantes };
 }
 
 // Cuenta de empresas por estado_notion (rediseño home), SIEMPRE dentro de una
@@ -6633,9 +6654,17 @@ export function registrarToqueEntrante(match: ContactoMatch, texto: string, fech
 // de la ventana del promedio vive en app/core/actividad.ts, no aqui ni en la UI.
 // `toque.fecha` puede ser ISO (app) o legado formato Notion ("June 25, 2026"); se
 // compara solo substr(fecha,1,10), asi el legado no-ISO cae fuera de las ventanas.
-
+//
+// enRango excluye fuente='whatsapp_entrante' desde el filtro base (2026-07-27): las cinco
+// funciones de este bloque cuentan actividad EJECUTADA (toques hechos, leads tocados,
+// desglose por canal/resultado) y un reply del ISP no es eso. Antes de este fix, un solo
+// hilo de una sola empresa mandando 42 mensajes en un dia inflaba contarToquesEnRango en 42,
+// metia esa empresa en leadsTocadosEnRango aunque el operador no la hubiera tocado, y subia
+// toquesPorCanal.whatsapp en 42 sin que nadie del equipo hiciera ese trabajo. El toque
+// entrante no se pierde: sigue en la tabla y en el historial de la empresa, solo deja de
+// sumar en este bloque.
 const enRango = (desde: string, hasta: string): SQL =>
-  sql`substr(${toque.fecha}, 1, 10) >= ${desde} AND substr(${toque.fecha}, 1, 10) <= ${hasta}`;
+  sql`substr(${toque.fecha}, 1, 10) >= ${desde} AND substr(${toque.fecha}, 1, 10) <= ${hasta} AND (${toque.fuente} IS NULL OR ${toque.fuente} != 'whatsapp_entrante')`;
 
 // Filtro opcional de owner (Tarea 14 del panel): el toque no tiene owner propio, el
 // owner vive en empresa. El join a empresa SOLO se agrega cuando el caller filtra por
@@ -7447,14 +7476,19 @@ export function toquesAntesDeCerrarPromedio(idOrganizacion: number): number | nu
 
   const ids = cierres.map((c) => c.idEmpresa);
   const toques = db
-    .select({ idEmpresa: toque.idEmpresa, fecha: toque.fecha })
+    .select({ idEmpresa: toque.idEmpresa, fecha: toque.fecha, fuente: toque.fuente })
     .from(toque)
     .where(inArray(toque.idEmpresa, ids))
     .all();
 
+  // fuente='whatsapp_entrante' fuera del promedio (2026-07-27): esto mide "cuantos toques
+  // ejecuto el equipo antes de cerrar", no "cuantos mensajes mando el cliente". Caso real:
+  // INTERCOMM DE NARIÑO SAS esta en firma_pago y ese mismo dia un solo hilo de WhatsApp le
+  // metio 42 filas entrantes -- sin este filtro, un cliente conversador infla el numero que
+  // el CRO lee en panel_metricas como si cerrarlo hubiera costado mas trabajo del real.
   const fechasPorEmpresa = new Map<string, string[]>();
   for (const t of toques) {
-    if (!t.fecha) continue;
+    if (!t.fecha || t.fuente === 'whatsapp_entrante') continue;
     const arr = fechasPorEmpresa.get(t.idEmpresa) ?? [];
     arr.push(t.fecha);
     fechasPorEmpresa.set(t.idEmpresa, arr);
@@ -7921,6 +7955,11 @@ export type ToqueActividad = {
   reunionFechaOcurrida: string | null;
   transcriptProveedor: string | null;
   transcriptUrl: string | null;
+  // 2026-07-27: distingue un toque EJECUTADO de un mensaje entrante del ISP
+  // (fuente='whatsapp_entrante', ver registrarToqueEntrante). actividadTool (mcp/tools.ts)
+  // usa este campo para separar los dos en la respuesta; se expone aca porque `toques` sigue
+  // trayendo TODAS las filas del rango (no se ocultan, es historial real).
+  fuente: string;
 };
 
 // Los toques de un rango de fechas, cruzados con su empresa. No existia forma de preguntar
@@ -7983,6 +8022,7 @@ export function toquesEnRango(
       reunionFechaOcurrida: toque.reunionFechaOcurrida,
       transcriptProveedor: toque.transcriptProveedor,
       transcriptUrl: toque.transcriptUrl,
+      fuente: toque.fuente,
     })
     .from(toque)
     .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
@@ -8493,10 +8533,21 @@ export function empresaFueraDelPipeline(idEmpresa: string, idOrganizacion: numbe
     .get();
   if (!fila) return null;
 
+  // fuente='whatsapp_entrante' no cuenta como "trabajo real" (2026-07-27, mismo criterio que
+  // el resto de contadores de actividad): un reply del ISP no es lo que explica que una
+  // empresa este trackeada, y contarlo aca haria decir "tiene toques" (trabajo real) de una
+  // empresa a la que nadie del equipo le hizo nada.
+  //
+  // OJO con ne() a secas (encontrado en revision, 2026-07-27): en SQL, `fuente != 'x'` evalua
+  // a NULL (no a true) cuando fuente es NULL, y NULL no pasa un WHERE -- una fila real con
+  // fuente NULL quedaria excluida del conteo, justo el resultado contrario al que se quiere.
+  // Hoy toque.fuente es NOT NULL asi que no muerde, pero es el mismo patron silencioso que el
+  // bug que este fix arregla. Mismo criterio que enRango (arriba en este archivo): OR con
+  // isNull cubre el caso.
   const toques = db
     .select({ n: sql<number>`count(*)` })
     .from(toque)
-    .where(eq(toque.idEmpresa, idEmpresa))
+    .where(and(eq(toque.idEmpresa, idEmpresa), or(isNull(toque.fuente), ne(toque.fuente, 'whatsapp_entrante'))))
     .get();
 
   return { ...fila, tieneToques: Number(toques?.n ?? 0) > 0 };

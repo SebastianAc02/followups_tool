@@ -44,9 +44,9 @@ function seedContacto(idEmpresa: string, cargoCategoria: string | null) {
   raw.close();
 }
 
-function seedToque(idEmpresa: string, fecha: string) {
+function seedToque(idEmpresa: string, fecha: string, fuente = 'test') {
   const raw = new Database(dbPath);
-  raw.prepare(`INSERT INTO toque (id_empresa, fecha, fuente, id_organizacion) VALUES (?, ?, 'test', 1)`).run(idEmpresa, fecha);
+  raw.prepare(`INSERT INTO toque (id_empresa, fecha, fuente, id_organizacion) VALUES (?, ?, ?, 1)`).run(idEmpresa, fecha, fuente);
   raw.close();
 }
 
@@ -140,6 +140,23 @@ test('toquesAntesDeCerrarPromedio: promedia toques ANTES de firma_pago, ignora l
 test('toquesAntesDeCerrarPromedio: ninguna empresa cerro -- null, no 0', () => {
   const promedio = toquesAntesDeCerrarPromedio(2099);
   assert.equal(promedio, null);
+});
+
+// 2026-07-27: caso real INTERCOMM DE NARIÑO SAS -- una empresa en firma_pago recibio 42
+// filas de fuente='whatsapp_entrante' de un solo hilo de WhatsApp, ANTES de la fecha de
+// cierre, y antes del fix esas 42 filas subian el promedio que lee panel_metricas (la vista
+// del CRO) como si cerrarla hubiera costado 42 toques de trabajo real.
+test('toquesAntesDeCerrarPromedio: los toques entrantes (whatsapp_entrante) no cuentan', () => {
+  const ORG = 2008;
+  seedEmpresa('tc3', 'lead', ORG);
+  seedToque('tc3', '2026-07-20'); // 1 toque ejecutado real, antes de cerrar
+  for (let i = 0; i < 42; i++) {
+    seedToque('tc3', '2026-07-21', 'whatsapp_entrante'); // hilo de respuestas del ISP, tambien antes de cerrar
+  }
+  actualizarEstadoNotion('tc3', 'firma_pago', ORG, '2026-07-27');
+
+  const promedio = toquesAntesDeCerrarPromedio(ORG);
+  assert.equal(promedio, 1, 'solo el toque ejecutado cuenta, los 42 entrantes no');
 });
 
 test.after(() => {

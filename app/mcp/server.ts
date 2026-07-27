@@ -772,12 +772,15 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
       description:
         'Actividad de un rango de fechas: los toques (dia, canal, resultado, duracion, razon de perdida y ' +
         'objecion con su nota, fechas de reunion propuesta y ocurrida, puntero de grabacion, empresa, ' +
-        'estado, owner, quien lo ejecuto) y, en una lista APARTE, los seguimientos que se aplazaron ' +
+        'estado, owner, quien lo ejecuto, fuente) y, en una lista APARTE, los seguimientos que se aplazaron ' +
         '(empresa, fecha incumplida, fecha nueva). Los aplazos no se suman a los toques: son lo que NO se ' +
-        'hizo. Trae ademas conteos por canal, por resultado, por ejecutor, de duracion, y el par de ' +
-        'reuniones (conFechaPropuesta / ocurridas / noShow) que da el no-show rate. Devuelve todas las ' +
-        'filas del rango, sin tope. Reporta toquesSinAtribuir y toquesSinFecha: la porcion de la que no se ' +
-        'puede decir quien la hizo ni cuando.',
+        'hizo. `toques` trae TODAS las filas del rango, incluidas las respuestas entrantes del ISP ' +
+        '(fuente=whatsapp_entrante) -- pero totalToques, toquesSinAtribuir, toquesSinFecha y conteos solo ' +
+        'cuentan lo EJECUTADO por el operador; los entrantes se reportan aparte en toquesEntrantes, mismo ' +
+        'criterio que totalAplazos. Trae ademas conteos por canal, por resultado, por ejecutor, de ' +
+        'duracion, y el par de reuniones (conFechaPropuesta / ocurridas / noShow) que da el no-show rate. ' +
+        'Devuelve todas las filas del rango, sin tope. Reporta toquesSinAtribuir y toquesSinFecha: la ' +
+        'porcion de lo ejecutado de la que no se puede decir quien la hizo ni cuando.',
       inputSchema: {
         desde: z.string().min(1).describe('YYYY-MM-DD, incluido'),
         hasta: z.string().min(1).describe('YYYY-MM-DD, incluido'),
