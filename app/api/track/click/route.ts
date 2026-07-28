@@ -6,6 +6,7 @@
 // no se vuelve un open-redirect generico para cualquier esquema.
 import { NextRequest, NextResponse } from 'next/server';
 import { resolverDestinatarioPorEmail, guardarEventoTracking } from '../../../db/repository';
+import { huellaRequest } from '../huella-request';
 
 function urlSegura(raw: string | null): string | null {
   if (!raw) return null;
@@ -36,7 +37,11 @@ export async function GET(req: NextRequest) {
           canal: 'correo',
           fechaEvento: new Date().toISOString(),
           email,
-          detalle: { url: destino },
+          // Misma huella que el pixel (ver huella-request.ts). El clic sirve para
+          // correlacionar: si una apertura y un clic salen del mismo ua/ip, la apertura
+          // fue de una persona; si la apertura viene de un ua de proxy y el clic de otro,
+          // ahí está la prueba de que el conteo de aperturas está inflado.
+          detalle: { url: destino, ...huellaRequest(req.headers) },
         });
       }
     } catch {

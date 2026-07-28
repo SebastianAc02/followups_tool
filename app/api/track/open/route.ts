@@ -6,6 +6,7 @@
 // rota en un correo real es peor que perder un evento de tracking.
 import { NextRequest, NextResponse } from 'next/server';
 import { resolverDestinatarioPorEmail, guardarEventoTracking } from '../../../db/repository';
+import { huellaRequest } from '../huella-request';
 
 const PIXEL_1X1_GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64');
 
@@ -26,7 +27,10 @@ export async function GET(req: NextRequest) {
           canal: 'correo',
           fechaEvento: new Date().toISOString(),
           email,
-          detalle: { via: 'pixel' },
+          // ua/ip se agregan al detalle en vez de columnas propias: `detalle` ya es JSON
+          // libre, no hay migración que correr y nada que lea eventos viejos se rompe
+          // (los de Apollo traen su payload entero ahí mismo). Ver huella-request.ts.
+          detalle: { via: 'pixel', ...huellaRequest(req.headers) },
         });
       }
     } catch {
