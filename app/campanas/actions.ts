@@ -67,11 +67,20 @@ export type ObtenerSegmentoResultado =
 
 // Fase 7 (volver a Segmento sin perder el progreso): reabre NuevoSegmento pre-cargado
 // con la MISMA definicion que ya se habia armado, en vez de vacio.
+//
+// El try existe por los segmentos VIEJOS (14 de los 24 de produccion el 2026-07-28, con
+// categoria='creditos', 'agencia_viajes', 'test' u 'otro'): sus definiciones se guardaron
+// cuando el dominio de cada campo no se validaba, y ahora obtenerSegmento las rechaza al
+// parsear. Reabrir uno de esos tiene que decir por que no se puede, no reventar la accion.
 export async function obtenerSegmentoAction(idSegmento: number): Promise<ObtenerSegmentoResultado> {
   const sesion = await requireSession();
-  const segmento = obtenerSegmento(idSegmento, sesion.idOrganizacion);
-  if (!segmento) return { ok: false, error: 'El segmento no existe' };
-  return { ok: true, segmento };
+  try {
+    const segmento = obtenerSegmento(idSegmento, sesion.idOrganizacion);
+    if (!segmento) return { ok: false, error: 'El segmento no existe' };
+    return { ok: true, segmento };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'La definicion guardada de ese segmento ya no es valida' };
+  }
 }
 
 export type PreviewConReadiness =
