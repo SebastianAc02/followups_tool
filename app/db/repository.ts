@@ -87,6 +87,8 @@ import { calcularDuracionPorEtapa, calcularCicloVenta, type TransicionEtapa } fr
 import type { EmpresaFunnelInput } from '../core/panel/conversionStage';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { contarToquesAntesDeFecha } from '../core/panel/toquesAntesCerrar';
+import { clasificarEvento, type Clasificacion, type Razon, type Confianza } from '../core/clasificar-evento-tracking';
+import { agruparDuplicados, type EventoParaDedup } from '../core/dedup-eventos-tracking';
 import { cifrar, descifrar } from '../lib/crypto';
 import { fechaBogotaISO, sumarDias, diaSemana, diaBogotaDeGuardado } from '../lib/date-utils';
 import type { SesionTranscript } from '../core/ports/transcript';
@@ -7291,19 +7293,23 @@ export function guardarEventoTracking(idPasoInscripcion: number, evento: EventoP
 // eventos de open de correo). La unica forma de ver una apertura o un clic era entrar por SSH
 // y correr node contra el volumen.
 //
-// Devuelve el evento crudo, no un porcentaje. Tres razones por las que un agregado calculado
-// aca mentiria, todas medidas y ninguna arreglada todavia:
+// Devuelve el evento crudo MAS su clasificacion y su grupo de dedup, nunca un porcentaje. La
+// clasificacion (humano/maquina/desconocido, con razon y senal) sale de clasificarEvento
+// (core/clasificar-evento-tracking.ts) y el agrupamiento de dedup de agruparDuplicados
+// (core/dedup-eventos-tracking.ts): las dos son funciones puras, esta funcion solo arma su
+// input desde la fila de DB y les pasa el trabajo. Ninguna fila de evento_tracking se toca,
+// se filtra ni se borra por esto -- el crudo completo sigue viajando en `eventos`.
 //
-//  1. No hay deduplicacion. El id de evento del pixel lleva Date.now() + random, asi que dos
-//     hits separados por 5 milisegundos son dos filas. En produccion un correo abierto dos
-//     veces por el operador dejo TRES filas de apertura.
-//  2. El proxy de imagenes de Gmail abre el pixel solo. Desde el 2026-07-28 el detalle trae
-//     user_agent e ip (app/api/track/huella-request.ts) y ese es el unico dato con el que se
-//     puede separar una apertura humana de un prefetch, pero nadie filtra por el todavia.
-//  3. La atribucion por paso esta corrida. resolverDestinatarioPorEmail acredita el evento al
+// Dos limitaciones que siguen vivas, medidas y sin arreglar aca:
+//
+//  1. La atribucion por paso esta corrida. resolverDestinatarioPorEmail acredita el evento al
 //     paso_inscripcion 'enviada' MAS RECIENTE de esa campana y ese email, no al correo que de
 //     verdad se abrio: con una cadencia de 5 pasos, una apertura del correo 1 se le acredita
-//     al correo 3. Muerde desde el paso 2.
+//     al correo 3. Muerde desde el paso 2. Fuera de alcance de este cambio.
+//  2. La deduplicacion agrupa dentro de lo que esta funcion devuelve. Si el llamador filtra por
+//     `tipo`, un grupo que hubiera cruzado 'abierto' y 'clic' nunca se ve entero -- pero el
+//     bucket de dedup ya es (id_paso_inscripcion, tipo), asi que filtrar por tipo no rompe un
+//     grupo existente, solo puede ocultar otros tipos.
 //
 // Por eso `pasoOrden` viaja con la advertencia pegada y no como si fuera un hecho.
 export type FiltroTrackingCorreo = {
@@ -7337,6 +7343,18 @@ export type EventoTrackingCorreo = {
   ip: string | null;
   url: string | null;
   detalle: string | null;
+  // Veredicto de clasificarEvento (core/clasificar-evento-tracking.ts), reconstruible: corre
+  // sobre el crudo de arriba, nunca sobre un campo escrito aparte.
+  clasificacion: Clasificacion;
+  razon: Razon;
+  senal: string;
+  confianza: Confianza;
+  excluirDeMetricas: boolean;
+  // Grupo de dedup de agruparDuplicados (core/dedup-eventos-tracking.ts). grupoDedupId es el
+  // idEvento del representante (el mas temprano del grupo); si el evento no tiene duplicados,
+  // grupoDedupId es su propio idEvento.
+  grupoDedupId: number;
+  esRepresentanteGrupo: boolean;
 };
 
 export function trackingCorreo(filtro: FiltroTrackingCorreo, idOrganizacion: number): EventoTrackingCorreo[] {
@@ -7360,6 +7378,10 @@ export function trackingCorreo(filtro: FiltroTrackingCorreo, idOrganizacion: num
       detalle: eventoTracking.detalle,
       proveedorEventoId: eventoTracking.proveedorEventoId,
       idPasoInscripcion: eventoTracking.idPasoInscripcion,
+      // Fecha de envio del PROPIO paso_inscripcion: es el 'fecha_envio' que pide R3 de
+      // clasificarEvento (piso fisico de latencia). No es un join contra un evento 'enviado'
+      // en evento_tracking -- paso_inscripcion ya trae su propia fecha_enviada.
+      fechaEnviada: pasoInscripcion.fechaEnviada,
       pasoOrden: pasoCadencia.orden,
       asunto: versionPaso.asunto,
       idEmpresa: inscripcion.idEmpresa,
@@ -7383,7 +7405,10 @@ export function trackingCorreo(filtro: FiltroTrackingCorreo, idOrganizacion: num
     .limit(filtro.limite ?? 200)
     .all();
 
-  return filas.map((f) => {
+  // Parseo de detalle y clasificacion primero: clasificarEvento es pura y solo necesita esta
+  // fila. El dedup si necesita el conjunto completo (agrupa contra otras filas), asi que corre
+  // aparte en un segundo paso sobre lo ya parseado.
+  const parseadas = filas.map((f) => {
     // detalle es JSON libre escrito por tres productores distintos (pixel, click, Apollo). Un
     // detalle ilegible no puede tumbar la lectura entera: se devuelve crudo y los campos
     // extraidos quedan null.
@@ -7395,6 +7420,50 @@ export function trackingCorreo(filtro: FiltroTrackingCorreo, idOrganizacion: num
       d = {};
     }
     const s = (k: string): string | null => (typeof d[k] === 'string' ? (d[k] as string) : null);
+    // La clave real que escribe huella-request.ts es 'ua', literal (huella-request.ts:56). El
+    // bug historico buscaba 'user_agent'/'userAgent', que el productor nunca escribio: el
+    // detalle traia el dato y la lectura lo tiraba a la basura por el nombre de clave
+    // equivocado. Un evento anterior al 2026-07-28 trae null porque no se capturo, nunca
+    // porque vino vacio -- uaVacio() en clasificarEvento distingue exactamente eso (R6).
+    const ua = s('ua');
+    const ip = s('ip');
+
+    const tipo = f.tipo as 'abierto' | 'clic' | 'visto';
+    const veredicto = clasificarEvento({
+      idEvento: f.idEvento,
+      tipo,
+      fechaEvento: f.fechaEvento ?? f.createdAt ?? '',
+      detalle: f.detalle ? { via: s('via') ?? undefined, ua, ip, url: s('url') ?? undefined } : null,
+      // fechaEnviada es NULL para un paso que nunca paso por el flujo normal de envio (dato
+      // sembrado a mano, por ejemplo). Sin ella R3 no puede calcular latencia y no dispara --
+      // eso es lo correcto, no un fallback silencioso.
+      fechaEnvio: f.fechaEnviada,
+      // No implementado en v1 (spec seccion 5): el chequeo contra el CSV vivo de Apple no
+      // existe todavia, asi que R5 nunca dispara y esto siempre viaja null.
+      ipEnRangoApplePrivateRelay: null,
+    });
+
+    return {
+      f,
+      s,
+      ua,
+      ip,
+      tipo,
+      veredicto,
+    };
+  });
+
+  const dedupInput: EventoParaDedup[] = parseadas.map((p) => ({
+    id_evento: p.f.idEvento,
+    id_paso_inscripcion: p.f.idPasoInscripcion,
+    tipo: p.tipo,
+    fecha_evento: p.f.fechaEvento ?? p.f.createdAt ?? '',
+    ip: p.ip,
+  }));
+  const gruposPorId = new Map(agruparDuplicados(dedupInput).map((g) => [g.id_evento, g]));
+
+  return parseadas.map(({ f, s, ua, veredicto }) => {
+    const grupo = gruposPorId.get(f.idEvento);
     return {
       idEvento: f.idEvento,
       tipo: f.tipo,
@@ -7411,12 +7480,19 @@ export function trackingCorreo(filtro: FiltroTrackingCorreo, idOrganizacion: num
       contacto: f.contacto,
       proveedorEventoId: f.proveedorEventoId,
       via: s('via'),
-      // Los dos nombres que escribe huella-request.ts. Se leen los dos por si el productor
-      // cambia de convencion: un campo que existe y no se lee es peor que uno que no existe.
-      userAgent: s('user_agent') ?? s('userAgent'),
+      userAgent: ua,
       ip: s('ip'),
       url: s('url'),
       detalle: f.detalle,
+      clasificacion: veredicto.clasificacion,
+      razon: veredicto.razon,
+      senal: veredicto.senal,
+      confianza: veredicto.confianza,
+      excluirDeMetricas: veredicto.excluir_de_metricas,
+      // grupo siempre existe (agruparDuplicados devuelve una entrada por cada fila de
+      // entrada); el fallback solo evita que TS se queje del tipo Map.get.
+      grupoDedupId: grupo?.grupo_dedup_id ?? f.idEvento,
+      esRepresentanteGrupo: grupo?.es_representante_grupo ?? true,
     };
   });
 }

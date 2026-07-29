@@ -12,6 +12,13 @@
 // Testeable sin servidor HTTP ni cliente MCP: cada funcion es (input) -> objeto JSON,
 // se prueba igual que un repository.*.test.ts (crearDbPrueba + seeds). Ver tools.test.ts.
 import { calcularHorarioEscalonado } from '../core/horario-escalonado';
+import {
+  estadoMedibilidadEnvio,
+  dominiosConAvisoNoMedible,
+  type EventoClasificadoParaEnvio,
+  type EnvioParaAvisoProveedor,
+  type EstadoMedibilidad,
+} from '../core/clasificar-evento-tracking';
 import { EJECUTOR_POR_DEFECTO } from '../db/validation';
 import {
   duracionPromedioPorEtapa,
@@ -1809,16 +1816,30 @@ export async function enviarWhatsappDirectoTool(
 
 // --- tracking_correo ------------------------------------------------------------------
 //
-// Lectura pura de evento_tracking. No existia forma de ver una apertura o un clic de correo
-// desde el MCP: TOOLS_LECTURA no lo exponia y aperturas_whatsapp es otra cosa (mensajes de
-// apertura de conversacion de WhatsApp, no eventos de open). La unica via era SSH mas node
-// contra el volumen.
+// Lectura y CLASIFICACION de evento_tracking (canal correo). No existia forma de ver una
+// apertura o un clic desde el MCP: TOOLS_LECTURA no lo exponia y aperturas_whatsapp es otra
+// cosa (mensajes de apertura de conversacion de WhatsApp, no eventos de open de correo). La
+// unica via era SSH mas node contra el volumen.
 //
-// Devuelve eventos crudos y NO calcula tasa de apertura, a proposito. Tres razones medidas,
-// todas vivas hoy: no hay deduplicacion (el id de evento del pixel lleva Date.now()+random,
-// dos hits a 5ms cuentan doble), el proxy de imagenes de Gmail dispara el pixel solo, y la
-// atribucion por paso esta corrida (ver `advertencias` en el resultado). Un porcentaje
-// calculado sobre eso seria un numero con cara de medicion.
+// Cada evento sale con su veredicto (clasificacion/razon/senal/confianza, de clasificarEvento
+// en core/clasificar-evento-tracking.ts) y su grupo de dedup (grupoDedupId/esRepresentanteGrupo,
+// de agruparDuplicados en core/dedup-eventos-tracking.ts). NINGUNA fila se borra ni se filtra:
+// el crudo completo sigue en `eventos`, las dos funciones son puras y reclasificar/reagrupar es
+// correrlas de nuevo sobre el mismo dato. `conteos` separa crudo de deduplicado (sumar por
+// grupoDedupId distinto, no por fila) y humano de maquina.
+//
+// `medibilidad` es el aviso de "no se puede saber", no un numero mas alto: por cada envio dice
+// si hay apertura humana confirmada, si un clic prueba deductivamente que el pixel fallo, o si
+// sencillamente no hay senal (que puede ser Outlook sin pixel o Gmail con solo el proxy -- las
+// dos caras se juntan a proposito, ver estadoMedibilidadEnvio). `avisosProveedor` solo nombra un
+// dominio cuando el patron se sostiene en 3+ envios sin un solo caso confirmado (umbral en
+// CONTEO, nunca en %).
+//
+// Lo que esta tool NUNCA hace, a proposito: no calcula ni muestra una tasa de apertura (open
+// rate) en ningun %, no resuelve Apple Private Relay en vivo (R5 existe documentada pero
+// inerte, campo siempre null, ver core/clasificar-evento-tracking.ts seccion 5 de la spec), no
+// detecta escaneres corporativos (Proofpoint/Mimecast/Barracuda) por firma propia, y no cruza
+// tracking con conversion para ningun accuracy o probabilidad de cierre.
 export type TrackingCorreoInput = {
   idEmpresa?: string;
   idCampana?: number;
@@ -1828,6 +1849,24 @@ export type TrackingCorreoInput = {
   limite?: number;
 };
 
+function dominioDeEmail(email: string | null): string | null {
+  if (!email) return null;
+  const arroba = email.lastIndexOf('@');
+  if (arroba < 0 || arroba === email.length - 1) return null;
+  return email.slice(arroba + 1).toLowerCase();
+}
+
+function contarPorClasificacion(eventos: { clasificacion: string; excluirDeMetricas: boolean }[]) {
+  // excluir_de_metricas (trafico de prueba interno, R1) nunca entra en un conteo: es la razon
+  // de ser del campo (spec seccion 1).
+  const conteo = { humano: 0, maquina: 0, desconocido: 0 };
+  for (const e of eventos) {
+    if (e.excluirDeMetricas) continue;
+    conteo[e.clasificacion as 'humano' | 'maquina' | 'desconocido']++;
+  }
+  return conteo;
+}
+
 export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: number) {
   const eventos = trackingCorreo(input, idOrganizacion);
 
@@ -1835,9 +1874,9 @@ export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: n
   for (const e of eventos) porTipo[e.tipo] = (porTipo[e.tipo] ?? 0) + 1;
 
   // Sospecha de duplicado, medida y no inferida: dos eventos del mismo tipo, sobre el mismo
-  // paso_inscripcion, a menos de 10 segundos. Se REPORTA, no se filtra -- deduplicar es una
-  // decision de producto que nadie tomo todavia, y borrar filas en la lectura escondería
-  // justo el problema que hay que ver.
+  // paso_inscripcion, a menos de 10 segundos. Heuristica previa a la deduplicacion formal
+  // (grupoDedupId en cada evento) -- se conserva porque sigue sirviendo de diagnostico rapido
+  // con una ventana mas ancha (10s) que la de agruparDuplicados (2s).
   const posiblesDuplicados: { idEventoA: number; idEventoB: number; tipo: string; segundos: number }[] = [];
   const porPaso = new Map<string, typeof eventos>();
   for (const e of eventos) {
@@ -1857,24 +1896,79 @@ export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: n
 
   const conHuella = eventos.filter((e) => e.userAgent != null).length;
 
+  // Deduplicado = una fila por grupoDedupId distinto (el representante mas temprano de cada
+  // grupo). Las filas de atras del mismo grupo siguen en `eventos`, solo no se cuentan dos
+  // veces aca.
+  const representantes = eventos.filter((e) => e.esRepresentanteGrupo);
+  const porTipoDedup: Record<string, number> = {};
+  for (const e of representantes) porTipoDedup[e.tipo] = (porTipoDedup[e.tipo] ?? 0) + 1;
+
+  const conteos = {
+    crudo: { total: eventos.length, porTipo, porClasificacion: contarPorClasificacion(eventos) },
+    deduplicado: { total: representantes.length, porTipo: porTipoDedup, porClasificacion: contarPorClasificacion(representantes) },
+  };
+
+  // Medibilidad por envio (seccion 4 de la spec). Se calcula sobre `eventos` tal como salieron
+  // de trackingCorreo -- si el llamador filtro por `tipo`, un envio puede faltarle la mitad de
+  // la evidencia (por ejemplo el clic que probaria pixel_bloqueado_confirmado), y eso queda
+  // dicho en `advertencias`, no escondido.
+  const porEnvio = new Map<number, { dominio: string | null; eventos: EventoClasificadoParaEnvio[] }>();
+  for (const e of eventos) {
+    const prev = porEnvio.get(e.idPasoInscripcion) ?? { dominio: dominioDeEmail(e.email), eventos: [] };
+    prev.eventos.push({ tipo: e.tipo as EventoClasificadoParaEnvio['tipo'], clasificacion: e.clasificacion });
+    porEnvio.set(e.idPasoInscripcion, prev);
+  }
+  const medibilidadPorEnvio: { idPasoInscripcion: number; dominio: string | null; estado: EstadoMedibilidad }[] = [];
+  for (const [idPasoInscripcion, info] of porEnvio) {
+    medibilidadPorEnvio.push({ idPasoInscripcion, dominio: info.dominio, estado: estadoMedibilidadEnvio(info.eventos) });
+  }
+  const enviosConDominio: EnvioParaAvisoProveedor[] = medibilidadPorEnvio
+    .filter((e): e is { idPasoInscripcion: number; dominio: string; estado: EstadoMedibilidad } => e.dominio !== null)
+    .map((e) => ({ dominio: e.dominio, estado: e.estado }));
+  const avisosProveedor = dominiosConAvisoNoMedible(enviosConDominio);
+
+  const advertencias = [
+    'Deduplicado por ventana encadenada de 2000ms (mismo id_paso_inscripcion y mismo tipo, desempatado por ip cuando ' +
+      'existe): grupoDedupId identifica el grupo y esRepresentanteGrupo marca la fila mas temprana de cada uno. Ninguna ' +
+      'fila se borra: conteos.crudo cuenta todas, conteos.deduplicado cuenta una por grupo. posiblesDuplicados usa una ' +
+      'ventana mas ancha (10s) y es un diagnostico aparte, previo a la deduplicacion formal.',
+    'Cada evento trae clasificacion (humano/maquina/desconocido) con su razon y su senal (clasificarEvento). ' +
+      'excluirDeMetricas es true solo para trafico de prueba interno (razon trafico_prueba_interno) y ya sale fuera de ' +
+      'conteos.crudo/conteos.deduplicado.',
+    'medibilidad.porEnvio dice si un envio tiene apertura humana confirmada, si un clic prueba deductivamente que el ' +
+      'pixel fallo (pixel_bloqueado_confirmado), o si no hay senal humana de apertura -- ese ultimo caso NUNCA se lee ' +
+      'como "no lo abrio": cubre tanto Outlook (el pixel nunca sale) como Gmail cuando la unica apertura fue el proxy. ' +
+      'medibilidad.avisosProveedor solo nombra un dominio con 3+ envios en pixel_bloqueado_confirmado y cero confirmados.',
+    input.tipo
+      ? `Filtraste por tipo='${input.tipo}': medibilidad.porEnvio pierde evidencia (por ejemplo el clic que confirma ` +
+        'pixel_bloqueado_confirmado si solo pediste abierto) porque solo ve los eventos de ese tipo. Sin filtro de tipo, ' +
+        've abierto y clic juntos.'
+      : 'userAgent e ip solo existen desde el 2026-07-28. Un evento anterior los trae en null porque no se capturaron, ' +
+        'no porque hayan venido vacíos -- razon sin_huella_capturada lo marca desconocido, no maquina ni humano.',
+    'medibilidad.porEnvio solo incluye envios que tienen AL MENOS UNA fila en evento_tracking: si el pixel de Outlook ' +
+      'nunca se disparó ni una vez, ese envío no tiene fila que leer y sencillamente no aparece acá (no genera un ' +
+      "estado 'sin_senal_humana_de_apertura' explícito). Para saber qué se envió y comparar contra lo que sí generó " +
+      'algún evento, cruza con estado_envio_correo o campana_completa.',
+    'pasoOrden puede estar mal atribuido. resolverDestinatarioPorEmail acredita el evento al paso_inscripcion ' +
+      "'enviada' MÁS RECIENTE de esa campaña y ese email, no al correo que de verdad se abrió: en una cadencia de " +
+      'varios pasos, una apertura del correo 1 se le acredita al último enviado. Muerde desde el paso 2. Fuera de alcance.',
+    'No hay tasa de apertura en ningún %, en ningún campo. R5 (Apple Private Relay) existe documentada pero está ' +
+      'inerte: el chequeo contra el CSV vivo de Apple no está construido, así que ipEnRangoApplePrivateRelay siempre ' +
+      'viaja null y esos casos caen en R7/R8. No se detectan escáneres corporativos (Proofpoint/Mimecast/Barracuda) por ' +
+      'firma propia: no hay UA público de ninguno.',
+    'Solo canal correo. Las aperturas de conversación de WhatsApp son otra cosa y viven en aperturas_whatsapp.',
+  ];
+
   return {
     total: eventos.length,
     porTipo,
     conHuella,
     sinHuella: eventos.length - conHuella,
     posiblesDuplicados,
+    conteos,
+    medibilidad: { porEnvio: medibilidadPorEnvio, avisosProveedor },
     eventos,
-    advertencias: [
-      'Sin deduplicar: el id de evento del pixel lleva Date.now()+random, así que dos hits separados por milisegundos ' +
-        'son dos filas. posiblesDuplicados marca los pares del mismo tipo y el mismo paso a menos de 10 segundos.',
-      'userAgent e ip solo existen desde el 2026-07-28. Un evento anterior los trae en null porque no se capturaron, ' +
-        'no porque hayan venido vacíos. Son lo único que separa una apertura humana del prefetch del proxy de imágenes ' +
-        'de Gmail, y nadie filtra por ellos todavía.',
-      'pasoOrden puede estar mal atribuido. resolverDestinatarioPorEmail acredita el evento al paso_inscripcion ' +
-        "'enviada' MÁS RECIENTE de esa campaña y ese email, no al correo que de verdad se abrió: en una cadencia de " +
-        'varios pasos, una apertura del correo 1 se le acredita al último enviado. Muerde desde el paso 2.',
-      'Solo canal correo. Las aperturas de conversación de WhatsApp son otra cosa y viven en aperturas_whatsapp.',
-    ],
+    advertencias,
   };
 }
 

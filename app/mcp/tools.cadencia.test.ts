@@ -468,9 +468,13 @@ test('tracking_correo devuelve el evento con su empresa, su campaña y su huella
     `INSERT INTO evento_tracking (id_paso_inscripcion, tipo, canal, proveedor_evento_id, detalle, fecha_evento, created_at)
      VALUES (?, ?, 'correo', ?, ?, ?, ?)`,
   );
-  ins.run(paso.id_paso_inscripcion, 'abierto', 'ev-1', JSON.stringify({ via: 'pixel', user_agent: 'Mozilla/5.0', ip: '181.1.1.1' }), '2026-07-28T10:00:00.000Z', '2026-07-28T10:00:00.000Z');
+  // La clave real que escribe huella-request.ts es 'ua' (huella-request.ts:56), literal. Antes
+  // este seed usaba 'user_agent', que coincidía con el nombre que buscaba el bug de lectura de
+  // repository.ts:7416 y por eso el test pasaba con la lectura rota -- sembrar la clave que el
+  // productor real escribe es lo que hace que este test detecte la regresión si el bug vuelve.
+  ins.run(paso.id_paso_inscripcion, 'abierto', 'ev-1', JSON.stringify({ via: 'pixel', ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15', ip: '181.1.1.1' }), '2026-07-28T10:00:00.000Z', '2026-07-28T10:00:00.000Z');
   // Dos hits a 3 segundos: el caso real que hoy cuenta doble porque no hay deduplicación.
-  ins.run(paso.id_paso_inscripcion, 'abierto', 'ev-2', JSON.stringify({ via: 'pixel', user_agent: 'GoogleImageProxy', ip: '66.102.1.1' }), '2026-07-28T10:00:03.000Z', '2026-07-28T10:00:03.000Z');
+  ins.run(paso.id_paso_inscripcion, 'abierto', 'ev-2', JSON.stringify({ via: 'pixel', ua: 'Mozilla/5.0 (via GoogleImageProxy)', ip: '66.102.1.1' }), '2026-07-28T10:00:03.000Z', '2026-07-28T10:00:03.000Z');
   ins.run(paso.id_paso_inscripcion, 'clic', 'ev-3', JSON.stringify({ via: 'link', url: 'https://onepay.co' }), '2026-07-28T11:00:00.000Z', '2026-07-28T11:00:00.000Z');
   // Un evento viejo, de antes de que se capturara la huella: userAgent tiene que quedar null.
   ins.run(paso.id_paso_inscripcion, 'abierto', 'ev-viejo', JSON.stringify({ via: 'pixel' }), '2026-07-01T10:00:00.000Z', '2026-07-01T10:00:00.000Z');
@@ -487,12 +491,24 @@ test('tracking_correo devuelve el evento con su empresa, su campaña y su huella
   assert.equal(r1.eventos[0].pasoOrden, 1);
 
   const abiertoConUa = r1.eventos.find((e) => e.proveedorEventoId === 'ev-1')!;
-  assert.equal(abiertoConUa.userAgent, 'Mozilla/5.0');
+  assert.equal(
+    abiertoConUa.userAgent,
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+  );
   assert.equal(abiertoConUa.ip, '181.1.1.1');
   assert.equal(abiertoConUa.via, 'pixel');
+  // UA de navegador completo real: R7 lo clasifica humano.
+  assert.equal(abiertoConUa.clasificacion, 'humano');
+  assert.equal(abiertoConUa.razon, 'ua_navegador_completo');
+
+  const proxyGmail = r1.eventos.find((e) => e.proveedorEventoId === 'ev-2')!;
+  assert.equal(proxyGmail.clasificacion, 'maquina');
+  assert.equal(proxyGmail.razon, 'proxy_imagenes_gmail');
 
   const viejo = r1.eventos.find((e) => e.proveedorEventoId === 'ev-viejo')!;
   assert.equal(viejo.userAgent, null, 'null porque no se capturó, no porque vino vacío');
+  assert.equal(viejo.clasificacion, 'desconocido');
+  assert.equal(viejo.razon, 'sin_huella_capturada');
   assert.equal(r1.conHuella, 2);
   assert.equal(r1.sinHuella, 2);
 
@@ -503,7 +519,13 @@ test('tracking_correo devuelve el evento con su empresa, su campaña y su huella
   assert.equal(r1.posiblesDuplicados.length, 1);
   assert.equal(r1.posiblesDuplicados[0].tipo, 'abierto');
   assert.equal(r1.posiblesDuplicados[0].segundos, 3);
-  assert.ok(r1.advertencias.some((a) => a.includes('deduplicar') || a.includes('deduplicación') || a.includes('Sin deduplicar')));
+  // ev-1 y ev-2 están a 3s, por encima de la ventana formal de dedup (2000ms): cada uno es su
+  // propio grupo. La heurística de posiblesDuplicados (10s) los marca igual, más ancha a propósito.
+  assert.equal(abiertoConUa.esRepresentanteGrupo, true);
+  assert.equal(proxyGmail.esRepresentanteGrupo, true);
+  assert.equal(r1.conteos.crudo.total, 4);
+  assert.equal(r1.conteos.deduplicado.total, 4);
+  assert.ok(r1.advertencias.some((a) => a.includes('Deduplicado') && a.includes('grupoDedupId')));
   assert.ok(r1.advertencias.some((a) => a.includes('pasoOrden')), 'la atribución corrida viaja con el dato, no aparte');
 });
 

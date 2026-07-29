@@ -1217,16 +1217,32 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
       description:
         'Aperturas, clics y rebotes de CORREO con su timestamp, filtrables por empresa, por campaña y por rango ' +
         'de fechas. Cada evento trae la empresa, la campaña, el paso al que se le atribuyó, el asunto, el email, ' +
-        'y la huella cruda del request (userAgent, ip, via) cuando existe. ' +
-        'DEVUELVE EVENTOS, NO UNA TASA DE APERTURA, y eso es a propósito: (1) no hay deduplicación, el id de ' +
-        'evento del pixel lleva Date.now()+random así que dos hits separados por milisegundos son dos filas ' +
-        '(medido en producción: un correo abierto dos veces dejó TRES filas); (2) el proxy de imágenes de Gmail ' +
-        'dispara el pixel solo, y userAgent es lo único que separa eso de una apertura humana, pero nadie filtra ' +
-        'por él todavía; (3) la atribución por paso está corrida, resolverDestinatarioPorEmail acredita al ' +
-        'paso_inscripcion enviado MÁS RECIENTE de esa campaña y ese email, así que en una cadencia de varios ' +
-        'pasos una apertura del correo 1 se le acredita al último enviado. Un porcentaje calculado encima de eso ' +
-        'sería un número con cara de medición. La respuesta trae posiblesDuplicados (pares del mismo tipo y el ' +
-        'mismo paso a menos de 10 segundos) marcados, no filtrados. ' +
+        'la huella cruda del request (userAgent, ip, via) cuando existe, y un VEREDICTO: clasificacion ' +
+        '(humano/maquina/desconocido), razon, senal y confianza, más grupoDedupId/esRepresentanteGrupo para saber ' +
+        'qué filas son el mismo hit repetido. Nada se borra ni se filtra: el crudo completo sigue en cada evento y ' +
+        'clasificacion/dedup son reconstruibles corriendo las mismas funciones puras sobre él. ' +
+        "conteos.crudo cuenta todas las filas; conteos.deduplicado suma por grupoDedupId distinto (una apertura " +
+        'real, no un hit repetido del mismo pixel); las dos traen porClasificacion (humano/máquina/desconocido) ' +
+        'y excluyen el tráfico de prueba interno. ' +
+        'medibilidad.porEnvio dice, por paso_inscripcion, si hay apertura humana confirmada, si un clic prueba ' +
+        'deductivamente que el pixel falló (pixel_bloqueado_confirmado, sin necesitar muestra), o si no hay señal ' +
+        'humana de apertura — este último caso NUNCA significa "no lo abrió": puede ser Outlook (el pixel nunca ' +
+        'sale) o Gmail con solo el proxy, y las dos causas se juntan a propósito porque no se pueden distinguir ' +
+        'desde acá. medibilidad.avisosProveedor solo nombra un dominio con 3+ envíos bloqueados y cero confirmados ' +
+        '(umbral en conteo, nunca en %). OJO: medibilidad.porEnvio solo cubre envíos con AL MENOS UNA fila en ' +
+        'evento_tracking; un envío de Outlook cuyo pixel nunca se disparó ni una vez no tiene fila que leer y no ' +
+        'aparece acá en absoluto (no genera un estado explícito). ' +
+        'DEVUELVE EVENTOS Y VEREDICTOS, NUNCA UNA TASA DE APERTURA (0% en ningún campo, en ninguna forma) — eso es ' +
+        'a propósito, es una decisión dura del sistema, no una limitación a resolver. La atribución por paso está ' +
+        'corrida y sigue fuera de alcance: resolverDestinatarioPorEmail acredita al paso_inscripcion enviado MÁS ' +
+        'RECIENTE de esa campaña y ese email, así que en una cadencia de varios pasos una apertura del correo 1 se ' +
+        'le acredita al último enviado (pasoOrden viaja con esa advertencia pegada). Apple Private Relay (R5) está ' +
+        'documentada pero inerte: no hay chequeo en vivo contra el CSV de Apple, así que esos casos caen en la regla ' +
+        'de UA de navegador completo o en no-clasificable, nunca en la de Apple. No se detectan escáneres ' +
+        'corporativos (Proofpoint/Mimecast/Barracuda) por firma propia: no hay UA público de ninguno. ' +
+        'Si filtras por tipo, medibilidad.porEnvio pierde evidencia (ver advertencias en la respuesta). ' +
+        'La respuesta también trae posiblesDuplicados, una heurística previa más ancha (10s) que grupoDedupId (2s), ' +
+        'útil como diagnóstico rápido. ' +
         'userAgent e ip solo existen desde el 2026-07-28: un evento anterior los trae en null porque no se ' +
         'capturaron, no porque hayan venido vacíos. ' +
         'Solo canal correo: las aperturas de conversación de WhatsApp son otra cosa y viven en aperturas_whatsapp.',
