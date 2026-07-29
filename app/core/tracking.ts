@@ -6,7 +6,10 @@ import type { OrigenFin } from './reinscripcion';
 // owner/idOrganizacion (2026-07-28): son lo que resuelve QUE PROVEEDOR lee esta campana,
 // exactamente igual que en el camino de envio (agruparPendientesCorreo). Que no vinieran era
 // la falla: sin ellos el poll no tenia con que preguntar y asumia Apollo para todo, incluidas
-// las campanas mandadas por Gmail -- una respuesta por correo no cortaba la cadencia.
+// las campanas mandadas por Gmail -- una respuesta por correo no cortaba la cadencia, y sin
+// error de por medio (Apollo contesta 200 y lista vacia a un id que no es suyo, verificado en
+// produccion). Preguntarle al proveedor equivocado se ve exactamente igual que "nadie
+// contesto": por eso el ruteo es el arreglo y el rastro de errores de abajo no alcanza.
 export type CampanaConSecuencia = { idCampana: number; proveedorCampanaId: string; owner: string | null; idOrganizacion: number };
 export type DestinatarioResuelto = { idPasoInscripcion: number; idDestinatario: number; idInscripcion: number; idEmpresa: string };
 

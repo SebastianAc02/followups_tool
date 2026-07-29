@@ -280,9 +280,16 @@ export async function tareaPushCorreo(modo: ModoPush = 'worker'): Promise<void> 
 // agruparPendientesCorreo hace del lado de ENVIO: owner -> idUsuarioDeOwner -> la MISMA
 // decidirProveedorCorreo. Antes este lado no existia y tareaTracking le pasaba Apollo a
 // todas las campanas, con lo cual una campana de Gmail (proveedor_campana_id
-// 'gmail-camp-N') se consultaba como si fuera un emailer_campaign_id de Apollo: 404 seguro,
-// y el `catch { continue }` del core se lo tragaba. Resultado medido en produccion el
-// 2026-07-28: cero respuestas por correo detectadas desde que Gmail existe.
+// 'gmail-camp-N') se consultaba como si fuera un emailer_campaign_id de Apollo.
+//
+// Y esto es lo peor del bug, medido contra produccion el 2026-07-28 y NO lo que se suponia:
+// Apollo no truena con un id de campana que no es suyo. Devuelve 200 con lista vacia (es el
+// mismo "ignora en silencio lo que no reconoce" que ya documenta apollo.ts sobre los
+// parametros de fecha). O sea que el `catch { continue }` nunca se ejecutaba y no habia nada
+// que loguear: la respuesta "cero eventos" del proveedor equivocado es indistinguible de un
+// "nadie contesto" legitimo. Ninguna cantidad de logs en el catch habria encontrado esto;
+// solo lo cura preguntarle al proveedor correcto. Resultado: cero respuestas por correo
+// detectadas desde que Gmail existe, con el heartbeat en ok todo el tiempo.
 //
 // Lo unico que NO es simetrico es la referencia que se le pasa al adaptador, porque los dos
 // proveedores no leen por la misma unidad (ver PollDeCampana en core/tracking.ts).
