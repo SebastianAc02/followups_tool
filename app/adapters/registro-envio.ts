@@ -137,15 +137,22 @@ const depsAgruparCorreoReales: DepsAgruparCorreo = {
 // spec) vive aca: una fila cuyo dueno resuelve a Gmail pero aprobadaEnvioGmail=false
 // se descarta ENTERA (no sale, ni por Gmail ni por Apollo -- si el dueno tiene Gmail,
 // Apollo no es un fallback valido para SU secuencia, ver decision del plan).
-export function agruparPendientesCorreo(ahora: string = new Date().toISOString(), deps: DepsAgruparCorreo = depsAgruparCorreoReales): GrupoPendientesCorreo[] {
-  const filas = deps.pendientes(ahora);
+//
+// deps es PARCIAL (2026-07-28, empujon-manual.ts): lo que no se pasa cae a la dep real. Existe
+// para que el empujon manual acotado pueda pisar SOLO `pendientes` (la cola global por la lista
+// de ids que le dieron) sin tener que repetir las otras cuatro, que son justo las que deciden el
+// proveedor y aplican el gate de aprobacion. Un caller que las repitiera seria un caller que
+// puede desviar el correo a otro adaptador sin querer.
+export function agruparPendientesCorreo(ahora: string = new Date().toISOString(), deps: Partial<DepsAgruparCorreo> = {}): GrupoPendientesCorreo[] {
+  const d: DepsAgruparCorreo = { ...depsAgruparCorreoReales, ...deps };
+  const filas = d.pendientes(ahora);
   const grupos = new Map<string, GrupoPendientesCorreo>();
 
   for (const f of filas) {
-    const idUsuario = deps.idUsuarioDeOwner(f.owner ?? null, f.idOrganizacion ?? 0);
+    const idUsuario = d.idUsuarioDeOwner(f.owner ?? null, f.idOrganizacion ?? 0);
     // Misma decision que usa el poll de tracking (decidirProveedorCorreo), no una copia:
     // el dia que el criterio cambie, envio y lectura cambian juntos o no cambia ninguno.
-    const esGmail = decidirProveedorCorreo(idUsuario, deps.gmailVerificado).proveedor === 'gmail';
+    const esGmail = decidirProveedorCorreo(idUsuario, d.gmailVerificado).proveedor === 'gmail';
 
     // Gate: sin aprobar, esta fila no sale. Ya NO en silencio -- se avisa antes de saltarla.
     // El aviso no cambia el comportamiento del gate a proposito: el gate esta bien (nadie
@@ -153,7 +160,7 @@ export function agruparPendientesCorreo(ahora: string = new Date().toISOString()
     // decirlo. Quien lo arregla de verdad es armar la campana (aprobada_envio_gmail=1), y eso
     // es una decision de quien lanza, no del worker.
     if (esGmail && !f.aprobadaEnvioGmail) {
-      deps.onDescartada?.(
+      d.onDescartada?.(
         f,
         `campana.aprobada_envio_gmail=0 y el dueno '${f.owner ?? 'sin owner'}' manda por Gmail. ` +
           'Se arma con lanzar_campana, con cambiar_cadencia armarEnvioCorreo:true, o con "Lanzar hoy" en la web',
@@ -164,7 +171,7 @@ export function agruparPendientesCorreo(ahora: string = new Date().toISOString()
     const key = esGmail ? `gmail:${idUsuario}` : 'apollo';
     if (!grupos.has(key)) {
       grupos.set(key, {
-        adaptador: esGmail ? deps.crearGmail(idUsuario!) : deps.crearApollo(),
+        adaptador: esGmail ? d.crearGmail(idUsuario!) : d.crearApollo(),
         idUsuarioGmail: esGmail ? idUsuario! : null,
         filas: [],
       });

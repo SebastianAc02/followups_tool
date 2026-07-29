@@ -46,8 +46,10 @@ import {
   planearDiaTool,
   marcarNoEjecutadoTool,
   planVsEjecutadoTool,
+  empujarEnviosTool,
   lanzarCampanaTool,
   crearCadenciaTool,
+  enviarWhatsappDirectoTool,
   trackingCorreoTool,
   type SesionLanzamiento,
 } from './tools';
@@ -98,6 +100,8 @@ export const TOOLS_ESCRITURA = [
   'crear_contacto',
   'crear_empresa',
   'editar_toque',
+  'empujar_envios',
+  'enviar_whatsapp_directo',
   'lanzar_campana',
   'marcar_no_ejecutado',
   'marcar_perdida',
@@ -441,7 +445,10 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
         'la fila fallo, y quedaba pendiente para siempre. Ahora, si la campana tiene pasos de correo que no ' +
         'pueden salir, esta tool FALLA y no inscribe nada, diciendo cual de las tres compuertas esta cerrada ' +
         '(proveedor_campana_id NULL, aprobada_envio_gmail=0, o pasos con es_manual=1). Para armarla y seguir, ' +
-        'armarEnvioCorreo: true.',
+        'armarEnvioCorreo: true. ' +
+        'AVISO QUE VIAJA EN advertencias: inscribir pone la campana en estado activa, y con eso lanzar_campana ' +
+        'deja de tomarla (solo lanza borradores). Si lo que se queria era que el mensaje saliera YA, sin esperar ' +
+        'la ventana de 8:00-18:00, el movimiento es empujar_envios.',
       inputSchema: {
         idEmpresa: z.string().min(1),
         idCampana: z.number().int().positive().optional().describe('Inscribe la empresa en la cadencia de esta campana'),
@@ -821,6 +828,55 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
   );
 
+  // La segunda tool que le manda mensajes a gente real, y la que le faltaba al MCP: empujar en
+  // modo manual lo que YA esta inscrito y pendiente, sin importar el estado de la campana ni la
+  // hora. Ver la nota de diseno larga en tools.ts para el bug que cierra (los dos caminos de
+  // inscripcion se excluian en silencio) y para por que es una tool nueva y no un flag de
+  // lanzar_campana.
+  server.registerTool(
+    'empujar_envios',
+    {
+      description:
+        'Empuja AHORA, en modo manual, lo que una campana/inscripcion/empresa ya tiene inscrito y pendiente. ' +
+        'Es lo que faltaba: lanzar_campana solo lanza campanas en borrador, y la primera inscripcion por ' +
+        'cambiar_cadencia ya pone la campana en activa, asi que inscribir cuenta por cuenta cerraba el empujon ' +
+        'manual para siempre y no quedaba mas que esperar la ventana del dia siguiente. ' +
+        'SE SALTA LA HORA Y NADA MAS: no respeta la ventana de 8:00-18:00 Bogota (ese es el punto), pero SI ' +
+        'respeta los tres gates que importan: la revision humana de WhatsApp (un paso de whatsapp sin aprobar no ' +
+        'sale, se reporta en esperandoRevisionHumana), es_manual del paso, y el tope diario de Gmail. ' +
+        'ACOTADO AL BLANCO: a diferencia de lanzar_campana, que empuja TODO lo pendiente de TODAS las campanas ' +
+        'activas, esta tool solo toca los pasos del blanco. Lo que otro empujon si sacaria y este deja afuera ' +
+        'viaja en noIncluidos, para que "no mando de mas" se pueda verificar. Hace falta un blanco: no existe un ' +
+        'modo "todo lo pendiente". ' +
+        'EN SECO POR DEFAULT: sin confirmar:true no escribe ni manda nada y devuelve cada paso con saldra true/false ' +
+        'y, cuando es false, POR QUE no sale (motivos). Ese diagnostico no existia en ningun lado: la cola descarta ' +
+        'con un continue pelado, sin error y sin marcar la fila. ' +
+        'adelantar:true es el opt-in para lo que todavia no vencio: baja la fecha_programada a ahora y, si la ' +
+        'inscripcion ni siquiera tiene su paso materializado, lo materializa con fecha de ahora. UN paso por ' +
+        'inscripcion y ni uno mas, para que adelantar no se convierta en mandar la cadencia entera de golpe. ' +
+        'Al confirmar devuelve lo que quedo escrito RELEIDO: cada paso con su estado final y, en salieron, los que ' +
+        'de verdad salieron con su proveedor y su id de mensaje. Si algo que se intento empujar no salio, la tool ' +
+        'REVIENTA con el estado releido y el log crudo del proveedor adentro del error.',
+      inputSchema: {
+        idCampana: z.number().int().positive().optional().describe('Empuja lo pendiente de esta campana entera'),
+        idsInscripcion: z.array(z.number().int().positive()).optional().describe('inscripcion.id_inscripcion. Apunta a inscripciones puntuales'),
+        idsEmpresa: z.array(z.string().min(1)).optional().describe('empresa.id_empresa. Apunta a cuentas puntuales'),
+        adelantar: z
+          .boolean()
+          .optional()
+          .describe(
+            'false o ausente = solo sale lo que YA vencio. true = baja a ahora la fecha del proximo paso de cada ' +
+              'inscripcion del blanco (y lo materializa si todavia no existe), asi que sale en este mismo empujon',
+          ),
+        confirmar: z.boolean().optional().describe('false o ausente = previsualizacion en seco, no escribe ni manda nada. true = MANDA. No tiene vuelta atras'),
+      },
+    },
+    async (input) => {
+      const r = await empujarEnviosTool(input as Parameters<typeof empujarEnviosTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
   // El movimiento que le faltaba al MCP: montar una cadencia. Ver la nota de diseno en
   // tools.ts para por que es UNA tool y no crear_cadencia + crear_campana por separado.
   server.registerTool(
@@ -923,6 +979,49 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
         );
       }
       const r = crearCadenciaTool(input as Parameters<typeof crearCadenciaTool>[0], idOrganizacion, sesion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  // La tercera tool que le manda mensajes a gente real (despues de lanzar_campana y
+  // empujar_envios), y la mas chica: UN mensaje suelto a UN numero, sin segmento, sin campana,
+  // sin cadencia. Ver la nota de diseno larga en tools.ts.
+  server.registerTool(
+    'enviar_whatsapp_directo',
+    {
+      description:
+        'Manda UN mensaje de WhatsApp a UN número, YA, por la línea activa de quien llama (o por la instancia que ' +
+        'se le pase, si es propia). Mismo camino que el botón "Probar" de /conectores (CanalEntrega.enviarPaso ' +
+        'directo): NO pasa por outbox/paso_inscripcion, así que no cuenta contra techo_diario, no encola nada y no ' +
+        'deja fila en toque ni en mensaje_whatsapp (esa tabla exige un contacto real de una empresa, por privacidad; ' +
+        'un número suelto no lo es). Es la herramienta para "¿mi línea manda de verdad?" o para un mensaje suelto ' +
+        'que no amerita crear una campaña de un destinatario. Devuelve RELEÍDO el resultado real de Evolution: el ' +
+        'proveedorMensajeId (el id real del mensaje en WhatsApp) y el estadoProveedor que el proveedor confirmó al ' +
+        'aceptar el envío, nunca un {ok:true} ciego. Si Evolution dice que la instancia no existe, la línea queda ' +
+        'marcada caída en la misma escritura.',
+      inputSchema: {
+        telefono: z.string().min(1).describe('Número de destino, con indicativo de país. Se limpia a solo dígitos antes de mandar'),
+        cuerpo: z.string().min(1).describe('El texto que se manda. Evolution no tiene motor de plantillas: sale exactamente como se escriba'),
+        instancia: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'referencia_proveedor de la línea (ej. wa-12368895214). Si no viene, se resuelve la línea ACTIVA del ' +
+              'owner que llama. Si viene, tiene que ser una línea DE ESE owner o falla: no se manda por la línea de otra persona',
+          ),
+      },
+    },
+    async (input) => {
+      // Mismo guard que lanzar_campana/crear_cadencia: owner e idUsuario salen de la sesión
+      // autenticada por OAuth, nunca del input. El server standalone por token no tiene sesión.
+      if (!sesion || !sesion.owner.trim() || !sesion.idUsuario.trim()) {
+        throw new Error(
+          'enviar_whatsapp_directo: esta sesión no trae usuario ni owner (el server standalone por token no los tiene). ' +
+            'Solo se puede mandar desde el MCP autenticado por OAuth, donde la sesión dice a nombre de quién sale el mensaje.',
+        );
+      }
+      const r = await enviarWhatsappDirectoTool(input as Parameters<typeof enviarWhatsappDirectoTool>[0], sesion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );

@@ -1286,6 +1286,13 @@ export type CambiarCadenciaResultado = {
   // null cuando no se inscribio en ninguna campana. Viaja siempre, incluso cuando todo esta
   // bien: el modo de falla que cierra es "se inscribio, se ve exitoso, y el correo esta muerto".
   envioCorreo: EstadoEnvioCorreo | null;
+  // Lo que esta llamada cambio SIN que nadie lo pidiera (2026-07-28). Hoy tiene un solo caso y
+  // es el que costo una noche: inscribir pone la campana en 'activa' (linea fija de
+  // inscribirEmpresaEnCadencia), y con eso lanzar_campana deja de tomarla para siempre, porque
+  // solo lanza borradores. Quien inscribia cuenta por cuenta cerraba esa puerta el mismo y se
+  // enteraba despues, cuando ya no habia forma de empujar a mano y solo quedaba esperar la
+  // ventana del dia siguiente. El aviso no cambia el comportamiento: cambia que se sepa antes.
+  advertencias: string[];
 };
 
 function leerCadenciasVivas(idEmpresa: string): CambiarCadenciaResultado['cadencias'] {
@@ -1360,6 +1367,13 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
     }
   }
 
+  // Se lee ANTES de inscribir: despues ya no se puede saber si la transicion la causo esta
+  // llamada o si la campana ya estaba activa.
+  const estadoCampanaPrevio =
+    parsed.idCampana !== undefined
+      ? (db.select({ estado: campana.estado }).from(campana).where(eq(campana.idCampana, parsed.idCampana)).get()?.estado ?? null)
+      : null;
+
   let inscripcionResultado: ResultadoInscripcionEmpresa | null = null;
   if (parsed.idCampana !== undefined) {
     inscripcionResultado = inscribirEmpresaEnCadencia(parsed.idEmpresa, parsed.idCampana);
@@ -1375,6 +1389,18 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
 
   const envioCorreo = parsed.idCampana !== undefined ? estadoEnvioCorreo(parsed.idCampana, idOrganizacion) : null;
 
+  const advertencias: string[] = [];
+  if (estadoCampanaPrevio === 'borrador' && inscripcionResultado?.ok) {
+    advertencias.push(
+      `la campana ${parsed.idCampana} paso de 'borrador' a 'activa' al inscribir. Consecuencia que no avisaba nadie: ` +
+        'lanzar_campana ya NO la toma (solo lanza campanas que nunca se lanzaron), asi que el empujon en modo manual ' +
+        'del boton "Lanzar hoy" deja de estar disponible por ese camino. Para que lo inscrito salga YA, sin esperar la ' +
+        `ventana de 8:00-18:00: empujar_envios con idCampana ${parsed.idCampana} (o con idsEmpresa para apuntar solo a ` +
+        'esta cuenta). Si se queria lanzar el segmento entero en modo manual, ese orden era al reves: primero ' +
+        'lanzar_campana, despues las inscripciones sueltas.',
+    );
+  }
+
   // Sin reprogramacion (solo se pidio mover de cadencia): no hay nada mas que escribir, pero se
   // relee igual -- el resultado tiene que mostrar como quedo la cuenta, no solo si se escribio.
   if (!parsed.proximoFollowUp && !parsed.proximoCanal && !parsed.proximoPaso) {
@@ -1383,6 +1409,7 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
       cadencias: leerCadenciasVivas(parsed.idEmpresa),
       inscripcion: inscripcionResultado,
       envioCorreo,
+      advertencias,
     };
   }
 
@@ -1418,6 +1445,7 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
     // Se relee DESPUES del update de empresa: el diagnostico que viaja es el estado final, no
     // el que se leyo a mitad de camino.
     envioCorreo: parsed.idCampana !== undefined ? estadoEnvioCorreo(parsed.idCampana, idOrganizacion) : envioCorreo,
+    advertencias,
   };
 }
 
@@ -10568,4 +10596,404 @@ export function aplicarImportacionToquesLegacy(idEmpresa: string, idOrganizacion
       }
     }
   });
+}
+
+// --- Empujón manual de envíos (tool empujar_envios, 2026-07-28) -------------------------
+//
+// El movimiento que faltaba y que no tenía rodeo barato: "esto que ya está inscrito y
+// pendiente, mandalo AHORA". Hasta hoy la única forma de empujar desde el MCP era
+// lanzar_campana, que exige estado 'borrador' -- y el borrador dura minutos, porque la primera
+// inscripción (inscribirEmpresaEnCadencia, o sea cambiar_cadencia) ya pone la campaña en
+// 'activa'. O sea que inscribir cuenta por cuenta cerraba para siempre la puerta del empujón
+// manual, en silencio, y no quedaba más que esperar la ventana de 8:00-18:00 del día siguiente.
+//
+// Tres funciones, y ninguna decide sola si un paso sale:
+//   - candidatosEmpujon: LEE los pasos del blanco con todo lo que hace falta para explicar un
+//     "no sale". No filtra: devuelve también los que no van a salir, que son los que importan.
+//   - adelantarEnvios: ESCRIBE, en una transacción, el adelanto explícito (materializar el paso
+//     que toca o bajarle la fecha a ahora). Es el opt-in que convierte "programado para mañana"
+//     en "sale ya".
+//   - pasoInscripcionesPendientesDe: la cola real, acotada a un set de ids. Filtra sobre
+//     pasoInscripcionesPendientes en vez de copiar sus condiciones: los siete gates (campaña
+//     activa, es_manual sin aprobar, backoff, intentos, fecha programada, proveedor_campana_id,
+//     línea del dueño) se aplican una sola vez y en un solo lugar. El volumen de un empujón
+//     manual es de unidades: filtrar en memoria no cuesta nada y no puede desincronizarse.
+
+export type SelectorEmpujon = {
+  idCampana?: number;
+  idsInscripcion?: number[];
+  idsEmpresa?: string[];
+};
+
+// Cada campo presente ESTRECHA (AND), no suma. {idCampana: 58, idsEmpresa: ['x']} es "lo de x
+// dentro de la campaña 58", no "todo 58 más todo x". Un selector que suma es el que manda de
+// más, y de más es el error que no se deshace.
+function condicionesSelector(sel: SelectorEmpujon, idOrganizacion: number): SQL[] {
+  const cond: SQL[] = [eq(campana.idOrganizacion, idOrganizacion)];
+  if (sel.idCampana !== undefined) cond.push(eq(inscripcion.idCampana, sel.idCampana));
+  if (sel.idsInscripcion !== undefined && sel.idsInscripcion.length > 0) cond.push(inArray(inscripcion.idInscripcion, sel.idsInscripcion));
+  if (sel.idsEmpresa !== undefined && sel.idsEmpresa.length > 0) cond.push(inArray(inscripcion.idEmpresa, sel.idsEmpresa));
+  return cond;
+}
+
+export function selectorVacio(sel: SelectorEmpujon): boolean {
+  return (
+    sel.idCampana === undefined &&
+    (sel.idsInscripcion === undefined || sel.idsInscripcion.length === 0) &&
+    (sel.idsEmpresa === undefined || sel.idsEmpresa.length === 0)
+  );
+}
+
+export type CandidatoEmpujon = {
+  idPasoInscripcion: number;
+  idCampana: number;
+  campana: string | null;
+  estadoCampana: string;
+  owner: string | null;
+  idInscripcion: number;
+  estadoInscripcion: string;
+  idEmpresa: string;
+  empresa: string | null;
+  idDestinatario: number;
+  estadoDestinatario: string | null;
+  contacto: string | null;
+  email: string | null;
+  telefono: string | null;
+  orden: number;
+  canal: string;
+  esManual: boolean;
+  estadoPaso: string;
+  intentos: number;
+  fechaProgramada: string | null;
+  proximoIntento: string | null;
+  aprobadoEn: string | null;
+  fechaEnviada: string | null;
+  proveedorCampanaId: string | null;
+  aprobadaEnvioGmail: boolean;
+  proveedorCorreo: 'gmail' | 'apollo' | null;
+  lineaWhatsappDelOwner: boolean;
+};
+
+// Sólo lo que todavía puede salir. 'enviada' y 'omitida' quedan fuera a propósito: no son
+// candidatos de nada, y meterlas obligaría a quien lee el resultado a filtrarlas de nuevo.
+const ESTADOS_CANDIDATOS_EMPUJON = ['pendiente', 'fallo', 'enviando'];
+
+export function candidatosEmpujon(sel: SelectorEmpujon, idOrganizacion: number): CandidatoEmpujon[] {
+  const filas = db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idCampana: campana.idCampana,
+      campana: campana.nombre,
+      estadoCampana: campana.estado,
+      owner: campana.owner,
+      proveedorCampanaId: campana.proveedorCampanaId,
+      aprobadaEnvioGmail: campana.aprobadaEnvioGmail,
+      idInscripcion: inscripcion.idInscripcion,
+      estadoInscripcion: inscripcion.estado,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      idDestinatario: destinatario.idDestinatario,
+      estadoDestinatario: destinatario.estado,
+      contacto: contacto.nombre,
+      email: contacto.email,
+      telefono: contacto.telefono,
+      orden: pasoCadencia.orden,
+      esManual: pasoCadencia.esManual,
+      canal: pasoInscripcion.canal,
+      estadoPaso: pasoInscripcion.estado,
+      intentos: pasoInscripcion.intentos,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+      proximoIntento: pasoInscripcion.proximoIntento,
+      aprobadoEn: pasoInscripcion.aprobadoEn,
+      fechaEnviada: pasoInscripcion.fechaEnviada,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .where(and(...condicionesSelector(sel, idOrganizacion), inArray(pasoInscripcion.estado, ESTADOS_CANDIDATOS_EMPUJON)))
+    .orderBy(inscripcion.idInscripcion, pasoCadencia.orden)
+    .all();
+
+  // Cache por owner: varias filas de la misma campaña comparten dueño y las dos resoluciones
+  // (Gmail verificado, línea de WhatsApp) son joins que no vale la pena repetir por fila. Mismo
+  // criterio que ya usa pasoInscripcionesPendientes para whatsapp.
+  const cacheCorreo = new Map<string, 'gmail' | 'apollo'>();
+  const cacheLinea = new Map<string, boolean>();
+
+  return filas.map((f) => {
+    const clave = `${idOrganizacion}:${f.owner ?? ''}`;
+    if (!cacheCorreo.has(clave)) {
+      const idUsuario = idUsuarioDeOwner(f.owner, idOrganizacion);
+      cacheCorreo.set(clave, idUsuario && gmailVerificadoDe(idUsuario) ? 'gmail' : 'apollo');
+    }
+    if (!cacheLinea.has(clave)) cacheLinea.set(clave, lineaWhatsappActivaDeOwner(f.owner, idOrganizacion) !== null);
+    return {
+      ...f,
+      esManual: f.esManual === 1,
+      aprobadaEnvioGmail: f.aprobadaEnvioGmail === 1,
+      proveedorCorreo: f.canal === 'correo' ? cacheCorreo.get(clave)! : null,
+      lineaWhatsappDelOwner: cacheLinea.get(clave)!,
+    };
+  });
+}
+
+export type PasoAdelantado = {
+  idPasoInscripcion: number;
+  idInscripcion: number;
+  idEmpresa: string;
+  empresa: string | null;
+  orden: number;
+  canal: string;
+  accion: 'materializado' | 'reprogramado';
+  fechaProgramadaAntes: string | null;
+  fechaProgramadaAhora: string;
+};
+
+export type SaltadoAdelanto = { idInscripcion: number; idEmpresa: string; motivo: string };
+
+export type ResultadoAdelanto = { adelantados: PasoAdelantado[]; saltados: SaltadoAdelanto[] };
+
+// Adelanta UN paso por inscripción y ni uno más. Recorre la cadencia en orden y se queda con el
+// primero que no esté 'enviada'/'omitida':
+//   - si no tiene fila todavía, la crea 'pendiente' con fecha_programada = ahora;
+//   - si ya la tiene y está en el futuro, le baja la fecha (y le limpia el backoff).
+// Ese "uno y paro" es la misma regla anti-ráfaga de proximoPasoDebido: adelantar no puede
+// convertirse en mandar la cadencia entera de golpe.
+//
+// NO reusa materializarPasosDebidos, y es la diferencia que da sentido a esta función: aquella
+// contesta "qué toca HOY según el calendario" y ésta es justamente el override de ese calendario,
+// pedido a mano y acotado a un blanco. Encima el calendario tiene un agujero medido el 2026-07-28
+// (fecha_inscripcion se guarda en UTC y se compara contra el día de Bogotá, así que una
+// inscripción hecha después de las 19:00 queda anclada a mañana y su paso día 0 no se materializa
+// esa noche): con el override, ese agujero deja de dejar al operador sin salida.
+//
+// El canal se resuelve con las MISMAS funciones del dominio que usa el materializador
+// (canalesDisponibles + readinessEmpresa contra la regla de la campaña). Un paso que queda sin
+// canal NO se escribe como 'omitida' desde acá: se reporta saltado. Escribir una omisión sería
+// consumir un paso de la cadencia por una decisión que nadie pidió.
+export function adelantarEnvios(sel: SelectorEmpujon, idOrganizacion: number, ahora: string = new Date().toISOString()): ResultadoAdelanto {
+  if (selectorVacio(sel)) throw new Error('adelantarEnvios: hace falta un blanco (idCampana, idsInscripcion o idsEmpresa). Sin blanco no se adelanta nada');
+
+  const objetivo = db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      estadoInscripcion: inscripcion.estado,
+      idCampana: campana.idCampana,
+      estadoCampana: campana.estado,
+      idCadencia: campana.idCadencia,
+      reglaFaltante: campana.reglaFaltante,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(and(...condicionesSelector(sel, idOrganizacion)))
+    .orderBy(inscripcion.idInscripcion)
+    .all();
+
+  const adelantados: PasoAdelantado[] = [];
+  const saltados: SaltadoAdelanto[] = [];
+
+  db.transaction((tx) => {
+    for (const ins of objetivo) {
+      if (ins.estadoCampana !== 'activa') {
+        saltados.push({
+          idInscripcion: ins.idInscripcion,
+          idEmpresa: ins.idEmpresa,
+          motivo:
+            ins.estadoCampana === 'borrador'
+              ? `la campaña ${ins.idCampana} sigue en 'borrador': eso lo arranca lanzar_campana, no un empujón`
+              : `la campaña ${ins.idCampana} está en '${ins.estadoCampana}': la cola sólo mira campañas 'activa'`,
+        });
+        continue;
+      }
+      if (ins.estadoInscripcion !== 'activa') {
+        saltados.push({ idInscripcion: ins.idInscripcion, idEmpresa: ins.idEmpresa, motivo: `la inscripción está en '${ins.estadoInscripcion}', no activa` });
+        continue;
+      }
+
+      const dest = tx
+        .select({ id: destinatario.idDestinatario, idContacto: destinatario.idContacto })
+        .from(destinatario)
+        .where(and(eq(destinatario.idInscripcion, ins.idInscripcion), eq(destinatario.estado, 'activo')))
+        .get();
+      if (!dest) {
+        saltados.push({ idInscripcion: ins.idInscripcion, idEmpresa: ins.idEmpresa, motivo: 'la inscripción no tiene destinatario activo: no hay a quién mandarle' });
+        continue;
+      }
+
+      const pasos = tx
+        .select({ idPaso: pasoCadencia.idPaso, orden: pasoCadencia.orden, canal: pasoCadencia.canal })
+        .from(pasoCadencia)
+        .where(eq(pasoCadencia.idCadencia, ins.idCadencia))
+        .orderBy(pasoCadencia.orden)
+        .all();
+      if (pasos.length === 0) {
+        saltados.push({ idInscripcion: ins.idInscripcion, idEmpresa: ins.idEmpresa, motivo: `la cadencia ${ins.idCadencia} no tiene pasos` });
+        continue;
+      }
+
+      const filasPaso = tx
+        .select({
+          idPaso: pasoInscripcion.idPaso,
+          idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+          estado: pasoInscripcion.estado,
+          canal: pasoInscripcion.canal,
+          fechaProgramada: pasoInscripcion.fechaProgramada,
+        })
+        .from(pasoInscripcion)
+        .where(eq(pasoInscripcion.idDestinatario, dest.id))
+        .all();
+      const porPaso = new Map(filasPaso.map((f) => [f.idPaso, f]));
+
+      const siguiente = pasos.find((p) => {
+        const fila = porPaso.get(p.idPaso);
+        return !fila || (fila.estado !== 'enviada' && fila.estado !== 'omitida');
+      });
+      if (!siguiente) {
+        saltados.push({ idInscripcion: ins.idInscripcion, idEmpresa: ins.idEmpresa, motivo: 'la cadencia ya terminó: todos los pasos están enviados u omitidos' });
+        continue;
+      }
+
+      const fila = porPaso.get(siguiente.idPaso);
+      if (fila) {
+        if (fila.estado === 'enviando') {
+          saltados.push({
+            idInscripcion: ins.idInscripcion,
+            idEmpresa: ins.idEmpresa,
+            motivo: `el paso ${fila.idPasoInscripcion} está en 'enviando': se cayó a mitad de un envío anterior y adelantarlo podría mandarlo dos veces`,
+          });
+          continue;
+        }
+        if (fila.fechaProgramada !== null && fila.fechaProgramada <= ahora) {
+          saltados.push({
+            idInscripcion: ins.idInscripcion,
+            idEmpresa: ins.idEmpresa,
+            motivo: `el paso ${fila.idPasoInscripcion} ya estaba vencido (programado ${fila.fechaProgramada}): no hace falta adelantarlo, el empujón se lo lleva igual`,
+          });
+          continue;
+        }
+        // proximo_intento a null además de la fecha: un 'fallo' con backoff pendiente no saldría
+        // aunque la fecha programada ya esté en el pasado. "Mandalo ahora" quiere decir las dos.
+        tx.update(pasoInscripcion)
+          .set({ fechaProgramada: ahora, proximoIntento: null })
+          .where(eq(pasoInscripcion.idPasoInscripcion, fila.idPasoInscripcion))
+          .run();
+        adelantados.push({
+          idPasoInscripcion: fila.idPasoInscripcion,
+          idInscripcion: ins.idInscripcion,
+          idEmpresa: ins.idEmpresa,
+          empresa: ins.empresa,
+          orden: siguiente.orden,
+          canal: fila.canal,
+          accion: 'reprogramado',
+          fechaProgramadaAntes: fila.fechaProgramada,
+          fechaProgramadaAhora: ahora,
+        });
+        continue;
+      }
+
+      const contactosEmpresa = tx
+        .select({ email: contacto.email, telefono: contacto.telefono })
+        .from(contacto)
+        .where(eq(contacto.idEmpresa, ins.idEmpresa))
+        .all();
+      const readiness = readinessEmpresa(
+        canalesDisponibles(contactosEmpresa),
+        pasos.map((p) => ({ orden: p.orden, canal: p.canal as Canal })),
+        ins.reglaFaltante as ReglaFaltante,
+      );
+      if (readiness.pasosSinCanal.includes(siguiente.orden)) {
+        saltados.push({
+          idInscripcion: ins.idInscripcion,
+          idEmpresa: ins.idEmpresa,
+          motivo: `el paso ${siguiente.orden} es de ${siguiente.canal} y la empresa no tiene ese canal; la regla de la campaña es '${ins.reglaFaltante}', así que no hay por dónde mandarlo`,
+        });
+        continue;
+      }
+      const canalFinal = readiness.reemplazos.find((r) => r.orden === siguiente.orden)?.a ?? siguiente.canal;
+
+      const insertado = tx
+        .insert(pasoInscripcion)
+        .values({
+          idDestinatario: dest.id,
+          idPaso: siguiente.idPaso,
+          idVersion: versionActivaDePaso(siguiente.idPaso),
+          canal: canalFinal,
+          estado: 'pendiente',
+          fechaProgramada: ahora,
+          createdAt: ahora,
+        })
+        .run();
+      adelantados.push({
+        idPasoInscripcion: Number(insertado.lastInsertRowid),
+        idInscripcion: ins.idInscripcion,
+        idEmpresa: ins.idEmpresa,
+        empresa: ins.empresa,
+        orden: siguiente.orden,
+        canal: canalFinal,
+        accion: 'materializado',
+        fechaProgramadaAntes: null,
+        fechaProgramadaAhora: ahora,
+      });
+    }
+  });
+
+  return { adelantados, saltados };
+}
+
+// La cola real acotada a un set de ids. Filtra sobre pasoInscripcionesPendientes en vez de
+// repetir sus condiciones: es la única forma de garantizar que "lo que el empujón manda" y "lo
+// que el worker mandaría" salgan del mismo criterio, hoy y cuando ese criterio cambie.
+export function pasoInscripcionesPendientesDe(canal: Canal, ids: number[], ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
+  if (ids.length === 0) return [];
+  const permitidos = new Set(ids);
+  return pasoInscripcionesPendientes(canal, ahora).filter((f) => permitidos.has(f.idPasoInscripcion));
+}
+
+// El otro lado del blanco: las INSCRIPCIONES que alcanza, con cuántos pasos tienen ya
+// materializados. Existe porque candidatosEmpujon mira paso_inscripcion, y el caso que más duele
+// es justamente el de la inscripción que todavía no tiene NINGUNA fila ahí: sin esto, el seco de
+// un empujón diría "no hay nada que empujar" para una campaña que tiene gente adentro esperando.
+export type InscripcionEmpujable = {
+  idInscripcion: number;
+  idEmpresa: string;
+  empresa: string | null;
+  estadoInscripcion: string;
+  idCampana: number;
+  campana: string | null;
+  estadoCampana: string;
+  tieneDestinatarioActivo: boolean;
+  pasosMaterializados: number;
+  pasosVivos: number; // pendiente/fallo/enviando: lo que todavía puede salir
+  pasosCadencia: number;
+};
+
+export function inscripcionesEmpujables(sel: SelectorEmpujon, idOrganizacion: number): InscripcionEmpujable[] {
+  return db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      estadoInscripcion: inscripcion.estado,
+      idCampana: campana.idCampana,
+      campana: campana.nombre,
+      estadoCampana: campana.estado,
+      tieneDestinatarioActivo: sql<number>`exists (select 1 from destinatario d where d.id_inscripcion = ${inscripcion.idInscripcion} and d.estado = 'activo')`,
+      pasosMaterializados: sql<number>`(select count(*) from paso_inscripcion pi join destinatario d on d.id_destinatario = pi.id_destinatario where d.id_inscripcion = ${inscripcion.idInscripcion})`,
+      pasosVivos: sql<number>`(select count(*) from paso_inscripcion pi join destinatario d on d.id_destinatario = pi.id_destinatario where d.id_inscripcion = ${inscripcion.idInscripcion} and pi.estado in ('pendiente','fallo','enviando'))`,
+      pasosCadencia: sql<number>`(select count(*) from paso_cadencia pc where pc.id_cadencia = ${campana.idCadencia})`,
+    })
+    .from(inscripcion)
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .where(and(...condicionesSelector(sel, idOrganizacion)))
+    .orderBy(inscripcion.idInscripcion)
+    .all()
+    .map((f) => ({ ...f, tieneDestinatarioActivo: f.tieneDestinatarioActivo === 1 }));
 }

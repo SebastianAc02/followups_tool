@@ -29,6 +29,7 @@ import {
   canalesDeCadencia,
   pasosParaSincronizarCopy,
   lineasWhatsappDeUsuario,
+  actualizarEstadoLineaWhatsapp,
   gmailVerificadoDe,
   fijarOwnerCampana,
   actualizarConfigLanzamiento,
@@ -88,6 +89,14 @@ import {
   type CrearEmpresaResultado,
   type ActualizarEmpresaInput,
   type EmpresaEscrita,
+  candidatosEmpujon,
+  adelantarEnvios,
+  inscripcionesEmpujables,
+  pasoInscripcionesPendientesDe,
+  selectorVacio,
+  type SelectorEmpujon,
+  type CandidatoEmpujon,
+  type ResultadoAdelanto,
   crearContacto,
   actualizarContacto,
   type CrearContactoInput,
@@ -107,6 +116,8 @@ import {
   type DefinicionSegmento,
 } from '../db/validation';
 import { readinessCanalUsuario } from '../core/readiness-canal-usuario';
+import { motivosNoSale } from '../core/empujon';
+import { MAX_INTENTOS } from '../core/push';
 // La MISMA funcion pura que corre inscribirEmpresaEnCadencia por dentro (via
 // previsualizarInscripcion). No es una copia de la regla: es la regla.
 import { elegirDestinatarioDefault } from '../core/inscripcion';
@@ -1302,15 +1313,32 @@ export async function lanzarCampanaTool(
   const advertencias: string[] = [];
 
   if (camp.estado !== 'borrador') {
+    // El puntero a empujar_envios no es cortesía (2026-07-28): este bloqueo era un callejón sin
+    // salida. La primera inscripción por cambiar_cadencia ya pone la campaña en 'activa', así
+    // que quien inscribe cuenta por cuenta llegaba acá sin ninguna otra puerta y sin saber que
+    // la había cerrado él mismo.
     bloqueos.push(
       `la campaña está en estado '${camp.estado}', no en 'borrador'. Esta tool solo lanza campañas que nunca se lanzaron; ` +
-        `sumar empresas nuevas a una campaña ya activa es otro movimiento y no se hace desde acá`,
+        `sumar empresas nuevas a una campaña ya activa es otro movimiento y no se hace desde acá. ` +
+        `Para EMPUJAR AHORA lo que esa campaña ya tiene inscrito y pendiente, sin esperar la ventana de 8:00-18:00: empujar_envios`,
     );
   }
   if (!sesion.owner.trim()) bloqueos.push('la sesión no tiene owner mapeado: no hay a nombre de quién lanzar');
   if (!sesion.idUsuario.trim()) bloqueos.push('la sesión no tiene usuario: no se puede resolver el Gmail ni la línea de WhatsApp de quien lanza');
   for (const r of readiness) if (!r.listo) bloqueos.push(`canal ${r.canal}: ${r.motivo}`);
-  if (elegibles.length === 0) bloqueos.push('no hay ni un destinatario elegible: no hay a quién mandarle');
+  // El mensaje decía "no hay ni un destinatario elegible: no hay a quién mandarle" en los dos
+  // casos, y eso era falso en el que importa (2026-07-28): con dos inscripciones activas, con su
+  // destinatario y su correo listo, la campaña 58 recibió esa frase. Lo que la lista vacía
+  // describe es el SEGMENTO, que es de dónde salen las empresas POR INSCRIBIR; no dice nada sobre
+  // lo que la campaña ya tiene adentro. Un mensaje que dice lo contrario de la realidad manda a
+  // buscar el problema donde no está, que es lo que pasó.
+  if (elegibles.length === 0) {
+    bloqueos.push(
+      filas.length === 0
+        ? 'el segmento de la campaña no matchea ninguna empresa hoy: no hay a quién INSCRIBIR. Esto no dice nada sobre las inscripciones que la campaña ya tenga: para ver y empujar ésas, empujar_envios'
+        : `las ${filas.length} empresa(s) del segmento no tienen contacto con email ni teléfono utilizable: no hay a quién inscribir`,
+    );
+  }
   if (bloqueadas.length > 0) {
     // Mas estricto que el boton de la web, que inscribe las bloqueadas a la cola de revision y
     // sigue. Desde el MCP no se ve esa cola, asi que una bloqueada seria una empresa que se da
@@ -1640,6 +1668,145 @@ export function crearCadenciaTool(input: CrearCadenciaInput, idOrganizacion: num
   };
 }
 
+// --- enviar_whatsapp_directo (ESCRITURA, 2026-07-28) -----------------------------------
+//
+// El movimiento que le faltaba al MCP para validar una línea de punta a punta sin pasar por
+// campaña, cadencia ni goteo: mandar UN mensaje a UN número, ya. Mismo camino que ya usa
+// probarLineaAction (app/conectores/lineas-whatsapp-actions.ts): CanalEntrega.enviarPaso
+// directo, SIN pasar por outbox/paso_inscripcion, así que no cuenta contra techo_diario ni
+// deja fila en toque. Es la segunda tool (después de lanzar_campana) que le manda algo a
+// alguien real desde el MCP, y la única pensada para UN destinatario suelto en vez de un
+// segmento completo -- por eso es la herramienta correcta para "probemos que el brain puede
+// mandar" y no una desviación de crear_cadencia + lanzar_campana para un caso de uno.
+//
+// No escribe mensaje_whatsapp: esa tabla exige id_contacto NOT NULL para 'saliente' A
+// PROPÓSITO (ver su comentario en schema.ts) -- filtra por privacidad a que el destinatario
+// sea un contacto real de una empresa, y un envío ad-hoc a un número cualquiera (probando la
+// propia línea, por ejemplo) no lo es. La auditoría de "qué se mandó, a qué número, por qué
+// instancia" es el log de servidor de abajo más el resultado RELEÍDO de Evolution que
+// devuelve la tool -- nunca un {ok:true} ciego.
+export type EnviarWhatsappDirectoInput = {
+  telefono: string;
+  cuerpo: string;
+  // Si no viene, se resuelve la línea ACTIVA del owner de la sesión (misma fuente que ya usa
+  // lanzar_campana/crear_cadencia para decidir "por dónde sale WhatsApp de esta persona":
+  // lineasWhatsappDeUsuario(sesion.idUsuario)). Si viene, tiene que ser una línea DE ESE
+  // usuario -- no se manda por la línea de otra persona ni por la de pool a ciegas desde acá.
+  instancia?: string;
+};
+
+export type EnviarWhatsappDirectoResultado = {
+  telefono: string;
+  cuerpo: string;
+  instancia: string;
+  proveedor: 'evolution';
+  proveedorMensajeId: string;
+  estadoProveedor: string | null;
+  owner: string;
+  enviadoEn: string;
+};
+
+export type EnviarWhatsappDirectoDeps = {
+  // El envío real contra Evolution, más el efecto colateral de marcar la línea 'caida' si el
+  // proveedor confirma que la instancia no existe (mismo criterio que
+  // marcarCaidaSiNoExiste/recuperacion-linea.ts, reusado tal cual). Inyectable y cargado por
+  // import dinámico -- mismo patrón que LanzarCampanaDeps.empujarAhora: se puede probar sin
+  // red, y el resto de este archivo (todo lectura salvo estas dos tools) no arrastra el
+  // adaptador de Evolution solo por importarse.
+  enviar: (
+    referenciaProveedor: string,
+    telefono: string,
+    cuerpo: string,
+    idLinea: number | null,
+  ) => Promise<{ proveedorMensajeId: string; estadoProveedor: string | null }>;
+};
+
+const DEPS_ENVIAR_WHATSAPP_DIRECTO_DEFAULT: EnviarWhatsappDirectoDeps = {
+  enviar: async (referenciaProveedor, telefono, cuerpo, idLinea) => {
+    const { crearEvolutionAdapter } = await import('../adapters/evolution');
+    try {
+      const r = await crearEvolutionAdapter().enviarPaso(
+        referenciaProveedor,
+        { telefono, email: null, nombre: null, empresa: null, cargo: null },
+        { asunto: null, cuerpo, canal: 'whatsapp' },
+      );
+      return { proveedorMensajeId: r.proveedorMensajeId, estadoProveedor: r.estadoProveedor ?? null };
+    } catch (e) {
+      if (idLinea !== null) {
+        const { marcarCaidaSiNoExiste } = await import('../conectores/recuperacion-linea');
+        marcarCaidaSiNoExiste(idLinea, e);
+      }
+      throw e;
+    }
+  },
+};
+
+export async function enviarWhatsappDirectoTool(
+  input: EnviarWhatsappDirectoInput,
+  sesion: SesionLanzamiento,
+  deps: EnviarWhatsappDirectoDeps = DEPS_ENVIAR_WHATSAPP_DIRECTO_DEFAULT,
+): Promise<EnviarWhatsappDirectoResultado> {
+  // owner/idUsuario de la SESION, nunca del input -- mismo criterio que lanzar_campana y
+  // crear_cadencia: un cliente no elige por la línea de quién manda.
+  if (!sesion.owner.trim() || !sesion.idUsuario.trim()) {
+    throw new Error(
+      'enviar_whatsapp_directo: esta sesión no trae usuario ni owner (el server standalone por token no los tiene). ' +
+        'Solo se puede mandar desde el MCP autenticado por OAuth, donde la sesión dice a nombre de quién sale el mensaje.',
+    );
+  }
+
+  const telefono = input.telefono.replace(/\D/g, '');
+  if (!telefono) throw new Error('enviar_whatsapp_directo: telefono vacío después de quitar todo lo que no es dígito');
+  if (!input.cuerpo.trim()) throw new Error('enviar_whatsapp_directo: cuerpo vacío, no hay qué mandar');
+
+  const lineas = lineasWhatsappDeUsuario(sesion.idUsuario);
+  let instancia = input.instancia?.trim();
+  let idLinea: number | null = null;
+
+  if (instancia) {
+    const propia = lineas.find((l) => l.referenciaProveedor === instancia);
+    if (!propia) {
+      throw new Error(
+        `enviar_whatsapp_directo: '${instancia}' no es una línea de ${sesion.owner}. Pasá una instancia propia ` +
+          '(la que devuelve /conectores) o dejá el campo vacío para que se resuelva sola.',
+      );
+    }
+    idLinea = propia.id;
+  } else {
+    const activa = lineas.find((l) => l.estado === 'activa' && l.referenciaProveedor);
+    if (!activa?.referenciaProveedor) {
+      throw new Error(
+        `enviar_whatsapp_directo: ${sesion.owner} no tiene una línea de WhatsApp activa (linea_whatsapp.estado='activa'). ` +
+          'Conectala en /conectores antes de mandar.',
+      );
+    }
+    instancia = activa.referenciaProveedor;
+    idLinea = activa.id;
+  }
+
+  const enviadoEn = new Date().toISOString();
+  const { proveedorMensajeId, estadoProveedor } = await deps.enviar(instancia, telefono, input.cuerpo, idLinea);
+
+  // Auditoría mínima: server log con quién, por dónde y a qué número, porque esta tool NO deja
+  // fila en mensaje_whatsapp (ver nota de arriba). No es la fuente de verdad -- la fuente es lo
+  // que la tool devuelve, releído del proveedor, no un eco del input.
+  console.log(
+    `[mcp] enviar_whatsapp_directo owner=${sesion.owner} instancia=${instancia} telefono=${telefono} ` +
+      `proveedorMensajeId=${proveedorMensajeId} estadoProveedor=${estadoProveedor ?? 'desconocido'} en=${enviadoEn}`,
+  );
+
+  return {
+    telefono,
+    cuerpo: input.cuerpo,
+    instancia,
+    proveedor: 'evolution',
+    proveedorMensajeId,
+    estadoProveedor,
+    owner: sesion.owner,
+    enviadoEn,
+  };
+}
+
 // --- tracking_correo ------------------------------------------------------------------
 //
 // Lectura pura de evento_tracking. No existia forma de ver una apertura o un clic de correo
@@ -1728,4 +1895,333 @@ export function enviosProgramadosTool(input: EnviosProgramadosInput) {
     truncado: false,
     envios,
   };
+}
+
+// --- empujar_envios -------------------------------------------------------------------
+//
+// "Esto que ya está inscrito y pendiente, mandalo AHORA." El movimiento que faltaba, y faltaba
+// justo en el camino que el operador usa de verdad.
+//
+// EL BUG QUE CIERRA (medido en producción el 2026-07-28, campaña 58). Había dos caminos para
+// inscribir y se pisaban en silencio:
+//   - lanzar_campana inscribe el segmento entero y empuja en modo manual, saltándose la ventana
+//     de 8:00-18:00. Exige estado 'borrador'.
+//   - cambiar_cadencia inscribe UNA empresa, y al hacerlo pone la campaña en 'activa'
+//     (inscribirEmpresaEnCadencia lo hace siempre, no es opcional).
+// O sea que inscribir cuenta por cuenta -- que es lo que toca cuando el segmento devuelve cero, o
+// cuando se quiere apuntar a dos cuentas y no a un segmento -- mataba para siempre el empujón
+// manual, y nada lo avisaba antes de elegir el camino. El operador quedaba obligado a esperar la
+// ventana del día siguiente.
+//
+// POR QUÉ UNA TOOL NUEVA Y NO UN FLAG EN lanzar_campana. lanzar_campana hace cinco cosas que sólo
+// tienen sentido la primera vez: fija el owner, persiste la config de goteo, inscribe el segmento,
+// arma Gmail y empuja. Las cuatro primeras no aplican a una campaña que ya está corriendo, así que
+// un `permitirActiva: true` haría que el mismo nombre hiciera dos cosas distintas según un
+// booleano. Y el default peligroso es distinto: lanzar_campana confirmada le manda a un segmento
+// que se calcula en el momento; ésta le manda a una lista que se puede leer entera antes.
+//
+// LO QUE ESTA TOOL NO HACE, y es lo que la vuelve usable para dos cuentas sueltas: NO barre.
+// lanzar_campana empuja con materializarYEmpujarAhora, que materializa la base entera y manda todo
+// lo pendiente de todas las campañas activas (por eso tiene que cantar `colateral`). Acá el blanco
+// lo pone quien llama y lo que no está en la lista de ids no se toca: el colateral es cero por
+// construcción, y `noIncluidos` dice qué quedó afuera para que eso sea verificable y no una
+// promesa.
+//
+// LOS TRES GATES QUE SIGUEN VIVOS: revisión humana de WhatsApp (aprobado_en), es_manual del paso,
+// y el tope diario de Gmail. Esta tool se salta la HORA, y nada más.
+
+export type EmpujarEnviosInput = {
+  idCampana?: number;
+  idsInscripcion?: number[];
+  idsEmpresa?: string[];
+  adelantar?: boolean;
+  confirmar?: boolean;
+};
+
+export type EmpujarEnviosDeps = {
+  // El push real vive en el worker y habla con Gmail/Evolution. Inyectable para poder probar el
+  // proveedor caído sin proveedor, y por import dinámico para que el resto del MCP no arrastre
+  // los adaptadores sólo por importar este archivo (mismo criterio que lanzar_campana).
+  empujar: (ids: number[]) => Promise<void>;
+};
+
+const DEPS_EMPUJAR_DEFAULT: EmpujarEnviosDeps = {
+  empujar: async (ids) => {
+    const { empujarPasosAhora } = await import('../worker/empujon-manual');
+    await empujarPasosAhora(ids);
+  },
+};
+
+export type PasoEmpujable = {
+  idPasoInscripcion: number;
+  idCampana: number;
+  campana: string | null;
+  idInscripcion: number;
+  idEmpresa: string;
+  empresa: string | null;
+  contacto: string | null;
+  destino: string | null;
+  canal: string;
+  orden: number;
+  estado: string;
+  intentos: number;
+  fechaProgramada: string | null;
+  saldra: boolean;
+  motivos: string[];
+};
+
+export type EmpujarEnviosResultado = {
+  confirmado: boolean;
+  blanco: SelectorEmpujon;
+  ahora: string;
+  // Las inscripciones que el blanco alcanza, con cuántos pasos tienen materializados. Una con
+  // pasosMaterializados en 0 es gente inscrita que no aparece en `pasos` porque su fila todavía
+  // no existe: sin esta lista, el seco diría "no hay nada que empujar" y sería falso.
+  inscripciones: ReturnType<typeof inscripcionesEmpujables>;
+  // Todo lo que el blanco toca, salga o no. El que no sale trae su motivo: eso es lo que no
+  // existía en ningún lado, porque el descarte de la cola es un `continue` sin rastro.
+  pasos: PasoEmpujable[];
+  saldrian: number;
+  // Lo que otro empujón (el del worker, o lanzar_campana) sacaría y éste NO va a tocar.
+  noIncluidos: { idPasoInscripcion: number; idCampana: number; empresa: string | null; canal: string; destino: string | null }[];
+  esperandoRevisionHumana: { idPasoInscripcion: number; canal: string; empresa: string | null; motivo: string }[];
+  advertencias: string[];
+  adelanto: ResultadoAdelanto | null;
+  // Releído de la base DESPUÉS del push.
+  estadoTrasEmpujar: PasoEmpujable[];
+  salieron: { idPasoInscripcion: number; empresa: string | null; canal: string; proveedor: string | null; proveedorMensajeId: string | null; fechaEnviada: string | null }[];
+  problemas: string[];
+  logDelPush: string[];
+  nota: string;
+};
+
+function aPasoEmpujable(c: CandidatoEmpujon, elegibles: Set<number>, ahora: string): PasoEmpujable {
+  const saldra = elegibles.has(c.idPasoInscripcion);
+  const motivos = saldra ? [] : motivosNoSale(c, ahora, MAX_INTENTOS);
+  return {
+    idPasoInscripcion: c.idPasoInscripcion,
+    idCampana: c.idCampana,
+    campana: c.campana,
+    idInscripcion: c.idInscripcion,
+    idEmpresa: c.idEmpresa,
+    empresa: c.empresa,
+    contacto: c.contacto,
+    destino: c.canal === 'correo' ? c.email : c.canal === 'whatsapp' ? c.telefono : null,
+    canal: c.canal,
+    orden: c.orden,
+    estado: c.estadoPaso,
+    intentos: c.intentos,
+    fechaProgramada: c.fechaProgramada,
+    saldra,
+    // Si la cola real dice que no sale y el diagnóstico no encuentra motivo, se dice eso. Inventar
+    // una explicación manda a buscar donde no está, que es el error que esta tool viene a cerrar.
+    motivos: saldra
+      ? []
+      : motivos.length > 0
+        ? motivos
+        : ['la cola real no lo toma y el diagnóstico no encontró la razón: hay que mirar pasoInscripcionesPendientes a mano para este id'],
+  };
+}
+
+// Los ids que la cola REAL toma, dentro de un set dado. Es la fuente de verdad de "sale o no
+// sale"; motivosNoSale sólo explica el no. Dos implementaciones de la misma regla se
+// desincronizan, así que la que decide es una sola y es la del worker.
+function elegiblesDe(ids: number[], ahora: string): Set<number> {
+  const elegibles = new Set<number>();
+  for (const canal of ['correo', 'whatsapp'] as Canal[]) {
+    for (const f of pasoInscripcionesPendientesDe(canal, ids, ahora)) elegibles.add(f.idPasoInscripcion);
+  }
+  return elegibles;
+}
+
+export async function empujarEnviosTool(
+  input: EmpujarEnviosInput,
+  idOrganizacion: number,
+  deps: EmpujarEnviosDeps = DEPS_EMPUJAR_DEFAULT,
+): Promise<EmpujarEnviosResultado> {
+  const blanco: SelectorEmpujon = {
+    ...(input.idCampana !== undefined ? { idCampana: input.idCampana } : {}),
+    ...(input.idsInscripcion !== undefined && input.idsInscripcion.length > 0 ? { idsInscripcion: input.idsInscripcion } : {}),
+    ...(input.idsEmpresa !== undefined && input.idsEmpresa.length > 0 ? { idsEmpresa: input.idsEmpresa } : {}),
+  };
+  // Sin blanco no se empuja. NO existe un modo "todo lo pendiente", a propósito: un empujón sin
+  // blanco es la forma de mandarle a gente que nadie miró, y eso no se deshace.
+  if (selectorVacio(blanco)) {
+    throw new Error(
+      'empujar_envios: hace falta decir QUÉ se empuja (idCampana, idsInscripcion o idsEmpresa). No existe un modo "todo lo pendiente": un empujón sin blanco es la forma de mandarle a alguien que nadie miró.',
+    );
+  }
+
+  const inscripciones = inscripcionesEmpujables(blanco, idOrganizacion);
+  if (inscripciones.length === 0) {
+    // "El blanco no existe" y "no hay nada pendiente" son dos diagnósticos distintos, y
+    // confundirlos manda a buscar el problema donde no está. Se separan acá, no en un mensaje.
+    throw new Error(
+      `empujar_envios: el blanco no alcanza ninguna inscripción en la organización ${idOrganizacion} (${JSON.stringify(blanco)}). No es que no haya nada pendiente: es que no hay nadie inscrito ahí.`,
+    );
+  }
+
+  const ahoraPreview = new Date().toISOString();
+  const candidatosPreview = candidatosEmpujon(blanco, idOrganizacion);
+  const elegiblesPreview = elegiblesDe(candidatosPreview.map((c) => c.idPasoInscripcion), ahoraPreview);
+  const pasosPreview = candidatosPreview.map((c) => aPasoEmpujable(c, elegiblesPreview, ahoraPreview));
+
+  const advertencias: string[] = [
+    'el empujón corre en modo manual: NO respeta la ventana de 8:00-18:00 Bogotá ni el espaciado de 45-90s del worker. Lo que se empuje a las 11pm sale a las 11pm.',
+    'acotado al blanco: no materializa ni empuja nada de otras campañas. Lo que otro empujón sí sacaría viaja en noIncluidos.',
+  ];
+
+  const programadosAdelante = pasosPreview.filter((p) => !p.saldra && p.fechaProgramada !== null && p.fechaProgramada > ahoraPreview);
+  const sinMaterializar = inscripciones.filter((i) => i.estadoInscripcion === 'activa' && i.estadoCampana === 'activa' && i.pasosVivos === 0 && i.pasosCadencia > 0);
+  if (input.adelantar !== true) {
+    if (programadosAdelante.length > 0) {
+      advertencias.push(
+        `${programadosAdelante.length} paso(s) están programados para más adelante y por eso no saldrían. Con adelantar: true se les baja la fecha a ahora y salen en este mismo empujón.`,
+      );
+    }
+    if (sinMaterializar.length > 0) {
+      advertencias.push(
+        `${sinMaterializar.length} inscripción(es) activas no tienen ningún paso vivo materializado (${sinMaterializar.map((i) => i.idInscripcion).join(', ')}): el calendario todavía no las dio por debidas. Con adelantar: true se materializa el paso que les toca con fecha de ahora y sale en este empujón.`,
+      );
+    }
+  }
+
+  const esperandoRevisionHumana = pasosPreview
+    .filter((p) => !p.saldra && p.motivos.some((m) => m.includes('revisión humana')))
+    .map((p) => ({ idPasoInscripcion: p.idPasoInscripcion, canal: p.canal, empresa: p.empresa, motivo: p.motivos.find((m) => m.includes('revisión humana'))! }));
+  if (esperandoRevisionHumana.length > 0) {
+    advertencias.push(
+      `${esperandoRevisionHumana.length} paso(s) esperan revisión humana y este empujón NO se salta ese gate: se aprueban uno por uno con programar_envios.`,
+    );
+  }
+
+  // Lo que la cola global sí tomaría y este empujón deja afuera. Es la contraparte honesta del
+  // `colateral` de lanzar_campana: allá el número es lo que sale de más, acá es lo que NO sale.
+  const idsBlanco = new Set(candidatosPreview.map((c) => c.idPasoInscripcion));
+  const todos = candidatosEmpujon({}, idOrganizacion);
+  const elegiblesGlobal = elegiblesDe(todos.map((c) => c.idPasoInscripcion), ahoraPreview);
+  const noIncluidos = todos
+    .filter((c) => !idsBlanco.has(c.idPasoInscripcion) && elegiblesGlobal.has(c.idPasoInscripcion))
+    .map((c) => ({
+      idPasoInscripcion: c.idPasoInscripcion,
+      idCampana: c.idCampana,
+      empresa: c.empresa,
+      canal: c.canal,
+      destino: c.canal === 'correo' ? c.email : c.telefono,
+    }));
+
+  const base = {
+    blanco,
+    inscripciones,
+    pasos: pasosPreview,
+    saldrian: pasosPreview.filter((p) => p.saldra).length,
+    noIncluidos,
+    esperandoRevisionHumana,
+    advertencias,
+  };
+
+  if (input.confirmar !== true) {
+    return {
+      ...base,
+      confirmado: false,
+      ahora: ahoraPreview,
+      adelanto: null,
+      estadoTrasEmpujar: [],
+      salieron: [],
+      problemas: [],
+      logDelPush: [],
+      nota:
+        input.adelantar === true
+          ? 'En seco: no se escribió ni se mandó nada. Con confirmar: true se adelanta lo que haga falta y sale.'
+          : 'En seco: no se escribió ni se mandó nada. Con confirmar: true sale lo que aparece con saldra: true.',
+    };
+  }
+
+  const ahora = new Date().toISOString();
+  const adelanto = input.adelantar === true ? adelantarEnvios(blanco, idOrganizacion, ahora) : null;
+
+  // Se releen los candidatos DESPUÉS del adelanto: el paso que se acaba de materializar no existía
+  // cuando se armó el preview, y es justo el que hay que empujar.
+  const candidatos = candidatosEmpujon(blanco, idOrganizacion);
+  const idsCampana = new Set<number>(candidatos.map((c) => c.idCampana));
+  for (const i of inscripciones) idsCampana.add(i.idCampana);
+  const elegibles = elegiblesDe(candidatos.map((c) => c.idPasoInscripcion), ahora);
+  const aEmpujar = [...elegibles];
+
+  // push.ts se traga el fallo del proveedor con un console.error y deja la fila en 'fallo'. Sin
+  // copiar esa línea el único "por qué" se pierde. Se COPIA, no se silencia: sigue imprimiéndose.
+  const logDelPush: string[] = [];
+  const errorOriginal = console.error;
+  console.error = (...args: unknown[]) => {
+    logDelPush.push(args.map((a) => (a instanceof Error ? a.message : typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+    errorOriginal(...args);
+  };
+  try {
+    if (aEmpujar.length > 0) await deps.empujar(aEmpujar);
+  } finally {
+    console.error = errorOriginal;
+  }
+
+  // Relectura: lo que quedó escrito, no el eco de lo que se pidió.
+  const trasEmpujar = candidatosEmpujon(blanco, idOrganizacion);
+  const idsIntentados = new Set(aEmpujar);
+  const estadoTrasEmpujar = trasEmpujar.map((c) => aPasoEmpujable(c, elegiblesDe(trasEmpujar.map((x) => x.idPasoInscripcion), ahora), ahora));
+  const salieron = leerSalidas([...idsCampana], idOrganizacion, idsIntentados);
+
+  // Un paso que se intentó empujar y sigue vivo (pendiente/fallo/enviando) NO salió. Se reporta
+  // como problema aunque el resto haya salido: un empujón parcial devuelto como éxito es la forma
+  // de creer que un correo se mandó cuando no.
+  const problemas = trasEmpujar
+    .filter((c) => idsIntentados.has(c.idPasoInscripcion))
+    .map((c) => `paso_inscripcion ${c.idPasoInscripcion} (${c.canal}, ${c.empresa ?? c.idEmpresa}) quedó en '${c.estadoPaso}' con ${c.intentos} intento(s): no salió`);
+
+  const resultado: EmpujarEnviosResultado = {
+    ...base,
+    confirmado: true,
+    ahora,
+    adelanto,
+    estadoTrasEmpujar,
+    salieron,
+    problemas,
+    logDelPush,
+    nota:
+      aEmpujar.length === 0
+        ? 'No había ni un paso elegible: no se mandó nada. El motivo de cada uno está en pasos[].motivos.'
+        : `Se intentaron ${aEmpujar.length} paso(s) y salieron ${salieron.length}. Los que salieron son los que quedaron 'enviada' con proveedorMensajeId; los demás no.`,
+  };
+
+  // Falla ruidosa, con el estado releído adentro del error: la escritura ya ocurrió.
+  if (problemas.length > 0) {
+    throw new Error(
+      `empujar_envios: ${problemas.length} paso(s) no salieron. ${problemas.join(' | ')}` +
+        `${logDelPush.length > 0 ? ` || log del push: ${logDelPush.join(' ; ')}` : ''}\n` +
+        JSON.stringify(resultado, null, 2),
+    );
+  }
+
+  return resultado;
+}
+
+// El acuse del proveedor, releído. candidatosEmpujon no lo puede dar porque sólo lista lo que
+// TODAVÍA puede salir (una fila 'enviada' ya no es candidata de nada): la prueba de que salió hay
+// que ir a buscarla al estado de la campaña.
+function leerSalidas(idsCampana: number[], idOrganizacion: number, ids: Set<number>): EmpujarEnviosResultado['salieron'] {
+  if (ids.size === 0) return [];
+  const salidas: EmpujarEnviosResultado['salieron'] = [];
+  for (const idCampana of idsCampana) {
+    const estado = estadoLanzamientoCampana(idCampana, idOrganizacion);
+    if (!estado) continue;
+    for (const p of estado.pasos) {
+      if (!ids.has(p.idPasoInscripcion) || p.estado !== 'enviada') continue;
+      salidas.push({
+        idPasoInscripcion: p.idPasoInscripcion,
+        empresa: p.empresa,
+        canal: p.canal,
+        proveedor: p.proveedor,
+        proveedorMensajeId: p.proveedorMensajeId,
+        fechaEnviada: p.fechaEnviada,
+      });
+    }
+  }
+  return salidas;
 }

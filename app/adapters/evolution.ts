@@ -178,7 +178,10 @@ export function crearEvolutionAdapter(): CanalEntrega & ConexionLinea {
       });
       const mensajeId = data.key?.id;
       if (!mensajeId) throw new Error(`Evolution no devolvio id de mensaje al enviar por ${referenciaProveedor}`);
-      return { proveedor: 'evolution', proveedorMensajeId: mensajeId };
+      // data.status: 'PENDING' en la forma de exito confirmada en vivo (ver el comentario de
+      // EnviarTextoRespuesta). Campo aditivo del puerto (estadoProveedor) -- undefined si algun
+      // dia Evolution deja de mandarlo, nunca se inventa un valor.
+      return { proveedor: 'evolution', proveedorMensajeId: mensajeId, estadoProveedor: data.status };
     },
 
     // Pairing-code por DEFAULT (2026-07-09): el QR esta bloqueado server-side (ver

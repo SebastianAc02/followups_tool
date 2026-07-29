@@ -85,6 +85,13 @@ export type EnvioResultado = {
   // undefined para Apollo/Evolution -- ninguno de los dos lo necesita, aditivo a
   // proposito para no tocar su firma ni sus tests.
   proveedorHiloId?: string;
+  // enviar_whatsapp_directo (MCP, 2026-07-28): el estado crudo que el proveedor devuelve AL
+  // MOMENTO de aceptar el envio (para Evolution, el 'PENDING' de POST /message/sendText -- ver
+  // EnviarTextoRespuesta en evolution.ts). No es el estado final del mensaje (eso son los acuses
+  // MESSAGES_UPDATE que ya procesa parsearAcuseLectura); es lo unico que distingue, en la misma
+  // respuesta sincronica, "Evolution aceptó mandarlo" de un 200 vacío. Mismo criterio aditivo que
+  // proveedorHiloId: opcional y undefined para quien no lo tenga, no toca la firma de nadie mas.
+  estadoProveedor?: string;
 };
 
 // sincronizarCopy (sesion 2026-07-08): sube/actualiza el copy de TODA la cadencia de
