@@ -49,8 +49,16 @@ export const POST = withMcpAuth(auth, async (req, oauthSession) => {
   // ESCRITURA (puedeEscribirMcp, separado del de lectura). Un lector sin ese permiso ve las 3
   // tools de lectura y ninguna de escritura -- ni siquiera aparecen en tools/list. La
   // organizacion sobre la que escribe la fija la sesion, no el cliente.
+  // owner/idUsuario (2026-07-27, lanzar_campana): salen de la SESION, nunca del input de la
+  // tool. Son a nombre de quien queda la campana y contra quien se resuelven el Gmail
+  // verificado y la linea de WhatsApp, o sea por donde sale el mensaje.
   const escritura = puedeEscribirMcp(sesion);
-  const mcpServer = crearMcpServer({ escritura, idOrganizacion: sesion.idOrganizacion });
+  const mcpServer = crearMcpServer({
+    escritura,
+    idOrganizacion: sesion.idOrganizacion,
+    owner: sesion.owner,
+    idUsuario: sesion.id,
+  });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await mcpServer.connect(transport);
   return transport.handleRequest(req);

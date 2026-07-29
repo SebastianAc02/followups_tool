@@ -1,4 +1,4 @@
-import type { EnvioAdapter, CanalEntrega } from '../core/ports/envio';
+import type { EnvioAdapter, CanalEntrega, TrackingPoll } from '../core/ports/envio';
 import type { Canal } from '../db/validation';
 import { CANALES_AUTOMATICOS } from '../db/validation';
 import { crearApolloAdapter } from './apollo';
@@ -53,6 +53,29 @@ export function crearRegistroEntrega(): Record<Canal, CanalEntrega | null> {
 // ver el comentario ahi para el motivo de la direccion de dependencia.
 export { CANALES_AUTOMATICOS };
 
+// LA decision de "quien manda/lee el correo de este dueno", en un solo lugar (2026-07-28).
+// Antes vivia copiada en tres sitios: resolverAdaptadorCorreo, agruparPendientesCorreo y
+// -- por omision -- el poll de tracking, que ni siquiera preguntaba y asumia Apollo para
+// TODA campana. Esa asimetria es la que dejaba una respuesta por correo sin cortar la
+// cadencia: se mandaba por Gmail y se leia por Apollo.
+//
+// Devuelve el veredicto, no el adaptador, a proposito: el camino de ENVIO necesita un
+// CanalEntrega y el de LECTURA un TrackingPoll, dos interfaces distintas del mismo
+// proveedor. Con el veredicto separado, los dos caminos comparten el criterio sin
+// compartir el tipo de retorno, y agregar un tercer rol no obliga a tocar la decision.
+//
+// gmailVerificado se inyecta para que agruparPendientesCorreo pase el suyo (tests) sin
+// que exista una segunda forma de decidir.
+export type ProveedorCorreo = { proveedor: 'gmail'; idUsuario: string } | { proveedor: 'apollo'; idUsuario: null };
+
+export function decidirProveedorCorreo(
+  idUsuarioDueno: string | null,
+  gmailVerificado: (idUsuario: string) => boolean = gmailVerificadoDe,
+): ProveedorCorreo {
+  if (idUsuarioDueno && gmailVerificado(idUsuarioDueno)) return { proveedor: 'gmail', idUsuario: idUsuarioDueno };
+  return { proveedor: 'apollo', idUsuario: null };
+}
+
 // Gmail Etapa 2 (2026-07-15): resuelve el adaptador de CORREO para un dueno puntual.
 // Gmail verificado -> Gmail propio; sin Gmail o dueno null (campana vieja) -> Apollo,
 // mismo fallback que ya describe el spec. Solo CanalEntrega (enviar) -- push.ts nunca
@@ -60,8 +83,22 @@ export { CANALES_AUTOMATICOS };
 // sigue resolviendo crearRegistroEnvio() (arriba) para quien de verdad lo necesita
 // (campanas/actions.ts, tareaTracking).
 export function resolverAdaptadorCorreo(idUsuarioDueno: string | null): CanalEntrega {
-  if (idUsuarioDueno && gmailVerificadoDe(idUsuarioDueno)) return crearGmailAdapter(idUsuarioDueno);
-  return crearApolloAdapter();
+  const veredicto = decidirProveedorCorreo(idUsuarioDueno);
+  return veredicto.proveedor === 'gmail' ? crearGmailAdapter(veredicto.idUsuario) : crearApolloAdapter();
+}
+
+// El espejo de resolverAdaptadorCorreo del lado de LECTURA (2026-07-28). Misma decision,
+// otro rol: TrackingPoll en vez de CanalEntrega.
+//
+// Devuelve tambien el NOMBRE del proveedor porque quien pollea necesita dos cosas que el
+// adaptador no dice: que referencia pasarle (Apollo lee por secuencia, Gmail por hilo --
+// ver worker/index.ts) y con que etiquetar el error cuando una campana falla. Un adaptador
+// anonimo obliga a un instanceof o a un segundo `if`, o sea a decidir el proveedor dos veces.
+export function resolverTrackingCorreo(idUsuarioDueno: string | null): { proveedor: 'gmail' | 'apollo'; adaptador: TrackingPoll } {
+  const veredicto = decidirProveedorCorreo(idUsuarioDueno);
+  return veredicto.proveedor === 'gmail'
+    ? { proveedor: 'gmail', adaptador: crearGmailAdapter(veredicto.idUsuario) }
+    : { proveedor: 'apollo', adaptador: crearApolloAdapter() };
 }
 
 export type GrupoPendientesCorreo = { adaptador: CanalEntrega; idUsuarioGmail: string | null; filas: FilaPasoInscripcion[] };
@@ -72,6 +109,11 @@ export type DepsAgruparCorreo = {
   gmailVerificado: (idUsuario: string) => boolean;
   crearGmail: (idUsuario: string) => CanalEntrega;
   crearApollo: () => CanalEntrega;
+  // Se llama por CADA fila que el gate descarta. Existe porque el descarte era un `continue`
+  // pelado: la fila no salia, no se marcaba 'fallo', no se logueaba, y se quedaba 'pendiente'
+  // para siempre. Un correo que muere sin dejar rastro es indistinguible de uno que todavia no
+  // le toca, y esa es la unica diferencia que importa cuando alguien pregunta "¿se mandó?".
+  onDescartada?: (fila: FilaPasoInscripcion, motivo: string) => void;
 };
 
 const depsAgruparCorreoReales: DepsAgruparCorreo = {
@@ -80,6 +122,12 @@ const depsAgruparCorreoReales: DepsAgruparCorreo = {
   gmailVerificado: gmailVerificadoDe,
   crearGmail: crearGmailAdapter,
   crearApollo: crearApolloAdapter,
+  onDescartada: (fila, motivo) => {
+    console.error(
+      `[correo] paso_inscripcion ${fila.idPasoInscripcion} (${fila.destinatario.empresa ?? 'sin empresa'} <${fila.destinatario.email ?? 'sin email'}>) ` +
+        `NO se envia y queda 'pendiente': ${motivo}`,
+    );
+  },
 };
 
 // Agrupa las filas de correo pendientes por ADAPTADOR RESUELTO (una entrada por Gmail
@@ -95,9 +143,23 @@ export function agruparPendientesCorreo(ahora: string = new Date().toISOString()
 
   for (const f of filas) {
     const idUsuario = deps.idUsuarioDeOwner(f.owner ?? null, f.idOrganizacion ?? 0);
-    const esGmail = idUsuario ? deps.gmailVerificado(idUsuario) : false;
+    // Misma decision que usa el poll de tracking (decidirProveedorCorreo), no una copia:
+    // el dia que el criterio cambie, envio y lectura cambian juntos o no cambia ninguno.
+    const esGmail = decidirProveedorCorreo(idUsuario, deps.gmailVerificado).proveedor === 'gmail';
 
-    if (esGmail && !f.aprobadaEnvioGmail) continue; // gate: sin aprobar, esta fila no sale
+    // Gate: sin aprobar, esta fila no sale. Ya NO en silencio -- se avisa antes de saltarla.
+    // El aviso no cambia el comportamiento del gate a proposito: el gate esta bien (nadie
+    // quiere que una campana sin revisar salga sola), lo que estaba mal era que cortara sin
+    // decirlo. Quien lo arregla de verdad es armar la campana (aprobada_envio_gmail=1), y eso
+    // es una decision de quien lanza, no del worker.
+    if (esGmail && !f.aprobadaEnvioGmail) {
+      deps.onDescartada?.(
+        f,
+        `campana.aprobada_envio_gmail=0 y el dueno '${f.owner ?? 'sin owner'}' manda por Gmail. ` +
+          'Se arma con lanzar_campana, con cambiar_cadencia armarEnvioCorreo:true, o con "Lanzar hoy" en la web',
+      );
+      continue;
+    }
 
     const key = esGmail ? `gmail:${idUsuario}` : 'apollo';
     if (!grupos.has(key)) {

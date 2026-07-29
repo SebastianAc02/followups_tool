@@ -32,7 +32,11 @@ export type PushDeps = {
   // proveedor (sesion 2026-07-09): viene de EnvioResultado.proveedor, NO se asume --
   // asi el registro dice de verdad quien mando cada paso, sin importar si maniana
   // enviarPaso lo resuelve un adaptador de Apollo, de WhatsApp o de otro proveedor.
-  marcarEnviada: (idPasoInscripcion: number, proveedor: string, proveedorMensajeId: string, fechaEnviada: string) => void;
+  // proveedorHiloId (2026-07-28): el hilo de Gmail de este envio. enviarPaso lo devolvia
+  // desde el 2026-07-14 y este push lo tiraba a la basura, con lo cual el poll de tracking
+  // se quedaba sin la unica referencia por la que Gmail se deja leer. undefined para Apollo
+  // y WhatsApp, que no tienen hilo.
+  marcarEnviada: (idPasoInscripcion: number, proveedor: string, proveedorMensajeId: string, fechaEnviada: string, proveedorHiloId?: string) => void;
   marcarFallo: (idPasoInscripcion: number, intentos: number, proximoIntento: string | null) => void;
 };
 
@@ -71,7 +75,7 @@ export async function pushPendientes(
     try {
       deps.marcarEnviando(fila.idPasoInscripcion);
       const resultado = await envio.enviarPaso(fila.proveedorCampanaId, fila.destinatario, fila.paso);
-      deps.marcarEnviada(fila.idPasoInscripcion, resultado.proveedor, resultado.proveedorMensajeId, ahora.toISOString());
+      deps.marcarEnviada(fila.idPasoInscripcion, resultado.proveedor, resultado.proveedorMensajeId, ahora.toISOString(), resultado.proveedorHiloId);
     } catch (e) {
       // Sesion 2026-07-10: el catch se tragaba el error sin loguearlo -- una fila
       // fallaba 3 veces en silencio (APOLLO_MAILBOX_ID sin cargar, credencial mala,

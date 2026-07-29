@@ -145,6 +145,8 @@ import {
   type OrigenTransicion,
   RITMOS_INGRESO,
   type RitmoIngresoInput,
+  REGLAS_FALTANTE,
+  type ReglaFaltanteInput,
   validarCanalAutomatico,
   CANALES_AUTOMATICOS,
 } from './validation';
@@ -1247,6 +1249,12 @@ const cambiarCadenciaSchema = z
     proximoFollowUp: z.string().min(1).optional(),
     proximoCanal: z.string().min(1).optional(),
     proximoPaso: z.string().min(1).optional(),
+    // Opt-in explicito para armar el envio de correo de la campana al inscribir. Ver la nota
+    // larga en cambiarCadencia: sin esto, inscribir en una campana con pasos de correo produce
+    // correos que no salen nunca y nada avisa. Es opt-in y no default porque
+    // aprobada_envio_gmail es de la CAMPANA, no de la empresa: prenderla tambien desbloquea a
+    // todos los que ya estaban inscritos ahi.
+    armarEnvioCorreo: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.idCampana === undefined && !data.proximoFollowUp && !data.proximoCanal && !data.proximoPaso) {
@@ -1268,6 +1276,10 @@ export type CambiarCadenciaResultado = {
   // solo se reprogramo. Se expone porque puede decir 'ya_inscrita' y eso no es un error, pero
   // tampoco es un cambio: sin esto, "no pasó nada" y "ya estaba" se ven igual.
   inscripcion: ResultadoInscripcionEmpresa | null;
+  // El diagnostico de si el correo de esa campana va a salir, RELEIDO despues de escribir.
+  // null cuando no se inscribio en ninguna campana. Viaja siempre, incluso cuando todo esta
+  // bien: el modo de falla que cierra es "se inscribio, se ve exitoso, y el correo esta muerto".
+  envioCorreo: EstadoEnvioCorreo | null;
 };
 
 function leerCadenciasVivas(idEmpresa: string): CambiarCadenciaResultado['cadencias'] {
@@ -1303,10 +1315,59 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
     throw new Error(`La empresa ${parsed.idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
   }
 
+  // GATE DE CORREO MUERTO (2026-07-28). Inscribir una empresa en una campana con pasos de
+  // correo materializaba filas que no salian NUNCA y nadie se enteraba: el descarte vive en
+  // agruparPendientesCorreo como un `continue` pelado, sin error, sin marcar la fila 'fallo',
+  // y la fila se queda 'pendiente' para siempre. La compuerta (aprobada_envio_gmail) solo la
+  // prende marcarCampanaAprobadaGmail, que llaman lanzar_campana (bulk sobre un segmento
+  // entero) y el boton "Lanzar hoy" de la web. cambiarCadencia no la tocaba.
+  //
+  // Se chequea ANTES de inscribir y se lanza en vez de escribir a medias: una inscripcion cuyo
+  // correo esta muerto es peor que no inscribir, porque se ve igual que una que funciona. El
+  // error dice las tres compuertas por su nombre y cuantas otras inscripciones se
+  // desbloquearian al armar, para que el opt-in sea informado y no a ciegas.
+  if (parsed.idCampana !== undefined) {
+    const previo = estadoEnvioCorreo(parsed.idCampana, idOrganizacion);
+    if (!previo) throw new Error(`La campana ${parsed.idCampana} no existe en la organizacion ${idOrganizacion}`);
+    if (previo.tieneCorreo && !previo.saldra && parsed.armarEnvioCorreo !== true) {
+      // 'estado' no se cuenta como bloqueo aca: una campana en 'borrador' pasa a 'activa' en
+      // el mismo inscribirEmpresaEnCadencia de abajo, asi que exigirlo antes seria pedir algo
+      // que esta llamada misma va a arreglar.
+      const reales = previo.bloqueos.filter((b) => !b.includes("esta en estado 'borrador'"));
+      if (reales.length > 0) {
+        const otras = db
+          .select({ n: sql<number>`count(*)` })
+          .from(inscripcion)
+          .where(and(eq(inscripcion.idCampana, parsed.idCampana), inArray(inscripcion.estado, ['activa', 'bloqueada'])))
+          .get()?.n ?? 0;
+        throw new Error(
+          `cambiarCadencia: la campana ${parsed.idCampana} tiene ${previo.pasosCorreo} paso(s) de correo que NO van a salir. ` +
+            `No se inscribio a ${parsed.idEmpresa}: una inscripcion con el correo muerto se ve igual que una que funciona. ` +
+            `Bloqueos: ${reales.join(' | ')}. ` +
+            `Para armarla y seguir, repetir con armarEnvioCorreo: true -- eso escribe proveedor_campana_id y ` +
+            `aprobada_envio_gmail=1 en la CAMPANA, asi que tambien desbloquea a las ${otras} inscripcion(es) que ya tiene.` +
+            (previo.bloqueos.some((b) => b.includes('es_manual=1'))
+              ? ' Ojo: armarEnvioCorreo NO toca es_manual. Los pasos marcados manuales seguiran esperando aprobacion uno por uno.'
+              : ''),
+        );
+      }
+    }
+  }
+
   let inscripcionResultado: ResultadoInscripcionEmpresa | null = null;
   if (parsed.idCampana !== undefined) {
     inscripcionResultado = inscribirEmpresaEnCadencia(parsed.idEmpresa, parsed.idCampana);
+    // Armar DESPUES de inscribir, no antes: si la inscripcion falla, la campana queda como
+    // estaba y no se le abre el envio a nadie. Al reves, una campana armada con una
+    // inscripcion que reventó empezaria a mandarle a los que ya estaban.
+    if (parsed.armarEnvioCorreo === true && inscripcionResultado.ok) {
+      const ahora = new Date().toISOString();
+      const idCampana = parsed.idCampana;
+      db.transaction((tx) => armarEnvioCorreoEnTx(tx, idCampana, ahora));
+    }
   }
+
+  const envioCorreo = parsed.idCampana !== undefined ? estadoEnvioCorreo(parsed.idCampana, idOrganizacion) : null;
 
   // Sin reprogramacion (solo se pidio mover de cadencia): no hay nada mas que escribir, pero se
   // relee igual -- el resultado tiene que mostrar como quedo la cuenta, no solo si se escribio.
@@ -1315,6 +1376,7 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
       empresa: leerEmpresaEscrita(db, parsed.idEmpresa),
       cadencias: leerCadenciasVivas(parsed.idEmpresa),
       inscripcion: inscripcionResultado,
+      envioCorreo,
     };
   }
 
@@ -1347,6 +1409,9 @@ export function cambiarCadencia(input: CambiarCadenciaInput, idOrganizacion: num
     empresa: leerEmpresaEscrita(db, parsed.idEmpresa),
     cadencias: leerCadenciasVivas(parsed.idEmpresa),
     inscripcion: inscripcionResultado,
+    // Se relee DESPUES del update de empresa: el diagnostico que viaja es el estado final, no
+    // el que se leyo a mitad de camino.
+    envioCorreo: parsed.idCampana !== undefined ? estadoEnvioCorreo(parsed.idCampana, idOrganizacion) : envioCorreo,
   };
 }
 
@@ -2569,7 +2634,20 @@ export function crearCadencia(parseada: CadenciaParseada): number {
   const val = cadenciaParseadaSchema.parse(parseada);
   const ahora = new Date().toISOString();
 
-  return db.transaction((tx) => {
+  return db.transaction((tx) => insertarCadenciaEnTx(tx, val, ahora));
+}
+
+// El cuerpo de crearCadencia, sin abrir transaccion propia. Existe para que crear una
+// cadencia Y su campana caiga en UNA sola transaccion (crearCadenciaConCampana, la tool
+// crear_cadencia del MCP) en vez de dos consecutivas: con dos, un fallo al insertar la
+// campana deja la cadencia huerfana viva para siempre -- el mismo zombie que el wizard
+// tuvo que tapar despues con abandonarBorradorAction. Recibe la estructura YA validada
+// por cadenciaParseadaSchema: el unico validador sigue siendo crearCadencia/el caller,
+// no se valida dos veces ni se confia en que alguien lo hizo.
+type TxRepo = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+function insertarCadenciaEnTx(tx: TxRepo, val: z.output<typeof cadenciaParseadaSchema>, ahora: string): number {
+  {
     const insCad = tx
       .insert(cadencia)
       .values({ nombre: val.nombre, descripcion: val.descripcion ?? null, activa: 1, createdAt: ahora, updatedAt: ahora })
@@ -2622,7 +2700,7 @@ export function crearCadencia(parseada: CadenciaParseada): number {
     }
 
     return idCadencia;
-  });
+  }
 }
 
 // Fase 4 (cockpit de cadencia): cambios de un paso existente (dia/canal/aprobacion).
@@ -3546,6 +3624,404 @@ export function crearCampana(input: CampanaInput, idOrganizacion: number): numbe
   return Number(ins.lastInsertRowid);
 }
 
+// --- crear una cadencia entera de una (tool crear_cadencia del MCP) --------------------
+//
+// Hasta hoy montar una cadencia solo se podia por el wizard web: crearCadencia y crearCampana
+// tenian UN solo caller, app/campanas/nueva/actions.ts, una Server Action detras de la sesion
+// del navegador. Un agente al que se le pidiera armar una cadencia quedaba sin camino, o
+// terminaba insertando a mano en cadencia + paso_cadencia + version_paso + segmento + campana,
+// que es exactamente el rodeo que no se paga una vez sino cada vez.
+//
+// UNA transaccion para las tres filas, no tres seguidas. campana.id_cadencia y
+// campana.id_segmento son NOT NULL: si la campana falla despues de insertar la cadencia, esa
+// cadencia queda huerfana y viva para siempre, sin ninguna campana que la referencie y sin
+// forma de llegar a ella desde ninguna pantalla. El wizard ya se comio ese zombie y tuvo que
+// agregar abandonarBorradorAction para limpiarlo a mano; aca no puede pasar porque no existe
+// el estado intermedio.
+//
+// La cadencia NACE con su campana a proposito (no hay una funcion para crear una cadencia
+// suelta desde el MCP): una cadencia sin campana no la consume nada, no se puede inscribir
+// nadie en ella y no aparece en ninguna lista. Poder crearla suelta solo agrega una forma de
+// dejar basura.
+export type CrearCadenciaConCampanaInput = {
+  cadencia: CadenciaParseada;
+  // Reusar un segmento ya guardado, o crear uno nuevo con su definicion. No hay tercera
+  // opcion "sin segmento": campana.id_segmento es NOT NULL, y definicionSegmentoSchema exige
+  // al menos una condicion justamente para que nadie cree una campana que matchea la base
+  // entera.
+  segmento: { idSegmento: number } | { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string };
+  // owner es obligatorio, sin default. Es de quien sale el mensaje: idUsuarioDeOwner lo usa
+  // para resolver el Gmail y la linea de WhatsApp con los que se manda. Una campana con owner
+  // null cae a Apollo en silencio (resolverAdaptadorCorreo), asi que dejarlo vacio no es un
+  // dato faltante, es mandar por otro proveedor sin decirlo.
+  owner: string;
+  nombreCampana?: string;
+  modo?: ModoCampana;
+  reglaFaltante?: ReglaFaltanteInput;
+  intakeDiario?: number;
+  ritmoIngreso?: RitmoIngresoInput;
+  topeToquesDia?: number;
+  fechaInicio?: string;
+};
+
+const crearCadenciaConCampanaSchema = z.object({
+  owner: z.string().min(1, 'owner es obligatorio: es de quien sale el mensaje'),
+  nombreCampana: z.string().min(1).optional(),
+  modo: z.enum(MODOS_CAMPANA).optional(),
+  reglaFaltante: z.enum(REGLAS_FALTANTE).optional(),
+  intakeDiario: z.number().int().positive().optional(),
+  ritmoIngreso: z.enum(RITMOS_INGRESO).optional(),
+  topeToquesDia: z.number().int().positive().optional(),
+  fechaInicio: z.string().min(1).optional(),
+});
+
+export function crearCadenciaConCampana(
+  input: CrearCadenciaConCampanaInput,
+  idOrganizacion: number,
+): { idCadencia: number; idCampana: number; idSegmento: number } {
+  // Los tres validadores corren ANTES de abrir la transaccion: una definicion invalida no
+  // debe llegar a escribir la cadencia y despues hacer rollback, debe no empezar.
+  const meta = crearCadenciaConCampanaSchema.parse(input);
+  const cad = cadenciaParseadaSchema.parse(input.cadencia);
+  const segNuevo = 'idSegmento' in input.segmento ? null : definicionSegmentoSchema.parse(input.segmento.definicion);
+
+  // Un segmento reusado se verifica contra la organizacion ANTES de escribir nada: sin esto se
+  // podria colgar una campana de esta organizacion de un segmento de otra.
+  if ('idSegmento' in input.segmento) {
+    const existe = db
+      .select({ id: segmento.idSegmento })
+      .from(segmento)
+      .where(and(eq(segmento.idSegmento, input.segmento.idSegmento), eq(segmento.idOrganizacion, idOrganizacion)))
+      .get();
+    if (!existe) throw new Error(`El segmento ${input.segmento.idSegmento} no existe en la organizacion ${idOrganizacion}`);
+  }
+
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    let idSegmento: number;
+    if ('idSegmento' in input.segmento) {
+      idSegmento = input.segmento.idSegmento;
+    } else {
+      const insSeg = tx
+        .insert(segmento)
+        .values({
+          nombre: input.segmento.nombre,
+          definicion: JSON.stringify(segNuevo),
+          descripcionNatural: input.segmento.descripcionNatural ?? null,
+          idOrganizacion,
+          createdAt: ahora,
+          updatedAt: ahora,
+        })
+        .run();
+      idSegmento = Number(insSeg.lastInsertRowid);
+    }
+
+    const idCadencia = insertarCadenciaEnTx(tx, cad, ahora);
+
+    const insCamp = tx
+      .insert(campana)
+      .values({
+        nombre: meta.nombreCampana ?? cad.nombre,
+        idCadencia,
+        idSegmento,
+        // Nace en 'borrador', igual que crearCampana: crear no es lanzar. Quien la pone a
+        // correr es inscribirCampana (lanzar_campana) o inscribirEmpresaEnCadencia
+        // (cambiar_cadencia), y esos dos son los que la pasan a 'activa'.
+        estado: 'borrador',
+        modo: meta.modo ?? 'prioritaria',
+        reglaFaltante: meta.reglaFaltante ?? 'cola',
+        intakeDiario: meta.intakeDiario ?? null,
+        ritmoIngreso: meta.ritmoIngreso ?? 'diario',
+        topeToquesDia: meta.topeToquesDia ?? null,
+        fechaInicio: meta.fechaInicio ?? null,
+        owner: meta.owner,
+        idOrganizacion,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+
+    return { idCadencia, idCampana: Number(insCamp.lastInsertRowid), idSegmento };
+  });
+}
+
+// --- releer una campana entera --------------------------------------------------------
+//
+// La relectura que exige la regla del write-path: una tool de escritura devuelve lo que quedo
+// EN LA BASE, no el eco del input. Trae la campana, su cadencia paso por paso con el copy de
+// la version default (que es lo que de verdad se va a mandar), el segmento con cuantas
+// empresas caen hoy, y el diagnostico de si el correo va a salir o no.
+export type PasoDeCadenciaLeido = {
+  idPaso: number;
+  orden: number;
+  canal: string;
+  diaOffset: number;
+  esManual: boolean;
+  objetivo: string | null;
+  idVersion: number | null;
+  asunto: string | null;
+  cuerpo: string | null;
+  variables: string[];
+};
+
+export type CampanaCompleta = {
+  campana: {
+    idCampana: number;
+    nombre: string;
+    estado: string;
+    modo: string;
+    reglaFaltante: string;
+    owner: string | null;
+    idOrganizacion: number;
+    proveedorCampanaId: string | null;
+    aprobadaEnvioGmail: boolean;
+    intakeDiario: number | null;
+    ritmoIngreso: string | null;
+    topeToquesDia: number | null;
+    fechaInicio: string | null;
+    createdAt: string | null;
+  };
+  cadencia: { idCadencia: number; nombre: string; descripcion: string | null; activa: boolean };
+  pasos: PasoDeCadenciaLeido[];
+  segmento: { idSegmento: number; nombre: string; definicion: DefinicionSegmento | null; empresasQueCaen: number | null };
+  inscripciones: { estado: string; n: number }[];
+};
+
+export function campanaCompleta(idCampana: number, idOrganizacion: number): CampanaCompleta | null {
+  const camp = db
+    .select()
+    .from(campana)
+    .where(and(eq(campana.idCampana, idCampana), eq(campana.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!camp) return null;
+
+  const cad = db.select().from(cadencia).where(eq(cadencia.idCadencia, camp.idCadencia)).get();
+  if (!cad) throw new Error(`La campana ${idCampana} apunta a la cadencia ${camp.idCadencia}, que no existe`);
+
+  // LEFT JOIN a la version default: un paso sin version default es un paso sin copy, y hay que
+  // poder VERLO en la relectura (es justo lo que impide que el correo salga), no esconderlo
+  // detras de un inner join que lo desaparece de la lista.
+  const pasos = db
+    .select({
+      idPaso: pasoCadencia.idPaso,
+      orden: pasoCadencia.orden,
+      canal: pasoCadencia.canal,
+      diaOffset: pasoCadencia.diaOffset,
+      esManual: pasoCadencia.esManual,
+      objetivo: pasoCadencia.objetivo,
+      idVersion: versionPaso.idVersion,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+      variables: versionPaso.variables,
+    })
+    .from(pasoCadencia)
+    .leftJoin(versionPaso, and(eq(versionPaso.idPaso, pasoCadencia.idPaso), eq(versionPaso.esDefault, 1)))
+    .where(eq(pasoCadencia.idCadencia, camp.idCadencia))
+    .orderBy(pasoCadencia.orden)
+    .all();
+
+  const seg = db.select().from(segmento).where(eq(segmento.idSegmento, camp.idSegmento)).get();
+  let definicion: DefinicionSegmento | null = null;
+  let empresasQueCaen: number | null = null;
+  if (seg) {
+    // Un segmento con una definicion corrupta no debe tumbar la relectura entera de una
+    // escritura que YA ocurrio: se reporta como null y la campana se sigue viendo.
+    try {
+      definicion = definicionSegmentoSchema.parse(JSON.parse(seg.definicion));
+      empresasQueCaen = contarSegmento(definicion, idOrganizacion);
+    } catch {
+      definicion = null;
+    }
+  }
+
+  const inscripciones = db
+    .select({ estado: inscripcion.estado, n: sql<number>`count(*)` })
+    .from(inscripcion)
+    .where(eq(inscripcion.idCampana, idCampana))
+    .groupBy(inscripcion.estado)
+    .all();
+
+  return {
+    campana: {
+      idCampana: camp.idCampana,
+      nombre: camp.nombre,
+      estado: camp.estado,
+      modo: camp.modo,
+      reglaFaltante: camp.reglaFaltante,
+      owner: camp.owner,
+      idOrganizacion: camp.idOrganizacion,
+      proveedorCampanaId: camp.proveedorCampanaId,
+      aprobadaEnvioGmail: camp.aprobadaEnvioGmail === 1,
+      intakeDiario: camp.intakeDiario,
+      ritmoIngreso: camp.ritmoIngreso,
+      topeToquesDia: camp.topeToquesDia,
+      fechaInicio: camp.fechaInicio,
+      createdAt: camp.createdAt,
+    },
+    cadencia: { idCadencia: cad.idCadencia, nombre: cad.nombre, descripcion: cad.descripcion, activa: cad.activa === 1 },
+    pasos: pasos.map((p) => ({
+      idPaso: p.idPaso,
+      orden: p.orden,
+      canal: p.canal,
+      diaOffset: p.diaOffset,
+      esManual: p.esManual === 1,
+      objetivo: p.objetivo,
+      idVersion: p.idVersion,
+      asunto: p.asunto,
+      cuerpo: p.cuerpo,
+      variables: p.variables ? (JSON.parse(p.variables) as string[]) : [],
+    })),
+    segmento: { idSegmento: camp.idSegmento, nombre: seg?.nombre ?? '(segmento borrado)', definicion, empresasQueCaen },
+    inscripciones,
+  };
+}
+
+// --- por que un correo de esta campana no va a salir ----------------------------------
+//
+// El bug que esto existe para hacer visible: inscribir una empresa en una campana con pasos de
+// correo produce filas de paso_inscripcion que NUNCA salen y nadie avisa. Son tres compuertas
+// distintas, en tres archivos distintos, y ninguna deja rastro cuando corta:
+//
+//  1. pasoInscripcionesPendientes (repository) exige campana.proveedor_campana_id NOT NULL.
+//     Una campana con NULL simplemente no aparece en la consulta: sus filas quedan 'pendiente'
+//     para siempre y ningun log lo dice.
+//  2. agruparPendientesCorreo (adapters/registro-envio.ts) descarta la fila entera cuando el
+//     dueno resuelve a Gmail y aprobada_envio_gmail=0. Era un `continue` pelado.
+//  3. pasoInscripcionesPendientes exige es_manual=0 O aprobado_en NOT NULL. Un paso de correo
+//     marcado manual espera revision humana igual que uno de WhatsApp.
+//
+// Medido en produccion el 2026-07-28: las dos campanas vivas (55 y 56) tienen las TRES
+// compuertas cerradas a la vez -- proveedor_campana_id NULL, aprobada_envio_gmail 0, y los 5
+// pasos de correo de cada una con es_manual=1.
+//
+// Esta funcion las lee juntas y dice cual esta cerrada. No arregla nada por su cuenta: es el
+// dato que las tools devuelven para que un envio muerto sea imposible de no ver.
+export type EstadoEnvioCorreo = {
+  idCampana: number;
+  tieneCorreo: boolean;
+  pasosCorreo: number;
+  saldra: boolean;
+  bloqueos: string[];
+  proveedorCampanaId: string | null;
+  aprobadaEnvioGmail: boolean;
+  owner: string | null;
+  idUsuarioDelOwner: string | null;
+  proveedorQueMandaria: 'gmail' | 'apollo' | null;
+  pasosManualesSinAprobar: number;
+};
+
+export function estadoEnvioCorreo(idCampana: number, idOrganizacion: number): EstadoEnvioCorreo | null {
+  const camp = db
+    .select({
+      idCadencia: campana.idCadencia,
+      estado: campana.estado,
+      owner: campana.owner,
+      proveedorCampanaId: campana.proveedorCampanaId,
+      aprobadaEnvioGmail: campana.aprobadaEnvioGmail,
+    })
+    .from(campana)
+    .where(and(eq(campana.idCampana, idCampana), eq(campana.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!camp) return null;
+
+  const pasosCorreo = db
+    .select({ idPaso: pasoCadencia.idPaso, esManual: pasoCadencia.esManual })
+    .from(pasoCadencia)
+    .where(and(eq(pasoCadencia.idCadencia, camp.idCadencia), eq(pasoCadencia.canal, 'correo')))
+    .all();
+
+  const idUsuario = idUsuarioDeOwner(camp.owner, idOrganizacion);
+  const esGmail = idUsuario ? gmailVerificadoDe(idUsuario) : false;
+
+  // Cuenta las filas YA materializadas que estan paradas por el gate de revision humana. Es
+  // distinto de "la cadencia tiene pasos manuales": lo primero ya bloquea envios reales.
+  const manualesSinAprobar =
+    pasosCorreo.length === 0
+      ? 0
+      : (db
+          .select({ n: sql<number>`count(*)` })
+          .from(pasoInscripcion)
+          .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+          .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+          .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+          .where(
+            and(
+              eq(inscripcion.idCampana, idCampana),
+              eq(pasoInscripcion.canal, 'correo'),
+              inArray(pasoInscripcion.estado, ['pendiente', 'fallo']),
+              eq(pasoCadencia.esManual, 1),
+              isNull(pasoInscripcion.aprobadoEn),
+            ),
+          )
+          .get()?.n ?? 0);
+
+  const bloqueos: string[] = [];
+  if (pasosCorreo.length > 0) {
+    if (camp.proveedorCampanaId === null) {
+      bloqueos.push(
+        'campana.proveedor_campana_id esta en NULL: pasoInscripcionesPendientes exige que NO lo este para el canal correo, ' +
+          'asi que ningun paso de correo de esta campana entra siquiera a la cola del worker',
+      );
+    }
+    if (esGmail && camp.aprobadaEnvioGmail !== 1) {
+      bloqueos.push(
+        `el owner '${camp.owner}' manda por Gmail y campana.aprobada_envio_gmail esta en 0: agruparPendientesCorreo ` +
+          'descarta la fila entera, sin error y sin marcarla fallo, y se queda pendiente para siempre',
+      );
+    }
+    if (!camp.owner) {
+      bloqueos.push('la campana no tiene owner: el correo caeria a Apollo por fallback en vez de salir del Gmail de nadie');
+    } else if (!idUsuario) {
+      bloqueos.push(`el owner '${camp.owner}' no resuelve a ningun usuario: el correo caeria a Apollo por fallback`);
+    }
+    const manuales = pasosCorreo.filter((p) => p.esManual === 1).length;
+    if (manuales > 0) {
+      bloqueos.push(
+        `${manuales} de los ${pasosCorreo.length} pasos de correo tienen es_manual=1: cada envio de esos pasos exige que ` +
+          'un humano lo apruebe uno por uno (programar_envios) antes de salir. Una cadencia que se deja corriendo sola ' +
+          'los quiere en es_manual=0',
+      );
+    }
+    if (camp.estado !== 'activa') {
+      bloqueos.push(`la campana esta en estado '${camp.estado}': pasoInscripcionesPendientes solo mira campanas 'activa'`);
+    }
+  }
+
+  return {
+    idCampana,
+    tieneCorreo: pasosCorreo.length > 0,
+    pasosCorreo: pasosCorreo.length,
+    saldra: pasosCorreo.length > 0 && bloqueos.length === 0,
+    bloqueos,
+    proveedorCampanaId: camp.proveedorCampanaId,
+    aprobadaEnvioGmail: camp.aprobadaEnvioGmail === 1,
+    owner: camp.owner,
+    idUsuarioDelOwner: idUsuario,
+    proveedorQueMandaria: pasosCorreo.length === 0 ? null : esGmail ? 'gmail' : 'apollo',
+    pasosManualesSinAprobar: manualesSinAprobar,
+  };
+}
+
+// Arma una campana para que su correo pueda salir: el par (proveedor_campana_id sintetico,
+// aprobada_envio_gmail=1) que escribe el boton "Lanzar hoy" de la web. Se llama DENTRO de la
+// transaccion de quien inscribe, para que "esta empresa entra" y "el correo puede salir" sean
+// un solo hecho y no dos que se pueden desincronizar a la mitad.
+//
+// NO toca es_manual: si la cadencia pide revision humana por paso, esa decision se respeta. Y
+// no crea nada en Apollo -- el id es sintetico, es el correlator del pixel de tracking, igual
+// que en la web.
+export function armarEnvioCorreoEnTx(tx: TxRepo, idCampana: number, ahora: string): void {
+  tx.update(campana)
+    .set({
+      proveedorCampanaId: sql`coalesce(${campana.proveedorCampanaId}, ${'gmail-camp-' + idCampana})`,
+      aprobadaEnvioGmail: 1,
+      updatedAt: ahora,
+    })
+    .where(eq(campana.idCampana, idCampana))
+    .run();
+}
+
 // Un borrador que nunca corrio inscribirCampana no tiene inscripciones -- se puede
 // borrar limpio. Nunca toca 'activa'/'pausada'/'archivada': esas ya tienen historia
 // real (inscripciones, toques) que no es seguro eliminar desde aca. paso_cadencia y
@@ -4086,6 +4562,13 @@ export type FilaPreviewInscripcion = {
   idContacto: number | null;
   nombreContacto: string | null;
   cargo: string | null;
+  // email/telefono (2026-07-27, para la previsualizacion en seco de lanzar_campana en el MCP):
+  // hasta hoy el preview decia a QUIEN le llega (nombre y cargo) pero no A DONDE. En pantalla
+  // no hacia falta; para confirmar un envio sin ver la pantalla, si -- lo que hay que poder
+  // leer antes de mandar es la direccion exacta. Son los mismos datos del contacto elegido, ya
+  // cargados en esta funcion: no agregan una consulta.
+  email: string | null;
+  telefono: string | null;
   estado: EstadoPreviewInscripcion;
   pasosAjustados: PasoAjustado[];
   toquesTotales: number;
@@ -4166,6 +4649,8 @@ export function previsualizarInscripcionCampana(idCampana: number, idOrganizacio
       idContacto: p.idContactoDestinatario,
       nombreContacto: dest?.nombre ?? null,
       cargo: dest?.cargo ?? null,
+      email: dest?.email ?? null,
+      telefono: dest?.telefono ?? null,
       estado: p.estado,
       pasosAjustados: p.pasosAjustados,
       toquesTotales: p.toquesTotales,
@@ -4450,6 +4935,187 @@ export function actualizarConfigLanzamiento(idCampana: number, cambios: ConfigLa
   if ('fechaInicio' in cambios) sets.fechaInicio = cambios.fechaInicio || null;
 
   db.update(campana).set(sets).where(eq(campana.idCampana, idCampana)).run();
+}
+
+// La foto COMPLETA de una campana despues de lanzarla (2026-07-27, para lanzar_campana del
+// MCP). Existe porque una accion de escritura tiene que devolver lo que quedo escrito
+// releyendolo, y hasta hoy no habia una sola funcion que trajera las tres capas juntas: la
+// fila de campana con proveedor_campana_id y aprobada_envio_gmail, las inscripciones con su
+// destinatario real, y cada paso_inscripcion con su estado, su proveedor y su id de mensaje.
+//
+// actividadDeCampana() responde una pregunta parecida pero NO sirve para esto: no trae
+// proveedor_mensaje_id (el acuse del proveedor, que es la prueba de que el mensaje salio),
+// no trae aprobado_en (el gate de revision humana de whatsapp) ni intentos, y descarta las
+// inscripciones bloqueadas porque hace innerJoin contra contacto/destinatario. Aca las
+// bloqueadas SI aparecen: una inscripcion sin destinatario es la mitad de la respuesta a
+// "a quien le llego".
+export type DestinatarioLanzado = {
+  idDestinatario: number;
+  idContacto: number;
+  nombre: string | null;
+  email: string | null;
+  telefono: string | null;
+  estado: string;
+};
+
+export type InscripcionLanzada = {
+  idInscripcion: number;
+  idEmpresa: string;
+  empresa: string;
+  estado: string;
+  fechaInscripcion: string | null;
+  destinatarios: DestinatarioLanzado[];
+};
+
+export type PasoLanzado = {
+  idPasoInscripcion: number;
+  idInscripcion: number;
+  idEmpresa: string;
+  empresa: string;
+  destinatario: string | null;
+  email: string | null;
+  telefono: string | null;
+  orden: number;
+  canal: string;
+  esManual: boolean;
+  estado: string;
+  proveedor: string | null;
+  proveedorMensajeId: string | null;
+  fechaProgramada: string | null;
+  fechaEnviada: string | null;
+  aprobadoEn: string | null;
+  aprobadoPor: string | null;
+  intentos: number;
+};
+
+export type EstadoLanzamientoCampana = {
+  campana: {
+    idCampana: number;
+    nombre: string;
+    estado: string;
+    owner: string | null;
+    idCadencia: number;
+    idSegmento: number;
+    proveedorCampanaId: string | null;
+    aprobadaEnvioGmail: boolean;
+    intakeDiario: number | null;
+    ritmoIngreso: string;
+    topeToquesDia: number | null;
+    fechaInicio: string | null;
+    updatedAt: string | null;
+  };
+  inscripciones: InscripcionLanzada[];
+  pasos: PasoLanzado[];
+};
+
+export function estadoLanzamientoCampana(idCampana: number, idOrganizacion: number): EstadoLanzamientoCampana | null {
+  const camp = db
+    .select({
+      idCampana: campana.idCampana,
+      nombre: campana.nombre,
+      estado: campana.estado,
+      owner: campana.owner,
+      idCadencia: campana.idCadencia,
+      idSegmento: campana.idSegmento,
+      proveedorCampanaId: campana.proveedorCampanaId,
+      aprobadaEnvioGmail: campana.aprobadaEnvioGmail,
+      intakeDiario: campana.intakeDiario,
+      ritmoIngreso: campana.ritmoIngreso,
+      topeToquesDia: campana.topeToquesDia,
+      fechaInicio: campana.fechaInicio,
+      updatedAt: campana.updatedAt,
+    })
+    .from(campana)
+    .where(and(eq(campana.idCampana, idCampana), eq(campana.idOrganizacion, idOrganizacion)))
+    .get();
+  if (!camp) return null;
+
+  // leftJoin y no innerJoin: una inscripcion 'bloqueada' nace sin destinatario (nadie con
+  // email/telefono utilizable) y es justo la que hay que ver despues de lanzar.
+  const filasInscripcion = db
+    .select({
+      idInscripcion: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      estado: inscripcion.estado,
+      fechaInscripcion: inscripcion.fechaInscripcion,
+      idDestinatario: destinatario.idDestinatario,
+      idContacto: destinatario.idContacto,
+      estadoDestinatario: destinatario.estado,
+      nombreContacto: contacto.nombre,
+      email: contacto.email,
+      telefono: contacto.telefono,
+    })
+    .from(inscripcion)
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .leftJoin(destinatario, eq(destinatario.idInscripcion, inscripcion.idInscripcion))
+    .leftJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .where(eq(inscripcion.idCampana, idCampana))
+    .orderBy(inscripcion.idInscripcion, destinatario.idDestinatario)
+    .all();
+
+  const porInscripcion = new Map<number, InscripcionLanzada>();
+  for (const f of filasInscripcion) {
+    let ins = porInscripcion.get(f.idInscripcion);
+    if (!ins) {
+      ins = {
+        idInscripcion: f.idInscripcion,
+        idEmpresa: f.idEmpresa,
+        empresa: f.empresa,
+        estado: f.estado,
+        fechaInscripcion: f.fechaInscripcion,
+        destinatarios: [],
+      };
+      porInscripcion.set(f.idInscripcion, ins);
+    }
+    if (f.idDestinatario != null && f.idContacto != null) {
+      ins.destinatarios.push({
+        idDestinatario: f.idDestinatario,
+        idContacto: f.idContacto,
+        nombre: f.nombreContacto,
+        email: f.email,
+        telefono: f.telefono,
+        estado: f.estadoDestinatario ?? 'activo',
+      });
+    }
+  }
+
+  const pasos = db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idInscripcion: inscripcion.idInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      destinatario: contacto.nombre,
+      email: contacto.email,
+      telefono: contacto.telefono,
+      orden: pasoCadencia.orden,
+      canal: pasoInscripcion.canal,
+      esManual: pasoCadencia.esManual,
+      estado: pasoInscripcion.estado,
+      proveedor: pasoInscripcion.proveedor,
+      proveedorMensajeId: pasoInscripcion.proveedorMensajeId,
+      fechaProgramada: pasoInscripcion.fechaProgramada,
+      fechaEnviada: pasoInscripcion.fechaEnviada,
+      aprobadoEn: pasoInscripcion.aprobadoEn,
+      aprobadoPor: pasoInscripcion.aprobadoPor,
+      intentos: pasoInscripcion.intentos,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .where(eq(inscripcion.idCampana, idCampana))
+    .orderBy(pasoCadencia.orden, pasoInscripcion.idPasoInscripcion)
+    .all();
+
+  return {
+    campana: { ...camp, aprobadaEnvioGmail: camp.aprobadaEnvioGmail === 1 },
+    inscripciones: [...porInscripcion.values()],
+    pasos: pasos.map((p) => ({ ...p, esManual: p.esManual === 1 })),
+  };
 }
 
 // Task 1.6: empresas inscritas (activas + bloqueadas). Reusa el mismo inscripcion.estado
@@ -5836,9 +6502,17 @@ export function marcarPasoInscripcionEnviando(idPasoInscripcion: number) {
 
 // proveedor (sesion 2026-07-09): ya no se hardcodea 'apollo' -- viene del EnvioResultado
 // real que devolvio el adaptador que de verdad mando el paso (ver push.ts).
-export function marcarPasoInscripcionEnviada(idPasoInscripcion: number, proveedor: string, proveedorMensajeId: string, fechaEnviada: string) {
+// proveedorHiloId (2026-07-28): opcional porque solo Gmail tiene hilo. Se escribe solo si
+// vino -- un undefined NO pisa con NULL lo que ya estuviera guardado.
+export function marcarPasoInscripcionEnviada(
+  idPasoInscripcion: number,
+  proveedor: string,
+  proveedorMensajeId: string,
+  fechaEnviada: string,
+  proveedorHiloId?: string,
+) {
   db.update(pasoInscripcion)
-    .set({ estado: 'enviada', proveedor, proveedorMensajeId, fechaEnviada })
+    .set({ estado: 'enviada', proveedor, proveedorMensajeId, fechaEnviada, ...(proveedorHiloId ? { proveedorHiloId } : {}) })
     .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
     .run();
 }
@@ -6016,13 +6690,54 @@ export function historialPasosDestinatario(idDestinatario: number) {
 }
 
 // V5.5: poll de tracking + reply detection.
+// owner/idOrganizacion (2026-07-28): los mismos dos campos con los que el camino de envio
+// resuelve el proveedor de correo (idUsuarioDeOwner + decidirProveedorCorreo). Se agregan aca
+// para que el poll pueda hacer la misma pregunta en vez de asumir Apollo.
 export function campanasConSecuencia(): CampanaConSecuencia[] {
   return db
-    .select({ idCampana: campana.idCampana, proveedorCampanaId: campana.proveedorCampanaId })
+    .select({
+      idCampana: campana.idCampana,
+      proveedorCampanaId: campana.proveedorCampanaId,
+      owner: campana.owner,
+      idOrganizacion: campana.idOrganizacion,
+    })
     .from(campana)
     .where(isNotNull(campana.proveedorCampanaId))
     .all()
-    .map((c) => ({ idCampana: c.idCampana, proveedorCampanaId: c.proveedorCampanaId as string }));
+    .map((c) => ({
+      idCampana: c.idCampana,
+      proveedorCampanaId: c.proveedorCampanaId as string,
+      owner: c.owner ?? null,
+      idOrganizacion: c.idOrganizacion,
+    }));
+}
+
+// Los hilos de Gmail que ya salieron por esta campana: la unidad de lectura de Gmail
+// (adapters/gmail.ts lee por hilo, no por campana). Un hilo por envio 'enviada'.
+//
+// COALESCE con proveedor_mensaje_id a proposito: proveedor_hilo_id nace con la migracion
+// 0020 y los envios anteriores lo tienen NULL. Para un hilo que arranca la API de Gmail
+// devuelve threadId == id del primer mensaje (el supuesto que destinatarioOriginalDe ya da
+// por cierto desde el 2026-07-14, gmail.ts), y enviarPaso nunca contesta un hilo existente,
+// asi que el proveedor_mensaje_id guardado ES el hilo para todo lo mandado hasta hoy. El
+// fallback deja de tener efecto solo con los envios nuevos, que ya guardan el hilo real.
+export function hilosGmailDeCampana(idCampana: number): string[] {
+  return db
+    .selectDistinct({ hilo: sql<string>`COALESCE(${pasoInscripcion.proveedorHiloId}, ${pasoInscripcion.proveedorMensajeId})` })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .where(
+      and(
+        eq(inscripcion.idCampana, idCampana),
+        eq(pasoInscripcion.proveedor, 'gmail'),
+        eq(pasoInscripcion.estado, 'enviada'),
+        isNotNull(sql`COALESCE(${pasoInscripcion.proveedorHiloId}, ${pasoInscripcion.proveedorMensajeId})`),
+      ),
+    )
+    .all()
+    .map((f) => f.hilo)
+    .filter((h): h is string => Boolean(h));
 }
 
 // Resuelve por (proveedorCampanaId, email): el envio 'enviada' MAS RECIENTE de ese
@@ -6096,6 +6811,143 @@ export function guardarEventoTracking(idPasoInscripcion: number, evento: EventoP
     })
     .run();
   return 'insertado';
+}
+
+// --- leer el tracking de correo (tool tracking_correo del MCP) -------------------------
+//
+// evento_tracking no se podia leer desde el MCP: TOOLS_LECTURA no lo exponia, y
+// aperturas_whatsapp es otra cosa (mensajes de apertura de conversacion de WhatsApp, no
+// eventos de open de correo). La unica forma de ver una apertura o un clic era entrar por SSH
+// y correr node contra el volumen.
+//
+// Devuelve el evento crudo, no un porcentaje. Tres razones por las que un agregado calculado
+// aca mentiria, todas medidas y ninguna arreglada todavia:
+//
+//  1. No hay deduplicacion. El id de evento del pixel lleva Date.now() + random, asi que dos
+//     hits separados por 5 milisegundos son dos filas. En produccion un correo abierto dos
+//     veces por el operador dejo TRES filas de apertura.
+//  2. El proxy de imagenes de Gmail abre el pixel solo. Desde el 2026-07-28 el detalle trae
+//     user_agent e ip (app/api/track/huella-request.ts) y ese es el unico dato con el que se
+//     puede separar una apertura humana de un prefetch, pero nadie filtra por el todavia.
+//  3. La atribucion por paso esta corrida. resolverDestinatarioPorEmail acredita el evento al
+//     paso_inscripcion 'enviada' MAS RECIENTE de esa campana y ese email, no al correo que de
+//     verdad se abrio: con una cadencia de 5 pasos, una apertura del correo 1 se le acredita
+//     al correo 3. Muerde desde el paso 2.
+//
+// Por eso `pasoOrden` viaja con la advertencia pegada y no como si fuera un hecho.
+export type FiltroTrackingCorreo = {
+  idEmpresa?: string;
+  idCampana?: number;
+  tipo?: string;
+  desde?: string;
+  hasta?: string;
+  limite?: number;
+};
+
+export type EventoTrackingCorreo = {
+  idEvento: number;
+  tipo: string;
+  fechaEvento: string | null;
+  createdAt: string | null;
+  idEmpresa: string;
+  empresa: string;
+  idCampana: number;
+  campana: string;
+  idPasoInscripcion: number;
+  pasoOrden: number | null;
+  asunto: string | null;
+  email: string | null;
+  contacto: string | null;
+  proveedorEventoId: string;
+  // La huella cruda del request, cuando existe. Los eventos anteriores al 2026-07-28 no la
+  // tienen: null significa "no se capturo", nunca "vino vacia".
+  via: string | null;
+  userAgent: string | null;
+  ip: string | null;
+  url: string | null;
+  detalle: string | null;
+};
+
+export function trackingCorreo(filtro: FiltroTrackingCorreo, idOrganizacion: number): EventoTrackingCorreo[] {
+  const condiciones = [eq(eventoTracking.canal, 'correo'), eq(campana.idOrganizacion, idOrganizacion)];
+  if (filtro.idEmpresa) condiciones.push(eq(inscripcion.idEmpresa, filtro.idEmpresa));
+  if (filtro.idCampana != null) condiciones.push(eq(inscripcion.idCampana, filtro.idCampana));
+  if (filtro.tipo) condiciones.push(eq(eventoTracking.tipo, filtro.tipo));
+  // Compara contra fecha_evento con fallback a created_at: fecha_evento es nullable y un
+  // evento sin ella desapareceria del rango en silencio, que es justo el modo de falla que
+  // esta tool existe para no repetir.
+  const fecha = sql`coalesce(${eventoTracking.fechaEvento}, ${eventoTracking.createdAt})`;
+  if (filtro.desde) condiciones.push(sql`${fecha} >= ${filtro.desde}`);
+  if (filtro.hasta) condiciones.push(sql`${fecha} <= ${filtro.hasta}`);
+
+  const filas = db
+    .select({
+      idEvento: eventoTracking.idEvento,
+      tipo: eventoTracking.tipo,
+      fechaEvento: eventoTracking.fechaEvento,
+      createdAt: eventoTracking.createdAt,
+      detalle: eventoTracking.detalle,
+      proveedorEventoId: eventoTracking.proveedorEventoId,
+      idPasoInscripcion: eventoTracking.idPasoInscripcion,
+      pasoOrden: pasoCadencia.orden,
+      asunto: versionPaso.asunto,
+      idEmpresa: inscripcion.idEmpresa,
+      empresa: empresa.nombreOficial,
+      idCampana: inscripcion.idCampana,
+      campanaNombre: campana.nombre,
+      email: contacto.email,
+      contacto: contacto.nombre,
+    })
+    .from(eventoTracking)
+    .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .leftJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+    .leftJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
+    .where(and(...condiciones))
+    .orderBy(desc(sql`coalesce(${eventoTracking.fechaEvento}, ${eventoTracking.createdAt})`), desc(eventoTracking.idEvento))
+    .limit(filtro.limite ?? 200)
+    .all();
+
+  return filas.map((f) => {
+    // detalle es JSON libre escrito por tres productores distintos (pixel, click, Apollo). Un
+    // detalle ilegible no puede tumbar la lectura entera: se devuelve crudo y los campos
+    // extraidos quedan null.
+    let d: Record<string, unknown> = {};
+    try {
+      const p: unknown = f.detalle ? JSON.parse(f.detalle) : {};
+      if (p && typeof p === 'object') d = p as Record<string, unknown>;
+    } catch {
+      d = {};
+    }
+    const s = (k: string): string | null => (typeof d[k] === 'string' ? (d[k] as string) : null);
+    return {
+      idEvento: f.idEvento,
+      tipo: f.tipo,
+      fechaEvento: f.fechaEvento,
+      createdAt: f.createdAt,
+      idEmpresa: f.idEmpresa,
+      empresa: f.empresa,
+      idCampana: f.idCampana,
+      campana: f.campanaNombre,
+      idPasoInscripcion: f.idPasoInscripcion,
+      pasoOrden: f.pasoOrden,
+      asunto: f.asunto,
+      email: f.email,
+      contacto: f.contacto,
+      proveedorEventoId: f.proveedorEventoId,
+      via: s('via'),
+      // Los dos nombres que escribe huella-request.ts. Se leen los dos por si el productor
+      // cambia de convencion: un campo que existe y no se lee es peor que uno que no existe.
+      userAgent: s('user_agent') ?? s('userAgent'),
+      ip: s('ip'),
+      url: s('url'),
+      detalle: f.detalle,
+    };
+  });
 }
 
 // pausada es un estado nuevo (no 'finalizada'): B6 pide que una reply o un

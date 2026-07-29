@@ -24,6 +24,26 @@ import {
   aprobarYProgramarPaso,
   enviosProgramadosDelDia,
   type EnvioProgramado,
+  campanaParaLanzar,
+  previsualizarInscripcionCampana,
+  canalesDeCadencia,
+  pasosParaSincronizarCopy,
+  lineasWhatsappDeUsuario,
+  gmailVerificadoDe,
+  fijarOwnerCampana,
+  actualizarConfigLanzamiento,
+  inscribirCampana,
+  guardarProveedorCampanaId,
+  marcarCampanaAprobadaGmail,
+  estadoLanzamientoCampana,
+  pasoInscripcionesPendientes,
+  crearCadenciaConCampana,
+  campanaCompleta,
+  estadoEnvioCorreo,
+  trackingCorreo,
+  type ConfigLanzamientoInput,
+  type EstadoLanzamientoCampana,
+  type ResultadoInscripcion,
   embudoPipeline,
   cuentasParaReconciliar,
   empresaFueraDelPipeline,
@@ -69,10 +89,23 @@ import {
   type ActualizarEmpresaInput,
   type EmpresaEscrita,
 } from '../db/repository';
-import { RESULTADOS_REUNION_OCURRIDA, type RegistrarToqueInput, type EditarToqueInput, type PlanearDiaInput, type MarcarNoEjecutadoInput } from '../db/validation';
+import {
+  RESULTADOS_REUNION_OCURRIDA,
+  type RegistrarToqueInput,
+  type EditarToqueInput,
+  type PlanearDiaInput,
+  type MarcarNoEjecutadoInput,
+  type Canal,
+  type RitmoIngresoInput,
+  type DefinicionSegmento,
+} from '../db/validation';
+import { readinessCanalUsuario } from '../core/readiness-canal-usuario';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
+// El mismo parser que usa el wizard web (app/campanas/nueva/actions.ts). Ver la nota en
+// crearCadenciaTool: es donde vive la extraccion de [variables] y la directiva [[firma]].
+import { parsearCadenciaJson } from '../core/cadencia-parser';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { debeEncolarHaciaNotion, type OrigenCambio } from '../core/origen-cambio';
 import { CLAVE_SIN_ETAPA } from '../core/embudo';
@@ -1029,6 +1062,525 @@ export function programarEnviosTool(input: ProgramarEnviosInput) {
       `Las horas son el piso desde el que cada mensaje queda ELEGIBLE, no el instante exacto de salida. ` +
       `El worker corre cada 5 minutos y separa los de una misma pasada con whatsapp_espaciado_min_ms/max_ms: ` +
       `para que el ritmo real sea de ${espaciadoMinutos} minutos, esas dos claves tienen que valer ${espaciadoMinutos * 60_000}.`,
+  };
+}
+
+// --- lanzar_campana -------------------------------------------------------------------
+//
+// Lanzar una campana solo se podia apretando el boton de /campanas/[id]/lanzar. Esta tool es
+// ese mismo movimiento sin la web: fija el owner, persiste la config de goteo, inscribe el
+// segmento curado, deja la campana lista para Gmail y empuja de una lo que ya vencio.
+//
+// DOS PASADAS, y la primera es el default: sin `confirmar: true` no se escribe NADA. Se
+// devuelve a quien le llegaria, por que canal y a que direccion, mas todo lo que impediria
+// lanzar. Un lanzamiento no se deshace (el mensaje ya salio), asi que el default tenia que ser
+// el que no manda.
+//
+// Lo que NO hace, a proposito:
+//  - no salta el gate de revision humana de WhatsApp. Los pasos de whatsapp se materializan
+//    igual, pero pasoInscripcionesPendientes('whatsapp') exige aprobado_en, asi que ninguno
+//    sale de aca: hay que aprobarlos uno por uno con programar_envios. Se reportan aparte
+//    (esperandoRevisionHumana) para que quede claro que quedaron parados a proposito.
+//  - no crea ni sincroniza una secuencia en Apollo. El unico camino de correo vivo es Gmail
+//    (readinessCanalUsuario bloquea 'correo' sin Gmail verificado antes de escribir nada), y
+//    ahi el proveedor_campana_id es sintetico, igual que en la web.
+//  - no lanza una campana que no este en 'borrador'. Re-inscribir una campana ya activa es un
+//    movimiento distinto (sumar empresas nuevas del segmento) y no se hace por accidente
+//    desde una tool.
+//
+// ADVERTENCIA que no vive en ningun comentario del worker: el empujon de esta tool es 'manual'
+// (materializarYEmpujarAhora), y el modo manual NO respeta la ventana de 8 a 18 hora Bogota ni
+// el espaciado de 45-90s. Un lanzamiento a las 11pm manda a las 11pm.
+
+export type LanzarCampanaInput = {
+  idCampana: number;
+  confirmar?: boolean;
+  intakeDiario?: number | null;
+  ritmoIngreso?: RitmoIngresoInput;
+  topeToquesDia?: number | null;
+  fechaInicio?: string | null;
+};
+
+// Quien lanza. No sale del input del cliente MCP a proposito: el owner que queda en la campana
+// y el usuario contra el que se resuelven Gmail y la linea de WhatsApp son los de la SESION
+// autenticada (app/api/mcp/route.ts), igual que requireEscritura() en la web. Un cliente que
+// pudiera elegir el owner podria mandar por la linea de otra persona.
+export type SesionLanzamiento = { idUsuario: string; owner: string };
+
+export type LanzarCampanaDeps = {
+  // El empujon real. Inyectable para poder probar el fallo del proveedor sin proveedor, y
+  // cargado por import dinamico para que el resto del MCP (todo lectura) no arrastre los
+  // adaptadores del worker solo por importar este archivo.
+  empujarAhora: () => Promise<void>;
+};
+
+const DEPS_LANZAR_DEFAULT: LanzarCampanaDeps = {
+  empujarAhora: async () => {
+    const { materializarYEmpujarAhora } = await import('../worker/index');
+    await materializarYEmpujarAhora();
+  },
+};
+
+// Estados de paso_inscripcion que, en un canal automatico, significan "no salio". 'enviando' es
+// transitorio: si quedo ahi despues del push, el proceso se cayo entre marcar y recibir la
+// respuesta del proveedor.
+const ESTADOS_NO_SALIO = ['pendiente', 'fallo', 'enviando'];
+
+export type LanzarCampanaResultado = {
+  idCampana: number;
+  confirmado: boolean;
+  puedeLanzar: boolean;
+  bloqueos: string[];
+  advertencias: string[];
+  campana: ReturnType<typeof campanaParaLanzar>;
+  canales: Canal[];
+  readiness: { canal: Canal; listo: boolean; motivo: string | null }[];
+  destinatarios: { empresa: string; idEmpresa: string; contacto: string | null; email: string | null; telefono: string | null; canales: string[]; toques: number }[];
+  bloqueadas: { empresa: string; idEmpresa: string; motivo: string }[];
+  // Lo que el empujon mandaria ADEMAS de esta campana: materializarYEmpujarAhora barre TODAS
+  // las campanas activas, no solo esta. Se dice antes de confirmar, no despues.
+  colateral: { idPasoInscripcion: number; canal: string; empresa: string | null }[];
+  colateralNota: string;
+  inscripcion: ResultadoInscripcion | null;
+  estadoTrasLanzar: EstadoLanzamientoCampana | null;
+  esperandoRevisionHumana: { idPasoInscripcion: number; canal: string; empresa: string }[];
+  problemas: string[];
+  logDelPush: string[];
+  nota: string;
+};
+
+export async function lanzarCampanaTool(
+  input: LanzarCampanaInput,
+  idOrganizacion: number,
+  sesion: SesionLanzamiento,
+  deps: LanzarCampanaDeps = DEPS_LANZAR_DEFAULT,
+): Promise<LanzarCampanaResultado> {
+  const camp = campanaParaLanzar(input.idCampana, idOrganizacion);
+  // Sin campana no hay nada que previsualizar ni que lanzar: revienta en los dos modos.
+  if (!camp) throw new Error(`lanzar_campana: la campaña ${input.idCampana} no existe en la organización ${idOrganizacion}`);
+
+  const canales = canalesDeCadencia(camp.idCadencia);
+  const tieneLineaWhatsapp = lineasWhatsappDeUsuario(sesion.idUsuario).some((l) => l.estado === 'activa');
+  const tieneGmailVerificado = gmailVerificadoDe(sesion.idUsuario);
+  const readiness = canales.map((canal) => {
+    const v = readinessCanalUsuario(canal, tieneLineaWhatsapp, tieneGmailVerificado);
+    return { canal, listo: v.listo, motivo: v.listo ? null : v.motivo };
+  });
+
+  const filas = previsualizarInscripcionCampana(input.idCampana, idOrganizacion) ?? [];
+  const elegibles = filas.filter((f) => f.idContacto != null);
+  const bloqueadas = filas.filter((f) => f.idContacto == null);
+
+  const bloqueos: string[] = [];
+  const advertencias: string[] = [];
+
+  if (camp.estado !== 'borrador') {
+    bloqueos.push(
+      `la campaña está en estado '${camp.estado}', no en 'borrador'. Esta tool solo lanza campañas que nunca se lanzaron; ` +
+        `sumar empresas nuevas a una campaña ya activa es otro movimiento y no se hace desde acá`,
+    );
+  }
+  if (!sesion.owner.trim()) bloqueos.push('la sesión no tiene owner mapeado: no hay a nombre de quién lanzar');
+  if (!sesion.idUsuario.trim()) bloqueos.push('la sesión no tiene usuario: no se puede resolver el Gmail ni la línea de WhatsApp de quien lanza');
+  for (const r of readiness) if (!r.listo) bloqueos.push(`canal ${r.canal}: ${r.motivo}`);
+  if (elegibles.length === 0) bloqueos.push('no hay ni un destinatario elegible: no hay a quién mandarle');
+  if (bloqueadas.length > 0) {
+    // Mas estricto que el boton de la web, que inscribe las bloqueadas a la cola de revision y
+    // sigue. Desde el MCP no se ve esa cola, asi que una bloqueada seria una empresa que se da
+    // por lanzada y nunca recibe nada.
+    bloqueos.push(
+      `hay ${bloqueadas.length} empresa(s) sin destinatario utilizable (${bloqueadas.map((b) => b.nombreEmpresa).join(', ')}). ` +
+        `Se resuelven en la cola de revisión antes de lanzar desde acá`,
+    );
+  }
+  if (canales.includes('correo') && pasosParaSincronizarCopy(camp.idCadencia).length === 0) {
+    bloqueos.push('la cadencia tiene un paso de correo pero ninguna versión de copy por default: no hay texto que mandar');
+  }
+
+  const pasosWhatsapp = canales.includes('whatsapp');
+  if (pasosWhatsapp) {
+    advertencias.push(
+      'la cadencia tiene pasos de WhatsApp: se materializan pero NO salen. Cada uno exige revisión humana ' +
+        '(programar_envios) antes de que el worker lo empuje.',
+    );
+  }
+  if (canales.includes('correo')) {
+    advertencias.push('el correo sale por Gmail con el id de campaña sintético gmail-camp-N; no se crea ninguna secuencia en Apollo.');
+  }
+  advertencias.push(
+    'el empujón es modo manual: NO respeta la ventana de 8:00-18:00 Bogotá ni el espaciado de 45-90s del worker. ' +
+      'Lo que se lance a las 11pm sale a las 11pm.',
+  );
+
+  // Lo que el push mandaria ademas de esta campana, leido ANTES de tocar nada. Antes de
+  // inscribir, esta campana no tiene ningun paso_inscripcion, asi que todo lo que salga aca es
+  // de otras campanas.
+  const colateral = ([...pasoInscripcionesPendientes('correo'), ...pasoInscripcionesPendientes('whatsapp')]).map((f) => ({
+    idPasoInscripcion: f.idPasoInscripcion,
+    canal: f.paso.canal,
+    empresa: f.destinatario.empresa,
+  }));
+
+  const base = {
+    idCampana: input.idCampana,
+    puedeLanzar: bloqueos.length === 0,
+    bloqueos,
+    advertencias,
+    campana: camp,
+    canales,
+    readiness,
+    destinatarios: elegibles.map((f) => ({
+      empresa: f.nombreEmpresa,
+      idEmpresa: f.idEmpresa,
+      contacto: f.nombreContacto,
+      email: f.email,
+      telefono: f.telefono,
+      canales: f.pasosAjustados.map((p) => p.canal),
+      toques: f.toquesTotales,
+    })),
+    bloqueadas: bloqueadas.map((f) => ({ empresa: f.nombreEmpresa, idEmpresa: f.idEmpresa, motivo: 'sin contacto con email ni teléfono utilizable' })),
+    colateral,
+    colateralNota:
+      'Son los pasos YA materializados de otras campañas que este mismo empujón sacaría. No incluye los que ' +
+      'se materialicen durante esta corrida (el worker corre cada 5 minutos, así que en la práctica ya están).',
+  };
+
+  if (input.confirmar !== true) {
+    return {
+      ...base,
+      confirmado: false,
+      inscripcion: null,
+      estadoTrasLanzar: estadoLanzamientoCampana(input.idCampana, idOrganizacion),
+      esperandoRevisionHumana: [],
+      problemas: [],
+      logDelPush: [],
+      nota: 'En seco: no se escribió nada. Para lanzar de verdad hay que mandar confirmar: true.',
+    };
+  }
+
+  if (bloqueos.length > 0) {
+    throw new Error(`lanzar_campana: la campaña ${input.idCampana} no se puede lanzar. ${bloqueos.join(' | ')}`);
+  }
+
+  fijarOwnerCampana(input.idCampana, sesion.owner);
+  const config: ConfigLanzamientoInput = {};
+  if ('intakeDiario' in input) config.intakeDiario = input.intakeDiario ?? null;
+  if (input.ritmoIngreso != null) config.ritmoIngreso = input.ritmoIngreso;
+  if ('topeToquesDia' in input) config.topeToquesDia = input.topeToquesDia ?? null;
+  if ('fechaInicio' in input) config.fechaInicio = input.fechaInicio ?? null;
+  if (Object.keys(config).length > 0) actualizarConfigLanzamiento(input.idCampana, config);
+
+  // La escritura fuerte: inscribirCampana corre en UNA transaccion (cierra la activa anterior
+  // de cada empresa y abre la nueva juntas) y deja la campana en 'activa'.
+  const inscripcion = inscribirCampana(input.idCampana, idOrganizacion);
+
+  // Correo: el id sintetico es el correlator del tracking y aprobada_envio_gmail es la
+  // compuerta que mira pasoInscripcionesPendientes. Sin estos dos, el paso se materializa y
+  // nunca sale -- exactamente el mismo par que escribe el boton de la web.
+  if (canales.includes('correo')) {
+    guardarProveedorCampanaId(input.idCampana, `gmail-camp-${input.idCampana}`, idOrganizacion);
+    marcarCampanaAprobadaGmail(input.idCampana);
+  }
+
+  // push.ts se traga el fallo del proveedor: lo loguea con console.error y deja la fila en
+  // 'fallo'. Sin capturar esa linea, la unica pista del "por que" se pierde y esta tool
+  // reportaria un estado sin causa -- el mismo agujero por el que ya pasaron el heartbeat de
+  // apollo-tracking y gmailVerificadoDe. Se COPIA, no se silencia: cada linea se sigue
+  // imprimiendo igual.
+  const logDelPush: string[] = [];
+  const errorOriginal = console.error;
+  console.error = (...args: unknown[]) => {
+    logDelPush.push(args.map((a) => (a instanceof Error ? a.message : typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+    errorOriginal(...args);
+  };
+  try {
+    await deps.empujarAhora();
+  } finally {
+    console.error = errorOriginal;
+  }
+
+  const estadoTrasLanzar = estadoLanzamientoCampana(input.idCampana, idOrganizacion);
+  if (!estadoTrasLanzar) {
+    throw new Error(`lanzar_campana: se inscribió la campaña ${input.idCampana} pero no se pudo releer su estado. Verificar a mano antes de reintentar.`);
+  }
+
+  // Un paso de whatsapp sin aprobar NO es un fallo: es el gate funcionando. Se separa de los
+  // problemas reales para que ninguno de los dos se lea como el otro.
+  const esperandoRevisionHumana = estadoTrasLanzar.pasos
+    .filter((p) => p.canal === 'whatsapp' && p.aprobadoEn === null && p.estado === 'pendiente')
+    .map((p) => ({ idPasoInscripcion: p.idPasoInscripcion, canal: p.canal, empresa: p.empresa }));
+
+  const problemas: string[] = [];
+  for (const p of estadoTrasLanzar.pasos) {
+    if (p.canal === 'whatsapp' && p.aprobadoEn === null) continue; // ya contado arriba
+    if (p.canal === 'llamada') continue; // no tiene proveedor automatico: se hace a mano y por eso queda pendiente
+    if (ESTADOS_NO_SALIO.includes(p.estado)) {
+      problemas.push(
+        `paso_inscripcion ${p.idPasoInscripcion} (${p.canal}, ${p.empresa}) quedó en '${p.estado}' con ${p.intentos} intento(s): no salió`,
+      );
+    }
+  }
+
+  const resultado: LanzarCampanaResultado = {
+    ...base,
+    confirmado: true,
+    inscripcion,
+    estadoTrasLanzar,
+    esperandoRevisionHumana,
+    problemas,
+    logDelPush,
+    nota:
+      `La campaña quedó '${estadoTrasLanzar.campana.estado}'. Los pasos con estado 'enviada' y proveedor_mensaje_id ` +
+      `son los que de verdad salieron; los demás no. Lo que no se materializó hoy (el goteo reparte por día) lo empuja el worker.`,
+  };
+
+  // Falla ruidosa: la escritura ya ocurrio, asi que el estado releido viaja igual dentro del
+  // error. Un lanzamiento con un paso caido NO puede devolverse como exito.
+  if (problemas.length > 0) {
+    throw new Error(
+      `lanzar_campana: la campaña ${input.idCampana} se inscribió pero ${problemas.length} paso(s) no salieron. ` +
+        `${problemas.join(' | ')}${logDelPush.length > 0 ? ` || log del push: ${logDelPush.join(' ; ')}` : ''}\n` +
+        JSON.stringify(resultado, null, 2),
+    );
+  }
+
+  return resultado;
+}
+
+// --- crear_cadencia -------------------------------------------------------------------
+//
+// El movimiento que le faltaba al MCP y que no tenia rodeo barato: montar una cadencia. Hasta
+// hoy crearCadencia y crearCampana tenian un solo caller, la Server Action del wizard web
+// (app/campanas/nueva/actions.ts), detras de la sesion del navegador. Sin tool, un agente al
+// que se le pidiera "arma una cadencia de 5 correos" quedaba bloqueado o terminaba insertando
+// a mano en seis tablas.
+//
+// UNA tool y no dos (crear_cadencia + crear_campana), por tres razones que salen del esquema:
+//   - campana.id_cadencia y campana.id_segmento son NOT NULL. Una cadencia sin campana no la
+//     consume nada: no se puede inscribir a nadie en ella, no sale en ninguna lista, no la ve
+//     ninguna pantalla. La unica forma de usarla es crear la campana, asi que separarlas solo
+//     agrega un estado intermedio invalido.
+//   - Ese estado intermedio ya mordio una vez: el wizard creaba la cadencia y la campana en
+//     dos pasos y dejaba zombies en 'borrador' cada vez que el usuario cambiaba de archivo;
+//     hubo que agregar abandonarBorradorAction para limpiarlos. Con una tool no puede pasar,
+//     porque las tres filas caen en una sola transaccion.
+//   - Un cliente MCP no tiene forma de deshacer a medias. Si crear_campana falla despues de
+//     crear_cadencia, el agente se queda con un id de cadencia que no puede usar ni borrar.
+//
+// Reusa las MISMAS funciones de dominio que la web (insertarCadenciaEnTx, el insert de campana
+// y definicionSegmentoSchema), no una copia: si manana cambia como nace un paso, cambia para
+// los dos caminos a la vez.
+//
+// Nace en 'borrador' a proposito: crear no es lanzar. Poner la campana a correr es otro acto
+// explicito (lanzar_campana para el segmento entero, cambiar_cadencia para una empresa suelta).
+export type CrearCadenciaInput = {
+  nombre: string;
+  descripcion?: string;
+  pasos: {
+    orden: number;
+    diaOffset: number;
+    canal: string;
+    asunto?: string;
+    cuerpo?: string;
+    objetivo?: string;
+    esManual?: boolean;
+  }[];
+  idSegmento?: number;
+  segmento?: { nombre: string; definicion: unknown; descripcionNatural?: string };
+  nombreCampana?: string;
+  modo?: 'prioritaria' | 'batch';
+  reglaFaltante?: 'reemplazar' | 'saltar' | 'cola';
+  intakeDiario?: number;
+  ritmoIngreso?: RitmoIngresoInput;
+  topeToquesDia?: number;
+  fechaInicio?: string;
+};
+
+export type CrearCadenciaResultado = {
+  idCadencia: number;
+  idCampana: number;
+  idSegmento: number;
+  campana: NonNullable<ReturnType<typeof campanaCompleta>>;
+  envioCorreo: ReturnType<typeof estadoEnvioCorreo>;
+  advertencias: string[];
+  nota: string;
+};
+
+export function crearCadenciaTool(input: CrearCadenciaInput, idOrganizacion: number, sesion: SesionLanzamiento): CrearCadenciaResultado {
+  // owner sale de la SESION, nunca del input: es de quien salen los mensajes, y con el se
+  // resuelven el Gmail y la linea de WhatsApp. Un cliente que pudiera elegirlo podria montar
+  // una cadencia que sale por la cuenta de otra persona.
+  if (!sesion.owner.trim()) {
+    throw new Error(
+      'crear_cadencia: esta sesión no trae owner mapeado. La campaña quedaría con owner NULL, y una campaña sin owner ' +
+        'manda el correo por Apollo (fallback de resolverAdaptadorCorreo) en vez de por el Gmail de nadie.',
+    );
+  }
+  if (input.idSegmento == null && input.segmento == null) {
+    throw new Error(
+      'crear_cadencia: hace falta idSegmento (reusar uno guardado) o segmento (crear uno nuevo con su definición). ' +
+        'campana.id_segmento es NOT NULL: no existe una campaña sin segmento.',
+    );
+  }
+  if (input.idSegmento != null && input.segmento != null) {
+    throw new Error('crear_cadencia: llegaron idSegmento y segmento a la vez. Es uno o el otro, no los dos.');
+  }
+
+  // Se pasa por el MISMO parser que el wizard (parsearCadenciaJson, el formato 'json' de
+  // parsearCadenciaPorFormato) en vez de mandar el input crudo al repositorio. No es
+  // ceremonia: ahi vive procesarCopy, que extrae las [variables] del asunto y del cuerpo y
+  // saca la directiva [[firma]] del texto. Sin esto, una cadencia creada por MCP quedaria con
+  // version_paso.variables en NULL y el [[firma]] pegado dentro del copy, mientras la misma
+  // cadencia creada por la web queda bien: dos caminos escribiendo distinto para el mismo
+  // texto de entrada.
+  const parseada = parsearCadenciaJson(JSON.stringify({ nombre: input.nombre, descripcion: input.descripcion, pasos: input.pasos }));
+  // parsearCadenciaJson no lee esManual: ningun formato de import (CSV/Markdown/JSON) tiene
+  // columna para declararlo. Se re-adjunta desde el input, por posicion sobre el mismo array
+  // que el parser acaba de recorrer en orden.
+  const pasosConManual = parseada.pasos.map((p, i) => ({ ...p, esManual: input.pasos[i]?.esManual }));
+
+  const { idCadencia, idCampana, idSegmento } = crearCadenciaConCampana(
+    {
+      cadencia: { ...parseada, pasos: pasosConManual },
+      segmento:
+        input.idSegmento != null
+          ? { idSegmento: input.idSegmento }
+          : {
+              nombre: input.segmento!.nombre,
+              // El parse duro lo hace definicionSegmentoSchema dentro de crearCadenciaConCampana.
+              // Aca solo se pasa: validar dos veces con dos schemas distintos es como se
+              // desincronizan.
+              definicion: input.segmento!.definicion as DefinicionSegmento,
+              descripcionNatural: input.segmento!.descripcionNatural,
+            },
+      owner: sesion.owner,
+      nombreCampana: input.nombreCampana,
+      modo: input.modo,
+      reglaFaltante: input.reglaFaltante,
+      intakeDiario: input.intakeDiario,
+      ritmoIngreso: input.ritmoIngreso,
+      topeToquesDia: input.topeToquesDia,
+      fechaInicio: input.fechaInicio,
+    },
+    idOrganizacion,
+  );
+
+  // Relectura, no eco del input: lo que se devuelve sale de la base despues de escribir. Si la
+  // relectura no encuentra la campana que se acaba de crear, se dice; no se devuelve el input
+  // haciendose pasar por resultado.
+  const campana = campanaCompleta(idCampana, idOrganizacion);
+  if (!campana) {
+    throw new Error(
+      `crear_cadencia: se creó la campaña ${idCampana} (cadencia ${idCadencia}, segmento ${idSegmento}) pero la relectura ` +
+        'no la encuentra. Verificar a mano antes de reintentar: reintentar crearía una segunda.',
+    );
+  }
+
+  const advertencias: string[] = [];
+  const pasosCorreoManuales = campana.pasos.filter((p) => p.canal === 'correo' && p.esManual);
+  if (pasosCorreoManuales.length > 0) {
+    advertencias.push(
+      `${pasosCorreoManuales.length} paso(s) de correo quedaron con esManual=true: cada envío exige que un humano lo ` +
+        'apruebe uno por uno (programar_envios) antes de salir. Una cadencia que se deja corriendo sola los quiere en false.',
+    );
+  }
+  const sinCopy = campana.pasos.filter((p) => p.canal === 'correo' && !p.cuerpo);
+  if (sinCopy.length > 0) {
+    advertencias.push(`los pasos de correo ${sinCopy.map((p) => p.orden).join(', ')} no tienen cuerpo: no hay texto que mandar.`);
+  }
+  const pasosWhatsapp = campana.pasos.filter((p) => p.canal === 'whatsapp');
+  if (pasosWhatsapp.length > 0) {
+    advertencias.push(
+      `${pasosWhatsapp.length} paso(s) de WhatsApp: se materializan pero NO salen solos. WhatsApp exige revisión humana ` +
+        'por envío (programar_envios), sin excepción.',
+    );
+  }
+  if (campana.segmento.empresasQueCaen === 0) {
+    advertencias.push('el segmento no matchea ninguna empresa hoy: lanzar_campana no tendría a quién inscribir.');
+  }
+
+  return {
+    idCadencia,
+    idCampana,
+    idSegmento,
+    campana,
+    envioCorreo: estadoEnvioCorreo(idCampana, idOrganizacion),
+    advertencias,
+    nota:
+      `La campaña ${idCampana} quedó en 'borrador': crear no es lanzar, todavía no se le mandó nada a nadie. ` +
+      'Para ponerla a correr sobre el segmento entero: lanzar_campana. Para meter una empresa suelta: cambiar_cadencia ' +
+      `con idCampana ${idCampana}. envioCorreo dice si el correo va a salir de verdad o qué compuerta lo está frenando.`,
+  };
+}
+
+// --- tracking_correo ------------------------------------------------------------------
+//
+// Lectura pura de evento_tracking. No existia forma de ver una apertura o un clic de correo
+// desde el MCP: TOOLS_LECTURA no lo exponia y aperturas_whatsapp es otra cosa (mensajes de
+// apertura de conversacion de WhatsApp, no eventos de open). La unica via era SSH mas node
+// contra el volumen.
+//
+// Devuelve eventos crudos y NO calcula tasa de apertura, a proposito. Tres razones medidas,
+// todas vivas hoy: no hay deduplicacion (el id de evento del pixel lleva Date.now()+random,
+// dos hits a 5ms cuentan doble), el proxy de imagenes de Gmail dispara el pixel solo, y la
+// atribucion por paso esta corrida (ver `advertencias` en el resultado). Un porcentaje
+// calculado sobre eso seria un numero con cara de medicion.
+export type TrackingCorreoInput = {
+  idEmpresa?: string;
+  idCampana?: number;
+  tipo?: string;
+  desde?: string;
+  hasta?: string;
+  limite?: number;
+};
+
+export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: number) {
+  const eventos = trackingCorreo(input, idOrganizacion);
+
+  const porTipo: Record<string, number> = {};
+  for (const e of eventos) porTipo[e.tipo] = (porTipo[e.tipo] ?? 0) + 1;
+
+  // Sospecha de duplicado, medida y no inferida: dos eventos del mismo tipo, sobre el mismo
+  // paso_inscripcion, a menos de 10 segundos. Se REPORTA, no se filtra -- deduplicar es una
+  // decision de producto que nadie tomo todavia, y borrar filas en la lectura escondería
+  // justo el problema que hay que ver.
+  const posiblesDuplicados: { idEventoA: number; idEventoB: number; tipo: string; segundos: number }[] = [];
+  const porPaso = new Map<string, typeof eventos>();
+  for (const e of eventos) {
+    const k = `${e.idPasoInscripcion}:${e.tipo}`;
+    porPaso.set(k, [...(porPaso.get(k) ?? []), e]);
+  }
+  for (const lista of porPaso.values()) {
+    const ord = [...lista].sort((a, b) => (a.fechaEvento ?? '').localeCompare(b.fechaEvento ?? ''));
+    for (let i = 1; i < ord.length; i++) {
+      const t0 = Date.parse(ord[i - 1].fechaEvento ?? ord[i - 1].createdAt ?? '');
+      const t1 = Date.parse(ord[i].fechaEvento ?? ord[i].createdAt ?? '');
+      if (Number.isNaN(t0) || Number.isNaN(t1)) continue;
+      const segundos = Math.abs(t1 - t0) / 1000;
+      if (segundos <= 10) posiblesDuplicados.push({ idEventoA: ord[i - 1].idEvento, idEventoB: ord[i].idEvento, tipo: ord[i].tipo, segundos });
+    }
+  }
+
+  const conHuella = eventos.filter((e) => e.userAgent != null).length;
+
+  return {
+    total: eventos.length,
+    porTipo,
+    conHuella,
+    sinHuella: eventos.length - conHuella,
+    posiblesDuplicados,
+    eventos,
+    advertencias: [
+      'Sin deduplicar: el id de evento del pixel lleva Date.now()+random, así que dos hits separados por milisegundos ' +
+        'son dos filas. posiblesDuplicados marca los pares del mismo tipo y el mismo paso a menos de 10 segundos.',
+      'userAgent e ip solo existen desde el 2026-07-28. Un evento anterior los trae en null porque no se capturaron, ' +
+        'no porque hayan venido vacíos. Son lo único que separa una apertura humana del prefetch del proxy de imágenes ' +
+        'de Gmail, y nadie filtra por ellos todavía.',
+      'pasoOrden puede estar mal atribuido. resolverDestinatarioPorEmail acredita el evento al paso_inscripcion ' +
+        "'enviada' MÁS RECIENTE de esa campaña y ese email, no al correo que de verdad se abrió: en una cadencia de " +
+        'varios pasos, una apertura del correo 1 se le acredita al último enviado. Muerde desde el paso 2.',
+      'Solo canal correo. Las aperturas de conversación de WhatsApp son otra cosa y viven en aperturas_whatsapp.',
+    ],
   };
 }
 

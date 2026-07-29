@@ -360,6 +360,9 @@ export function crearDbPrueba() {
       canal TEXT NOT NULL,
       proveedor TEXT,
       proveedor_mensaje_id TEXT,
+      -- Migracion 0020: el hilo de Gmail del envio, por donde el poll de tracking lee las
+      -- respuestas. Misma clase de desincronizacion que ya avisa la cabecera de este archivo.
+      proveedor_hilo_id TEXT,
       estado TEXT NOT NULL DEFAULT 'pendiente',
       fecha_programada TEXT,
       fecha_enviada TEXT,

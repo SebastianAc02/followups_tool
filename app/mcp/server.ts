@@ -44,8 +44,25 @@ import {
   planearDiaTool,
   marcarNoEjecutadoTool,
   planVsEjecutadoTool,
+  lanzarCampanaTool,
+  crearCadenciaTool,
+  trackingCorreoTool,
+  type SesionLanzamiento,
 } from './tools';
-import { CANALES, CANALES_TOQUE, RESULTADOS, MOTIVOS_APLAZO, RAZONES_PERDIDA, OBJECIONES, ACCIONES_CLIENTE, TIPOS_PLAN, ORIGENES_PLAN } from '../db/validation';
+import {
+  CANALES,
+  CANALES_TOQUE,
+  RESULTADOS,
+  MOTIVOS_APLAZO,
+  RAZONES_PERDIDA,
+  OBJECIONES,
+  ACCIONES_CLIENTE,
+  TIPOS_PLAN,
+  ORIGENES_PLAN,
+  RITMOS_INGRESO,
+  MODOS_CAMPANA,
+  REGLAS_FALTANTE,
+} from '../db/validation';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import { CATEGORIAS_EMPRESA } from '../core/empresa-identidad';
 import { ORIGENES_CAMBIO } from '../core/origen-cambio';
@@ -67,14 +84,17 @@ export const TOOLS_LECTURA = [
   'panel_metricas',
   'pipeline',
   'plan_vs_ejecutado',
+  'tracking_correo',
 ] as const;
 
 export const TOOLS_ESCRITURA = [
   'actualizar_empresa',
   'aplazar_seguimiento',
   'cambiar_cadencia',
+  'crear_cadencia',
   'crear_empresa',
   'editar_toque',
+  'lanzar_campana',
   'marcar_no_ejecutado',
   'marcar_perdida',
   'mover_estado',
@@ -121,7 +141,7 @@ const ORGANIZACION_DEFAULT = 1;
 // aca solo se cablean las tools contra la organizacion de esa sesion. Los inputSchema
 // declaran el contrato para el cliente; la validacion dura (razonPerdida obligatoria, canal
 // valido, etc.) la reimpone el dominio via Zod .parse(), no se confia solo en esto.
-function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
+function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?: SesionLanzamiento): void {
   const kdmShape = z
     .object({ nombre: z.string().min(1), telefono: z.string().min(1).optional() })
     .optional()
@@ -410,13 +430,29 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
         'a otra cadencia (idCampana). Devuelve la empresa RELEIDA con su proximo follow-up y sus ' +
         'cadencias vivas, mas el resultado de la inscripcion cuando se pidio mover de cadencia ' +
         '(puede decir ya_inscrita, que no es error pero tampoco es un cambio). Envuelve ' +
-        'cambiarCadencia() del dominio.',
+        'cambiarCadencia() del dominio. ' +
+        'DEVUELVE ADEMAS envioCorreo, el diagnostico de si el correo de esa campana va a salir de verdad. ' +
+        'Existe porque inscribir en una campana con pasos de correo producia correos que no salian NUNCA y ' +
+        'nada avisaba: el descarte era un `continue` pelado en agruparPendientesCorreo, sin error, sin marcar ' +
+        'la fila fallo, y quedaba pendiente para siempre. Ahora, si la campana tiene pasos de correo que no ' +
+        'pueden salir, esta tool FALLA y no inscribe nada, diciendo cual de las tres compuertas esta cerrada ' +
+        '(proveedor_campana_id NULL, aprobada_envio_gmail=0, o pasos con es_manual=1). Para armarla y seguir, ' +
+        'armarEnvioCorreo: true.',
       inputSchema: {
         idEmpresa: z.string().min(1),
         idCampana: z.number().int().positive().optional().describe('Inscribe la empresa en la cadencia de esta campana'),
         proximoFollowUp: z.string().min(1).optional().describe('YYYY-MM-DD'),
         proximoCanal: z.string().min(1).optional(),
         proximoPaso: z.string().min(1).optional(),
+        armarEnvioCorreo: z
+          .boolean()
+          .optional()
+          .describe(
+            'true arma la CAMPANA para que su correo pueda salir: escribe proveedor_campana_id sintetico y ' +
+              'aprobada_envio_gmail=1, el mismo par que el boton "Lanzar hoy" de la web. OJO: es de la campana, no de ' +
+              'esta empresa, asi que tambien desbloquea a todas las inscripciones que esa campana ya tenga. NO toca ' +
+              'es_manual: un paso marcado manual sigue esperando aprobacion uno por uno.',
+          ),
       },
     },
     async (input) => {
@@ -650,6 +686,140 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
+
+  // La unica tool que le manda mensajes a gente real desde el MCP. Todo lo demas escribe la
+  // base; esta ademas empuja al proveedor. Por eso el default es en seco y el envio exige
+  // confirmar: true explicito.
+  server.registerTool(
+    'lanzar_campana',
+    {
+      description:
+        'Lanza una campaña que está en borrador: fija el owner, guarda la config de goteo, inscribe el segmento ' +
+        'curado en UNA transacción, deja la campaña lista para Gmail (proveedor_campana_id sintético + ' +
+        'aprobada_envio_gmail) y materializa/empuja de una lo que ya vencía. Es el botón "Lanzar hoy" de la web, ' +
+        'sin la web. EN SECO POR DEFAULT: sin confirmar:true no escribe nada y devuelve a quién le llegaría, por ' +
+        'qué canal y a qué dirección exacta, más todo lo que impediría lanzar (bloqueos) y lo que este mismo ' +
+        'empujón sacaría de OTRAS campañas (colateral). Al confirmar devuelve lo que quedó escrito RELEÍDO: la ' +
+        'campaña, las inscripciones con su destinatario real, y cada paso_inscripcion con su estado, su proveedor ' +
+        'y su id de mensaje: los que salieron son los que están en "enviada" con proveedorMensajeId, no los ' +
+        'demás. AVISOS: (1) el empujón corre en modo manual, así que NO respeta la ventana de 8:00-18:00 Bogotá ' +
+        'ni el espaciado de 45-90s del worker: lo que se lance a las 11pm sale a las 11pm; (2) los pasos de ' +
+        'WhatsApp se materializan pero NO salen, porque siguen exigiendo revisión humana (programar_envios) y esta ' +
+        'tool no se salta ese gate: aparecen en esperandoRevisionHumana; (3) falla en vez de seguir si la campaña ' +
+        'no está en borrador, si hay empresas sin destinatario utilizable, si el canal no está listo para quien ' +
+        'lanza (Gmail verificado / línea de WhatsApp) o si después de empujar quedó algún paso sin salir, y en ese ' +
+        'último caso el error trae el estado releído y el log crudo del proveedor.',
+      inputSchema: {
+        idCampana: z.number().int().positive().describe('campana.id_campana. Tiene que estar en estado borrador'),
+        confirmar: z
+          .boolean()
+          .optional()
+          .describe('false o ausente = previsualización en seco, no escribe nada. true = inscribe y MANDA. No tiene vuelta atrás'),
+        intakeDiario: z.number().int().positive().nullable().optional().describe('Cuántas empresas entran por día. null lo limpia (todas de una). Sin esto, se respeta lo ya guardado'),
+        ritmoIngreso: z.enum(RITMOS_INGRESO).optional().describe('Cada cuánto entra un lote'),
+        topeToquesDia: z.number().int().positive().nullable().optional(),
+        fechaInicio: z.string().min(1).nullable().optional().describe('YYYY-MM-DD, desde cuándo cuenta el goteo. null = hoy'),
+      },
+    },
+    async (input) => {
+      // La sesion no se acepta por input: owner e idUsuario salen del token OAuth (route.ts).
+      // Sin ellos no se lanza -- se dice, no se inventa un default.
+      if (!sesion || !sesion.owner.trim() || !sesion.idUsuario.trim()) {
+        throw new Error(
+          'lanzar_campana: esta sesión no trae usuario ni owner (el server standalone por token no los tiene). ' +
+            'Solo se puede lanzar desde el MCP autenticado por OAuth, donde la sesión dice a nombre de quién sale el mensaje.',
+        );
+      }
+      const r = await lanzarCampanaTool(input as Parameters<typeof lanzarCampanaTool>[0], idOrganizacion, sesion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  // El movimiento que le faltaba al MCP: montar una cadencia. Ver la nota de diseno en
+  // tools.ts para por que es UNA tool y no crear_cadencia + crear_campana por separado.
+  server.registerTool(
+    'crear_cadencia',
+    {
+      description:
+        'Crea una cadencia con sus N pasos Y su campaña, en UNA transacción. Es lo que hace el wizard de ' +
+        '/campanas/nueva, sin la web: hasta ahora crearCadencia/crearCampana solo tenían como caller esa Server ' +
+        'Action detrás del navegador, así que montar una cadencia desde acá era imposible sin insertar a mano en ' +
+        'seis tablas. Crea cadencia + paso_cadencia + version_paso (donde vive el copy) + campana, y el segmento ' +
+        'si se pide uno nuevo. Es UNA tool y no dos porque campana.id_cadencia y campana.id_segmento son NOT NULL: ' +
+        'una cadencia sin campaña no la consume nada y solo sirve para quedar huérfana. ' +
+        'NACE EN BORRADOR: crear no es lanzar, no se le manda nada a nadie. Ponerla a correr es otro acto ' +
+        '(lanzar_campana para el segmento entero, cambiar_cadencia con su idCampana para una empresa suelta). ' +
+        'Devuelve todo RELEÍDO de la base (campaña, cadencia, cada paso con su copy, el segmento con cuántas ' +
+        'empresas caen hoy), más envioCorreo: si el correo de esa campaña va a poder salir o qué lo frena. ' +
+        'CLAVE PARA UNA CADENCIA QUE CORRE SOLA: los pasos de correo tienen que ir con esManual en false o ' +
+        'ausente. Con esManual true, CADA envío exige aprobación humana una por una (programar_envios) y la ' +
+        'cadencia deja de ser automática. Los pasos de whatsapp y llamada quedan manuales siempre, sin importar ' +
+        'lo que se mande: whatsapp nunca se automatiza en este sistema y llamada no tiene proveedor.',
+      inputSchema: {
+        nombre: z.string().min(1).describe('Nombre de la cadencia. La campaña hereda este nombre salvo que se mande nombreCampana'),
+        descripcion: z.string().min(1).optional(),
+        pasos: z
+          .array(
+            z.object({
+              orden: z.number().int().positive().describe('1, 2, 3... El orden en que salen'),
+              diaOffset: z.number().int().nonnegative().describe('Días desde que la empresa entra a la cadencia. 0 = el mismo día'),
+              canal: z.enum(CANALES),
+              asunto: z.string().min(1).optional().describe('Solo correo. Admite [variables] entre corchetes'),
+              cuerpo: z.string().min(1).optional().describe('El texto que se manda. Admite [variables] y la directiva [[firma]]'),
+              objetivo: z.string().min(1).optional().describe('Para qué es este paso. Nota interna, no se manda'),
+              esManual: z
+                .boolean()
+                .optional()
+                .describe(
+                  'true = este envío espera revisión humana antes de salir. Para correo el default (false) es lo que ' +
+                    'hace que la cadencia corra sola. whatsapp y llamada quedan manuales de todas formas.',
+                ),
+            }),
+          )
+          .min(1)
+          .describe('Al menos un paso. El copy de cada uno queda como su version_paso default'),
+        idSegmento: z.number().int().positive().optional().describe('Reusar un segmento ya guardado. Excluyente con segmento'),
+        segmento: z
+          .object({
+            nombre: z.string().min(1),
+            definicion: z
+              .object({
+                condiciones: z.array(z.record(z.string(), z.unknown())).min(1),
+                orden: z.object({ campo: z.string(), dir: z.enum(['asc', 'desc']) }).optional(),
+                limite: z.number().int().positive().optional(),
+              })
+              .describe(
+                'Filtro de empresas. condiciones necesita AL MENOS UNA: un segmento vacío matchearía la base entera. ' +
+                  'Campos: estado, categoria, estado_comercial, prioridad, es_cliente, ciudad, departamento, owner, ' +
+                  'usuarios, en_notion, rol. Operadores: en, no_en, es_null, no_null, entre, mayor_que, menor_que. ' +
+                  'Ejemplo: {"condiciones":[{"campo":"estado","op":"en","valores":["lead"]}]}',
+              ),
+            descripcionNatural: z.string().min(1).optional(),
+          })
+          .optional()
+          .describe('Crear un segmento nuevo. Excluyente con idSegmento'),
+        nombreCampana: z.string().min(1).optional(),
+        modo: z.enum(MODOS_CAMPANA).optional().describe('prioritaria (default) = revisar toque a toque. batch = el copy default sale tal cual'),
+        reglaFaltante: z.enum(REGLAS_FALTANTE).optional().describe('Qué hacer si la empresa no tiene el canal del paso. Default cola'),
+        intakeDiario: z.number().int().positive().optional().describe('Cuántas empresas nuevas arrancan por día. Sin esto, todas de una'),
+        ritmoIngreso: z.enum(RITMOS_INGRESO).optional(),
+        topeToquesDia: z.number().int().positive().optional(),
+        fechaInicio: z.string().min(1).optional().describe('YYYY-MM-DD'),
+      },
+    },
+    async (input) => {
+      // Mismo criterio que lanzar_campana: el owner sale de la sesión OAuth, no del input. Una
+      // campaña con owner NULL manda el correo por Apollo por fallback, no por el Gmail de nadie.
+      if (!sesion || !sesion.owner.trim()) {
+        throw new Error(
+          'crear_cadencia: esta sesión no trae owner (el server standalone por token no lo tiene). ' +
+            'Solo se puede crear desde el MCP autenticado por OAuth, donde la sesión dice de quién salen los mensajes.',
+        );
+      }
+      const r = crearCadenciaTool(input as Parameters<typeof crearCadenciaTool>[0], idOrganizacion, sesion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
 }
 
 // Un McpServer nuevo por request (modo "stateless" del SDK, sessionIdGenerator: undefined,
@@ -666,7 +836,15 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number): void {
 // opts.idOrganizacion (la de la sesion). Default false: el server standalone legacy
 // (crearServidorMcp) lo llama sin opts y queda SOLO LECTURA, igual que antes. Solo el camino
 // OAuth de Next (app/api/mcp/route.ts) opta por escritura, y SOLO tras pasar puedeEscribirMcp.
-export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: number } = {}): McpServer {
+//
+// opts.owner / opts.idUsuario (2026-07-27, lanzar_campana): la organizacion ya no alcanza para
+// una escritura que MANDA mensajes. El owner queda estampado en la campana y el idUsuario es
+// contra quien se resuelven el Gmail verificado y la linea de WhatsApp, o sea a nombre de quien
+// sale el mensaje. Viajan aparte del input de la tool a proposito: si el cliente MCP pudiera
+// elegirlos, podria mandar por la linea de otra persona. Opcionales en la firma porque el server
+// standalone por token no tiene sesion de usuario; ahi lanzar_campana se registra igual pero
+// falla explicito al invocarse, en vez de lanzar a nombre de nadie.
+export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: number; owner?: string; idUsuario?: string } = {}): McpServer {
   const server = new McpServer({ name: NOMBRE_SERVIDOR, version: VERSION_SERVIDOR });
 
   server.registerTool(
@@ -825,6 +1003,43 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
   );
 
+  // El tracking de correo no se podia leer desde el MCP: evento_tracking no estaba expuesto y
+  // la unica via era SSH mas node contra el volumen. Devuelve el evento crudo, no una tasa --
+  // ver las advertencias que viajan en la respuesta.
+  server.registerTool(
+    'tracking_correo',
+    {
+      description:
+        'Aperturas, clics y rebotes de CORREO con su timestamp, filtrables por empresa, por campaña y por rango ' +
+        'de fechas. Cada evento trae la empresa, la campaña, el paso al que se le atribuyó, el asunto, el email, ' +
+        'y la huella cruda del request (userAgent, ip, via) cuando existe. ' +
+        'DEVUELVE EVENTOS, NO UNA TASA DE APERTURA, y eso es a propósito: (1) no hay deduplicación, el id de ' +
+        'evento del pixel lleva Date.now()+random así que dos hits separados por milisegundos son dos filas ' +
+        '(medido en producción: un correo abierto dos veces dejó TRES filas); (2) el proxy de imágenes de Gmail ' +
+        'dispara el pixel solo, y userAgent es lo único que separa eso de una apertura humana, pero nadie filtra ' +
+        'por él todavía; (3) la atribución por paso está corrida, resolverDestinatarioPorEmail acredita al ' +
+        'paso_inscripcion enviado MÁS RECIENTE de esa campaña y ese email, así que en una cadencia de varios ' +
+        'pasos una apertura del correo 1 se le acredita al último enviado. Un porcentaje calculado encima de eso ' +
+        'sería un número con cara de medición. La respuesta trae posiblesDuplicados (pares del mismo tipo y el ' +
+        'mismo paso a menos de 10 segundos) marcados, no filtrados. ' +
+        'userAgent e ip solo existen desde el 2026-07-28: un evento anterior los trae en null porque no se ' +
+        'capturaron, no porque hayan venido vacíos. ' +
+        'Solo canal correo: las aperturas de conversación de WhatsApp son otra cosa y viven en aperturas_whatsapp.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).optional().describe('empresa.id_empresa'),
+        idCampana: z.number().int().positive().optional(),
+        tipo: z.string().min(1).optional().describe("Filtra por tipo de evento: abierto, clic, rebota, respondio, enviado"),
+        desde: z.string().min(1).optional().describe('ISO o YYYY-MM-DD, incluido. Compara contra fecha_evento con fallback a created_at'),
+        hasta: z.string().min(1).optional().describe('ISO o YYYY-MM-DD, incluido'),
+        limite: z.number().int().positive().optional().describe('Default 200, del más reciente al más viejo'),
+      },
+    },
+    async (input) => {
+      const resultado = trackingCorreoTool(input as Parameters<typeof trackingCorreoTool>[0], opts.idOrganizacion ?? ORGANIZACION_DEFAULT);
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
   // Que quedo programado para un dia. Es la comprobacion de que las cuentas quedaron listas:
   // hasta hoy, despues de programar siete mensajes no habia forma de verificarlo salvo confiar.
   server.registerTool(
@@ -944,7 +1159,8 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
   );
 
   if (opts.escritura) {
-    registrarWriteTools(server, opts.idOrganizacion ?? ORGANIZACION_DEFAULT);
+    const sesion = opts.owner != null && opts.idUsuario != null ? { owner: opts.owner, idUsuario: opts.idUsuario } : undefined;
+    registrarWriteTools(server, opts.idOrganizacion ?? ORGANIZACION_DEFAULT, sesion);
   }
 
   return server;

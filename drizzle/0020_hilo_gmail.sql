@@ -1,0 +1,1 @@
+ALTER TABLE `paso_inscripcion` ADD `proveedor_hilo_id` text;

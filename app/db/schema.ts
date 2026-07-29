@@ -555,6 +555,12 @@ export const pasoInscripcion = sqliteTable('paso_inscripcion', {
   canal: text('canal').notNull(),
   proveedor: text('proveedor'),
   proveedorMensajeId: text('proveedor_mensaje_id'),
+  // El hilo de Gmail de ESTE envio (2026-07-28). enviarPaso ya lo devolvia desde el
+  // 2026-07-14 (EnvioResultado.proveedorHiloId) y nadie lo guardaba, asi que se perdia en
+  // el aire: sin el, el poll de tracking no tiene por donde preguntarle a Gmail si el ISP
+  // contesto -- Gmail no lee por campana, lee por hilo, y el hilo era justo el dato que no
+  // quedaba escrito. NULL para Apollo y para WhatsApp, que no tienen hilo propio.
+  proveedorHiloId: text('proveedor_hilo_id'),
   estado: text('estado').notNull().default('pendiente'),
   fechaProgramada: text('fecha_programada'),
   fechaEnviada: text('fecha_enviada'),

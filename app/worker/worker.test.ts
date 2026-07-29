@@ -42,6 +42,26 @@ test('tarea que truena queda aislada: heartbeat de error, no relanza', async () 
   assert.match(fila?.ultimo_resultado ?? '', /fallo simulado/);
 });
 
+// 2026-07-28: el heartbeat tenia solo dos valores posibles, 'ok' y 'error: ...', y una tarea
+// que corrio A MEDIAS quedaba en 'ok'. Asi paso desapercibido tres semanas que el poll de
+// tracking no leia ni una campana de Gmail.
+test('una tarea que devuelve texto lo escribe tal cual en el heartbeat (estado degradado)', async () => {
+  await ejecutarCiclo([
+    {
+      nombre: 'tracking',
+      proveedorHeartbeat: 'proveedor-degradado',
+      ejecutar: async () => 'degradado: 1 de 3 campanas fallaron (gmail/hilo-1: 404)',
+    },
+  ]);
+  const fila = leerHeartbeat('proveedor-degradado');
+  assert.strictEqual(fila?.ultimo_resultado, 'degradado: 1 de 3 campanas fallaron (gmail/hilo-1: 404)');
+});
+
+test('una tarea que no devuelve nada sigue quedando en "ok" (las tareas viejas no cambian)', async () => {
+  await ejecutarCiclo([{ nombre: 'materializar', proveedorHeartbeat: 'proveedor-mudo', ejecutar: async () => {} }]);
+  assert.strictEqual(leerHeartbeat('proveedor-mudo')?.ultimo_resultado, 'ok');
+});
+
 test('una tarea rota no bloquea que las demas corran (aislamiento)', async () => {
   await ejecutarCiclo([
     {

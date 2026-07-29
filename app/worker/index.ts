@@ -8,6 +8,8 @@ import {
   marcarPasoInscripcionEnviada,
   marcarPasoInscripcionFallo,
   campanasConSecuencia,
+  hilosGmailDeCampana,
+  idUsuarioDeOwner,
   resolverDestinatarioPorEmail,
   guardarEventoTracking,
   pausarInscripcion,
@@ -23,11 +25,11 @@ import {
 } from '../db/repository';
 import { drenarOutbox } from '../core/outbox';
 import { pushPendientes } from '../core/push';
-import { pollTracking } from '../core/tracking';
+import { pollTracking, type CampanaConSecuencia, type PollDeCampana } from '../core/tracking';
 import type { ConfigCalendario } from '../core/motor-cadencia';
 import { dentroDeVentana, esperaEntreMensajes, VENTANA_DEFAULT, ESPACIADO_WHATSAPP_DEFAULT } from '../core/ventana-envio';
 import { crearNotionAdapter } from '../adapters/notion';
-import { crearRegistroEnvio, crearRegistroEntrega, agruparPendientesCorreo } from '../adapters/registro-envio';
+import { crearRegistroEnvio, crearRegistroEntrega, agruparPendientesCorreo, resolverTrackingCorreo } from '../adapters/registro-envio';
 import { hoy } from '../lib/reloj';
 import { fechaBogotaISO, horaBogota } from '../lib/date-utils';
 import type { Canal } from '../db/validation';
@@ -48,7 +50,11 @@ const CONFIG_CALENDARIO_DEFAULT: ConfigCalendario = { diasBloqueados: [], corrim
 
 const INTERVALO_MS = 5 * 60 * 1000;
 
-export type Tarea = { nombre: string; proveedorHeartbeat: string; ejecutar: () => Promise<void> };
+// ejecutar puede devolver el TEXTO del heartbeat (2026-07-28). Antes solo habia dos
+// desenlaces posibles, 'ok' o 'error: ...', y una tarea que corrio a medias no tenia como
+// decirlo: quedaba 'ok', indistinguible de una que corrio entera. Devolver void sigue
+// valiendo y sigue significando 'ok', asi que ninguna tarea existente cambia.
+export type Tarea = { nombre: string; proveedorHeartbeat: string; ejecutar: () => Promise<void | string> };
 
 async function tareaOutbox(): Promise<void> {
   await drenarOutbox(
@@ -270,25 +276,67 @@ export async function tareaPushCorreo(modo: ModoPush = 'worker'): Promise<void> 
   }
 }
 
+// Rutea UNA campana a su proveedor de lectura (2026-07-28). Es el espejo exacto de lo que
+// agruparPendientesCorreo hace del lado de ENVIO: owner -> idUsuarioDeOwner -> la MISMA
+// decidirProveedorCorreo. Antes este lado no existia y tareaTracking le pasaba Apollo a
+// todas las campanas, con lo cual una campana de Gmail (proveedor_campana_id
+// 'gmail-camp-N') se consultaba como si fuera un emailer_campaign_id de Apollo: 404 seguro,
+// y el `catch { continue }` del core se lo tragaba. Resultado medido en produccion el
+// 2026-07-28: cero respuestas por correo detectadas desde que Gmail existe.
+//
+// Lo unico que NO es simetrico es la referencia que se le pasa al adaptador, porque los dos
+// proveedores no leen por la misma unidad (ver PollDeCampana en core/tracking.ts).
+export function planDePollDeCampana(camp: CampanaConSecuencia): PollDeCampana {
+  const idUsuario = idUsuarioDeOwner(camp.owner, camp.idOrganizacion);
+  const { proveedor, adaptador } = resolverTrackingCorreo(idUsuario);
+  return {
+    proveedor,
+    adaptador,
+    referencias: proveedor === 'gmail' ? hilosGmailDeCampana(camp.idCampana) : [camp.proveedorCampanaId],
+  };
+}
+
 // V5.5: poll de tracking + reply detection. Solo tiene sentido para el proveedor de
 // correo hoy (es el unico con tracking real, ver experimento-apollo.md); si el dia de
 // manana un proveedor de whatsapp tambien expone tracking, esto se vuelve un loop por
 // canal igual que tareaPush. Heartbeat propio ('apollo-tracking', no 'apollo') para que
 // un fallo aca no pise el heartbeat de push en el mismo ciclo.
-async function tareaTracking(envioCorreo: ReturnType<typeof crearRegistroEnvio>['correo']): Promise<void> {
-  if (!envioCorreo) return;
-  await pollTracking(
-    {
-      campanasConSecuencia,
-      resolverDestinatario: resolverDestinatarioPorEmail,
-      guardarEvento: guardarEventoTracking,
-      pausarInscripcion,
-      marcarDestinatarioSalio,
-      quedanDestinatariosActivos,
-      registrarRespuestaDetectada,
-    },
-    envioCorreo,
-  );
+//
+// Devuelve el texto del heartbeat en vez de void (2026-07-28). Criterio, de menos a mas
+// ruidoso:
+// - ninguna campana fallo (o no habia nada que consultar) -> 'ok', como siempre.
+// - fallaron algunas -> 'degradado: N de M ...'. No es 'error' porque el poll SI hizo su
+//   trabajo con las demas, y no es 'ok' porque hay respuestas que hoy no se estan leyendo.
+//   La UI de /conectores solo pinta "Caído" con el prefijo 'error', asi que degradado se lee
+//   como estado con su texto a la vista, que es justo lo que se quiere: visible, no alarma.
+// - fallaron TODAS -> se lanza, y ejecutarCiclo lo estampa como 'error: ...'. Un poll que no
+//   pudo leer ni una campana es un poll caido, y decir 'ok' ahi fue exactamente el bug que
+//   dejo esto tres semanas sin que nadie lo viera.
+async function tareaTracking(): Promise<string> {
+  const resultado = await pollTracking({
+    campanasConSecuencia,
+    resolverPoll: planDePollDeCampana,
+    resolverDestinatario: resolverDestinatarioPorEmail,
+    guardarEvento: guardarEventoTracking,
+    pausarInscripcion,
+    marcarDestinatarioSalio,
+    quedanDestinatariosActivos,
+    registrarRespuestaDetectada,
+    onFalla: (f) =>
+      console.error(
+        `[tracking] campana ${f.idCampana} (${f.proveedorCampanaId}) por ${f.proveedor}, referencia ${f.referencia}: ${f.error}`,
+      ),
+  });
+
+  if (resultado.campanasFallidas === 0) return 'ok';
+
+  const detalle = resultado.fallas
+    .slice(0, 3)
+    .map((f) => `${f.proveedor}/${f.referencia}: ${f.error}`)
+    .join(' | ');
+  const resumen = `${resultado.campanasFallidas} de ${resultado.campanasConsultadas} campanas fallaron (${detalle})`;
+  if (resultado.campanasFallidas === resultado.campanasConsultadas) throw new Error(`poll de tracking sin una sola campana leida: ${resumen}`);
+  return `degradado: ${resumen}`;
 }
 
 // Sesion 2026-07-10 (prueba multicanal real): lanzar una campana no debia dejar al
@@ -417,7 +465,8 @@ export function construirTareas(): Tarea[] {
     { nombre: 'materializar', proveedorHeartbeat: 'materializador', ejecutar: tareaMaterializar },
     { nombre: 'push:correo', proveedorHeartbeat: 'apollo', ejecutar: tareaPushCorreo },
     ...tareasPush(registroEntrega),
-    { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: () => tareaTracking(registroCompleto.correo) },
+    // Ya no recibe un adaptador: cada campana resuelve el suyo adentro (planDePollDeCampana).
+    { nombre: 'tracking', proveedorHeartbeat: 'apollo-tracking', ejecutar: tareaTracking },
     { nombre: 'archivar-campanas', proveedorHeartbeat: 'archivador', ejecutar: () => tareaArchivarCampanas(registroCompleto.correo) },
   ];
 }
@@ -429,8 +478,8 @@ export function construirTareas(): Tarea[] {
 export async function ejecutarCiclo(tareas: Tarea[]): Promise<void> {
   for (const tarea of tareas) {
     try {
-      await tarea.ejecutar();
-      registrarHeartbeatConector(tarea.proveedorHeartbeat, 'ok');
+      const resultado = await tarea.ejecutar();
+      registrarHeartbeatConector(tarea.proveedorHeartbeat, typeof resultado === 'string' ? resultado : 'ok');
     } catch (e) {
       const mensaje = e instanceof Error ? e.message : String(e);
       registrarHeartbeatConector(tarea.proveedorHeartbeat, `error: ${mensaje}`);
