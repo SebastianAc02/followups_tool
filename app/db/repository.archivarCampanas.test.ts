@@ -66,7 +66,9 @@ function fijarAnchor(idInscripcion: number, fechaIso: string) {
 // pasado) queda ANTES del anchor y proximoPasoDebido no ve nada vencido todavia.
 function fijarAnchors(idsEmpresa: string[], fecha: string) {
   for (const idEmpresa of idsEmpresa) {
-    fijarAnchor(inscripcionActivaDe(idEmpresa).id, `${fecha}T00:00:00.000Z`);
+    // 14:00Z = 09:00 en Bogota, la zona en la que el motor lee el anchor. Medianoche UTC
+    // caeria en el dia anterior hora Bogota y el escenario correria un dia.
+    fijarAnchor(inscripcionActivaDe(idEmpresa).id, `${fecha}T14:00:00.000Z`);
   }
 }
 

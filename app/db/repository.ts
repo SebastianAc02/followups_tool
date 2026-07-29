@@ -88,7 +88,7 @@ import type { EmpresaFunnelInput } from '../core/panel/conversionStage';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { contarToquesAntesDeFecha } from '../core/panel/toquesAntesCerrar';
 import { cifrar, descifrar } from '../lib/crypto';
-import { fechaBogotaISO, sumarDias, diaSemana } from '../lib/date-utils';
+import { fechaBogotaISO, sumarDias, diaSemana, diaBogotaDeGuardado } from '../lib/date-utils';
 import type { SesionTranscript } from '../core/ports/transcript';
 import { ESTADOS_CALIENTES, ESTADOS_ACTIVOS } from './funnel';
 import type { CampoCalificacion } from '../core/calificacion';
@@ -6074,9 +6074,11 @@ export function agendaEnSeco(hoy: string, config: ConfigCalendario) {
       .where(eq(pasoCadencia.idCadencia, a.idCadencia))
       .all();
 
-    // fecha_inscripcion se guarda como ISO datetime completo; el motor trabaja con
-    // fecha "YYYY-MM-DD", por eso el slice(0, 10).
-    const anchor = (a.anchor ?? hoy).slice(0, 10);
+    // fecha_inscripcion se guarda como ISO datetime completo Y EN UTC; el motor trabaja con
+    // fecha "YYYY-MM-DD" de Bogota, la misma zona en la que viene `hoy`. Recortar los 10
+    // primeros caracteres daba el dia UTC y adelantaba el anchor un dia entre las 19:00 y la
+    // medianoche (ver diaBogotaDeGuardado).
+    const anchor = diaBogotaDeGuardado(a.anchor ?? hoy);
     const debido = proximoPasoDebido(pasos, { anchor, ejecutados: [] }, hoy, config);
     if (debido) {
       agenda.push({ idEmpresa: a.idEmpresa, empresa: a.empresa, orden: debido.orden, fecha: debido.fechaObjetivo });
@@ -6157,7 +6159,10 @@ export function materializarPasosDebidos(hoy: string, config: ConfigCalendario):
     );
     const reemplazoPorOrden = new Map(readiness.reemplazos.map((r) => [r.orden, r.a]));
     const sinCanalPorOrden = new Set(readiness.pasosSinCanal);
-    const anchor = (insc.anchor ?? hoy).slice(0, 10);
+    // El anchor sale de fecha_inscripcion, que se escribe en UTC, y se compara contra `hoy`,
+    // que viene en Bogota. Convertir las dos puntas a la MISMA zona es lo que hace que una
+    // empresa inscrita a las 8 de la noche tenga su paso de dia 0 debido hoy y no mañana.
+    const anchor = diaBogotaDeGuardado(insc.anchor ?? hoy);
 
     // Guard = cantidad de pasos de la cadencia: como maximo se puede avanzar un paso
     // por cada paso que tiene la cadencia en una sola pasada (los omitidos encadenan,
@@ -6171,7 +6176,11 @@ export function materializarPasosDebidos(hoy: string, config: ConfigCalendario):
         .all();
       const ejecutados = historial
         .filter((h) => h.estado === 'enviada' || h.estado === 'omitida')
-        .map((h) => ({ orden: h.orden, fechaReal: (h.fechaEnviada ?? h.fechaProgramada ?? hoy).slice(0, 10) }));
+        // Misma conversion que el anchor y por lo mismo: fecha_enviada se escribe en UTC (6
+        // de las 6 no nulas de produccion), fecha_programada ya viene como dia de calendario.
+        // Estas fechas re-anclan el paso siguiente, asi que un dia corrido aca corre toda la
+        // cola que viene detras.
+        .map((h) => ({ orden: h.orden, fechaReal: diaBogotaDeGuardado(h.fechaEnviada ?? h.fechaProgramada ?? hoy) }));
 
       const debido = proximoPasoDebido(
         pasos.map((p) => ({ orden: p.orden, diaOffset: p.diaOffset })),

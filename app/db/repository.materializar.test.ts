@@ -42,6 +42,10 @@ function seedEmpresa(id: string, categoria: string, opts: { email?: string; tele
   db.close();
 }
 
+// El anchor se guarda como instante (UTC) y se lee como dia de calendario en BOGOTA, que es
+// la zona en la que trabaja el motor. Los escenarios de abajo anclan a las 14:00Z = 09:00 de
+// Bogota: un instante de MEDIANOCHE UTC seria las 19:00 del dia ANTERIOR en Bogota y el
+// escenario diria un dia distinto del que se lee.
 function fijarAnchor(idInscripcion: number, fechaIso: string) {
   const db = raw();
   db.prepare('UPDATE inscripcion SET fecha_inscripcion = ? WHERE id_inscripcion = ?').run(fechaIso, idInscripcion);
@@ -65,7 +69,7 @@ test('primera pasada materializa el paso del dia 0 como pendiente', () => {
   const idCampana = crearCampana({ nombre: 'Camp mat 1', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1);
   const insc = inscripcionActivaDe('e-mat-1');
-  fijarAnchor(insc.id, '2026-07-01T00:00:00.000Z');
+  fijarAnchor(insc.id, '2026-07-01T14:00:00.000Z');
 
   const r1 = materializarPasosDebidos('2026-07-01', CONFIG);
   assert.equal(r1.creados, 1);
@@ -88,7 +92,7 @@ test('no avanza al paso 2 hasta que el paso 1 este ejecutado (enviada), y no dup
   const idCampana = crearCampana({ nombre: 'Camp mat 2', idCadencia, idSegmento: idSeg }, 1);
   inscribirCampana(idCampana, 1);
   const insc = inscripcionActivaDe('e-mat-2');
-  fijarAnchor(insc.id, '2026-07-01T00:00:00.000Z');
+  fijarAnchor(insc.id, '2026-07-01T14:00:00.000Z');
 
   materializarPasosDebidos('2026-07-01', CONFIG);
   const r2 = materializarPasosDebidos('2026-07-01', CONFIG);
@@ -121,7 +125,7 @@ test('sin telefono, el paso de llamada se omite (regla cola) y no bloquea el pas
   const idCampana = crearCampana({ nombre: 'Camp mat 3', idCadencia, idSegmento: idSeg, reglaFaltante: 'cola' }, 1);
   inscribirCampana(idCampana, 1);
   const insc = inscripcionActivaDe('e-mat-3');
-  fijarAnchor(insc.id, '2026-07-01T00:00:00.000Z');
+  fijarAnchor(insc.id, '2026-07-01T14:00:00.000Z');
 
   const rDia0 = materializarPasosDebidos('2026-07-01', CONFIG);
   assert.equal(rDia0.omitidos, 1, 'el paso de llamada se omite de una: no hay a quien llamar');
@@ -144,6 +148,73 @@ test('empresa bloqueada (sin destinatario, ningun contacto con email) no revient
   inscribirCampana(idCampana, 1);
 
   assert.doesNotThrow(() => materializarPasosDebidos('2026-07-01', CONFIG));
+});
+
+// Bug medido en produccion el 2026-07-28 a las 20:09 -05: las inscripciones 216 y 217
+// quedaron con fecha_inscripcion '2026-07-29T01:09Z' (el mismo instante, escrito en UTC) y su
+// paso de dia 0 NO se materializo esa noche. El anchor se leia recortando el ISO, o sea en
+// dia UTC, mientras el worker pasa hoy() en dia Bogota: entre las 19:00 y la medianoche las
+// dos puntas caian en dias distintos y el paso de hoy calculaba mañana.
+//
+// La hora simulada no necesita fake timers: 01:09Z ES las 20:09 de Bogota del dia anterior.
+// Lo que se fija es justo el dato que produce ese instante en la base.
+test('la inscripcion de las 20:09 hora Bogota materializa su paso de dia 0 ESE mismo dia', () => {
+  seedEmpresa('e-mat-tz', 'mat-cat-tz', { email: 'tz@x.com', telefono: '3000000009' });
+  const idCadencia = crearCadencia({ nombre: 'C mat tz', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' }] });
+  const idSeg = guardarSegmento({ nombre: 'mat-seg-tz', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['mat-cat-tz'] }] } }, 1);
+  const idCampana = crearCampana({ nombre: 'Camp mat tz', idCadencia, idSegmento: idSeg }, 1);
+  inscribirCampana(idCampana, 1);
+  const insc = inscripcionActivaDe('e-mat-tz');
+  fijarAnchor(insc.id, '2026-07-29T01:09:48.705Z'); // 2026-07-28 20:09 en Bogota
+
+  const r = materializarPasosDebidos('2026-07-28', CONFIG);
+  assert.equal(r.creados, 1, 'el paso de dia 0 toca el 28, que es el dia que era en Bogota cuando entro la empresa');
+
+  // Contra la base abierta aparte, no contra el valor de retorno: lo que importa es la fila.
+  const db = raw();
+  const idDest = destinatariosDeInscripcion(insc.id)[0].id;
+  const fila = db
+    .prepare('SELECT estado, fecha_programada FROM paso_inscripcion WHERE id_destinatario = ?')
+    .get(idDest) as { estado: string; fecha_programada: string };
+  db.close();
+  assert.equal(fila.estado, 'pendiente');
+  assert.equal(fila.fecha_programada, '2026-07-28', 'programada para hoy en Bogota, no para mañana en UTC');
+});
+
+test('un anchor de las 20:09 no adelanta los pasos de offset mayor a cero', () => {
+  seedEmpresa('e-mat-tz2', 'mat-cat-tz2', { email: 'tz2@x.com', telefono: '3000000010' });
+  const idCadencia = crearCadencia({
+    nombre: 'C mat tz2',
+    pasos: [
+      { orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' },
+      { orden: 2, diaOffset: 2, canal: 'correo', cuerpo: 'p2' },
+    ],
+  });
+  const idSeg = guardarSegmento({ nombre: 'mat-seg-tz2', definicion: { condiciones: [{ campo: 'ciudad', op: 'en', valores: ['mat-cat-tz2'] }] } }, 1);
+  const idCampana = crearCampana({ nombre: 'Camp mat tz2', idCadencia, idSegmento: idSeg }, 1);
+  inscribirCampana(idCampana, 1);
+  const insc = inscripcionActivaDe('e-mat-tz2');
+  fijarAnchor(insc.id, '2026-07-29T01:09:48.705Z'); // 2026-07-28 20:09 en Bogota
+
+  materializarPasosDebidos('2026-07-28', CONFIG);
+  const idDest = destinatariosDeInscripcion(insc.id)[0].id;
+  const pi1 = agendaHoyCadencias('2026-07-28').find((f) => f.idDestinatario === idDest)!;
+  // Enviado tambien de noche: la fecha real del paso 1 se guarda en UTC y es la que re-ancla
+  // el paso 2, asi que el corrimiento tenia por donde volver a entrar.
+  marcarPasoInscripcionEnviada(pi1.idPasoInscripcion, 'apollo', 'msg-tz', '2026-07-29T01:30:00.000Z');
+
+  assert.equal(materializarPasosDebidos('2026-07-29', CONFIG).creados, 0, 'el paso de offset 2 no toca al dia siguiente');
+  assert.equal(materializarPasosDebidos('2026-07-30', CONFIG).creados, 1, 'toca dos dias despues del 28, que es cuando entro la empresa');
+
+  const db = raw();
+  const filas = db
+    .prepare('SELECT fecha_programada FROM paso_inscripcion WHERE id_destinatario = ? ORDER BY id_paso_inscripcion')
+    .all(idDest) as { fecha_programada: string }[];
+  db.close();
+  assert.deepEqual(
+    filas.map((f) => f.fecha_programada),
+    ['2026-07-28', '2026-07-30'],
+  );
 });
 
 test.after(() => {

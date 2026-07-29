@@ -20,6 +20,27 @@ export function fechaBogotaISO(date: Date = new Date()): string {
   return FORMATO_FECHA_BOGOTA.format(date);
 }
 
+// Dia de calendario EN BOGOTA de un instante ya guardado en la base. Existe porque las
+// columnas de tiempo se escriben con `new Date().toISOString()`, o sea en UTC, y recortarlas
+// con .slice(0, 10) devuelve el dia UTC: entre las 19:00 y la medianoche de Colombia eso es
+// MAÑANA. Ese corrimiento es un bug medido (2026-07-28, 20:09 -05): la inscripcion 216 quedo
+// con fecha_inscripcion '2026-07-29T01:09:48Z', su anchor se leyo como 2026-07-29 y el paso
+// de diaOffset 0 calculo "mañana" contra un hoy() que ya era 2026-07-28 en Bogota. Resultado:
+// el paso del dia 0 no se materializaba si la empresa entraba despues de las 7 pm.
+//
+// Tres formas de valor y las tres tienen que sobrevivir, porque las tres estan en produccion:
+//   'YYYY-MM-DD'              -> ya es un dia de calendario, se devuelve igual (no se
+//                                reinterpreta como medianoche UTC, que lo correria un dia).
+//   ISO con zona ('...Z')     -> se convierte a la fecha de pared en Bogota.
+//   cualquier otra cosa       -> se recorta y ya; no se inventa una fecha de un formato
+//                                que no se reconoce.
+export function diaBogotaDeGuardado(valor: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(valor)) return valor;
+  const instante = new Date(valor);
+  if (Number.isNaN(instante.getTime())) return valor.slice(0, 10);
+  return fechaBogotaISO(instante);
+}
+
 // Hora del dia en Bogota, 0-23. Misma razon que fechaBogotaISO: el contenedor puede correr
 // en UTC (el host del VPS lo hace) y getHours() contestaria la hora del proceso, no la del
 // negocio. hourCycle 'h23' y no hour12:false, que en algunas versiones de ICU devuelve "24"
