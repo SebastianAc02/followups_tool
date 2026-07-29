@@ -70,7 +70,13 @@ import { calcularGoteo, type RitmoIngreso } from '../core/goteo';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
-import type { MensajeEntrante, MensajeSaliente, ContactoMatch, InscripcionActiva } from '../core/llego-respuesta';
+import {
+  normalizarTelefono,
+  type MensajeEntrante,
+  type MensajeSaliente,
+  type ContactoMatch,
+  type InscripcionActiva,
+} from '../core/llego-respuesta';
 import type { EventoProveedor, PasoParaSincronizar, PasoSincronizado } from '../core/ports/envio';
 import { restarUnDia } from '../core/actividad';
 import { normalizarFechaToque } from '../core/fecha-toque';
@@ -2052,6 +2058,362 @@ export function actualizarEmpresa(input: ActualizarEmpresaInput, idOrganizacion:
       .run();
 
     return leerEmpresaEscrita(tx, parsed.idEmpresa);
+  });
+}
+
+// --- crearContacto / actualizarContacto -----------------------------------------------
+//
+// El movimiento que le faltaba al MCP: cargar A QUIEN se le manda. Hasta 2026-07-28 el UNICO
+// camino que escribia `contacto` desde el MCP era el bloque `kdm` de registrarToque, que solo
+// acepta nombre y telefono -- sin email. Y sin email no hay destinatario: elegirDestinatarioDefault
+// (app/core/inscripcion.ts) filtra por email y devuelve null si NINGUN contacto lo tiene, con lo
+// que inscribirEmpresaEnCadencia abre la inscripcion en 'bloqueada' y lanzar_campana responde
+// "empresas sin destinatario utilizable". Medido en produccion el 2026-07-28: 248 de 415
+// contactos no tienen email, o sea que el caso dominante NO es crear un contacto nuevo sino
+// completarle el correo a uno que ya existe. Por eso son DOS funciones y no una: crear se niega
+// a duplicar, y completar es un acto explicito sobre un id concreto.
+
+export type ContactoEscrito = {
+  idContacto: number;
+  idEmpresa: string;
+  nombre: string | null;
+  apellido: string | null;
+  cargo: string | null;
+  cargoCategoria: string | null;
+  email: string | null;
+  telefono: string | null;
+  linkedin: string | null;
+  notas: string | null;
+  esPrincipal: boolean;
+  esKeyDecisionMaker: boolean;
+  fuente: string;
+};
+
+function filaAContactoEscrito(f: {
+  idContacto: number;
+  idEmpresa: string;
+  nombre: string | null;
+  apellido: string | null;
+  cargo: string | null;
+  cargoCategoria: string | null;
+  email: string | null;
+  telefono: string | null;
+  linkedin: string | null;
+  notas: string | null;
+  esPrincipal: number;
+  esKeyDecisionMaker: number;
+  fuente: string;
+}): ContactoEscrito {
+  return { ...f, esPrincipal: f.esPrincipal === 1, esKeyDecisionMaker: f.esKeyDecisionMaker === 1 };
+}
+
+const COLUMNAS_CONTACTO_ESCRITO = {
+  idContacto: contacto.idContacto,
+  idEmpresa: contacto.idEmpresa,
+  nombre: contacto.nombre,
+  apellido: contacto.apellido,
+  cargo: contacto.cargo,
+  cargoCategoria: contacto.cargoCategoria,
+  email: contacto.email,
+  telefono: contacto.telefono,
+  linkedin: contacto.linkedin,
+  notas: contacto.notas,
+  esPrincipal: contacto.esPrincipal,
+  esKeyDecisionMaker: contacto.esKeyDecisionMaker,
+  fuente: contacto.fuente,
+};
+
+// Todos los contactos de la empresa, releidos. Es lo que devuelven crearContacto y
+// actualizarContacto ademas del contacto tocado: quien llama necesita ver el resto para saber
+// a quien le va a caer la cadencia (elegirDestinatarioDefault decide sobre el conjunto, no
+// sobre el que se acaba de escribir).
+export function contactosDeEmpresa(idEmpresa: string, lector: typeof db | Tx = db): ContactoEscrito[] {
+  return lector
+    .select(COLUMNAS_CONTACTO_ESCRITO)
+    .from(contacto)
+    .where(eq(contacto.idEmpresa, idEmpresa))
+    .orderBy(contacto.idContacto)
+    .all()
+    .map(filaAContactoEscrito);
+}
+
+function leerContactoEscrito(lector: typeof db | Tx, idContacto: number): ContactoEscrito {
+  const fila = lector.select(COLUMNAS_CONTACTO_ESCRITO).from(contacto).where(eq(contacto.idContacto, idContacto)).get();
+  if (!fila) throw new Error(`El contacto ${idContacto} no quedo escrito`);
+  return filaAContactoEscrito(fila);
+}
+
+function empresaDeLaOrganizacion(lector: typeof db | Tx, idEmpresa: string, idOrganizacion: number): void {
+  const emp = lector
+    .select({ organizacionActivaId: empresa.organizacionActivaId })
+    .from(empresa)
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!emp) throw new Error(`Empresa ${idEmpresa} no existe. Créala con crear_empresa antes de cargarle un contacto.`);
+  if (emp.organizacionActivaId !== idOrganizacion) {
+    throw new Error(`La empresa ${idEmpresa} esta activa en otra organizacion, no en ${idOrganizacion}`);
+  }
+}
+
+// Antidupe. Mismo idioma que buscarEmpresa: se busca ANTES de escribir y se devuelve el que ya
+// existe, en vez de dejar dos filas de la misma persona. Un contacto duplicado no es cosmetico:
+// las dos filas entran a contactosDeEmpresa, y si un dia la de menor id es la que tiene el
+// telefono viejo, la cadencia le escribe a esa.
+//   - email: exacto, sin distinguir mayusculas ni espacios de sobra.
+//   - telefono: por los ULTIMOS 10 DIGITOS, el mismo criterio que ya usa resolverPorUltimos10
+//     para cruzar un WhatsApp entrante contra un contacto (+57, 57 y separadores absorbidos).
+function contactosQueChocan(
+  existentes: ContactoEscrito[],
+  email: string | undefined,
+  telefono: string | undefined,
+  idPropio?: number,
+): ContactoEscrito[] {
+  const emailBuscado = email?.trim().toLowerCase();
+  const telBuscado = telefono ? normalizarTelefono(telefono).slice(-10) : undefined;
+  return existentes.filter((c) => {
+    if (c.idContacto === idPropio) return false;
+    if (emailBuscado && c.email && c.email.trim().toLowerCase() === emailBuscado) return true;
+    if (telBuscado && telBuscado.length === 10 && c.telefono && normalizarTelefono(c.telefono).slice(-10) === telBuscado) return true;
+    return false;
+  });
+}
+
+// es_principal es EXCLUSIVO por empresa y no por convencion: isps.db tiene el indice unico
+// parcial `uq_contacto_principal ON contacto(id_empresa) WHERE es_principal = 1` (verificado en
+// produccion el 2026-07-28). Dos principales es un estado que la base no deja existir, asi que
+// rechazar la escritura solo trasladaria el problema a quien llama sin ganar nada: se DEGRADA el
+// anterior dentro de la MISMA transaccion y se devuelve cual era, para que el cambio quede visible
+// y no silencioso. Degradar primero e insertar despues, en ese orden: SQLite valida el indice por
+// sentencia, no al cerrar la transaccion.
+function degradarPrincipalAnterior(tx: Tx, idEmpresa: string, idNuevo?: number): ContactoEscrito | null {
+  const anteriores = tx
+    .select(COLUMNAS_CONTACTO_ESCRITO)
+    .from(contacto)
+    .where(and(eq(contacto.idEmpresa, idEmpresa), eq(contacto.esPrincipal, 1)))
+    .all()
+    .map(filaAContactoEscrito)
+    .filter((c) => c.idContacto !== idNuevo);
+  if (anteriores.length === 0) return null;
+  for (const a of anteriores) {
+    tx.update(contacto).set({ esPrincipal: 0 }).where(eq(contacto.idContacto, a.idContacto)).run();
+  }
+  return anteriores[0];
+}
+
+const crearContactoSchema = z
+  .object({
+    idEmpresa: z.string().trim().min(1),
+    nombre: z.string().trim().min(1).optional(),
+    apellido: z.string().trim().min(1).optional(),
+    cargo: z.string().trim().min(1).optional(),
+    email: z.string().trim().email('email inválido').optional(),
+    telefono: z.string().trim().min(1).optional(),
+    linkedin: z.string().trim().min(1).optional(),
+    notas: z.string().trim().min(1).optional(),
+    esPrincipal: z.boolean().optional(),
+    esKdm: z.boolean().optional(),
+    fuente: z.string().trim().min(1).optional(),
+    forzar: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.email && !data.telefono) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'crear_contacto exige email o telefono (o los dos). Un contacto sin ninguno de los dos no puede recibir ' +
+          'nada por cadencia y ademas no tiene con que compararse contra los que ya existen.',
+      });
+    }
+  });
+export type CrearContactoInput = z.input<typeof crearContactoSchema>;
+
+export type CrearContactoResultado =
+  | {
+      creado: true;
+      contacto: ContactoEscrito;
+      // Quien perdio el es_principal al marcar este, null si no habia otro.
+      principalAnterior: ContactoEscrito | null;
+      contactosEmpresa: ContactoEscrito[];
+    }
+  | {
+      creado: false;
+      motivo: 'duplicado_probable';
+      mensaje: string;
+      candidatos: ContactoEscrito[];
+      contactosEmpresa: ContactoEscrito[];
+    };
+
+export function crearContacto(input: CrearContactoInput, idOrganizacion: number): CrearContactoResultado {
+  const parsed = crearContactoSchema.parse(input);
+
+  return db.transaction((tx) => {
+    empresaDeLaOrganizacion(tx, parsed.idEmpresa, idOrganizacion);
+
+    const existentes = contactosDeEmpresa(parsed.idEmpresa, tx);
+    const choques = contactosQueChocan(existentes, parsed.email, parsed.telefono);
+    if (choques.length > 0 && !parsed.forzar) {
+      return {
+        creado: false as const,
+        motivo: 'duplicado_probable' as const,
+        mensaje:
+          `No se creó: ${parsed.idEmpresa} ya tiene ${choques.length} contacto(s) con ese mismo email o teléfono ` +
+          `(${choques.map((c) => `#${c.idContacto} ${c.nombre ?? 'sin nombre'} ${c.email ?? 'sin email'} ${c.telefono ?? 'sin teléfono'}`).join('; ')}). ` +
+          'Complétale los campos que le faltan con actualizar_contacto usando ese idContacto, o repite con forzar:true ' +
+          'si de verdad son dos personas distintas.',
+        candidatos: choques,
+        contactosEmpresa: existentes,
+      };
+    }
+
+    const principalAnterior = parsed.esPrincipal ? degradarPrincipalAnterior(tx, parsed.idEmpresa) : null;
+
+    const ins = tx
+      .insert(contacto)
+      .values({
+        idEmpresa: parsed.idEmpresa,
+        nombre: parsed.nombre ?? null,
+        apellido: parsed.apellido ?? null,
+        cargo: parsed.cargo ?? null,
+        // La categoria NO se recibe: se deriva del cargo con el mismo clasificador que usa la
+        // reconciliacion de Notion. cargo_categoria tiene un CHECK de 10 valores en isps.db, y
+        // dejar que el cliente MCP escriba texto libre ahi es fabricar un error de constraint.
+        cargoCategoria: parsed.cargo ? clasificarCargo(parsed.cargo) : null,
+        email: parsed.email ?? null,
+        telefono: parsed.telefono ?? null,
+        linkedin: parsed.linkedin ?? null,
+        notas: parsed.notas ?? null,
+        esPrincipal: parsed.esPrincipal ? 1 : 0,
+        esKeyDecisionMaker: parsed.esKdm ? 1 : 0,
+        fuente: parsed.fuente ?? 'mcp',
+      })
+      .run();
+
+    const idContacto = Number(ins.lastInsertRowid);
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: new Date().toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'contacto',
+        idRegistro: String(idContacto),
+        accion: 'insert',
+        detalle: `alta de contacto en ${parsed.idEmpresa}: ${parsed.nombre ?? 'sin nombre'} (${parsed.email ?? 'sin email'})`,
+      })
+      .run();
+
+    // Relectura, no eco del input: lo que sale es lo que quedo en la base, incluida la
+    // cargo_categoria derivada y el id que asigno SQLite.
+    return {
+      creado: true as const,
+      contacto: leerContactoEscrito(tx, idContacto),
+      principalAnterior,
+      contactosEmpresa: contactosDeEmpresa(parsed.idEmpresa, tx),
+    };
+  });
+}
+
+const actualizarContactoSchema = z
+  .object({
+    idContacto: z.number().int().positive(),
+    nombre: z.string().trim().min(1).optional(),
+    apellido: z.string().trim().min(1).optional(),
+    cargo: z.string().trim().min(1).optional(),
+    email: z.string().trim().email('email inválido').optional(),
+    telefono: z.string().trim().min(1).optional(),
+    linkedin: z.string().trim().min(1).optional(),
+    notas: z.string().trim().min(1).optional(),
+    esPrincipal: z.boolean().optional(),
+    esKdm: z.boolean().optional(),
+    forzar: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const { idContacto: _id, forzar: _f, ...campos } = data;
+    if (Object.values(campos).every((v) => v === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'actualizar_contacto requiere al menos un campo a cambiar (nombre, apellido, cargo, email, telefono, ' +
+          'linkedin, notas, esPrincipal, esKdm)',
+      });
+    }
+  });
+export type ActualizarContactoInput = z.input<typeof actualizarContactoSchema>;
+
+export type ActualizarContactoResultado =
+  | { actualizado: true; contacto: ContactoEscrito; principalAnterior: ContactoEscrito | null; contactosEmpresa: ContactoEscrito[] }
+  | { actualizado: false; motivo: 'duplicado_probable'; mensaje: string; candidatos: ContactoEscrito[]; contactosEmpresa: ContactoEscrito[] };
+
+// Cambia campos puntuales de un contacto que ya existe. Solo se escribe lo que VINO: un campo
+// ausente no se toca, y `.trim().min(1)` hace que un string vacio sea un error de entrada y no
+// un borrado silencioso. Es el camino para el caso dominante (248 de 415 contactos de produccion
+// sin email): completarle el correo al contacto que registrar_toque creo con solo nombre y
+// telefono, para que la empresa deje de estar sin destinatario.
+export function actualizarContacto(input: ActualizarContactoInput, idOrganizacion: number): ActualizarContactoResultado {
+  const parsed = actualizarContactoSchema.parse(input);
+
+  return db.transaction((tx) => {
+    const actual = tx
+      .select({ idEmpresa: contacto.idEmpresa })
+      .from(contacto)
+      .where(eq(contacto.idContacto, parsed.idContacto))
+      .get();
+    if (!actual) throw new Error(`El contacto ${parsed.idContacto} no existe`);
+    empresaDeLaOrganizacion(tx, actual.idEmpresa, idOrganizacion);
+
+    const existentes = contactosDeEmpresa(actual.idEmpresa, tx);
+    // Mismo antidupe que al crear, pero excluyendose a si mismo: poner un email que OTRO
+    // contacto de la empresa ya tiene fabrica el duplicado por la puerta de atras.
+    const choques = contactosQueChocan(existentes, parsed.email, parsed.telefono, parsed.idContacto);
+    if (choques.length > 0 && !parsed.forzar) {
+      return {
+        actualizado: false as const,
+        motivo: 'duplicado_probable' as const,
+        mensaje:
+          `No se actualizó: ese email o teléfono ya lo tiene otro contacto de ${actual.idEmpresa} ` +
+          `(${choques.map((c) => `#${c.idContacto} ${c.nombre ?? 'sin nombre'} ${c.email ?? 'sin email'} ${c.telefono ?? 'sin teléfono'}`).join('; ')}). ` +
+          'Edita ese contacto, o repite con forzar:true si de verdad son dos personas distintas.',
+        candidatos: choques,
+        contactosEmpresa: existentes,
+      };
+    }
+
+    const principalAnterior = parsed.esPrincipal === true ? degradarPrincipalAnterior(tx, actual.idEmpresa, parsed.idContacto) : null;
+
+    const sets: Record<string, unknown> = {};
+    if (parsed.nombre !== undefined) sets.nombre = parsed.nombre;
+    if (parsed.apellido !== undefined) sets.apellido = parsed.apellido;
+    if (parsed.cargo !== undefined) {
+      sets.cargo = parsed.cargo;
+      sets.cargoCategoria = clasificarCargo(parsed.cargo);
+    }
+    if (parsed.email !== undefined) sets.email = parsed.email;
+    if (parsed.telefono !== undefined) sets.telefono = parsed.telefono;
+    if (parsed.linkedin !== undefined) sets.linkedin = parsed.linkedin;
+    if (parsed.notas !== undefined) sets.notas = parsed.notas;
+    if (parsed.esPrincipal !== undefined) sets.esPrincipal = parsed.esPrincipal ? 1 : 0;
+    if (parsed.esKdm !== undefined) sets.esKeyDecisionMaker = parsed.esKdm ? 1 : 0;
+
+    tx.update(contacto).set(sets).where(eq(contacto.idContacto, parsed.idContacto)).run();
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: new Date().toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'contacto',
+        idRegistro: String(parsed.idContacto),
+        accion: 'update',
+        detalle: `campos: ${Object.keys(sets).join(', ')}`,
+      })
+      .run();
+
+    return {
+      actualizado: true as const,
+      contacto: leerContactoEscrito(tx, parsed.idContacto),
+      principalAnterior,
+      contactosEmpresa: contactosDeEmpresa(actual.idEmpresa, tx),
+    };
   });
 }
 

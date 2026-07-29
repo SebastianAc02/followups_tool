@@ -88,6 +88,13 @@ import {
   type CrearEmpresaResultado,
   type ActualizarEmpresaInput,
   type EmpresaEscrita,
+  crearContacto,
+  actualizarContacto,
+  type CrearContactoInput,
+  type CrearContactoResultado,
+  type ActualizarContactoInput,
+  type ActualizarContactoResultado,
+  type ContactoEscrito,
 } from '../db/repository';
 import {
   RESULTADOS_REUNION_OCURRIDA,
@@ -100,6 +107,9 @@ import {
   type DefinicionSegmento,
 } from '../db/validation';
 import { readinessCanalUsuario } from '../core/readiness-canal-usuario';
+// La MISMA funcion pura que corre inscribirEmpresaEnCadencia por dentro (via
+// previsualizarInscripcion). No es una copia de la regla: es la regla.
+import { elegirDestinatarioDefault } from '../core/inscripcion';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
@@ -449,6 +459,123 @@ export function crearEmpresaTool(input: CrearEmpresaInput, idOrganizacion: numbe
 
 export function actualizarEmpresaTool(input: ActualizarEmpresaInput, idOrganizacion: number): EmpresaEscrita {
   return actualizarEmpresa(input, idOrganizacion);
+}
+
+// --- crear_contacto / actualizar_contacto (2026-07-28) ---------------------------------
+//
+// El movimiento que faltaba: cargar A QUIEN se le manda. crear_empresa monta la cuenta y
+// crear_cadencia monta la secuencia, pero entre las dos no habia forma de darle un correo a
+// nadie: el unico camino que escribia `contacto` era el bloque `kdm` de registrar_toque, que
+// acepta nombre y telefono y nada mas. Sin email no hay destinatario y lanzar_campana responde
+// "empresas sin destinatario utilizable".
+//
+// Las dos tools no devuelven solo el contacto: devuelven ademas quien seria el DESTINATARIO de
+// una inscripcion hecha hoy, calculado con elegirDestinatarioDefault, la misma funcion pura que
+// corre inscribirEmpresaEnCadencia por dentro (via previsualizarInscripcion). Es la unica forma
+// de que quien llama vea el efecto real de lo que acaba de escribir, porque la eleccion NO es
+// "el que acabo de marcar principal": el orden es KDM, despues principal, despues el primero con
+// email por id. Un contacto nuevo marcado principal en una empresa que ya tenia un KDM con email
+// NO se lleva la cadencia, y eso se dice explicito en vez de dejar que se descubra con el correo
+// mandado al que no era.
+
+export type DestinatarioDeLaCadencia = { idContacto: number; nombre: string | null; email: string | null; porQue: string } | null;
+
+function destinatarioQueElegiriaLaCadencia(contactos: ContactoEscrito[]): DestinatarioDeLaCadencia {
+  const idElegido = elegirDestinatarioDefault(
+    contactos.map((c) => ({
+      idContacto: c.idContacto,
+      esKeyDecisionMaker: c.esKeyDecisionMaker,
+      esPrincipal: c.esPrincipal,
+      email: c.email,
+      telefono: c.telefono,
+    })),
+  );
+  if (idElegido == null) return null;
+  const elegido = contactos.find((c) => c.idContacto === idElegido)!;
+  const porQue = elegido.esKeyDecisionMaker
+    ? 'es el KDM con email (el KDM gana sobre el principal)'
+    : elegido.esPrincipal
+      ? 'es el contacto principal con email'
+      : 'es el primero con email por id (no hay KDM ni principal con email)';
+  return { idContacto: elegido.idContacto, nombre: elegido.nombre, email: elegido.email, porQue };
+}
+
+// Advertencias que salen de leer el estado FINAL de la empresa, no del input. Cada una es un
+// caso en que la escritura quedo bien pero el correo igual no sale, o sale al que no era.
+function advertenciasDeContacto(
+  contactos: ContactoEscrito[],
+  destinatario: DestinatarioDeLaCadencia,
+  tocado: ContactoEscrito,
+  principalAnterior: ContactoEscrito | null,
+): string[] {
+  const advertencias: string[] = [];
+  if (principalAnterior) {
+    advertencias.push(
+      `#${principalAnterior.idContacto} (${principalAnterior.nombre ?? 'sin nombre'}) dejó de ser el principal de ` +
+        `${tocado.idEmpresa}: es_principal es exclusivo por empresa (índice único uq_contacto_principal en isps.db), ` +
+        'así que marcar uno degrada al anterior en la misma transacción.',
+    );
+  }
+  if (destinatario === null) {
+    advertencias.push(
+      `${tocado.idEmpresa} sigue SIN destinatario: ningún contacto suyo tiene email, así que una inscripción nacería ` +
+        "'bloqueada' y lanzar_campana la contaría como \"empresa sin destinatario utilizable\".",
+    );
+  } else if (destinatario.idContacto !== tocado.idContacto) {
+    advertencias.push(
+      `el correo de esta cadencia NO le va a llegar a #${tocado.idContacto} sino a #${destinatario.idContacto} ` +
+        `(${destinatario.nombre ?? 'sin nombre'}, ${destinatario.email}), porque ${destinatario.porQue}. ` +
+        'Para que sea el que acabas de tocar: márcalo esKdm:true, o quítale el KDM al otro con actualizar_contacto.',
+    );
+  }
+  const kdmsConEmail = contactos.filter((c) => c.esKeyDecisionMaker && c.email);
+  if (kdmsConEmail.length > 1) {
+    advertencias.push(
+      `${tocado.idEmpresa} tiene ${kdmsConEmail.length} contactos marcados KDM con email (#${kdmsConEmail.map((c) => c.idContacto).join(', #')}). ` +
+        'es_key_decision_maker NO es exclusivo en la base, y elegirDestinatarioDefault se queda con el de menor id: ' +
+        `hoy sería #${kdmsConEmail[0].idContacto}.`,
+    );
+  }
+  if (!tocado.nombre) {
+    advertencias.push(
+      `#${tocado.idContacto} quedó sin nombre. El copy de las cadencias usa [variables] como [nombre]: un paso que ` +
+        'la use va a salir con el hueco vacío.',
+    );
+  }
+  return advertencias;
+}
+
+export type CrearContactoTooResultado =
+  | (Extract<CrearContactoResultado, { creado: true }> & { destinatarioDeLaCadencia: DestinatarioDeLaCadencia; advertencias: string[] })
+  | Extract<CrearContactoResultado, { creado: false }>;
+
+export function crearContactoTool(input: CrearContactoInput, idOrganizacion: number): CrearContactoTooResultado {
+  const r = crearContacto(input, idOrganizacion);
+  if (!r.creado) return r;
+  const destinatarioDeLaCadencia = destinatarioQueElegiriaLaCadencia(r.contactosEmpresa);
+  return {
+    ...r,
+    destinatarioDeLaCadencia,
+    advertencias: advertenciasDeContacto(r.contactosEmpresa, destinatarioDeLaCadencia, r.contacto, r.principalAnterior),
+  };
+}
+
+export type ActualizarContactoTooResultado =
+  | (Extract<ActualizarContactoResultado, { actualizado: true }> & {
+      destinatarioDeLaCadencia: DestinatarioDeLaCadencia;
+      advertencias: string[];
+    })
+  | Extract<ActualizarContactoResultado, { actualizado: false }>;
+
+export function actualizarContactoTool(input: ActualizarContactoInput, idOrganizacion: number): ActualizarContactoTooResultado {
+  const r = actualizarContacto(input, idOrganizacion);
+  if (!r.actualizado) return r;
+  const destinatarioDeLaCadencia = destinatarioQueElegiriaLaCadencia(r.contactosEmpresa);
+  return {
+    ...r,
+    destinatarioDeLaCadencia,
+    advertencias: advertenciasDeContacto(r.contactosEmpresa, destinatarioDeLaCadencia, r.contacto, r.principalAnterior),
+  };
 }
 
 // Corrige el id provisional de una cuenta por su NIT real. Es una escritura estructural (mueve

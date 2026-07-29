@@ -30,6 +30,8 @@ import {
   buscarEmpresaTool,
   crearEmpresaTool,
   actualizarEmpresaTool,
+  crearContactoTool,
+  actualizarContactoTool,
   reasignarNitTool,
   reconciliarNotionTool,
   cambiosDesdeTool,
@@ -88,10 +90,12 @@ export const TOOLS_LECTURA = [
 ] as const;
 
 export const TOOLS_ESCRITURA = [
+  'actualizar_contacto',
   'actualizar_empresa',
   'aplazar_seguimiento',
   'cambiar_cadencia',
   'crear_cadencia',
+  'crear_contacto',
   'crear_empresa',
   'editar_toque',
   'lanzar_campana',
@@ -576,6 +580,88 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
     async (input) => {
       const r = actualizarEmpresaTool(input as Parameters<typeof actualizarEmpresaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  // El movimiento que faltaba entre crear_empresa y crear_cadencia: cargar A QUIEN se le manda.
+  // Ver la nota de diseño en tools.ts (por qué son dos tools y no un upsert).
+  server.registerTool(
+    'crear_contacto',
+    {
+      description:
+        'Crea un contacto (persona) de una cuenta, con su email, y devuelve el contacto RELEÍDO de la base más ' +
+        'todos los contactos que le quedaron a esa empresa. Es lo que le faltaba al MCP para tener a quién mandarle ' +
+        'una cadencia: hasta ahora el único camino que creaba contactos era el campo kdm de registrar_toque, que solo ' +
+        'acepta nombre y teléfono. Sin un contacto con email, la inscripción nace bloqueada y lanzar_campana responde ' +
+        '"empresas sin destinatario utilizable". ' +
+        'ANTIDUPE: antes de insertar busca en esa empresa por email (exacto, sin distinguir mayúsculas) y por teléfono ' +
+        '(últimos 10 dígitos, así +57/57/guiones no engañan). Si encuentra, NO crea: devuelve el existente con su ' +
+        'idContacto para que le completes lo que le falta con actualizar_contacto. forzar:true lo salta, solo cuando ' +
+        'de verdad son dos personas. ' +
+        'es_principal ES EXCLUSIVO por empresa (índice único uq_contacto_principal en la base): si marcas esPrincipal ' +
+        'y ya había otro, el anterior QUEDA DEGRADADO en la misma transacción y se devuelve cuál era en ' +
+        'principalAnterior. No se rechaza, se degrada y se dice. ' +
+        'CUIDADO con quién recibe: la cadencia NO elige al principal, elige en este orden: (1) el KDM con email, ' +
+        '(2) el principal con email, (3) el primero con email por id. El resultado trae destinatarioDeLaCadencia con ' +
+        'quién sería hoy y por qué, y una advertencia explícita si no es el que acabas de crear.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa. Tiene que existir y ser de esta organización, o falla'),
+        nombre: z.string().min(1).optional().describe('Nombre de pila. Sin él, el copy con [nombre] sale con el hueco vacío'),
+        apellido: z.string().min(1).optional(),
+        cargo: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Texto libre ("Gerente General"). La cargo_categoria se deriva sola con el clasificador del dominio'),
+        email: z.string().min(1).optional().describe('El campo que decide si esta empresa tiene destinatario de correo o no'),
+        telefono: z.string().min(1).optional().describe('Como se escriba: el antidupe compara por los últimos 10 dígitos'),
+        linkedin: z.string().min(1).optional(),
+        notas: z.string().min(1).optional(),
+        esPrincipal: z.boolean().optional().describe('Exclusivo por empresa: marcarlo degrada al principal anterior'),
+        esKdm: z
+          .boolean()
+          .optional()
+          .describe('Key decision maker. GANA sobre esPrincipal al resolver a quién se le manda la cadencia'),
+        fuente: z.string().min(1).optional().describe("De dónde salió el dato. Default 'mcp'"),
+        forzar: z.boolean().optional().describe('Crea aunque ya haya un contacto con ese email o teléfono en la empresa'),
+      },
+    },
+    async (input) => {
+      const r = crearContactoTool(input as Parameters<typeof crearContactoTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'actualizar_contacto',
+    {
+      description:
+        'Cambia campos puntuales de un contacto que ya existe (típicamente: ponerle el email que no tenía) y devuelve ' +
+        'el contacto RELEÍDO más todos los de esa empresa. Es el camino del caso más común: 248 de los 415 contactos ' +
+        'de producción no tienen email, casi todos creados por el campo kdm de registrar_toque, que nunca aceptó uno. ' +
+        'Solo escribe los campos que vengan; los que no vengan quedan como estaban, y un string vacío es un error de ' +
+        'entrada, no un borrado. ' +
+        'ANTIDUPE igual que crear_contacto: si el email o el teléfono que le pones ya lo tiene OTRO contacto de la ' +
+        'misma empresa, no escribe y devuelve cuál es (forzar:true lo salta). ' +
+        'esPrincipal:true degrada al principal anterior en la misma transacción (es exclusivo por empresa). ' +
+        'El resultado trae destinatarioDeLaCadencia: a quién le llegaría el correo hoy y por qué.',
+      inputSchema: {
+        idContacto: z.number().int().positive().describe('contacto.id_contacto. Sale de crear_contacto o de contactosEmpresa'),
+        nombre: z.string().min(1).optional(),
+        apellido: z.string().min(1).optional(),
+        cargo: z.string().min(1).optional().describe('La cargo_categoria se vuelve a derivar sola'),
+        email: z.string().min(1).optional(),
+        telefono: z.string().min(1).optional(),
+        linkedin: z.string().min(1).optional(),
+        notas: z.string().min(1).optional(),
+        esPrincipal: z.boolean().optional().describe('Exclusivo por empresa: true degrada al anterior'),
+        esKdm: z.boolean().optional().describe('GANA sobre esPrincipal al resolver el destinatario de la cadencia'),
+        forzar: z.boolean().optional().describe('Escribe aunque el email o el teléfono ya sea de otro contacto de la empresa'),
+      },
+    },
+    async (input) => {
+      const r = actualizarContactoTool(input as Parameters<typeof actualizarContactoTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
