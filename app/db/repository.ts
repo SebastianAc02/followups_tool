@@ -758,12 +758,20 @@ function leerToqueEscrito(
 // muestra el efecto colateral que más importa (si el toque movió la etapa).
 export function registrarToque(input: RegistrarToqueInput, idOrganizacion: number): RegistrarToqueResultado {
   const parsed = registrarToqueSchema.parse(input);
-  const ahora = new Date().toISOString();
+  const instante = new Date();
+  const ahora = instante.toISOString();
   // El día del toque: el que mandó el caller (un toque de ayer dictado hoy) o el de este
   // instante. `fecha` guarda el timestamp completo y `fecha_dia` el día sobre el que se cuenta;
   // cuando el caller fija el día, el timestamp se ancla a ese día para que las dos no se
   // contradigan.
-  const fechaDia = parsed.fecha ?? ahora.slice(0, 10);
+  //
+  // fechaBogotaISO y no `ahora.slice(0, 10)` (2026-07-28): recortar el ISO devuelve el día UTC,
+  // que entre las 19:00 y la medianoche de Colombia ya es MAÑANA. Un toque dictado a las 8pm sin
+  // fecha explícita quedaba contado en el día siguiente, y fecha_dia es justo la columna sobre la
+  // que se mide la actividad diaria. Medido en producción: los toques 193 y 196 quedaron fechados
+  // 2026-07-09 y 2026-07-10 cuando ocurrieron el 08 y el 09. El timestamp `fecha` sigue en UTC a
+  // propósito: eso es un instante, no un día de calendario, y ahí UTC es correcto.
+  const fechaDia = parsed.fecha ?? fechaBogotaISO(instante);
   const fechaCompleta = parsed.fecha ? `${parsed.fecha}T12:00:00.000Z` : ahora;
 
   return db.transaction((tx) => {
@@ -1156,8 +1164,10 @@ export type MarcarPerdidaResultado = {
 
 export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number): MarcarPerdidaResultado {
   const parsed = marcarPerdidaSchema.parse(input);
-  const ahora = new Date().toISOString();
-  const fechaDia = parsed.fecha ?? ahora.slice(0, 10);
+  const instante = new Date();
+  const ahora = instante.toISOString();
+  // Mismo día de calendario en Bogotá que registrarToque, por la misma razón (ver allá).
+  const fechaDia = parsed.fecha ?? fechaBogotaISO(instante);
   const fechaCompleta = parsed.fecha ? `${parsed.fecha}T12:00:00.000Z` : ahora;
 
   return db.transaction((tx) => {
@@ -4704,7 +4714,11 @@ export function inscribirCampana(idCampana: number, idOrganizacion: number): Res
   const intakeDiario = camp.intakeDiario ?? idsElegiblesEnOrden.length;
   const goteo =
     idsElegiblesEnOrden.length > 0 && intakeDiario > 0
-      ? calcularGoteo(idsElegiblesEnOrden.length, intakeDiario, camp.ritmoIngreso as RitmoIngreso, camp.fechaInicio ?? ahora.slice(0, 10))
+      // fechaBogotaISO y no `ahora.slice(0, 10)` (2026-07-28): una campaña sin fecha_inicio
+      // arranca el goteo "hoy", y ese hoy tiene que ser el día de calendario en Bogotá. Con el
+      // recorte del ISO, lanzar después de las 7pm arrancaba el goteo un día tarde y corría toda
+      // la cola detrás. 18 de las campañas en producción tienen fecha_inicio en NULL.
+      ? calcularGoteo(idsElegiblesEnOrden.length, intakeDiario, camp.ritmoIngreso as RitmoIngreso, camp.fechaInicio ?? fechaBogotaISO())
       : { porDia: [], diasHabiles: 0 };
 
   // Aplana el goteo a "fecha por posicion": la K-esima elegible (0-based, en el orden
@@ -4716,7 +4730,8 @@ export function inscribirCampana(idCampana: number, idOrganizacion: number): Res
   }
   const fechaProgramadaPorEmpresa = new Map<string, string>();
   idsElegiblesEnOrden.forEach((id, i) => {
-    fechaProgramadaPorEmpresa.set(id, fechaPorPosicion[i] ?? ahora.slice(0, 10));
+    // Mismo motivo que arriba: el fallback "cae hoy" es el hoy de Bogotá, no el de UTC.
+    fechaProgramadaPorEmpresa.set(id, fechaPorPosicion[i] ?? fechaBogotaISO());
   });
 
   db.transaction((tx) => {
@@ -6631,7 +6646,17 @@ export function marcarCampanaAprobadaGmail(idCampana: number): void {
 // no owner_canonico solo. Sin filtrar tambien campana.idOrganizacion aqui, un
 // owner_canonico que colisionara entre dos orgs sumaria envios de AMBAS, inflando el
 // conteo contra el tope diario de una organizacion con los envios de otra.
-export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: string): number {
+//
+// Fix (2026-07-28): `hoy` es el dia de calendario en BOGOTA y la columna se convierte a Bogota
+// antes de comparar. Las dos puntas tienen que estar en la misma zona o el tope se reinicia
+// donde no debe. fecha_enviada se escribe con new Date().toISOString(), o sea en UTC: comparar
+// su recorte contra un dia UTC (lo que hacia antes) mueve el corte del tope a las 19:00 de
+// Colombia, y comparar su recorte contra un dia de Bogota (arreglar solo el caller) dejaria de
+// contar los envios hechos despues de las 19:00. Colombia no tiene horario de verano, esta fija
+// en UTC-5, asi que el desplazamiento es exacto y no necesita tabla de zonas.
+// El CASE protege las filas donde fecha_enviada quedo como dia suelto sin hora: ahi ya es un dia
+// de calendario y restarle cinco horas la correria al dia anterior.
+export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: string = fechaBogotaISO()): number {
   // dbReal para la identidad; el conteo de abajo sigue en `db` (paso_inscripcion es negocio
   // y el tope diario debe contar los envios de la base en la que estas). Sin esto, en modo
   // prueba el miembro no se encontraba y la funcion devolvia 0: el tope diario de Gmail
@@ -6655,7 +6680,7 @@ export function enviosGmailHoy(idUsuario: string, idOrganizacion: number, hoy: s
         eq(pasoInscripcion.estado, 'enviada'),
         eq(campana.owner, miembro.owner),
         eq(campana.idOrganizacion, idOrganizacion),
-        sql`substr(${pasoInscripcion.fechaEnviada}, 1, 10) = ${hoy}`,
+        sql`substr(CASE WHEN length(${pasoInscripcion.fechaEnviada}) > 10 THEN datetime(${pasoInscripcion.fechaEnviada}, '-5 hours') ELSE ${pasoInscripcion.fechaEnviada} END, 1, 10) = ${hoy}`,
       ),
     )
     .get();

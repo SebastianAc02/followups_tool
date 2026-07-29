@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { crearDbPrueba, borrarDbPrueba } from './test-helpers.ts';
+import { fechaBogotaISO } from '../lib/date-utils.ts';
 
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
@@ -108,7 +109,7 @@ test('marcarCampanaAprobadaGmail deja la columna en 1', () => {
 test('enviosGmailHoy cuenta solo pasos enviados por gmail, hoy, del dueno resuelto', () => {
   const hoy = new Date().toISOString();
 
-  assert.equal(enviosGmailHoy('user-ana', 1, hoy.slice(0, 10)), 0);
+  assert.equal(enviosGmailHoy('user-ana', 1, fechaBogotaISO()), 0);
 
   seedEmpresa('e-gmail-conteo', 'isp', [{ email: 'ana@empresa.com', principal: true }]);
 
@@ -122,8 +123,8 @@ test('enviosGmailHoy cuenta solo pasos enviados por gmail, hoy, del dueno resuel
   const idPaso1 = crearPasoInscripcionPendiente({ idDestinatario, idPaso, idVersion, canal: 'correo' });
   marcarPasoInscripcionEnviada(idPaso1, 'gmail', 'msg-1', hoy);
 
-  assert.equal(enviosGmailHoy('user-ana', 1, hoy.slice(0, 10)), 1);
-  assert.equal(enviosGmailHoy('user-beto', 1, hoy.slice(0, 10)), 0, 'no cuenta envios de otro dueno');
+  assert.equal(enviosGmailHoy('user-ana', 1, fechaBogotaISO()), 1);
+  assert.equal(enviosGmailHoy('user-beto', 1, fechaBogotaISO()), 0, 'no cuenta envios de otro dueno');
 });
 
 // Code review (2026-07-15): mismo bug ya encontrado en lineaWhatsappActivaDeOwner --
@@ -156,9 +157,9 @@ test('enviosGmailHoy no mezcla organizaciones distintas con el mismo owner_canon
   marcarPasoInscripcionEnviada(idPasoOrg2, 'gmail', 'msg-org2-1', hoy);
 
   // org2 cuenta su propio envio...
-  assert.equal(enviosGmailHoy('user-ana-org2', 2, hoy.slice(0, 10)), 1);
+  assert.equal(enviosGmailHoy('user-ana-org2', 2, fechaBogotaISO()), 1);
   // ...pero no se filtra hacia el conteo de org1, que sigue en 1 (del test anterior).
-  assert.equal(enviosGmailHoy('user-ana', 1, hoy.slice(0, 10)), 1, 'el envio de org2 no deberia sumar al conteo de org1');
+  assert.equal(enviosGmailHoy('user-ana', 1, fechaBogotaISO()), 1, 'el envio de org2 no deberia sumar al conteo de org1');
 });
 
 test.after(() => {

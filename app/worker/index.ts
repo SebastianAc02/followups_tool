@@ -255,7 +255,11 @@ export async function tareaPushCorreo(modo: ModoPush = 'worker'): Promise<void> 
       // tope de 300, le quedan 50 en este ciclo -- no es todo-o-nada, las filas que
       // no alcanzan quedan 'pendiente' para el siguiente ciclo del worker (mismo
       // mecanismo de reintento que ya existe, no se pierden ni marcan fallo).
-      const yaEnviados = enviosGmailHoy(grupo.idUsuarioGmail, filas[0]?.idOrganizacion ?? 0, ahora.toISOString().slice(0, 10));
+      //
+      // El dia del tope es el de Bogota (2026-07-28). Con `ahora.toISOString().slice(0, 10)` el
+      // contador se reiniciaba a las 19:00 hora Colombia, no a medianoche: un empuje manual a las
+      // 8pm veia cero enviados y podia mandar el tope entero otra vez el mismo dia habil.
+      const yaEnviados = enviosGmailHoy(grupo.idUsuarioGmail, filas[0]?.idOrganizacion ?? 0, fechaBogotaISO(ahora));
       const restante = topeDiario - yaEnviados;
       if (restante <= 0) continue; // tope alcanzado, este grupo no manda nada este ciclo
       filas = filas.slice(0, restante);

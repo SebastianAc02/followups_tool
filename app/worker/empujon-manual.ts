@@ -63,7 +63,11 @@ export async function empujarPasosAhora(ids: number[]): Promise<void> {
     let throttle = 0;
     if (grupo.idUsuarioGmail) {
       const tope = configNumeroAdmin('gmail_tope_diario', GMAIL_TOPE_DIARIO_DEFAULT);
-      const yaEnviados = enviosGmailHoy(grupo.idUsuarioGmail, filas[0]?.idOrganizacion ?? 0, ahora.toISOString().slice(0, 10));
+      // Sin dia explicito: enviosGmailHoy toma el dia de calendario en Bogota (2026-07-28).
+      // Aca importa mas que en el worker, porque este camino NO tiene ventana horaria: es el
+      // unico que de verdad corre despues de las 19:00, y con el dia en UTC el contador del tope
+      // se reiniciaba justo ahi, dejando mandar el cupo entero por segunda vez el mismo dia.
+      const yaEnviados = enviosGmailHoy(grupo.idUsuarioGmail, filas[0]?.idOrganizacion ?? 0);
       const restante = tope - yaEnviados;
       if (restante <= 0) {
         console.error(`[empujon-manual] la cuenta de Gmail ${grupo.idUsuarioGmail} ya llegó al tope diario de ${tope}: ${filas.length} fila(s) no salen`);

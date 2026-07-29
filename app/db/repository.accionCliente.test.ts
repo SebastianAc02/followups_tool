@@ -10,6 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { crearDbPrueba } from './test-helpers.ts';
+import { fechaBogotaISO } from '../lib/date-utils.ts';
 
 const dbPath = crearDbPrueba();
 process.env.ISPS_DB_PATH = dbPath;
@@ -123,7 +124,10 @@ test('un valor fuera de la escala no entra', () => {
 });
 
 test('la accion viaja en la lectura, no solo en la escritura', () => {
-  const hoy = new Date().toISOString().slice(0, 10);
+  // fechaBogotaISO y no `toISOString().slice(0, 10)` (2026-07-28): registrarToque escribe
+  // fecha_dia en dia de Bogota, y este rango tiene que preguntar por el mismo dia. Con el
+  // recorte en UTC la prueba pasaba de dia y fallaba entre las 19:00 y la medianoche.
+  const hoy = fechaBogotaISO();
   const fila = toquesEnRango(hoy, hoy, 1).find((t) => t.idEmpresa === 'ac-4');
   assert.equal(fila?.accionCliente, 'negocia');
 });
