@@ -1221,28 +1221,45 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
         '(humano/maquina/desconocido), razon, senal y confianza, más grupoDedupId/esRepresentanteGrupo para saber ' +
         'qué filas son el mismo hit repetido. Nada se borra ni se filtra: el crudo completo sigue en cada evento y ' +
         'clasificacion/dedup son reconstruibles corriendo las mismas funciones puras sobre él. ' +
+        'Cada evento tipo clic trae además `escaner`: probable_escaner o sin_evidencia_de_escaner (nunca humano/ ' +
+        'maquina, esa certeza no existe), con las señales que lo disparan y su confianza — alta solo cuando dos ' +
+        'señales independientes coinciden (latencia bajo 30s desde el envío, umbral PROVISIONAL sin calibrar con ' +
+        'datos propios; o la url reescrita por Safe Links/Proofpoint/Mimecast), media cuando dispara una sola, y un ' +
+        'ua vacío nunca decide solo. La señal de ip de datacenter NO está implementada (declarado explícito, no ' +
+        'inventado). Un clic humano marcado probable_escaner NO cuenta como prueba de lectura en medibilidad. ' +
         "conteos.crudo cuenta todas las filas; conteos.deduplicado suma por grupoDedupId distinto (una apertura " +
         'real, no un hit repetido del mismo pixel); las dos traen porClasificacion (humano/máquina/desconocido) ' +
         'y excluyen el tráfico de prueba interno. ' +
-        'medibilidad.porEnvio dice, por paso_inscripcion, si hay apertura humana confirmada, si un clic prueba ' +
-        'deductivamente que el pixel falló (pixel_bloqueado_confirmado, sin necesitar muestra), o si no hay señal ' +
-        'humana de apertura — este último caso NUNCA significa "no lo abrió": puede ser Outlook (el pixel nunca ' +
-        'sale) o Gmail con solo el proxy, y las dos causas se juntan a propósito porque no se pueden distinguir ' +
-        'desde acá. medibilidad.avisosProveedor solo nombra un dominio con 3+ envíos bloqueados y cero confirmados ' +
-        '(umbral en conteo, nunca en %). OJO: medibilidad.porEnvio solo cubre envíos con AL MENOS UNA fila en ' +
-        'evento_tracking; un envío de Outlook cuyo pixel nunca se disparó ni una vez no tiene fila que leer y no ' +
-        'aparece acá en absoluto (no genera un estado explícito). ' +
-        'DEVUELVE EVENTOS Y VEREDICTOS, NUNCA UNA TASA DE APERTURA (0% en ningún campo, en ninguna forma) — eso es ' +
-        'a propósito, es una decisión dura del sistema, no una limitación a resolver. La atribución por paso está ' +
-        'corrida y sigue fuera de alcance: resolverDestinatarioPorEmail acredita al paso_inscripcion enviado MÁS ' +
-        'RECIENTE de esa campaña y ese email, así que en una cadencia de varios pasos una apertura del correo 1 se ' +
-        'le acredita al último enviado (pasoOrden viaja con esa advertencia pegada). Apple Private Relay (R5) está ' +
-        'documentada pero inerte: no hay chequeo en vivo contra el CSV de Apple, así que esos casos caen en la regla ' +
-        'de UA de navegador completo o en no-clasificable, nunca en la de Apple. No se detectan escáneres ' +
-        'corporativos (Proofpoint/Mimecast/Barracuda) por firma propia: no hay UA público de ninguno. ' +
-        'Si filtras por tipo, medibilidad.porEnvio pierde evidencia (ver advertencias en la respuesta). ' +
-        'La respuesta también trae posiblesDuplicados, una heurística previa más ancha (10s) que grupoDedupId (2s), ' +
-        'útil como diagnóstico rápido. ' +
+        'medibilidad.porEnvio (cruzarAperturaClic) dice, por paso_inscripcion, si la lectura quedó confirmada y por ' +
+        'qué método (apertura_humana, clic_humano, o ambos), y si no, por qué no se puede saber — causaMedibilidad ' +
+        "distingue las tres causas que antes se fundían: 'pixel_nunca_salio' (Outlook, cero eventos abierto), " +
+        "'solo_apertura_de_maquina' (Gmail, el pixel se disparó pero solo lo pidió el proxy) y " +
+        "'apertura_sin_huella_capturada' (hubo abierto pero sin UA capturado). aperturaSubeDeRango=true cuando un " +
+        'clic humano confirma una apertura que era de máquina o sin huella; clienteNoMediblePorPixel=true cuando el ' +
+        'pixel nunca se disparó y solo el clic prueba la lectura. lectura=no_se_puede_saber NUNCA significa "no lo ' +
+        'abrió", nunca hay evidencia para afirmar eso. medibilidad.avisosProveedor solo nombra un dominio con 3+ ' +
+        'envíos sin lectura confirmada por apertura humana y cero confirmados (umbral en conteo, nunca en %). OJO: ' +
+        'medibilidad.porEnvio y matrizClientes solo cubren envíos con AL MENOS UNA fila en evento_tracking; un envío ' +
+        'de Outlook cuyo pixel nunca se disparó ni una vez no tiene fila que leer y no aparece acá en absoluto. ' +
+        'matrizClientes (acumularMatrizClientes) agrupa los mismos envíos por (dominio del destinatario x superficie ' +
+        'de comportamiento observada — proxy_gmail, proxy_apple_mpp, pixel_directo_navegador, clic_veloz_sin_pixel, ' +
+        'etc.), NO por "cliente de correo" literal: no hay dato en la huella que diga qué software leyó el correo. ' +
+        "Cada celda trae origen 'inferida_fuente_externa' (lo que dice matrizSemilla, investigación externa citada " +
+        "con su fuente y su estado verificado/inferido/conflicto/no_se_puede_saber) o 'medida_datos_propios' " +
+        '(30+ envíos propios en esa celda exacta, umbralNEnviosCeldaMatriz); divergencia se reporta sin esperar el ' +
+        'umbral cuando el patrón observado contradice una expectativa dura de la semilla (hoy solo Gmail). ' +
+        'matrizSemilla viaja siempre completa (9 filas), es constante, sirve de referencia para leer las celdas. ' +
+        'DEVUELVE EVENTOS Y VEREDICTOS, NUNCA UNA TASA DE APERTURA (0% en ningún campo, en ninguna forma, ni en ' +
+        'medibilidad ni en matrizClientes) — eso es a propósito, es una decisión dura del sistema, no una ' +
+        'limitación a resolver; tampoco un accuracy o una probabilidad de escáner o de cierre. La atribución por ' +
+        'paso está corrida y sigue fuera de alcance: resolverDestinatarioPorEmail acredita al paso_inscripcion ' +
+        'enviado MÁS RECIENTE de esa campaña y ese email, así que en una cadencia de varios pasos una apertura del ' +
+        'correo 1 se le acredita al último enviado (pasoOrden viaja con esa advertencia pegada). Apple Private ' +
+        'Relay (R5) está documentada pero inerte: no hay chequeo en vivo contra el CSV de Apple, así que esos casos ' +
+        'caen en la regla de UA de navegador completo o en no-clasificable, nunca en la de Apple. ' +
+        'Si filtras por tipo, medibilidad.porEnvio y matrizClientes pierden evidencia (ver advertencias en la ' +
+        'respuesta). La respuesta también trae posiblesDuplicados, una heurística previa más ancha (10s) que ' +
+        'grupoDedupId (2s), útil como diagnóstico rápido. ' +
         'userAgent e ip solo existen desde el 2026-07-28: un evento anterior los trae en null porque no se ' +
         'capturaron, no porque hayan venido vacíos. ' +
         'Solo canal correo: las aperturas de conversación de WhatsApp son otra cosa y viven en aperturas_whatsapp.',

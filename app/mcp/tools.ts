@@ -13,12 +13,27 @@
 // se prueba igual que un repository.*.test.ts (crearDbPrueba + seeds). Ver tools.test.ts.
 import { calcularHorarioEscalonado } from '../core/horario-escalonado';
 import {
-  estadoMedibilidadEnvio,
   dominiosConAvisoNoMedible,
-  type EventoClasificadoParaEnvio,
   type EnvioParaAvisoProveedor,
   type EstadoMedibilidad,
+  type Clasificacion,
 } from '../core/clasificar-evento-tracking';
+import { detectarClicEscaner, type VeredictoEscaner } from '../core/detectar-clic-escaner';
+import {
+  cruzarAperturaClic,
+  type EventoParaCruce,
+  type EstadoCruce,
+  type Lectura,
+  type MetodoConfirmacion,
+  type CausaMedibilidad,
+} from '../core/cruzar-apertura-clic';
+import {
+  acumularMatrizClientes,
+  MATRIZ_SEMILLA,
+  UMBRAL_N_ENVIOS_CELDA,
+  type EnvioParaMatriz,
+  type EventoClasificadoParaMatriz,
+} from '../core/matriz-clientes-correo';
 import { EJECUTOR_POR_DEFECTO } from '../db/validation';
 import {
   duracionPromedioPorEtapa,
@@ -1826,20 +1841,33 @@ export async function enviarWhatsappDirectoTool(
 // de agruparDuplicados en core/dedup-eventos-tracking.ts). NINGUNA fila se borra ni se filtra:
 // el crudo completo sigue en `eventos`, las dos funciones son puras y reclasificar/reagrupar es
 // correrlas de nuevo sobre el mismo dato. `conteos` separa crudo de deduplicado (sumar por
-// grupoDedupId distinto, no por fila) y humano de maquina.
+// grupoDedupId distinto, no por fila) y humano de maquina. Cada evento 'clic' trae ademas
+// `escaner` (detectarClicEscaner, core/detectar-clic-escaner.ts): probable_escaner/
+// sin_evidencia_de_escaner con su confianza, null para 'abierto'/'visto'.
 //
-// `medibilidad` es el aviso de "no se puede saber", no un numero mas alto: por cada envio dice
-// si hay apertura humana confirmada, si un clic prueba deductivamente que el pixel fallo, o si
-// sencillamente no hay senal (que puede ser Outlook sin pixel o Gmail con solo el proxy -- las
-// dos caras se juntan a proposito, ver estadoMedibilidadEnvio). `avisosProveedor` solo nombra un
-// dominio cuando el patron se sostiene en 3+ envios sin un solo caso confirmado (umbral en
-// CONTEO, nunca en %).
+// `medibilidad.porEnvio` sale de cruzarAperturaClic (core/cruzar-apertura-clic.ts), que separa
+// las dos causas que el viejo estadoMedibilidadEnvio (2026-07-29, primera version) fundia bajo
+// 'pixel_bloqueado_confirmado': el pixel nunca se disparo (Outlook, causaMedibilidad
+// 'pixel_nunca_salio') vs el pixel se disparo pero solo lo pidio un proxy (Gmail, causaMedibilidad
+// 'solo_apertura_de_maquina'). Un clic que clasificarEvento marca 'humano' pero que
+// detectarClicEscaner marca 'probable_escaner' NO cuenta como prueba de lectura humana en este
+// cruce (se degrada a 'desconocido' solo para este calculo puntual; el veredicto original de
+// clasificarEvento en `eventos` no se toca). `avisosProveedor` sigue nombrando un dominio cuando
+// el patron se sostiene en 3+ envios sin un solo caso confirmado (umbral en CONTEO, nunca en %),
+// ahora sobre el estado colapsado del cruce.
+//
+// `matrizClientes` (acumularMatrizClientes, core/matriz-clientes-correo.ts) agrupa los mismos
+// envios por (dominio del destinatario x superficie de comportamiento observada) y marca cada
+// celda `inferida_fuente_externa` (lo que dice `matrizSemilla`, la investigacion externa) o
+// `medida_datos_propios` (30+ envios propios en esa celda). Se recalcula al vuelo sobre los
+// envios de esta respuesta, no hay tabla ni cache.
 //
 // Lo que esta tool NUNCA hace, a proposito: no calcula ni muestra una tasa de apertura (open
 // rate) en ningun %, no resuelve Apple Private Relay en vivo (R5 existe documentada pero
 // inerte, campo siempre null, ver core/clasificar-evento-tracking.ts seccion 5 de la spec), no
-// detecta escaneres corporativos (Proofpoint/Mimecast/Barracuda) por firma propia, y no cruza
-// tracking con conversion para ningun accuracy o probabilidad de cierre.
+// afirma que un clic ES de un escaner (solo 'probable', con confianza declarada: la senal de
+// ip datacenter no esta implementada, ver senalIpDatacenterNoImplementada), y no cruza tracking
+// con conversion para ningun accuracy o probabilidad de cierre.
 export type TrackingCorreoInput = {
   idEmpresa?: string;
   idCampana?: number;
@@ -1867,8 +1895,57 @@ function contarPorClasificacion(eventos: { clasificacion: string; excluirDeMetri
   return conteo;
 }
 
+// Un clic que clasificarEvento marco 'humano' (por UA de navegador completo) pero que
+// detectarClicEscaner marco 'probable_escaner' no puede seguir contando como prueba de lectura
+// humana en cruzarAperturaClic (instruccion del operador, 2026-07-29). Se degrada a
+// 'desconocido', no a 'maquina': el detector nunca afirma que SI fue un escaner, solo que hay
+// evidencia de que pudo serlo, y 'maquina' seria una certeza que no existe. Este ajuste vive
+// solo en el input del cruce -- el campo `clasificacion` de cada evento en `eventos` sigue
+// siendo el veredicto original de clasificarEvento, sin tocar.
+function clasificacionEfectivaParaCruce(
+  tipo: string,
+  clasificacion: Clasificacion,
+  veredictoEscaner: VeredictoEscaner | null,
+): Clasificacion {
+  if (tipo === 'clic' && clasificacion === 'humano' && veredictoEscaner?.clasificacion === 'probable_escaner') {
+    return 'desconocido';
+  }
+  return clasificacion;
+}
+
+// dominiosConAvisoNoMedible (clasificar-evento-tracking.ts) sigue esperando los 3 estados
+// viejos: se colapsan los 7 del cruce de vuelta a esos 3 solo para alimentar esa funcion ya
+// testeada, sin reimplementar su umbral de 3+ casos aca.
+function estadoCruceComoEstadoLegado(estado: EstadoCruce): EstadoMedibilidad {
+  if (estado === 'lectura_confirmada_apertura_humana') return 'apertura_humana_confirmada';
+  if (estado.startsWith('lectura_confirmada_clic_')) return 'pixel_bloqueado_confirmado';
+  return 'sin_senal_humana_de_apertura';
+}
+
 export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: number) {
-  const eventos = trackingCorreo(input, idOrganizacion);
+  const crudos = trackingCorreo(input, idOrganizacion);
+
+  // Deteccion de escaner (core/detectar-clic-escaner.ts) corre sobre cada 'clic'. Nunca decide
+  // 'humano'/'maquina' -- eso sigue siendo trabajo exclusivo de clasificarEvento -- solo marca
+  // si hay evidencia de escaner corporativo (latencia bajo piso, url reescrita, ua vacio) con su
+  // confianza declarada.
+  const veredictosEscaner = new Map<number, VeredictoEscaner>();
+  for (const e of crudos) {
+    if (e.tipo === 'clic') {
+      veredictosEscaner.set(
+        e.idEvento,
+        detectarClicEscaner({
+          fechaEvento: e.fechaEvento ?? e.createdAt ?? '',
+          fechaEnvio: e.fechaEnviada,
+          detalle: { url: e.url, ua: e.userAgent },
+        }),
+      );
+    }
+  }
+  const eventos = crudos.map((e) => ({
+    ...e,
+    escaner: e.tipo === 'clic' ? (veredictosEscaner.get(e.idEvento) ?? null) : null,
+  }));
 
   const porTipo: Record<string, number> = {};
   for (const e of eventos) porTipo[e.tipo] = (porTipo[e.tipo] ?? 0) + 1;
@@ -1908,24 +1985,90 @@ export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: n
     deduplicado: { total: representantes.length, porTipo: porTipoDedup, porClasificacion: contarPorClasificacion(representantes) },
   };
 
-  // Medibilidad por envio (seccion 4 de la spec). Se calcula sobre `eventos` tal como salieron
-  // de trackingCorreo -- si el llamador filtro por `tipo`, un envio puede faltarle la mitad de
-  // la evidencia (por ejemplo el clic que probaria pixel_bloqueado_confirmado), y eso queda
-  // dicho en `advertencias`, no escondido.
-  const porEnvio = new Map<number, { dominio: string | null; eventos: EventoClasificadoParaEnvio[] }>();
+  // Medibilidad por envio (cruzarAperturaClic, core/cruzar-apertura-clic.ts). Se calcula sobre
+  // `eventos` tal como salieron de trackingCorreo -- si el llamador filtro por `tipo`, un envio
+  // puede faltarle la mitad de la evidencia (por ejemplo el clic que confirmaria la lectura), y
+  // eso queda dicho en `advertencias`, no escondido. El mismo agrupamiento por envio arma el
+  // input de matrizClientes mas abajo, para no leer `eventos` dos veces con dos criterios.
+  const porEnvio = new Map<
+    number,
+    { dominio: string | null; fechaEnvio: string | null; eventosCruce: EventoParaCruce[]; eventosMatriz: EventoClasificadoParaMatriz[] }
+  >();
   for (const e of eventos) {
-    const prev = porEnvio.get(e.idPasoInscripcion) ?? { dominio: dominioDeEmail(e.email), eventos: [] };
-    prev.eventos.push({ tipo: e.tipo as EventoClasificadoParaEnvio['tipo'], clasificacion: e.clasificacion });
+    const prev = porEnvio.get(e.idPasoInscripcion) ?? {
+      dominio: dominioDeEmail(e.email),
+      fechaEnvio: e.fechaEnviada,
+      eventosCruce: [] as EventoParaCruce[],
+      eventosMatriz: [] as EventoClasificadoParaMatriz[],
+    };
+    // excluirDeMetricas (R1, trafico_prueba_interno) nunca entra al cruce de medibilidad: no es
+    // trafico real de ningun tipo, ni humano ni maquina genuina, y contaminaria causaMedibilidad
+    // con una causa que no ocurrio (ver matriz-clientes-correo.ts, mismo filtro en eventosValidos).
+    if (!e.excluirDeMetricas) {
+      prev.eventosCruce.push({
+        tipo: e.tipo as EventoParaCruce['tipo'],
+        clasificacion: clasificacionEfectivaParaCruce(e.tipo, e.clasificacion, e.escaner),
+      });
+    }
+    prev.eventosMatriz.push({
+      idEvento: e.idEvento,
+      tipo: e.tipo as EventoClasificadoParaMatriz['tipo'],
+      fechaEvento: e.fechaEvento ?? e.createdAt ?? '',
+      ua: e.userAgent,
+      clasificacion: e.clasificacion,
+      razon: e.razon,
+      excluirDeMetricas: e.excluirDeMetricas,
+      grupoDedupId: e.grupoDedupId,
+      esRepresentanteGrupo: e.esRepresentanteGrupo,
+    });
     porEnvio.set(e.idPasoInscripcion, prev);
   }
-  const medibilidadPorEnvio: { idPasoInscripcion: number; dominio: string | null; estado: EstadoMedibilidad }[] = [];
+
+  const medibilidadPorEnvio: {
+    idPasoInscripcion: number;
+    dominio: string | null;
+    estado: EstadoCruce;
+    lectura: Lectura;
+    metodoConfirmacion: MetodoConfirmacion;
+    causaMedibilidad: CausaMedibilidad;
+    pixelSeDisparo: boolean;
+    aperturaSubeDeRango: boolean;
+    clienteNoMediblePorPixel: boolean;
+    explicacion: string;
+  }[] = [];
   for (const [idPasoInscripcion, info] of porEnvio) {
-    medibilidadPorEnvio.push({ idPasoInscripcion, dominio: info.dominio, estado: estadoMedibilidadEnvio(info.eventos) });
+    const veredicto = cruzarAperturaClic(info.eventosCruce);
+    medibilidadPorEnvio.push({
+      idPasoInscripcion,
+      dominio: info.dominio,
+      estado: veredicto.estado,
+      lectura: veredicto.lectura,
+      metodoConfirmacion: veredicto.metodo_confirmacion,
+      causaMedibilidad: veredicto.causa_medibilidad,
+      pixelSeDisparo: veredicto.pixel_se_disparo,
+      aperturaSubeDeRango: veredicto.apertura_sube_de_rango,
+      clienteNoMediblePorPixel: veredicto.cliente_no_medible_por_pixel,
+      explicacion: veredicto.explicacion,
+    });
   }
   const enviosConDominio: EnvioParaAvisoProveedor[] = medibilidadPorEnvio
-    .filter((e): e is { idPasoInscripcion: number; dominio: string; estado: EstadoMedibilidad } => e.dominio !== null)
-    .map((e) => ({ dominio: e.dominio, estado: e.estado }));
+    .filter((e): e is typeof e & { dominio: string } => e.dominio !== null)
+    .map((e) => ({ dominio: e.dominio, estado: estadoCruceComoEstadoLegado(e.estado) }));
   const avisosProveedor = dominiosConAvisoNoMedible(enviosConDominio);
+
+  // Matriz por cliente de correo (acumularMatrizClientes, core/matriz-clientes-correo.ts): solo
+  // envios con dominio resoluble (email valido) entran, mismo criterio que avisosProveedor.
+  const enviosParaMatriz: EnvioParaMatriz[] = [];
+  for (const [idPasoInscripcion, info] of porEnvio) {
+    if (info.dominio === null) continue;
+    enviosParaMatriz.push({
+      idPasoInscripcion,
+      dominio: info.dominio,
+      fechaEnvio: info.fechaEnvio,
+      eventos: info.eventosMatriz,
+    });
+  }
+  const matrizClientes = acumularMatrizClientes(enviosParaMatriz);
 
   const advertencias = [
     'Deduplicado por ventana encadenada de 2000ms (mismo id_paso_inscripcion y mismo tipo, desempatado por ip cuando ' +
@@ -1935,27 +2078,40 @@ export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: n
     'Cada evento trae clasificacion (humano/maquina/desconocido) con su razon y su senal (clasificarEvento). ' +
       'excluirDeMetricas es true solo para trafico de prueba interno (razon trafico_prueba_interno) y ya sale fuera de ' +
       'conteos.crudo/conteos.deduplicado.',
-    'medibilidad.porEnvio dice si un envio tiene apertura humana confirmada, si un clic prueba deductivamente que el ' +
-      'pixel fallo (pixel_bloqueado_confirmado), o si no hay senal humana de apertura -- ese ultimo caso NUNCA se lee ' +
-      'como "no lo abrio": cubre tanto Outlook (el pixel nunca sale) como Gmail cuando la unica apertura fue el proxy. ' +
-      'medibilidad.avisosProveedor solo nombra un dominio con 3+ envios en pixel_bloqueado_confirmado y cero confirmados.',
+    'Cada evento tipo clic trae ademas `escaner` (detectarClicEscaner): probable_escaner o sin_evidencia_de_escaner, ' +
+      'con senales y confianza declarada (nunca alta si dispara sola la señal de latencia o la de url reescrita; alta ' +
+      'solo cuando las dos coinciden). Un clic humano probable_escaner no cuenta como prueba de lectura en ' +
+      'medibilidad.porEnvio, pero su `clasificacion` (clasificarEvento) sigue viajando sin tocar en `eventos`.',
+    'medibilidad.porEnvio (cruzarAperturaClic) separa por que un envio no tiene lectura confirmada por pixel: ' +
+      "causaMedibilidad 'pixel_nunca_salio' es Outlook (cero eventos abierto), 'solo_apertura_de_maquina' es Gmail " +
+      "(el pixel se disparo pero solo lo pidio el proxy), 'apertura_sin_huella_capturada' es un abierto sin UA " +
+      "capturado. lectura='confirmada' cuando hubo apertura humana o un clic humano (aperturaSubeDeRango=true cuando " +
+      "ese clic sube una apertura de maquina o sin huella a confirmada); lectura='no_se_puede_saber' NUNCA se lee " +
+      "como \"no lo abrio\". medibilidad.avisosProveedor solo nombra un dominio con 3+ envios sin lectura confirmada " +
+      'por clic y cero confirmados por apertura humana (umbral en CONTEO, nunca en %).',
     input.tipo
-      ? `Filtraste por tipo='${input.tipo}': medibilidad.porEnvio pierde evidencia (por ejemplo el clic que confirma ` +
-        'pixel_bloqueado_confirmado si solo pediste abierto) porque solo ve los eventos de ese tipo. Sin filtro de tipo, ' +
-        've abierto y clic juntos.'
+      ? `Filtraste por tipo='${input.tipo}': medibilidad.porEnvio y matrizClientes pierden evidencia (por ejemplo el ` +
+        'clic que confirmaria la lectura si solo pediste abierto) porque solo ven los eventos de ese tipo. Sin filtro ' +
+        'de tipo, ven abierto y clic juntos.'
       : 'userAgent e ip solo existen desde el 2026-07-28. Un evento anterior los trae en null porque no se capturaron, ' +
         'no porque hayan venido vacíos -- razon sin_huella_capturada lo marca desconocido, no maquina ni humano.',
-    'medibilidad.porEnvio solo incluye envios que tienen AL MENOS UNA fila en evento_tracking: si el pixel de Outlook ' +
-      'nunca se disparó ni una vez, ese envío no tiene fila que leer y sencillamente no aparece acá (no genera un ' +
-      "estado 'sin_senal_humana_de_apertura' explícito). Para saber qué se envió y comparar contra lo que sí generó " +
-      'algún evento, cruza con estado_envio_correo o campana_completa.',
+    'medibilidad.porEnvio y matrizClientes solo incluyen envios que tienen AL MENOS UNA fila en evento_tracking: si el ' +
+      'pixel de Outlook nunca se disparó ni una vez, ese envío no tiene fila que leer y sencillamente no aparece acá ' +
+      '(no genera un estado explícito). Para saber qué se envió y comparar contra lo que sí generó algún evento, cruza ' +
+      'con estado_envio_correo o campana_completa.',
     'pasoOrden puede estar mal atribuido. resolverDestinatarioPorEmail acredita el evento al paso_inscripcion ' +
       "'enviada' MÁS RECIENTE de esa campaña y ese email, no al correo que de verdad se abrió: en una cadencia de " +
       'varios pasos, una apertura del correo 1 se le acredita al último enviado. Muerde desde el paso 2. Fuera de alcance.',
-    'No hay tasa de apertura en ningún %, en ningún campo. R5 (Apple Private Relay) existe documentada pero está ' +
-      'inerte: el chequeo contra el CSV vivo de Apple no está construido, así que ipEnRangoApplePrivateRelay siempre ' +
-      'viaja null y esos casos caen en R7/R8. No se detectan escáneres corporativos (Proofpoint/Mimecast/Barracuda) por ' +
-      'firma propia: no hay UA público de ninguno.',
+    'No hay tasa de apertura en ningún %, en ningún campo, ni en medibilidad ni en matrizClientes. R5 (Apple Private ' +
+      'Relay) existe documentada pero está inerte: el chequeo contra el CSV vivo de Apple no está construido, así que ' +
+      'ipEnRangoApplePrivateRelay siempre viaja null y esos casos caen en R7/R8. `escaner` NUNCA afirma que un clic ES ' +
+      'de un escáner (solo "probable", con confianza declarada): no hay UA público de ningún vendor, la señal de ip de ' +
+      'datacenter no está implementada, y el umbral de latencia (30s) es provisional, sin calibrar con datos propios.',
+    'matrizClientes agrupa por (dominio del destinatario x superficie de comportamiento observada), no por "cliente de ' +
+      'correo" literal: no hay dato en la huella que diga qué software leyó el correo. Cada celda trae origen ' +
+      "'inferida_fuente_externa' (lo que dice matrizSemilla, investigación externa citada con su fuente) o " +
+      "'medida_datos_propios' (30+ envíos propios en esa celda exacta). divergencia solo se llena cuando el patrón " +
+      'observado contradice una expectativa dura de la semilla (hoy solo Gmail), y no espera el umbral para reportarse.',
     'Solo canal correo. Las aperturas de conversación de WhatsApp son otra cosa y viven en aperturas_whatsapp.',
   ];
 
@@ -1967,6 +2123,9 @@ export function trackingCorreoTool(input: TrackingCorreoInput, idOrganizacion: n
     posiblesDuplicados,
     conteos,
     medibilidad: { porEnvio: medibilidadPorEnvio, avisosProveedor },
+    matrizClientes,
+    matrizSemilla: MATRIZ_SEMILLA,
+    umbralNEnviosCeldaMatriz: UMBRAL_N_ENVIOS_CELDA,
     eventos,
     advertencias,
   };

@@ -7336,6 +7336,12 @@ export type EventoTrackingCorreo = {
   email: string | null;
   contacto: string | null;
   proveedorEventoId: string;
+  // Fecha del evento 'enviado' de este mismo id_paso_inscripcion (paso_inscripcion.fecha_enviada),
+  // la misma que ya se usaba internamente para R3 de clasificarEvento. Se expone porque
+  // detectarClicEscaner (core/detectar-clic-escaner.ts) y acumularMatrizClientes
+  // (core/matriz-clientes-correo.ts) tambien la necesitan y viven fuera de este archivo -- sin
+  // esto, el llamador no tenia como calcular la latencia desde el envio para ninguno de los dos.
+  fechaEnviada: string | null;
   // La huella cruda del request, cuando existe. Los eventos anteriores al 2026-07-28 no la
   // tienen: null significa "no se capturo", nunca "vino vacia".
   via: string | null;
@@ -7479,6 +7485,7 @@ export function trackingCorreo(filtro: FiltroTrackingCorreo, idOrganizacion: num
       email: f.email,
       contacto: f.contacto,
       proveedorEventoId: f.proveedorEventoId,
+      fechaEnviada: f.fechaEnviada,
       via: s('via'),
       userAgent: ua,
       ip: s('ip'),
