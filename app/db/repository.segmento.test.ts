@@ -25,6 +25,8 @@ const {
   obtenerSegmento,
   actualizarSegmento,
   segmentosSinCampana,
+  diagnosticoSegmento,
+  campanaCompleta,
   crearCadencia,
   crearCampana,
 } = await import('./repository.ts');
@@ -431,6 +433,77 @@ test('segmentosSinCampana no mezcla segmentos de otra organizacion', () => {
   const idOrg2 = guardarSegmento({ nombre: 'suelto-org2', definicion: { condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] } }, 2);
   assert.ok(!segmentosSinCampana(1).some((s) => s.id === idOrg2));
   assert.ok(segmentosSinCampana(2).some((s) => s.id === idOrg2));
+});
+
+// --- valor fuera del dominio del campo (bug del segmento 32, 2026-07-28) ----------------
+//
+// El segmento se creo por MCP con categoria='otro', devolvio 0 empresas y ese 0 se leyo como
+// un dato. No lo era: 'otro' es un valor de la COLUMNA plana empresa.categoria (lo que
+// escribe crear_empresa) y el segmento lee la VISTA empresa_categoria, que contesta
+// isp/sae_plus/telco_grande/carrier/utility/extranjero/no_isp y nunca 'otro'. El filtro no
+// podia matchear a nadie ningun dia.
+test("categoria='otro' no devuelve cero: falla diciendo cuales son los valores validos", () => {
+  const def = { condiciones: [{ campo: 'categoria' as const, op: 'en' as const, valores: ['otro'] }] };
+  assert.throws(
+    () => contarSegmento(def, 1),
+    (e: Error) => /otro/.test(e.message) && /sae_plus/.test(e.message),
+    'el mensaje tiene que nombrar el valor rechazado y el dominio real',
+  );
+  assert.throws(() => guardarSegmento({ nombre: 'no-deberia-existir', definicion: def }, 1));
+
+  // Y no quedo guardado: el rechazo es antes de escribir.
+  assert.ok(!listarSegmentos(1).some((s) => s.nombre === 'no-deberia-existir'));
+});
+
+test('los tres campos de dominio cerrado rechazan un valor inventado, y el valido sigue pasando', () => {
+  assert.throws(() => contarSegmento({ condiciones: [{ campo: 'estado', op: 'en', valores: ['On Hold'] }] }, 1), /on_hold/);
+  assert.throws(() => contarSegmento({ condiciones: [{ campo: 'estado_comercial', op: 'en', valores: ['activo'] }] }, 1), /pausado/);
+  assert.throws(() => contarSegmento({ condiciones: [{ campo: 'rol', op: 'en', valores: ['ceo'] }] }, 1), /dueno/);
+
+  // Un valor del dominio que sencillamente no tiene empresas SI contesta cero, sin ruido:
+  // la distincion es entre "no hay ninguna" y "esto no puede haberla nunca".
+  assert.equal(contarSegmento({ condiciones: [{ campo: 'estado', op: 'en', valores: ['on_hold'] }] }, 1), 4);
+  assert.equal(contarSegmento({ condiciones: [{ campo: 'estado_comercial', op: 'en', valores: ['descartado'] }] }, 1), 0);
+});
+
+test('owner y ciudad son texto libre: un valor que no existe SI es cero, no un error', () => {
+  assert.equal(contarSegmento({ condiciones: [{ campo: 'owner', op: 'en', valores: ['Nadie Con Ese Nombre'] }] }, 1), 0);
+});
+
+test('diagnosticoSegmento senala cual condicion sola mata el conjunto', () => {
+  const def = {
+    condiciones: [
+      { campo: 'estado' as const, op: 'en' as const, valores: ['on_hold'] },
+      { campo: 'owner' as const, op: 'en' as const, valores: ['Nadie Con Ese Nombre'] },
+    ],
+  };
+  const d = diagnosticoSegmento(def, 1);
+  assert.equal(d.total, 0);
+  assert.equal(d.porCondicion[0].empresas, 4, 'la primera condicion sola si trae empresas');
+  assert.equal(d.porCondicion[1].empresas, 0, 'la segunda es la que mata el conjunto');
+});
+
+test('la relectura de una campana cuyo segmento no matchea a nadie trae el porque, no solo el cero', () => {
+  const idSeg = guardarSegmento(
+    {
+      nombre: 'cero-con-motivo',
+      definicion: {
+        condiciones: [
+          { campo: 'estado', op: 'en', valores: ['on_hold'] },
+          { campo: 'owner', op: 'en', valores: ['Nadie Con Ese Nombre'] },
+        ],
+      },
+    },
+    1,
+  );
+  const idCad = crearCadencia({ nombre: 'C cero', pasos: [{ orden: 1, diaOffset: 0, canal: 'correo', cuerpo: 'p1' }] });
+  const idCampana = crearCampana({ nombre: 'Camp cero', idCadencia: idCad, idSegmento: idSeg }, 1);
+
+  const c = campanaCompleta(idCampana, 1)!;
+  assert.equal(c.segmento.empresasQueCaen, 0);
+  assert.equal(c.segmento.problema, null);
+  assert.equal(c.segmento.porQueCero!.porCondicion[0].empresas, 4);
+  assert.equal(c.segmento.porQueCero!.porCondicion[1].empresas, 0, 'la condicion de owner es la que vacia el conjunto');
 });
 
 test.after(() => {

@@ -43,9 +43,13 @@ function seedLineaPool(referenciaProveedor: string, estado: string) {
   db.close();
 }
 
-seedEmpresa('e-owner-1', 'owner-cat-1');
+seedEmpresa('e-owner-1', 'isp');
 const idCadencia = crearCadencia({ nombre: 'C owner', pasos: [{ orden: 1, diaOffset: 0, canal: 'whatsapp', cuerpo: 'hola' }] });
-const idSegmento = guardarSegmento({ nombre: 'owner-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['owner-cat-1'] }] } }, 1);
+// 'isp' y no una etiqueta inventada: el campo 'categoria' de un segmento lee la vista
+// empresa_categoria, cuyo dominio son 7 valores fijos, y una empresa sin fila en
+// empresa_clasificacion cae en 'isp' por el ELSE del CASE. Un valor fuera de ese dominio
+// ya no se guarda (DOMINIO_SEGMENTO): antes se aceptaba y el segmento matcheaba a nadie.
+const idSegmento = guardarSegmento({ nombre: 'owner-seg', definicion: { condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }] } }, 1);
 
 test('fijarOwnerCampana persiste el owner de la campana', () => {
   const idCampana = crearCampana({ nombre: 'Camp sin owner', idCadencia, idSegmento }, 1);

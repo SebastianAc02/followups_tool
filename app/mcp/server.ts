@@ -875,10 +875,30 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
                 limite: z.number().int().positive().optional(),
               })
               .describe(
-                'Filtro de empresas. condiciones necesita AL MENOS UNA: un segmento vacío matchearía la base entera. ' +
-                  'Campos: estado, categoria, estado_comercial, prioridad, es_cliente, ciudad, departamento, owner, ' +
-                  'usuarios, en_notion, rol. Operadores: en, no_en, es_null, no_null, entre, mayor_que, menor_que. ' +
-                  'Ejemplo: {"condiciones":[{"campo":"estado","op":"en","valores":["lead"]}]}',
+                'Filtro de empresas. Las condiciones se ANDean y necesita AL MENOS UNA: un segmento vacío matchearía ' +
+                  'la base entera. Un valor que no pertenece al dominio del campo se RECHAZA con error (no devuelve ' +
+                  '"0 empresas", que se leería como un resultado legítimo). ' +
+                  'CAMPOS, con la columna que lee cada uno y sus valores válidos: ' +
+                  'estado = la etapa del embudo (empresa.estado_notion), uno de lead, contacto_iniciado, oportunidad, ' +
+                  'reunion_agendada, cierre_documentacion, enviar_contrato, on_hold, firma_pago. ' +
+                  'categoria = la clasificación DERIVADA (vista empresa_categoria), uno de isp, sae_plus, telco_grande, ' +
+                  'carrier, utility, extranjero, no_isp — OJO: NO es el campo categoria de crear_empresa (esa columna ' +
+                  'acepta isp/utility/otro y el segmento no la lee); "otro" acá no existe y una empresa sin clasificar ' +
+                  'cuenta como isp. ' +
+                  'estado_comercial = empresa.estado_comercial, uno de cliente, negociacion, contactado, pausado, lead, ' +
+                  'descartado (es otro eje, no un sinónimo de estado). ' +
+                  'rol = el cargo de algún contacto de la empresa (contacto.cargo_categoria), uno de dueno, gerente, ' +
+                  'rep_legal, rep_legal_suplente, subgerente, tecnico, financiero, operativo, comercial, desconocido. ' +
+                  'prioridad (entero), es_cliente (0/1), usuarios (entero, usuarios estimados), personas (cuántos ' +
+                  'contactos tiene la empresa): numéricos, se filtran con entre/mayor_que/menor_que. ' +
+                  'ciudad, departamento, owner: TEXTO LIBRE, sin dominio cerrado — acá un valor inexistente sí devuelve ' +
+                  'cero en silencio, así que el owner se escribe exacto ("Sebastian Acosta Molina"). ' +
+                  'en_notion: usar es_null (nunca entró al CRM) / no_null (sí está). ' +
+                  'OPERADORES: en, no_en (con "valores": []), es_null, no_null, entre ("desde"/"hasta"), mayor_que, ' +
+                  'menor_que ("valor"). ' +
+                  'Ejemplo: {"condiciones":[{"campo":"estado","op":"en","valores":["lead"]}]}. ' +
+                  'Si el resultado da 0 empresas, la respuesta trae segmento.porQueCero con el conteo de CADA condición ' +
+                  'por separado: la que salga en 0 es la que vacía el conjunto.',
               ),
             descripcionNatural: z.string().min(1).optional(),
           })

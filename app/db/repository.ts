@@ -3407,6 +3407,33 @@ export function contarSegmento(def: DefinicionSegmento, idOrganizacion: number):
   return fila?.n ?? 0;
 }
 
+export type DiagnosticoSegmento = {
+  total: number;
+  // Cuantas empresas caen con CADA condicion sola. Las condiciones se ANDean, asi que una
+  // sola en 0 explica el total en 0 por si misma.
+  porCondicion: { indice: number; condicion: string; empresas: number }[];
+};
+
+// Por que un segmento devuelve 0. Corre cada condicion POR SEPARADO contra la misma base
+// (misma organizacion, mismo EMPRESA_VIVA) para senalar cual mata el conjunto.
+//
+// El dominio cerrado ya lo ataja Zod antes (DOMINIO_SEGMENTO): un valor imposible ni
+// siquiera llega aca. Esto cubre el resto del mismo problema, que Zod no puede ver: valores
+// perfectamente validos que juntos no matchean a nadie (owner que existe + estado que
+// existe, pero ninguna empresa con los dos). "0 empresas" a secas no dice nada; "la
+// condicion 3 sola ya da 0" dice exactamente donde mirar.
+export function diagnosticoSegmento(def: DefinicionSegmento, idOrganizacion: number): DiagnosticoSegmento {
+  const val = definicionSegmentoSchema.parse(def);
+  return {
+    total: contarSegmento(val, idOrganizacion),
+    porCondicion: val.condiciones.map((c, i) => ({
+      indice: i,
+      condicion: JSON.stringify(c),
+      empresas: contarSegmento({ condiciones: [c] }, idOrganizacion),
+    })),
+  };
+}
+
 // V4.3: guarda el filtro compilado como JSON en segmento.definicion. descripcionNatural
 // es opcional (el lenguaje natural lo llena Fase 6, aca solo se persiste si viene).
 export function guardarSegmento(input: { nombre: string; definicion: DefinicionSegmento; descripcionNatural?: string }, idOrganizacion: number): number {
@@ -4146,7 +4173,19 @@ export type CampanaCompleta = {
   };
   cadencia: { idCadencia: number; nombre: string; descripcion: string | null; activa: boolean };
   pasos: PasoDeCadenciaLeido[];
-  segmento: { idSegmento: number; nombre: string; definicion: DefinicionSegmento | null; empresasQueCaen: number | null };
+  segmento: {
+    idSegmento: number;
+    nombre: string;
+    definicion: DefinicionSegmento | null;
+    empresasQueCaen: number | null;
+    // Por que la definicion no se pudo leer (definicion queda en null). Antes ese null salia
+    // pelado y no habia forma de distinguir "el segmento se borro" de "su definicion tiene un
+    // valor que ningun campo acepta".
+    problema: string | null;
+    // Solo cuando caen 0 empresas: cuenta CADA condicion por separado para decir cual es la
+    // que vacia el conjunto. Un "0" sin esto no se puede depurar sin abrir la base a mano.
+    porQueCero: DiagnosticoSegmento | null;
+  };
   inscripciones: { estado: string; n: number }[];
 };
 
@@ -4186,15 +4225,23 @@ export function campanaCompleta(idCampana: number, idOrganizacion: number): Camp
   const seg = db.select().from(segmento).where(eq(segmento.idSegmento, camp.idSegmento)).get();
   let definicion: DefinicionSegmento | null = null;
   let empresasQueCaen: number | null = null;
+  let problema: string | null = null;
+  let porQueCero: DiagnosticoSegmento | null = null;
   if (seg) {
     // Un segmento con una definicion corrupta no debe tumbar la relectura entera de una
-    // escritura que YA ocurrio: se reporta como null y la campana se sigue viendo.
+    // escritura que YA ocurrio: se reporta como null y la campana se sigue viendo. El motivo
+    // SI se guarda (problema): tragarselo dejaba un null sin explicacion, que es la misma
+    // clase de falla silenciosa que el "0 empresas" de abajo.
     try {
       definicion = definicionSegmentoSchema.parse(JSON.parse(seg.definicion));
       empresasQueCaen = contarSegmento(definicion, idOrganizacion);
-    } catch {
+      if (empresasQueCaen === 0) porQueCero = diagnosticoSegmento(definicion, idOrganizacion);
+    } catch (e) {
       definicion = null;
+      problema = e instanceof Error ? e.message : String(e);
     }
+  } else {
+    problema = `el segmento ${camp.idSegmento} que referencia esta campana ya no existe`;
   }
 
   const inscripciones = db
@@ -4234,7 +4281,7 @@ export function campanaCompleta(idCampana: number, idOrganizacion: number): Camp
       cuerpo: p.cuerpo,
       variables: p.variables ? (JSON.parse(p.variables) as string[]) : [],
     })),
-    segmento: { idSegmento: camp.idSegmento, nombre: seg?.nombre ?? '(segmento borrado)', definicion, empresasQueCaen },
+    segmento: { idSegmento: camp.idSegmento, nombre: seg?.nombre ?? '(segmento borrado)', definicion, empresasQueCaen, problema, porQueCero },
     inscripciones,
   };
 }

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
+import { CARGO_CATEGORIAS } from '../core/reconciliacion/clasificarCargo';
 
 // Regla de dominio (no de UI): las 4 salidas cerradas de un toque, y razonPerdida es
 // obligatoria cuando resultado = 'contesto_no'. Vive junto al Repository porque es la
@@ -415,7 +417,11 @@ export type CadenciaParseadaInput = z.infer<typeof cadenciaParseadaSchema>;
 // operador fuera de este set ANTES de tocar la DB, asi no hay SQL libre ni inyeccion.
 export const CAMPOS_SEGMENTO = [
   'estado', // empresa.estado_notion (on_hold, oportunidad, lead...)
-  'categoria', // isp / utility / otro
+  // OJO: la VISTA empresa_categoria (derivada de empresa_clasificacion), NO la columna
+  // plana empresa.categoria. Son dos vocabularios distintos y no se solapan del todo:
+  // la vista contesta isp/sae_plus/telco_grande/carrier/utility/extranjero/no_isp y la
+  // columna plana isp/utility/otro. 'otro' NO existe de este lado. Ver DOMINIO_SEGMENTO.
+  'categoria',
   'estado_comercial',
   'prioridad', // empresa.prioridad_comercial (el "tier", numerico)
   'es_cliente', // 0 / 1
@@ -430,6 +436,42 @@ export const CAMPOS_SEGMENTO = [
   'en_notion',
 ] as const;
 export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
+
+// Los 7 valores que puede contestar la vista empresa_categoria, que es lo que lee el campo
+// 'categoria' de un segmento (COLUMNA_SEGMENTO en repository.ts). Salen del CASE de la vista
+// -- no de la columna plana empresa.categoria, que es otra cosa (CATEGORIAS_EMPRESA en
+// core/empresa-identidad.ts: isp/utility/otro) y que la app dejo de leer porque solo el 8% de
+// las filas se clasifico ahi. Sin clasificacion, la vista contesta 'isp' por el ELSE.
+export const CATEGORIAS_VISTA = ['isp', 'sae_plus', 'telco_grande', 'carrier', 'utility', 'extranjero', 'no_isp'] as const;
+
+// Los 6 valores del CHECK de empresa.estado_comercial. Lista en runtime por lo mismo que
+// ESTADOS_NOTION: el segmento filtra por este campo y hay que poder validarlo antes de consultar.
+export const ESTADOS_COMERCIALES = ['cliente', 'negociacion', 'contactado', 'pausado', 'lead', 'descartado'] as const;
+
+// Dominios CERRADOS de los campos de segmento que leen una columna con CHECK, o una vista
+// derivada, o un enum del dominio. Los campos que NO estan aca (ciudad, departamento, owner,
+// en_notion) son texto libre y no tienen dominio que imponer.
+//
+// Existe por el segmento 32 (2026-07-28): se creo por MCP con categoria='otro', devolvio
+// "0 empresas" y se leyo como un resultado legitimo. No lo era: 'otro' es un valor real de la
+// COLUMNA plana empresa.categoria -- lo que escribe crear_empresa -- y el segmento lee la
+// VISTA empresa_categoria, cuyo dominio no tiene 'otro'. Ese filtro no podia matchear NUNCA,
+// ni ese dia ni ninguno. Un valor fuera del dominio no es un conjunto vacio, es una consulta
+// mal escrita, y la unica forma de que se note es fallar aca en vez de contestar cero.
+export const DOMINIO_SEGMENTO: Partial<Record<CampoSegmento, readonly string[]>> = {
+  estado: ESTADOS_NOTION,
+  categoria: CATEGORIAS_VISTA,
+  estado_comercial: ESTADOS_COMERCIALES,
+  rol: CARGO_CATEGORIAS,
+};
+
+// Los valores de una condicion en/no_en que no pertenecen al dominio de su campo. Devuelve
+// vacio para los campos de texto libre (no hay dominio contra el cual medir).
+export function valoresFueraDeDominio(campo: CampoSegmento, valores: string[]): string[] {
+  const dominio = DOMINIO_SEGMENTO[campo];
+  if (!dominio) return [];
+  return valores.filter((v) => !dominio.includes(v));
+}
 
 // Parte 1 campanas: subset de campos donde un rango numerico tiene sentido.
 // rol es string (usa en/no_en) y NO va aqui; personas (cantidad de contactos de la
@@ -503,9 +545,31 @@ export const definicionSegmentoBorradorSchema = z.object({
 // formalidad: un segmento sin condiciones matchea la base ENTERA, o sea una campana
 // masiva a todo el mundo. Todo lo que persiste o inscribe pasa por aca (repository.ts,
 // guardarSegmentoAction); el Copiloto no.
-export const definicionSegmentoSchema = definicionSegmentoBorradorSchema.extend({
-  condiciones: z.array(condicionSegmentoSchema).min(1, 'un segmento necesita al menos una condicion'),
-});
+//
+// El dominio de cada valor se impone aca y NO en el borrador, a proposito y por la misma
+// razon que la separacion de arriba: el Copiloto propone mientras el usuario escribe y una
+// propuesta a medio armar no tiene por que reventar la pantalla. Lo que no puede pasar es
+// que un valor imposible se GUARDE y se EJECUTE contestando "0 empresas" (segmento 32,
+// 2026-07-28: categoria='otro', un valor que la vista empresa_categoria no contesta nunca).
+export const definicionSegmentoSchema = definicionSegmentoBorradorSchema
+  .extend({
+    condiciones: z.array(condicionSegmentoSchema).min(1, 'un segmento necesita al menos una condicion'),
+  })
+  .superRefine((def, ctx) => {
+    def.condiciones.forEach((c, i) => {
+      if (c.op !== 'en' && c.op !== 'no_en') return;
+      const fuera = valoresFueraDeDominio(c.campo, c.valores);
+      if (fuera.length === 0) return;
+      ctx.addIssue({
+        code: 'custom',
+        path: ['condiciones', i, 'valores'],
+        message:
+          `el campo '${c.campo}' no acepta [${fuera.join(', ')}]: sus valores validos son ` +
+          `[${DOMINIO_SEGMENTO[c.campo]!.join(', ')}]. Un valor fuera del dominio no matchea cero empresas, ` +
+          'no puede matchear ninguna nunca, asi que se rechaza en vez de devolver un conjunto vacio que parece un resultado.',
+      });
+    });
+  });
 
 export type DefinicionSegmento = z.infer<typeof definicionSegmentoSchema>;
 export type DefinicionSegmentoBorrador = z.infer<typeof definicionSegmentoBorradorSchema>;

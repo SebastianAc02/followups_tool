@@ -3,17 +3,25 @@
 // Matching por keyword, orden explicito de mas-especifico a menos-especifico
 // (p. ej. "subgerente" antes que "gerente"/"comercial", que tambien matchearian
 // "Subgerente Comercial"). No es scoring, es la primera regla que aplique.
-export type CargoCategoria =
-  | 'dueno'
-  | 'gerente'
-  | 'rep_legal'
-  | 'tecnico'
-  | 'financiero'
-  | 'operativo'
-  | 'comercial'
-  | 'rep_legal_suplente'
-  | 'subgerente'
-  | 'desconocido';
+// Lista en RUNTIME y no solo union de tipos, por la misma razon que ESTADOS_NOTION
+// (mapeoEstados.ts): quien reciba un rol de afuera -- el MCP arma segmentos con JSON
+// libre -- tiene que poder validarlo antes de consultar, y un union se borra al compilar.
+// Verificada contra produccion el 2026-07-28: los 402 contactos con cargo_categoria
+// caen todos en estos 10 valores, sin residuo de cargas viejas.
+export const CARGO_CATEGORIAS = [
+  'dueno',
+  'gerente',
+  'rep_legal',
+  'tecnico',
+  'financiero',
+  'operativo',
+  'comercial',
+  'rep_legal_suplente',
+  'subgerente',
+  'desconocido',
+] as const;
+
+export type CargoCategoria = (typeof CARGO_CATEGORIAS)[number];
 
 const REGLAS: { categoria: CargoCategoria; keywords: string[] }[] = [
   { categoria: 'dueno', keywords: ['dueño', 'dueno', 'ceo', 'propietario', 'fundador'] },
