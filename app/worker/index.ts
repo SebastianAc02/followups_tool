@@ -360,7 +360,41 @@ async function tareaTracking(): Promise<string> {
 //
 // modo 'manual' (2026-07-16): sin ventana horaria y con espaciado corto -- hay un request
 // esperando del otro lado. Ver el comentario de tareaPush para el porque de cada uno.
-export async function materializarYEmpujarAhora(): Promise<void> {
+//
+// conTracking (2026-08-03): corre ADEMAS el poll de tracking, dentro de este mismo request.
+// Existe por el modo prueba y solo lo prende el boton "Siguiente dia".
+//
+// El problema que resuelve: el worker es ciego al modo prueba y eso esta bien (default a base
+// real, ver el comentario largo de app/lib/modo-prueba.ts -- webhook, pixel y worker pertenecen
+// a la base de verdad). Pero el poll de tracking es el UNICO camino que detecta una respuesta
+// por correo, asi que en modo prueba esa deteccion no ocurria nunca: se podia responder el
+// correo de la demo y la cadencia seguia mandando. Colgarlo del click lo hace correr dentro del
+// contexto de modo prueba del request, que es lo mismo que ya se hizo con materializar/empujar.
+//
+// APAGADO POR DEFAULT, y eso es deliberado: los otros tres llamadores (lanzarCampanaAction y
+// dos tools del MCP) corren contra produccion, y el poll recorre TODAS las campanas con
+// secuencia, no solo la que se acaba de lanzar. Prenderlo para ellos les meteria una consulta
+// a Gmail/Apollo por campana dentro de un request que hoy es corto, sin que nadie lo pidiera.
+//
+// VA PRIMERO, antes de materializar y empujar, y el orden importa aunque en el worker no
+// importe. El ciclo del worker corre cada 5 minutos, asi que ahi da igual el orden. Aca es UNA
+// pasada: si el ISP respondio el correo de ayer, detectarlo ANTES es lo que corta la cadencia y
+// evita que el paso de hoy le escriba a alguien que ya contesto. Al reves, el correo ya salio.
+export async function materializarYEmpujarAhora(opciones: { conTracking?: boolean } = {}): Promise<void> {
+  if (opciones.conTracking) {
+    try {
+      const resultado = await tareaTracking();
+      if (resultado !== 'ok') console.warn(`[empujon-manual] poll de tracking ${resultado}`);
+    } catch (e) {
+      // Aislado a proposito, mismo criterio que ejecutarCiclo: un poll caido no puede tumbar el
+      // avance del dia. Lo que el operador pidio con el click fue mover la cadencia; los envios
+      // que vienen abajo valen aunque la lectura de respuestas haya fallado. Se loguea, no se
+      // traga: el silencio en el camino de tracking es justo lo que oculto el bug de tres
+      // semanas del pixel.
+      console.error('[empujon-manual] el poll de tracking fallo, se sigue con el empujon:', e);
+    }
+  }
+
   await tareaMaterializar();
   const registro = crearRegistroEntrega();
   for (const canal of Object.keys(registro) as Canal[]) {
