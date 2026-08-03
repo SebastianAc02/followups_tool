@@ -8473,9 +8473,20 @@ export type ResumenTrackingEmpresa = {
 // filtrada por empresa y con CONTEO en vez de booleanos -- la cola es por empresa y necesita
 // "3x . hace 2h", no un si/no. Una query para toda la cola + cruce en TS (mismo criterio que
 // aperturasPorCampana/actividadDeCampana: a la escala de una cola son decenas de filas).
-export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, ResumenTrackingEmpresa> {
+//
+// idCampana (2026-08-03): acota el agregado a UNA campaña. Sin el, la pantalla de una campaña
+// mostraria aperturas de otra campaña de la misma empresa y diria "abrio 9 veces" sobre un
+// correo que no es el suyo. La cola sigue llamandola sin campaña, que es lo correcto ahi: lo
+// que le importa es si la cuenta esta caliente, venga de donde venga.
+export function resumenTrackingPorEmpresa(idsEmpresa: string[], idCampana?: number): Map<string, ResumenTrackingEmpresa> {
   const resultado = new Map<string, ResumenTrackingEmpresa>();
   if (idsEmpresa.length === 0) return resultado;
+
+  const condiciones = [
+    inArray(inscripcion.idEmpresa, idsEmpresa),
+    inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto']),
+  ];
+  if (idCampana != null) condiciones.push(eq(inscripcion.idCampana, idCampana));
 
   const filas = db
     .select({
@@ -8487,7 +8498,7 @@ export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, Res
     .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
-    .where(and(inArray(inscripcion.idEmpresa, idsEmpresa), inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto'])))
+    .where(and(...condiciones))
     .all();
 
   for (const f of filas) {
@@ -8507,6 +8518,9 @@ export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, Res
 
 export type FilaActividad = {
   idPasoInscripcion: number;
+  // El id y no solo el nombre: la pantalla cruza cada envio con el tracking agregado de su
+  // cuenta (resumenTrackingPorEmpresa), y cruzar por nombre es como no cruzar.
+  idEmpresa: string;
   empresa: string;
   contacto: string | null;
   email: string | null;
@@ -8538,6 +8552,7 @@ export function actividadDeCampana(idCampana: number): FilaActividad[] {
   const envios = db
     .select({
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
       empresa: empresa.nombreOficial,
       contacto: contacto.nombre,
       email: contacto.email,
@@ -8576,6 +8591,7 @@ export function actividadDeCampana(idCampana: number): FilaActividad[] {
     const tipos = porPaso.get(e.idPasoInscripcion) ?? new Set<string>();
     return {
       idPasoInscripcion: e.idPasoInscripcion,
+      idEmpresa: e.idEmpresa,
       empresa: e.empresa,
       contacto: e.contacto,
       email: e.email,

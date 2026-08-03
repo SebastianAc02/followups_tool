@@ -36,8 +36,42 @@ export function haceCuanto(iso: string, ahora: Date): string {
 }
 
 // La primera apertura no cuenta -- ver comentario de arriba.
-function aperturasReales(s: SeñalTracking): number {
+export function aperturasReales(s: SeñalTracking): number {
   return Math.max(0, s.aperturas - 1);
+}
+
+export type DetalleTracking = {
+  // Aperturas que cuentan como persona (descontando la primera).
+  reales: number;
+  // Las que de verdad se registraron, sin descontar nada.
+  crudas: number;
+  clics: number;
+  vioWhatsapp: boolean;
+  ultimaApertura: string | null;
+  // Se registro apertura y TODA se descarto por la regla anti-proxy. Es el caso que confunde a
+  // cualquiera que este probando: el pill dice "Sin abrir" mientras la base tiene una fila de
+  // apertura, y sin decir por que parece que el tracking no funciona.
+  soloProxy: boolean;
+  temperatura: Temperatura;
+};
+
+// Lo mismo que resumirTracking pero SIN colapsar a una frase: una pantalla de campaña necesita
+// el conteo, la hora y el clic por separado para poder ponerlos en columnas. Comparte la regla
+// de descarte (aperturasReales) en vez de recalcularla, que es justo lo que hacia que la misma
+// apertura se leyera "Abrió" en una pantalla y "Sin abrir" en otra.
+export function detallarTracking(s: SeñalTracking): DetalleTracking {
+  const reales = aperturasReales(s);
+  return {
+    reales,
+    crudas: s.aperturas,
+    clics: s.clics,
+    vioWhatsapp: s.vioWhatsapp,
+    // La hora solo se ata a una apertura confirmada, mismo criterio que el pill: con una sola
+    // apertura no se muestra hora, porque esa hora pudo ser la del proxy y no la de la persona.
+    ultimaApertura: reales > 0 ? s.ultimaApertura : null,
+    soloProxy: s.aperturas > 0 && reales === 0,
+    temperatura: temperaturaDe(s),
+  };
 }
 
 // Regla de temperatura: clic, visto de WhatsApp, o una apertura real (descontando la
