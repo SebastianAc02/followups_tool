@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { aprobarLoteManualAction } from '../actions';
+import { ProgramarEnvio, type DestinoProgramable } from './ProgramarEnvio';
 import { cn } from '../ui/cn';
 import { Pill } from '../ui/Pill';
 import { CanalTag } from '../ui/CanalTag';
@@ -24,12 +25,35 @@ export type ItemCadenciaHoy = {
   nombre: string | null;
   asunto: string | null;
   cuerpo: string | null;
+  cuerpoFinal: string | null;
+  // Constancia de que alguien ya revisó el texto y lo dejó programado (aprobarYProgramarPaso).
+  // Null = nadie lo ha revisado, y para WhatsApp eso significa que no va a salir nunca.
+  aprobadoEn: string | null;
   firmaApollo: boolean;
   variables: string[];
   idEmpresa: string;
   empresaNombre: string;
   historial: { orden: number; diaOffset: number; canal: string; fechaEnviada: string | null }[];
 };
+
+// Qué pasos admiten "apruébalo y que salga": los que la herramienta puede mandar sola cuando
+// llegue la hora. La llamada no (no hay nada que mandar, hay que llamar). WhatsApp SIEMPRE,
+// manual o automático, porque su gate en pasoInscripcionesPendientes exige aprobado_en en los
+// dos casos: sin este botón, un paso automático de WhatsApp se queda pendiente para siempre.
+function admiteProgramar(item: ItemCadenciaHoy): boolean {
+  const canal = canalNormalizado(item.canal);
+  if (canal === 'llamada') return false;
+  return canal === 'whatsapp' || item.esManual === 1;
+}
+
+function destinoDe(item: ItemCadenciaHoy): DestinoProgramable {
+  return { idPasoInscripcion: item.idPasoInscripcion, nombreContacto: item.nombre, nombreEmpresa: item.empresaNombre };
+}
+
+// El copy que se ofrece para aprobar: el revisado si alguien ya lo tocó, si no la plantilla.
+function copyDe(item: ItemCadenciaHoy): string {
+  return item.cuerpoFinal ?? item.cuerpo ?? '';
+}
 
 // Llamadas primero (siguen igual, sin copy que mostrar), luego correo, luego
 // whatsapp: es el orden de trabajo que pidió Sebastián para la jornada.
@@ -119,6 +143,16 @@ function FilaPrioritaria({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: 
       <Link href={`/llamada/${item.idEmpresa}`} className={cn(button({ variant: 'pill' }), 'mt-2 inline-block text-[12.5px]')}>
         {labelAccion}
       </Link>
+      {/* Dos caminos, y el de arriba es "lo mando yo ahora". Este es el otro: aprobar el texto
+          y que salga solo a su hora. */}
+      {admiteProgramar(item) && (
+        <ProgramarEnvio
+          destinos={[destinoDe(item)]}
+          plantilla={copyDe(item)}
+          aprobadoEn={item.aprobadoEn}
+          fechaProgramada={item.fechaProgramada}
+        />
+      )}
     </div>
   );
 }
@@ -149,15 +183,27 @@ function GrupoBatch({ items }: { items: ItemCadenciaHoy[] }) {
         />
       )}
 
+      {/* Los dos gestos, uno al lado del otro y con el nombre de lo que cada uno hace. El de
+          abajo NO manda nada: da por hecho que el mensaje ya salió por fuera y escribe el
+          toque. El de al lado sí manda, a la hora que se le diga. */}
       <form action={aprobarLoteManualAction} className="mt-2">
         {items.map((i) => (
           <input key={i.idPasoInscripcion} type="hidden" name="idPasoInscripcion" value={i.idPasoInscripcion} />
         ))}
         {tieneCopy && <input type="hidden" name="cuerpoFinal" value={cuerpo} />}
-        <button type="submit" className={cn(button({ variant: 'pill' }), "text-[12.5px]")}>
-          Confirmar para las {items.length}
+        <button type="submit" className={cn(button({ variant: 'quiet' }), "text-[12.5px]")}>
+          Ya las mandé yo ({items.length})
         </button>
       </form>
+
+      {admiteProgramar(base) && (
+        <ProgramarEnvio
+          destinos={items.map(destinoDe)}
+          plantilla={cuerpo}
+          aprobadoEn={base.aprobadoEn}
+          fechaProgramada={base.fechaProgramada}
+        />
+      )}
     </div>
   );
 }
@@ -217,6 +263,17 @@ function FilaAutomatica({ item, atrasado }: { item: ItemCadenciaHoy; atrasado: b
           </span>
         )}
       </div>
+      {/* "Automático" nunca fue automático para WhatsApp: el worker no empuja un paso de
+          whatsapp sin aprobado_en, así que sin este control se quedaba pendiente para siempre.
+          Es exactamente lo que dejaba el canal muerto en modo prueba. */}
+      {admiteProgramar(item) && (
+        <ProgramarEnvio
+          destinos={[destinoDe(item)]}
+          plantilla={copyDe(item)}
+          aprobadoEn={item.aprobadoEn}
+          fechaProgramada={item.fechaProgramada}
+        />
+      )}
     </div>
   );
 }

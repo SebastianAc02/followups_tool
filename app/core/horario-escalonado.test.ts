@@ -1,7 +1,7 @@
 // Reparto de horas de un lote. Core puro, sin DB ni reloj: mismas entradas, misma salida.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularHorarioEscalonado } from './horario-escalonado.ts';
+import { calcularHorarioEscalonado, instanteBogota } from './horario-escalonado.ts';
 
 // El caso real que motivo la funcion: siete aperturas a las 11:00, una cada dos minutos.
 test('siete mensajes desde las 11:00, uno cada dos minutos', () => {
@@ -45,6 +45,29 @@ test('un lote vacio devuelve vacio, no truena', () => {
 // Entrada mala falla RUIDOSA. Una hora invalida que devolviera "Invalid Date" en silencio
 // dejaria siete mensajes programados para una fecha que no existe, y eso solo se descubre
 // cuando no salen.
+// La casilla de la web dice "11:00" y el operador piensa en su hora, no en UTC. Si la
+// conversion dependiera del huso del proceso, en el VPS (que corre en UTC) el mensaje quedaria
+// elegible a las 6 de la mañana de Colombia.
+test('instanteBogota fija el offset -05:00, no el huso del proceso', () => {
+  assert.equal(instanteBogota('2026-08-03', '11:00'), '2026-08-03T11:00:00-05:00');
+  assert.equal(new Date(instanteBogota('2026-08-03', '11:00')).toISOString(), '2026-08-03T16:00:00.000Z');
+});
+
+test('lo que devuelve instanteBogota lo acepta calcularHorarioEscalonado', () => {
+  const h = calcularHorarioEscalonado(instanteBogota('2026-08-03', '11:00'), 3, 2 * 60_000);
+  assert.deepEqual(
+    h.map((p) => p.fechaProgramada),
+    ['2026-08-03T16:00:00.000Z', '2026-08-03T16:02:00.000Z', '2026-08-03T16:04:00.000Z'],
+  );
+});
+
+test('una hora que no existe no se convierte en otra: truena', () => {
+  assert.throws(() => instanteBogota('2026-08-03', '25:00'), /hora invalida/);
+  assert.throws(() => instanteBogota('2026-08-03', '11'), /hora invalida/);
+  assert.throws(() => instanteBogota('2026-08-03', '11:60'), /hora invalida/);
+  assert.throws(() => instanteBogota('3 de agosto', '11:00'), /dia invalido/);
+});
+
 test('una hora invalida truena en vez de programar basura', () => {
   assert.throws(() => calcularHorarioEscalonado('mañana a las 11', 3, 120_000), /hora de inicio invalida/);
   // V8 acepta prosa: new Date('mañana a las 11') NO da Invalid Date, da una fecha inventada a

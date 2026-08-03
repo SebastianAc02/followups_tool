@@ -17,6 +17,27 @@
 
 export type PasoProgramado = { posicion: number; fechaProgramada: string };
 
+// El operador escribe "11:00" en una casilla y piensa en su hora, la de Bogota. Lo que la
+// base compara es un instante ISO (pasoInscripcionesPendientes contra `ahora` en UTC), asi que
+// entre lo uno y lo otro hay una conversion que NO puede quedar en manos del huso del proceso:
+// el contenedor del VPS corre en UTC, y armar el Date sin zona haria que "11:00" quedara
+// elegible a las 06:00 de Colombia. Colombia no tiene horario de verano, asi que el offset es
+// -05:00 fijo y no hace falta una tabla de zonas.
+const OFFSET_BOGOTA = '-05:00';
+const HORA_HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const DIA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+export function instanteBogota(dia: string, horaHHMM: string): string {
+  if (!DIA_ISO.test(dia)) throw new Error(`dia invalido: ${dia}`);
+  if (!HORA_HHMM.test(horaHHMM)) throw new Error(`hora invalida: ${horaHHMM}`);
+  return `${dia}T${horaHHMM}:00${OFFSET_BOGOTA}`;
+}
+
+// Ritmo por defecto de un lote programado desde la web: dos minutos, el mismo que la caja de
+// las 8:00 usa por el MCP. Es un PISO de elegibilidad, no la hora exacta de salida: quien manda
+// es el worker (ver el comentario de arriba).
+export const ESPACIADO_ENVIOS_DEFAULT_MIN = 2;
+
 // espaciadoMs 0 = todos a la misma hora (el lote entero elegible de una). No se prohibe: es
 // exactamente lo que se quiere cuando el ritmo lo pone el worker y no el calendario.
 // Forma ISO exigida ANTES de construir el Date, y no solo un chequeo de Invalid Date: el

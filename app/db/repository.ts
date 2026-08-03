@@ -7986,6 +7986,10 @@ export function agendaHoyCadencias(hoy: string, owner?: string) {
       // (2026-07-26, guardarCopyPaso). Va aparte de `cuerpo` y no lo pisa: hacen falta los dos
       // para poder ver que se cambio respecto a la plantilla.
       cuerpoFinal: pasoInscripcion.cuerpoFinal,
+      // Constancia de que un humano ya leyo el texto (2026-07-26). La pantalla la necesita
+      // para no ofrecer dos veces el mismo gesto: sin esto no hay forma de distinguir un paso
+      // aprobado esperando su hora de uno que nadie ha revisado, y los dos se ven igual.
+      aprobadoEn: pasoInscripcion.aprobadoEn,
       firmaApollo: versionPaso.firmaApollo,
       variables: versionPaso.variables,
       idCampana: campana.idCampana,
