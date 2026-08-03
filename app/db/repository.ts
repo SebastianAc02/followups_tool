@@ -102,6 +102,7 @@ import { scoreRazonSocial, UMBRAL_MINIMO_CANDIDATO } from '../core/reconciliacio
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import {
   CATEGORIAS_EMPRESA,
+  CATEGORIAS_ESCRIBIBLES,
   ESTADO_COMERCIAL_POR_ETAPA,
   dominioDe,
   esNitValido,
@@ -2710,9 +2711,23 @@ export function buscarEmpresa(input: BuscarEmpresaInput): BuscarEmpresaResultado
 
 const crearEmpresaSchema = z.object({
   nombreOficial: z.string().trim().min(1),
-  categoria: z.enum(CATEGORIAS_EMPRESA),
+  // CATEGORIAS_ESCRIBIBLES y no CATEGORIAS_EMPRESA: suma 'test', la marca de una cuenta
+  // sembrada para probar (ver app/core/empresa-identidad.ts). El MCP sigue ofreciendo solo las
+  // tres reales. Quien decide si 'test' es aceptable es la puerta por la que entra la escritura
+  // (categoriaAceptada, mismo archivo), nunca esta funcion: el repository no sabe en que modo
+  // corre, y ese desconocimiento es justo lo que hace imposible que se equivoque de base.
+  categoria: z.enum(CATEGORIAS_ESCRIBIBLES),
   estadoNotion: z.enum(ESTADOS_NOTION),
   owner: z.string().trim().min(1),
+  // La ciudad entra en el ALTA y no en un update posterior: es uno de los campos por los que
+  // segmenta el wizard de campanas (COLUMNA_SEGMENTO.ciudad), asi que una cuenta creada sin
+  // ella no cae en ningun segmento que filtre por ciudad. Vacio se trata como ausente, para no
+  // escribir '' donde la segmentacion lo leeria como un valor mas.
+  ciudad: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? undefined : v))
+    .optional(),
   notionPageId: z
     .string()
     .trim()
@@ -2855,6 +2870,7 @@ export function crearEmpresa(input: CrearEmpresaInput, idOrganizacion: number): 
         estadoComercial: ESTADO_COMERCIAL_POR_ETAPA[parsed.estadoNotion],
         estadoNotion: parsed.estadoNotion,
         categoria: parsed.categoria,
+        ciudadPrincipal: parsed.ciudad ?? null,
         owner: parsed.owner,
         notionPageId: parsed.notionPageId ?? null,
         organizacionActivaId: idOrganizacion,
@@ -7970,6 +7986,10 @@ export function agendaHoyCadencias(hoy: string, owner?: string) {
       // (2026-07-26, guardarCopyPaso). Va aparte de `cuerpo` y no lo pisa: hacen falta los dos
       // para poder ver que se cambio respecto a la plantilla.
       cuerpoFinal: pasoInscripcion.cuerpoFinal,
+      // Constancia de que un humano ya leyo el texto (2026-07-26). La pantalla la necesita
+      // para no ofrecer dos veces el mismo gesto: sin esto no hay forma de distinguir un paso
+      // aprobado esperando su hora de uno que nadie ha revisado, y los dos se ven igual.
+      aprobadoEn: pasoInscripcion.aprobadoEn,
       firmaApollo: versionPaso.firmaApollo,
       variables: versionPaso.variables,
       idCampana: campana.idCampana,
@@ -8453,9 +8473,20 @@ export type ResumenTrackingEmpresa = {
 // filtrada por empresa y con CONTEO en vez de booleanos -- la cola es por empresa y necesita
 // "3x . hace 2h", no un si/no. Una query para toda la cola + cruce en TS (mismo criterio que
 // aperturasPorCampana/actividadDeCampana: a la escala de una cola son decenas de filas).
-export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, ResumenTrackingEmpresa> {
+//
+// idCampana (2026-08-03): acota el agregado a UNA campaña. Sin el, la pantalla de una campaña
+// mostraria aperturas de otra campaña de la misma empresa y diria "abrio 9 veces" sobre un
+// correo que no es el suyo. La cola sigue llamandola sin campaña, que es lo correcto ahi: lo
+// que le importa es si la cuenta esta caliente, venga de donde venga.
+export function resumenTrackingPorEmpresa(idsEmpresa: string[], idCampana?: number): Map<string, ResumenTrackingEmpresa> {
   const resultado = new Map<string, ResumenTrackingEmpresa>();
   if (idsEmpresa.length === 0) return resultado;
+
+  const condiciones = [
+    inArray(inscripcion.idEmpresa, idsEmpresa),
+    inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto']),
+  ];
+  if (idCampana != null) condiciones.push(eq(inscripcion.idCampana, idCampana));
 
   const filas = db
     .select({
@@ -8467,7 +8498,7 @@ export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, Res
     .innerJoin(pasoInscripcion, eq(pasoInscripcion.idPasoInscripcion, eventoTracking.idPasoInscripcion))
     .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
     .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
-    .where(and(inArray(inscripcion.idEmpresa, idsEmpresa), inArray(eventoTracking.tipo, ['abierto', 'clic', 'visto'])))
+    .where(and(...condiciones))
     .all();
 
   for (const f of filas) {
@@ -8487,6 +8518,9 @@ export function resumenTrackingPorEmpresa(idsEmpresa: string[]): Map<string, Res
 
 export type FilaActividad = {
   idPasoInscripcion: number;
+  // El id y no solo el nombre: la pantalla cruza cada envio con el tracking agregado de su
+  // cuenta (resumenTrackingPorEmpresa), y cruzar por nombre es como no cruzar.
+  idEmpresa: string;
   empresa: string;
   contacto: string | null;
   email: string | null;
@@ -8518,6 +8552,7 @@ export function actividadDeCampana(idCampana: number): FilaActividad[] {
   const envios = db
     .select({
       idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idEmpresa: inscripcion.idEmpresa,
       empresa: empresa.nombreOficial,
       contacto: contacto.nombre,
       email: contacto.email,
@@ -8556,6 +8591,7 @@ export function actividadDeCampana(idCampana: number): FilaActividad[] {
     const tipos = porPaso.get(e.idPasoInscripcion) ?? new Set<string>();
     return {
       idPasoInscripcion: e.idPasoInscripcion,
+      idEmpresa: e.idEmpresa,
       empresa: e.empresa,
       contacto: e.contacto,
       email: e.email,

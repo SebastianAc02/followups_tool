@@ -21,6 +21,36 @@ import type { EstadoNotion } from './reconciliacion/mapeoEstados';
 export const CATEGORIAS_EMPRESA = ['isp', 'utility', 'otro'] as const;
 export type CategoriaEmpresa = (typeof CATEGORIAS_EMPRESA)[number];
 
+// 'test' NO es una categoria de negocio y por eso vive aparte de las tres de arriba: es la
+// marca de una cuenta sembrada para probar el flujo. Existe porque la vista empresa_categoria
+// de pruebas.db tiene una rama que solo dispara con este valor (scripts/seed_pruebas.ts), y esa
+// vista es la columna por la que el wizard de campanas segmenta (COLUMNA_SEGMENTO en
+// repository.ts). Sin poder escribirlo desde la web, una cuenta creada a mano en modo prueba
+// nunca cae en el segmento de prueba y la campana sale vacia.
+//
+// Separado a proposito: el alcance del brain (solo ISP) y cualquier conteo por categoria
+// siguen leyendo CATEGORIAS_EMPRESA, que no cambia de tamaño.
+export const CATEGORIA_PRUEBA = 'test';
+export const CATEGORIAS_ESCRIBIBLES = [...CATEGORIAS_EMPRESA, CATEGORIA_PRUEBA] as const;
+export type CategoriaEscribible = (typeof CATEGORIAS_ESCRIBIBLES)[number];
+
+// Con que categoria nace una cuenta creada desde la web. En modo prueba es 'test' para que
+// caiga sola en el segmento de prueba; fuera de el, la categoria dominante de la base (isp:
+// 1.867 de 1.956 filas).
+export function categoriaPorDefecto(modoPrueba: boolean): CategoriaEscribible {
+  return modoPrueba ? CATEGORIA_PRUEBA : 'isp';
+}
+
+// El gate de 'test' vive aca (core puro) y lo aplica la action, NO el repository: el
+// repository no tiene un solo if de modo prueba y ese diseño es lo que hace imposible que una
+// escritura se equivoque de base (ver app/db/index.ts). Una cuenta 'test' en isps.db no
+// rompería nada -- la columna no tiene CHECK y el alcance ISP la dejaria fuera -- pero seria
+// basura en la base real, asi que se rechaza en la puerta.
+export function categoriaAceptada(categoria: string, modoPrueba: boolean): categoria is CategoriaEscribible {
+  if (categoria === CATEGORIA_PRUEBA) return modoPrueba;
+  return (CATEGORIAS_EMPRESA as readonly string[]).includes(categoria);
+}
+
 // Prefijo de los ids sinteticos: cuentas que nacieron de una pagina de Notion y no tienen
 // NIT. 97 filas en isps.db hoy.
 const PREFIJO_SINTETICO = 'ntn-';

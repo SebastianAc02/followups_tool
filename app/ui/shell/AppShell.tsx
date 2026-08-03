@@ -11,7 +11,7 @@ import { cargarPerfil } from '../../lib/perfil';
 import { Sidebar, type ConectorEstado } from './Sidebar';
 import { TopBar } from './TopBar';
 import type { NavItem } from './SidebarNav';
-import { IconInicio, IconCampanas, IconToques, IconPipeline, IconSeguimiento, IconPanel, IconConectores, IconPorRevisar } from './icons';
+import { IconInicio, IconCampanas, IconToques, IconPipeline, IconSeguimiento, IconPanel, IconConectores, IconPorRevisar, IconCuentaNueva } from './icons';
 
 const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -63,6 +63,10 @@ export async function datosSidebar() {
     { href: '/seguimiento', label: 'Seguimiento', icon: <IconSeguimiento />, badge: String(cuentasFunnel) },
     { href: '/cola', label: 'Toques', icon: <IconToques />, badge: String(toquesHoy), badgeTone: toquesHoy > 0 ? 'done' : 'neutral' },
     { href: '/por-revisar', label: 'Por revisar', icon: <IconPorRevisar />, badge: String(porRevisar), badgeTone: porRevisar > 0 ? 'overdue' : 'neutral' },
+    // Alta de cuenta desde la web. Entra al nav y no queda escondida en un boton de otra
+    // pantalla porque es el primer paso de cualquier prueba del flujo: sin cuenta sembrada no
+    // hay segmento, sin segmento no hay campana. exactMatch para no encenderse en /empresas/*.
+    { href: '/empresas/nueva', label: 'Cuenta nueva', icon: <IconCuentaNueva />, exactMatch: true },
     // Panel: dashboard de metricas del CRO. Fase 4 (plan-produccion-cro-campana.md, tarea
     // 11) lo abrio a todos los usuarios -- ya no admin-only, el item siempre aparece.
     // Antes se rotulaba "Pipeline" y apuntaba aca.

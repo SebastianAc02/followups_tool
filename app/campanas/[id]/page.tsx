@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
-import { campanaResumen, metricasHub, actividadDeCampana } from '../../db/repository';
+import { campanaResumen, metricasHub, actividadDeCampana, resumenTrackingPorEmpresa } from '../../db/repository';
+import { detallarTracking } from '../../core/resumen-tracking';
 import { requireSession } from '../../lib/session';
 import { AppShell } from '../../ui/shell/AppShell';
 import { Pill } from '../../ui/Pill';
@@ -9,6 +10,7 @@ import { subNavItemsCampana } from './subnav-items';
 import { CicloVidaControles } from './CicloVidaControles';
 import { SincronizarCopiaControl } from './SincronizarCopiaControl';
 import { TablaActividad } from './TablaActividad';
+import { AperturasPorCuenta, type FilaAperturas } from './AperturasPorCuenta';
 
 const ESTADO_TONE = {
   activa: 'hot',
@@ -41,6 +43,21 @@ export default async function CampanaResumenPage({ params }: { params: Promise<{
 
   const metricas = metricasHub(idCampana);
   const actividad = actividadDeCampana(idCampana);
+
+  // Tracking agregado por cuenta y ACOTADO a esta campaña (resumenTrackingPorEmpresa, la misma
+  // que alimenta el pill de /cola): un chip "Abrió" no distingue una apertura de nueve, y la
+  // hora exacta no se veía en ninguna pantalla. Las cuentas salen de la actividad, que ya está
+  // cargada: una consulta más, no un recorrido por fila.
+  const empresasDeLaCampana = new Map(actividad.map((f) => [f.idEmpresa, f.empresa]));
+  const tracking = resumenTrackingPorEmpresa([...empresasDeLaCampana.keys()], idCampana);
+  const filasAperturas: FilaAperturas[] = [...empresasDeLaCampana.entries()]
+    .map(([idEmpresa, empresa]) => ({ idEmpresa, empresa, señal: tracking.get(idEmpresa) }))
+    .filter((f) => f.señal !== undefined)
+    .map((f) => ({ idEmpresa: f.idEmpresa, empresa: f.empresa, detalle: detallarTracking(f.señal!) }))
+    .sort((a, b) => b.detalle.reales - a.detalle.reales || (b.detalle.ultimaApertura ?? '').localeCompare(a.detalle.ultimaApertura ?? ''));
+  // Reloj real, no el de demo: "hace 2h" es tiempo de pared, no fecha de negocio (mismo
+  // criterio que /cola).
+  const ahora = new Date();
   const tasaPct = Math.round(metricas.tasaRespuesta * 100);
   const tone = ESTADO_TONE[camp.estado as keyof typeof ESTADO_TONE] ?? 'cold';
   const label = ESTADO_LABEL[camp.estado] ?? camp.estado;
@@ -80,7 +97,9 @@ export default async function CampanaResumenPage({ params }: { params: Promise<{
         />
       </div>
 
-      <TablaActividad filas={actividad} />
+      <AperturasPorCuenta filas={filasAperturas} ahora={ahora} />
+
+      <TablaActividad filas={actividad} trackingPorEmpresa={tracking} ahora={ahora} />
 
       <div className="rounded-2xl border border-line bg-card p-5">
         <h3 className="mb-3 font-serif text-lg text-ink">Errores e incidentes recientes</h3>

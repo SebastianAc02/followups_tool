@@ -1,4 +1,5 @@
-import type { FilaActividad } from '../../db/repository';
+import type { FilaActividad, ResumenTrackingEmpresa } from '../../db/repository';
+import { detallarTracking, haceCuanto } from '../../core/resumen-tracking';
 import { CanalTag, type Canal } from '../../ui/CanalTag';
 import { cn } from '../../ui/cn';
 
@@ -33,7 +34,19 @@ function fechaCorta(iso: string | null): string {
   return d.toLocaleString('es-CO', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-export function TablaActividad({ filas }: { filas: FilaActividad[] }) {
+export function TablaActividad({
+  filas,
+  trackingPorEmpresa,
+  ahora,
+}: {
+  filas: FilaActividad[];
+  // Agregado POR CUENTA y acotado a esta campaña (resumenTrackingPorEmpresa). Sirve para una
+  // cosa puntual: decidir si la apertura de esta fila cuenta como persona o se descartó por la
+  // regla anti-proxy. El conteo y la hora viven en la tabla de arriba, que es por cuenta; acá
+  // se repetirían por cada envío de la misma empresa y dirían nueve donde hay uno.
+  trackingPorEmpresa: Map<string, ResumenTrackingEmpresa>;
+  ahora: Date;
+}) {
   return (
     <div className="mb-8 overflow-hidden rounded-2xl border border-line bg-card">
       <div className="border-b border-line px-5 py-4">
@@ -60,6 +73,13 @@ export function TablaActividad({ filas }: { filas: FilaActividad[] }) {
               {filas.map((f) => {
                 const est = ESTADO[f.estado] ?? { label: f.estado, className: 'text-faint' };
                 const sinSeñales = !f.abrio && !f.hizoClic && !f.vioWhatsapp && !f.respondio && !f.reboto;
+                const señal = trackingPorEmpresa.get(f.idEmpresa);
+                const detalle = señal ? detallarTracking(señal) : null;
+                // La cuenta registró UNA sola apertura en esta campaña y la regla anti-proxy la
+                // descarta. Como es una sola, es exactamente la de esta fila: se puede decir sin
+                // mentir. Antes se pintaba "Abrió" en verde acá y "Sin abrir" en /cola por el
+                // mismo evento, que es lo que hacía dudar de si el tracking servía.
+                const aperturaDescartada = f.abrio && detalle?.soloProxy === true;
                 return (
                   <tr key={f.idPasoInscripcion} className="border-b border-line last:border-b-0">
                     <td className="px-5 py-3.5 font-mono-tag text-xs text-muted">{f.orden}</td>
@@ -79,7 +99,28 @@ export function TablaActividad({ filas }: { filas: FilaActividad[] }) {
                     <td className="px-5 py-3.5 font-mono-tag text-xs text-muted">{fechaCorta(f.fecha)}</td>
                     <td className="px-5 py-3.5">
                       <div className="flex flex-wrap gap-1.5">
-                        {f.abrio && <Señal label="Abrió" tone="done" />}
+                        {aperturaDescartada && (
+                          <span
+                            title="Se registró 1 apertura y no cuenta: la primera es indistinguible del proxy de Gmail o la precarga de Apple Mail"
+                            className="inline-flex items-center rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted"
+                          >
+                            1 apertura sin confirmar
+                          </span>
+                        )}
+                        {f.abrio && !aperturaDescartada && (
+                          <span
+                            title={
+                              detalle
+                                ? `La cuenta abrió ${detalle.reales} ${detalle.reales === 1 ? 'vez' : 'veces'} en esta campaña (de ${detalle.crudas} registradas)${
+                                    detalle.ultimaApertura ? ` · última ${haceCuanto(detalle.ultimaApertura, ahora)}` : ''
+                                  }`
+                                : undefined
+                            }
+                            className="inline-flex items-center rounded-full bg-done/10 px-2 py-0.5 text-[11px] font-semibold text-done"
+                          >
+                            Abrió
+                          </span>
+                        )}
                         {f.hizoClic && <Señal label="Clic" tone="done" />}
                         {f.vioWhatsapp && <Señal label="Visto" tone="done" />}
                         {f.respondio && <Señal label="Respondió" tone="done" />}

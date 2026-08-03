@@ -95,3 +95,49 @@ test('una empresa sin eventos no aparece en el mapa', () => {
 test('set vacio devuelve mapa vacio sin tocar la DB', () => {
   assert.equal(resumenTrackingPorEmpresa([]).size, 0);
 });
+
+// Corte por campaña (2026-08-03). La pantalla de una campaña no puede sumar las aperturas de
+// otra campaña de la misma cuenta: diria "abrió 9 veces" sobre un correo que no es el suyo.
+// La cola sigue llamando sin campaña, que es lo correcto ahí (le importa si está caliente).
+test('con idCampana, solo cuenta los eventos de ESA campaña', () => {
+  const idPasoOtra = (() => {
+    const raw = new Database(dbPath);
+    // Segunda campaña sobre la misma empresa, con su propia inscripcion y su propio envio.
+    raw.prepare(`INSERT INTO campana (nombre, id_cadencia, id_segmento, estado, modo, id_organizacion) VALUES ('Camp 2', ?, ?, 'activa', 'prioritaria', 1)`).run(idCadencia, idSegmento);
+    const idCamp2 = raw.prepare(`SELECT id_campana AS id FROM campana WHERE nombre = 'Camp 2'`).get() as { id: number };
+    // 'pausada' y no 'activa': el indice unico real (ux_inscripcion_activa) deja UNA activa
+    // por empresa, y el caso que se esta midiendo es justo ese -- la cuenta paso por una
+    // campaña y despues por otra, y los eventos de la vieja siguen en la tabla.
+    raw.prepare(`INSERT INTO inscripcion (id_empresa, id_campana, estado, fecha_inscripcion) VALUES ('e1', ?, 'pausada', '2026-07-16T00:00:00.000Z')`).run(idCamp2.id);
+    const idIns2 = raw.prepare(`SELECT id_inscripcion AS id FROM inscripcion WHERE id_campana = ?`).get(idCamp2.id) as { id: number };
+    const idContacto = raw.prepare(`SELECT id_contacto AS id FROM contacto WHERE id_empresa = 'e1'`).get() as { id: number };
+    raw.prepare(`INSERT INTO destinatario (id_inscripcion, id_contacto, estado) VALUES (?, ?, 'activo')`).run(idIns2.id, idContacto.id);
+    const idDest2 = raw.prepare(`SELECT id_destinatario AS id FROM destinatario WHERE id_inscripcion = ?`).get(idIns2.id) as { id: number };
+    const paso = raw.prepare(`SELECT id_paso FROM paso_cadencia WHERE id_cadencia = ?`).get(idCadencia) as { id_paso: number };
+    const r = raw
+      .prepare(
+        `INSERT INTO paso_inscripcion (id_destinatario, id_paso, id_version, canal, estado, created_at)
+         VALUES (?, ?, 1, 'correo', 'enviada', '2026-07-16T00:00:00.000Z')`,
+      )
+      .run(idDest2.id, paso.id_paso);
+    raw.close();
+    return { idPaso: Number(r.lastInsertRowid), idCampana: idCamp2.id };
+  })();
+
+  insertarEvento(idPasoOtra.idPaso, 'abierto', '2026-07-16T10:00:00.000Z');
+  insertarEvento(idPasoOtra.idPaso, 'abierto', '2026-07-16T11:00:00.000Z');
+  insertarEvento(idPasoOtra.idPaso, 'abierto', '2026-07-16T12:00:00.000Z');
+
+  // Sin campaña: todo junto (2 de la primera + 3 de la segunda).
+  assert.equal(resumenTrackingPorEmpresa(['e1']).get('e1')!.aperturas, 5);
+
+  // Acotado a la campaña vieja: solo las suyas, y su última apertura, no la de la otra.
+  const soloCamp1 = resumenTrackingPorEmpresa(['e1'], idCampana).get('e1')!;
+  assert.equal(soloCamp1.aperturas, 2);
+  assert.equal(soloCamp1.ultimaApertura, '2026-07-15T14:00:00.000Z');
+
+  const soloCamp2 = resumenTrackingPorEmpresa(['e1'], idPasoOtra.idCampana).get('e1')!;
+  assert.equal(soloCamp2.aperturas, 3);
+  assert.equal(soloCamp2.ultimaApertura, '2026-07-16T12:00:00.000Z');
+  assert.equal(soloCamp2.vioWhatsapp, false, 'el visto era de la otra campaña');
+});

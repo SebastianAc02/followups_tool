@@ -91,3 +91,15 @@ test('actividadDeCampana: incluye los pasos pendientes, no solo los enviados', (
   assert.equal(filas.length, 3);
   assert.ok(filas.some((f) => f.estado === 'pendiente'), 'lo que viene tambien se ve');
 });
+
+// La pantalla cruza cada envio con el tracking agregado de SU cuenta, y para eso necesita el
+// id. Cruzar por nombre de empresa es como no cruzar: dos cuentas pueden llamarse igual y el
+// nombre no es clave de nada.
+test('actividadDeCampana: cada fila trae el id de la cuenta, no solo su nombre', () => {
+  const filas = actividadDeCampana(9);
+  assert.ok(filas.length > 0);
+  for (const f of filas) {
+    assert.equal(f.idEmpresa, 'e1');
+    assert.equal(f.empresa, 'Viajes Andinos');
+  }
+});

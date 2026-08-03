@@ -84,6 +84,17 @@ export function IconPorRevisar({ className }: IconProps) {
   );
 }
 
+export function IconCuentaNueva({ className }: IconProps) {
+  return (
+    <svg {...base(className)}>
+      <path d="M3 21V8l6-4 6 4v13" />
+      <path d="M3 21h12" />
+      <path d="M18 12v8" />
+      <path d="M14 16h8" />
+    </svg>
+  );
+}
+
 export function IconEditar({ className }: IconProps) {
   return (
     <svg {...base(className)}>
