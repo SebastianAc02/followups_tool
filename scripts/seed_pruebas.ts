@@ -14,7 +14,9 @@
 //   --experimental-loader ./scripts/resolve-ts-ext.mjs scripts/seed_pruebas.ts
 import { eq, like, sql } from 'drizzle-orm';
 import { marcarModoPrueba } from '../app/lib/modo-prueba.ts';
-import { dbPruebas } from '../app/db/index.ts';
+// dbReal SOLO para la guarda de colision de la linea de WhatsApp (abajo): se lee, jamas se
+// escribe. Este script no toca isps.db ni una vez.
+import { dbPruebas, dbReal } from '../app/db/index.ts';
 import { empresa, contacto, lineaWhatsapp } from '../app/db/schema.ts';
 
 // Escribe SIEMPRE en dbPruebas explicito, asi que esta marca no elige la base: esta para
@@ -137,16 +139,69 @@ for (const c of CONTACTOS) {
 
 // La linea de WhatsApp NO se aisla (decision del spec): apunta a la MISMA instancia real
 // de Evolution. Mandar WhatsApp de verdad es el objetivo de la prueba.
+//
+// LA REFERENCIA TIENE QUE CUMPLIR DOS COSAS A LA VEZ, Y ESO NO ES OBVIO:
+//
+//   1. Ser el nombre REAL de la instancia en Evolution. El webhook entrante compara este
+//      valor contra `data.instance` del payload (app/db/ruteo-linea.ts). Un valor inventado
+//      no matchea nunca y el ruteo cae a la real por default, o sea el aislamiento no existe.
+//   2. NO existir en isps.db. La regla de ruteo es asimetrica a proposito: una referencia que
+//      esta en LAS DOS bases se resuelve como real. Cumplir solo el punto 1 no alcanza.
+//
+// Aca vivia 'prueba', que fallaba el punto 2 y nadie lo habia medido: isps.db tiene TRES filas
+// de linea_whatsapp con referencia_proveedor='prueba' (verificado el 2026-08-03), asi que cada
+// respuesta que entraba por esa linea se guardaba en la base real mientras la UI en modo prueba
+// la buscaba en pruebas.db. El mismo bug que ruteo-linea.ts existe para arreglar, reintroducido
+// desde el seed.
+//
+// El default es la instancia dedicada que hoy cumple las dos condiciones. Si algun dia deja de
+// cumplirlas, la guarda de abajo lo dice en vez de sembrar en silencio una linea que rutea a
+// produccion.
+const INSTANCIA_PRUEBAS = process.env.EVOLUTION_INSTANCIA_PRUEBAS ?? 'wa-12368895214';
+const NUMERO_PRUEBAS = process.env.WHATSAPP_NUMERO_PRUEBAS ?? '12368895214';
+// El id_usuario NO es decorativo: lanzarCampanaAction exige una linea ACTIVA del usuario que
+// lanza (lineasWhatsappDeUsuario, gate de canal), y esa consulta conmuta de base. Sin esto, una
+// cadencia con un paso de whatsapp no se puede lanzar en modo prueba: el gate la bloquea entera.
+const ID_USUARIO_PRUEBAS = process.env.USUARIO_PRUEBAS_ID ?? null;
+
+// Guarda, no comentario: leer isps.db para confirmar que la referencia no esta alla. Es la
+// UNICA lectura de la base real de todo el script y no la escribe nunca -- si hay que limpiar
+// filas en isps.db, eso lo decide el operador, no un seed.
+const colision = dbReal
+  .select({ id: lineaWhatsapp.id })
+  .from(lineaWhatsapp)
+  .where(eq(lineaWhatsapp.referenciaProveedor, INSTANCIA_PRUEBAS))
+  .all();
+if (colision.length > 0) {
+  console.error(
+    `ABORTADO: la instancia '${INSTANCIA_PRUEBAS}' ya existe en isps.db (${colision.length} fila(s)).\n` +
+      `Sembrarla igual haria que el ruteo asimetrico mande su trafico entrante a la base REAL\n` +
+      `(app/db/ruteo-linea.ts): las respuestas de la prueba se guardarian en produccion y la UI\n` +
+      `en modo prueba no las encontraria nunca. Usa una instancia dedicada:\n` +
+      `  EVOLUTION_INSTANCIA_PRUEBAS=<instancia> node ... scripts/seed_pruebas.ts`,
+  );
+  process.exit(1);
+}
+
 dbPruebas.delete(lineaWhatsapp).run();
 dbPruebas
   .insert(lineaWhatsapp)
   .values({
-    numero: '573105182997',
+    numero: NUMERO_PRUEBAS,
     tipo: 'personal',
     estado: 'activa',
     techoDiario: 25,
-    referenciaProveedor: 'prueba',
+    referenciaProveedor: INSTANCIA_PRUEBAS,
+    idUsuario: ID_USUARIO_PRUEBAS,
   })
   .run();
 
 console.log(`Sembradas ${EMPRESAS.length} empresas y ${CONTACTOS.length} contactos en pruebas.db`);
+console.log(`Linea de WhatsApp: ${NUMERO_PRUEBAS} via instancia '${INSTANCIA_PRUEBAS}' (sin colision en isps.db)`);
+if (!ID_USUARIO_PRUEBAS) {
+  console.warn(
+    `AVISO: la linea quedo sin id_usuario. El gate de canal de "Lanzar hoy" pide una linea ACTIVA\n` +
+      `del usuario que lanza, asi que una cadencia con paso de whatsapp NO se va a poder lanzar en\n` +
+      `modo prueba. Vuelve a correr con USUARIO_PRUEBAS_ID=<id del user> para dejarla utilizable.`,
+  );
+}
