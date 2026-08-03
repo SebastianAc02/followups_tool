@@ -102,6 +102,7 @@ import { scoreRazonSocial, UMBRAL_MINIMO_CANDIDATO } from '../core/reconciliacio
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
 import {
   CATEGORIAS_EMPRESA,
+  CATEGORIAS_ESCRIBIBLES,
   ESTADO_COMERCIAL_POR_ETAPA,
   dominioDe,
   esNitValido,
@@ -2710,9 +2711,23 @@ export function buscarEmpresa(input: BuscarEmpresaInput): BuscarEmpresaResultado
 
 const crearEmpresaSchema = z.object({
   nombreOficial: z.string().trim().min(1),
-  categoria: z.enum(CATEGORIAS_EMPRESA),
+  // CATEGORIAS_ESCRIBIBLES y no CATEGORIAS_EMPRESA: suma 'test', la marca de una cuenta
+  // sembrada para probar (ver app/core/empresa-identidad.ts). El MCP sigue ofreciendo solo las
+  // tres reales. Quien decide si 'test' es aceptable es la puerta por la que entra la escritura
+  // (categoriaAceptada, mismo archivo), nunca esta funcion: el repository no sabe en que modo
+  // corre, y ese desconocimiento es justo lo que hace imposible que se equivoque de base.
+  categoria: z.enum(CATEGORIAS_ESCRIBIBLES),
   estadoNotion: z.enum(ESTADOS_NOTION),
   owner: z.string().trim().min(1),
+  // La ciudad entra en el ALTA y no en un update posterior: es uno de los campos por los que
+  // segmenta el wizard de campanas (COLUMNA_SEGMENTO.ciudad), asi que una cuenta creada sin
+  // ella no cae en ningun segmento que filtre por ciudad. Vacio se trata como ausente, para no
+  // escribir '' donde la segmentacion lo leeria como un valor mas.
+  ciudad: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? undefined : v))
+    .optional(),
   notionPageId: z
     .string()
     .trim()
@@ -2855,6 +2870,7 @@ export function crearEmpresa(input: CrearEmpresaInput, idOrganizacion: number): 
         estadoComercial: ESTADO_COMERCIAL_POR_ETAPA[parsed.estadoNotion],
         estadoNotion: parsed.estadoNotion,
         categoria: parsed.categoria,
+        ciudadPrincipal: parsed.ciudad ?? null,
         owner: parsed.owner,
         notionPageId: parsed.notionPageId ?? null,
         organizacionActivaId: idOrganizacion,
