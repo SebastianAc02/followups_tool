@@ -388,11 +388,21 @@ export function colaLeads(hoy: string, owner: string, idOrganizacion: number) {
     .all();
 }
 
-// Bucket "Cierres" del split de cola: estados calientes (ESTADOS_CALIENTES), sin filtro de
-// fecha -- una cuenta en negociacion no es "vencida" solo porque no tiene fecha puesta.
-// Ordena por fecha si la tiene; las sin fecha van al final (NULL primero en SQLite ASC, por
-// eso el CASE explicito).
-export function colaCierres(owner: string, idOrganizacion: number) {
+// Bucket "Cierres" del split de cola: estados calientes (ESTADOS_CALIENTES) con proximo paso
+// VENCIDO O DE HOY.
+//
+// Hasta el 2026-08-03 no tenia filtro de fecha, con el argumento de que una cuenta en
+// negociacion no esta "vencida" solo por no tener fecha puesta. Como criterio de pipeline se
+// sostiene; el problema es que alimentaba una pantalla que se llama Toques y un contador que
+// el operador lee como "lo que tengo que hacer hoy". Medido ese dia en produccion: 39 cuentas
+// org-wide que aparecian todos los dias y no bajaban nunca, y un contador que no podia llegar
+// a cero.
+//
+// Lo que salio de aca no se perdio, tiene su propia consulta y su propia seccion:
+//   - fecha futura -> colaProgramadas
+//   - sin fecha    -> colaSinProximoPaso ("falta decidir el siguiente movimiento")
+// La particion de las cuatro consultas la verifica repository.colaPorFecha.test.ts.
+export function colaCierres(hoy: string, owner: string, idOrganizacion: number) {
   return db
     .select(columnasColaConCampana)
     .from(empresa)
@@ -406,11 +416,77 @@ export function colaCierres(owner: string, idOrganizacion: number) {
         EMPRESA_VIVA,
         eq(empresa.owner, owner),
         inArray(empresa.estadoNotion, [...ESTADOS_CALIENTES]),
+        isNotNull(empresa.proximoFollowUpFecha),
+        lte(empresa.proximoFollowUpFecha, hoy),
         // La reunion_agendada con no-show pendiente se muestra en Reagendar, no aqui.
         sql`NOT (${empresa.estadoNotion} = 'reunion_agendada' AND ${ultimoResultadoNoLlego})`,
       ),
     )
-    .orderBy(sql`${empresa.proximoFollowUpFecha} IS NULL`, empresa.proximoFollowUpFecha)
+    .orderBy(empresa.proximoFollowUpFecha)
+    .all();
+}
+
+// Seccion "Sin proximo paso decidido" (2026-08-03): los deals calientes SIN fecha. Es la
+// mitad que se cae de colaCierres al ponerle filtro de fecha, y sale a su propia seccion
+// justamente porque no puede desaparecer: un deal caliente sin fecha no es un deal tranquilo,
+// es un deal sin siguiente movimiento decidido, que es como se pudren.
+//
+// A diferencia de colaCierres, aca NO se excluye la reunion_agendada con no-show: si nadie la
+// reagendo, no tiene fecha, y colaReagendar exige fecha vencida-o-hoy. Sin esta puerta ese
+// caso no salia por ningun lado.
+export function colaSinProximoPaso(owner: string, idOrganizacion: number) {
+  return db
+    .select(columnasColaConCampana)
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(inscripcion, and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa')))
+    .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
+        eq(empresa.owner, owner),
+        inArray(empresa.estadoNotion, [...ESTADOS_CALIENTES]),
+        isNull(empresa.proximoFollowUpFecha),
+      ),
+    )
+    .orderBy(empresa.nombreOficial)
+    .all();
+}
+
+// Seccion "Programadas" (2026-08-03): lo que tiene fecha y TODAVIA NO llega. La otra mitad
+// que se cae de colaCierres, y la respuesta a "¿que viene despues de hoy?" sin meterlo en el
+// contador del dia.
+//
+// Incluye contacto_iniciado con fecha futura y sin cadencia activa, que hasta hoy no salia en
+// ninguna vista: colaContactoIniciadoConSeguimiento exige fecha vencida-o-hoy y
+// colaContactoIniciadoSinSeguimiento exige fecha NULL. Con cadencia activa se deja fuera
+// porque su paso ya sale por el bucket de cadencias cuando le toque.
+//
+// 'lead' queda fuera (dormido, regla del 2026-07-15) y on_hold/firma_pago tambien
+// (ESTADOS_FUERA_DE_TOQUES).
+export function colaProgramadas(hoy: string, owner: string, idOrganizacion: number) {
+  return db
+    .select(columnasColaConCampana)
+    .from(empresa)
+    .leftJoin(contacto, and(eq(contacto.idEmpresa, empresa.idEmpresa), eq(contacto.esPrincipal, 1)))
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .leftJoin(inscripcion, and(eq(inscripcion.idEmpresa, empresa.idEmpresa), eq(inscripcion.estado, 'activa')))
+    .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
+        eq(empresa.owner, owner),
+        gt(empresa.proximoFollowUpFecha, hoy),
+        or(
+          inArray(empresa.estadoNotion, [...ESTADOS_CALIENTES]),
+          and(eq(empresa.estadoNotion, 'contacto_iniciado'), isNull(inscripcion.idInscripcion)),
+        ),
+      ),
+    )
+    .orderBy(empresa.proximoFollowUpFecha)
     .all();
 }
 
@@ -1581,6 +1657,799 @@ export function aplazarSeguimiento(
 
     return { empresa: leerEmpresaEscrita(tx, parsed.idEmpresa), aplazo };
   });
+}
+
+// --- Estado de cadencia: lo que la cola no deja ver (2026-08-03) -----------------------
+//
+// colaDelDia excluye 'lead' por regla del operador (2026-07-15, ver el comentario largo de
+// esa funcion) y esa regla sigue siendo correcta: un lead es un contacto dormido y no es
+// trabajo del dia. El efecto colateral que nadie habia cerrado es que dejaba los leads
+// INVISIBLES: no habia por donde leer su proximo_follow_up_fecha ni saber si tenian una
+// secuencia corriendo. Medido el 2026-08-03: 9 cuentas en 'lead' con owner, sin un solo
+// toque, sumando 77.434 usuarios, y ninguna forma de mirarlas desde el MCP.
+//
+// cambiarCadencia devuelve cadencias vivas, pero exige idCampana o un campo de
+// reprogramacion, asi que no sirve como lectura: preguntarle "como esta esta cuenta"
+// responde con un error de validacion. Esta funcion es la lectura pura que faltaba.
+//
+// Tres diferencias con leerCadenciasVivas, que es lo unico parecido que habia:
+//   - NO filtra por fechaFin: devuelve tambien pausadas y terminadas, que es como se
+//     distingue "nunca estuvo en cadencia" de "la sacaron el martes".
+//   - baja a nivel de PASO (paso_inscripcion), que es donde vive la fecha programada real.
+//   - filtra por owner o por estado, no solo por una empresa suelta.
+//
+// Sin tope y sin truncar: una lectura que corta en N convierte "no hay mas" en "no te
+// mostre mas", y esas dos no se distinguen desde el otro lado.
+
+// Los estados de paso_inscripcion que TODAVIA pueden salir. Mismo criterio que
+// ESTADOS_CANDIDATOS_EMPUJON; 'enviada' y 'omitida' son terminales, y 'cancelada' la
+// escribe sacarDeCadencia (ver abajo) justamente para que deje de estar aca.
+const ESTADOS_PASO_VIVOS = ['pendiente', 'fallo', 'enviando'];
+
+export type PasoDeCadencia = {
+  idPasoInscripcion: number;
+  idPaso: number;
+  orden: number;
+  diaOffset: number;
+  canal: string;
+  estado: string;
+  esManual: boolean;
+  // El gate de revision humana de WhatsApp: null = nadie leyo el texto, y entonces ese paso
+  // NO sale por mas que su fecha ya haya llegado (pasoInscripcionesPendientes).
+  aprobadoEn: string | null;
+  fechaProgramada: string | null;
+  fechaEnviada: string | null;
+};
+
+export type InscripcionDeCadencia = {
+  idInscripcion: number;
+  idCampana: number;
+  campana: string | null;
+  estadoCampana: string | null;
+  estado: string; // activa | pausada | bloqueada | finalizada
+  // fechaFin IS NULL. Es el mismo corte que usa leerCadenciasVivas, expuesto como dato para
+  // que el consumidor no tenga que deducirlo del estado.
+  viva: boolean;
+  pasoActual: number | null;
+  fechaInscripcion: string | null;
+  fechaFin: string | null;
+  motivoFin: string | null;
+  origenFin: string | null;
+  // El primer paso que todavia puede salir, con su fecha programada. null = no queda ninguno
+  // (cadencia terminada, o todavia sin materializar).
+  proximoPaso: PasoDeCadencia | null;
+  pasos: PasoDeCadencia[];
+};
+
+export type CadenciaDeEmpresa = {
+  idEmpresa: string;
+  nombre: string;
+  estadoNotion: string | null;
+  owner: string | null;
+  proximoFollowUpFecha: string | null;
+  proximoCanal: string | null;
+  proximoPaso: string | null;
+  // true si tiene al menos una inscripcion 'activa'. Es la pregunta que dispara la lectura
+  // ("esta cuenta esta corriendo una secuencia ahora mismo?") y se responde una sola vez.
+  enCadenciaActiva: boolean;
+  inscripciones: InscripcionDeCadencia[];
+};
+
+const estadoCadenciaSchema = z
+  .object({
+    idEmpresa: z.string().trim().min(1).optional(),
+    owner: z.string().trim().min(1).optional(),
+    // estado_notion. 'lead' es el caso que motivo la funcion, pero no se cablea: el filtro es
+    // el valor que venga.
+    estado: z.string().trim().min(1).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.idEmpresa && !data.owner && !data.estado) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'estadoCadencia requiere al menos idEmpresa, owner o estado. Sin filtro devolveria la organizacion entera, ' +
+          'que no es una pregunta sino un volcado.',
+      });
+    }
+  });
+export type EstadoCadenciaInput = z.infer<typeof estadoCadenciaSchema>;
+
+export type EstadoCadenciaResultado = {
+  organizacion: number;
+  filtro: { idEmpresa: string | null; owner: string | null; estado: string | null };
+  total: number;
+  conCadenciaActiva: number;
+  sinNingunaInscripcion: number;
+  cuentas: CadenciaDeEmpresa[];
+};
+
+export function estadoCadencia(input: EstadoCadenciaInput, idOrganizacion: number): EstadoCadenciaResultado {
+  const parsed = estadoCadenciaSchema.parse(input);
+
+  const condiciones = [eq(empresa.organizacionActivaId, idOrganizacion), EMPRESA_VIVA];
+  if (parsed.idEmpresa) condiciones.push(eq(empresa.idEmpresa, parsed.idEmpresa));
+  if (parsed.owner) condiciones.push(eq(empresa.owner, parsed.owner));
+  if (parsed.estado) condiciones.push(eq(empresa.estadoNotion, parsed.estado));
+
+  const empresas = db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      estadoNotion: empresa.estadoNotion,
+      owner: empresa.owner,
+      proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      proximoCanal: empresa.proximoCanal,
+      proximoPaso: empresa.proximoPaso,
+    })
+    .from(empresa)
+    .where(and(...condiciones))
+    .orderBy(empresa.nombreOficial)
+    .all();
+
+  // Pedir una empresa concreta que no existe es un error, no una lista vacia: "no tiene
+  // cadencia" y "no esta en la base" son diagnosticos distintos y responder lo mismo a los dos
+  // manda al consumidor a inscribir una cuenta que no existe.
+  if (parsed.idEmpresa && empresas.length === 0) {
+    throw new Error(
+      `estadoCadencia: la empresa ${parsed.idEmpresa} no existe en la organizacion ${idOrganizacion}, o fue absorbida por una fusion de duplicados. ` +
+        'Para resolver cual de los dos es, buscar_empresa.',
+    );
+  }
+
+  const idsEmpresa = empresas.map((e) => e.idEmpresa);
+  const inscripciones =
+    idsEmpresa.length === 0
+      ? []
+      : db
+          .select({
+            idInscripcion: inscripcion.idInscripcion,
+            idEmpresa: inscripcion.idEmpresa,
+            idCampana: inscripcion.idCampana,
+            campana: campana.nombre,
+            estadoCampana: campana.estado,
+            estado: inscripcion.estado,
+            pasoActual: inscripcion.pasoActual,
+            fechaInscripcion: inscripcion.fechaInscripcion,
+            fechaFin: inscripcion.fechaFin,
+            motivoFin: inscripcion.motivoFin,
+            origenFin: inscripcion.origenFin,
+          })
+          .from(inscripcion)
+          .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+          .where(inArray(inscripcion.idEmpresa, idsEmpresa))
+          .orderBy(desc(inscripcion.idInscripcion))
+          .all();
+
+  const idsInscripcion = inscripciones.map((i) => i.idInscripcion);
+  const filasPaso =
+    idsInscripcion.length === 0
+      ? []
+      : db
+          .select({
+            idInscripcion: destinatario.idInscripcion,
+            idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+            idPaso: pasoInscripcion.idPaso,
+            orden: pasoCadencia.orden,
+            diaOffset: pasoCadencia.diaOffset,
+            esManual: pasoCadencia.esManual,
+            canal: pasoInscripcion.canal,
+            estado: pasoInscripcion.estado,
+            aprobadoEn: pasoInscripcion.aprobadoEn,
+            fechaProgramada: pasoInscripcion.fechaProgramada,
+            fechaEnviada: pasoInscripcion.fechaEnviada,
+          })
+          .from(pasoInscripcion)
+          .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+          .innerJoin(pasoCadencia, eq(pasoCadencia.idPaso, pasoInscripcion.idPaso))
+          .where(inArray(destinatario.idInscripcion, idsInscripcion))
+          .orderBy(pasoCadencia.orden, pasoInscripcion.idPasoInscripcion)
+          .all();
+
+  const pasosPorInscripcion = new Map<number, PasoDeCadencia[]>();
+  for (const f of filasPaso) {
+    const lista = pasosPorInscripcion.get(f.idInscripcion) ?? [];
+    lista.push({
+      idPasoInscripcion: f.idPasoInscripcion,
+      idPaso: f.idPaso,
+      orden: f.orden,
+      diaOffset: f.diaOffset,
+      canal: f.canal,
+      estado: f.estado,
+      esManual: f.esManual === 1,
+      aprobadoEn: f.aprobadoEn,
+      fechaProgramada: f.fechaProgramada,
+      fechaEnviada: f.fechaEnviada,
+    });
+    pasosPorInscripcion.set(f.idInscripcion, lista);
+  }
+
+  const inscripcionesPorEmpresa = new Map<string, InscripcionDeCadencia[]>();
+  for (const i of inscripciones) {
+    const pasos = pasosPorInscripcion.get(i.idInscripcion) ?? [];
+    const lista = inscripcionesPorEmpresa.get(i.idEmpresa) ?? [];
+    lista.push({
+      idInscripcion: i.idInscripcion,
+      idCampana: i.idCampana,
+      campana: i.campana,
+      estadoCampana: i.estadoCampana,
+      estado: i.estado,
+      viva: i.fechaFin === null,
+      pasoActual: i.pasoActual,
+      fechaInscripcion: i.fechaInscripcion,
+      fechaFin: i.fechaFin,
+      motivoFin: i.motivoFin,
+      origenFin: i.origenFin,
+      proximoPaso: pasos.find((p) => ESTADOS_PASO_VIVOS.includes(p.estado)) ?? null,
+      pasos,
+    });
+    inscripcionesPorEmpresa.set(i.idEmpresa, lista);
+  }
+
+  const cuentas: CadenciaDeEmpresa[] = empresas.map((e) => {
+    const suyas = inscripcionesPorEmpresa.get(e.idEmpresa) ?? [];
+    return { ...e, enCadenciaActiva: suyas.some((i) => i.estado === 'activa'), inscripciones: suyas };
+  });
+
+  return {
+    organizacion: idOrganizacion,
+    filtro: { idEmpresa: parsed.idEmpresa ?? null, owner: parsed.owner ?? null, estado: parsed.estado ?? null },
+    total: cuentas.length,
+    conCadenciaActiva: cuentas.filter((c) => c.enCadenciaActiva).length,
+    sinNingunaInscripcion: cuentas.filter((c) => c.inscripciones.length === 0).length,
+    cuentas,
+  };
+}
+
+// --- Sacar de la cadencia SIN registrar incumplimiento (2026-08-03) --------------------
+//
+// aplazarSeguimiento escribe una fila en seguimiento_aplazado, que es un evento de "el paso
+// no se hizo". Para las cuentas que TODAVIA no estan para toque eso miente al reves: nunca
+// hubo un paso que incumplir, la fecha la puso el seed de Notion o un enriquecimiento, no
+// trabajo real. Orden del operador el 2026-08-03: "esto ni siquiera deberia contar como un
+// que no se hizo el paso, simplemente ponmelas para atras".
+//
+// Por eso es una funcion aparte y no un flag de aplazarSeguimiento: un booleano que apaga el
+// evento convierte la tabla de incumplimientos en algo que a veces cuenta y a veces no, y
+// deja de poder responder "cuantas veces se corrio algo esta semana".
+//
+// Lo que hace, y no hace:
+//   - NO escribe seguimiento_aplazado. Nunca. Es el punto entero de la funcion.
+//   - NO escribe un toque: sacar una cuenta de la cadencia no es actividad.
+//   - NO encola a Notion. La herramienta no le escribe a Notion (esa decision esta cerrada:
+//     el unico escritor de Notion es el brain), y ademas el contrato CambioNotion no sabe
+//     representar "esta fecha se borro", asi que encolar un vaciado mandaria un valor que
+//     nadie pidio.
+//   - SI puede dejar proximo_follow_up_fecha en NULL, que es lo que actualizarEmpresa no
+//     permite (su campo es .trim().min(1), asi que un string vacio es error de entrada y no
+//     hay forma de vaciar la fecha).
+//   - SI corta lo que ya estaba materializado. Pausar la inscripcion NO alcanza:
+//     pasoInscripcionesPendientes no mira inscripcion.estado (su unica defensa en
+//     profundidad es campana.estado), asi que un paso ya materializado como 'pendiente'
+//     saldria igual despues de la baja. Se marcan 'cancelada', un estado terminal que
+//     ninguna consulta cuenta como pendiente ni como trabajo hecho ('enviada'/'omitida' si
+//     cuentan, y por eso no se reusa 'omitida': inflaria toquesHechos con trabajo que
+//     justamente no se hizo).
+//
+// Una cuenta a la vez, cada una en su propia transaccion (runbook de produccion). Una cuenta
+// que no se puede procesar se RECHAZA con su motivo y viaja en `rechazos`; jamas se salta en
+// silencio -- ese fue el modo de falla del `continue` pelado de agruparPendientesCorreo, que
+// dejo correos sin salir para siempre sin error y sin marcar la fila.
+
+// Formato de fecha de calendario. Se valida aca y no se confia en el caller: la columna es
+// TEXT y compara como texto, asi que una fecha en otro formato no revienta, solo deja de
+// ordenar bien y se descubre semanas despues.
+const RE_FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+const sacarDeCadenciaSchema = z
+  .object({
+    idsEmpresa: z.array(z.string().trim().min(1)).min(1),
+    // Corta las inscripciones vivas y cancela los envios ya materializados que no salieron.
+    pausarInscripciones: z.boolean().optional(),
+    // Corre la fecha del proximo follow-up. Excluyente con limpiarFecha.
+    nuevaFecha: z.string().trim().regex(RE_FECHA_ISO, 'nuevaFecha va en formato YYYY-MM-DD').optional(),
+    // Deja proximo_follow_up_fecha en NULL. Es un acto EXPLICITO y no el default de "no mande
+    // fecha": borrar una fecha por omision es exactamente como se pierde un follow-up.
+    limpiarFecha: z.boolean().optional(),
+    // Prosa para la bitacora. Opcional y nunca inferido: si el operador no dijo por que, queda
+    // vacio en vez de inventarse un motivo.
+    motivo: z.string().trim().min(1).optional(),
+    sacadoPor: z.string().trim().min(1).optional().default(EJECUTOR_POR_DEFECTO),
+  })
+  .superRefine((data, ctx) => {
+    if (data.nuevaFecha && data.limpiarFecha === true) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'sacarDeCadencia: nuevaFecha y limpiarFecha se contradicen. Una corre la fecha, la otra la borra: hay que elegir una.',
+      });
+    }
+    if (data.pausarInscripciones !== true && !data.nuevaFecha && data.limpiarFecha !== true) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'sacarDeCadencia requiere al menos una accion: pausarInscripciones, nuevaFecha o limpiarFecha. Sin ninguna seria un no-op que reporta exito.',
+      });
+    }
+    const vistos = new Set<string>();
+    const repetidos = data.idsEmpresa.filter((id) => (vistos.has(id) ? true : (vistos.add(id), false)));
+    if (repetidos.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `sacarDeCadencia: idsEmpresa trae repetidos (${[...new Set(repetidos)].join(', ')}). Cada cuenta se procesa una vez y el resultado tiene una fila por cuenta pedida.`,
+      });
+    }
+  });
+export type SacarDeCadenciaInput = z.input<typeof sacarDeCadenciaSchema>;
+
+export type InscripcionPausada = {
+  idInscripcion: number;
+  idCampana: number;
+  campana: string | null;
+  estadoAntes: string;
+  estadoAhora: string;
+};
+
+export type EnvioCancelado = {
+  idPasoInscripcion: number;
+  idInscripcion: number;
+  canal: string;
+  estadoAntes: string;
+  fechaProgramada: string | null;
+};
+
+export type CuentaSacada = {
+  idEmpresa: string;
+  // RELEIDA de la base despues de escribir, no el eco del input.
+  empresa: EmpresaEscrita;
+  fechaAntes: string | null;
+  fechaAhora: string | null;
+  inscripcionesPausadas: InscripcionPausada[];
+  enviosCancelados: EnvioCancelado[];
+  // El estado completo de la cadencia despues del cambio, releido. Es la prueba de que no
+  // quedo nada corriendo: sin esto, "la saque" y "creo que la saque" se ven igual.
+  cadenciaDespues: CadenciaDeEmpresa;
+};
+
+export type RechazoSacar = {
+  idEmpresa: string;
+  motivo: 'empresa_no_existe' | 'otra_organizacion' | 'identidad_absorbida';
+  detalle: string;
+};
+
+export type SacarDeCadenciaResultado = {
+  pedidas: number;
+  aplicadas: number;
+  rechazadas: number;
+  // Constante, y esta en el contrato a proposito: quien lea este resultado tiene que poder
+  // comprobar sin leer codigo que aca NO se escribio un incumplimiento.
+  cuentaComoIncumplimiento: false;
+  cuentas: CuentaSacada[];
+  rechazos: RechazoSacar[];
+};
+
+export function sacarDeCadencia(input: SacarDeCadenciaInput, idOrganizacion: number): SacarDeCadenciaResultado {
+  const parsed = sacarDeCadenciaSchema.parse(input);
+  const ahora = new Date().toISOString();
+  const nota = parsed.motivo ? `: ${parsed.motivo}` : '';
+
+  const cuentas: CuentaSacada[] = [];
+  const rechazos: RechazoSacar[] = [];
+
+  for (const idEmpresa of parsed.idsEmpresa) {
+    const emp = db
+      .select({
+        organizacionActivaId: empresa.organizacionActivaId,
+        operaBajoId: empresa.operaBajoId,
+        proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, idEmpresa))
+      .get();
+
+    if (!emp) {
+      rechazos.push({
+        idEmpresa,
+        motivo: 'empresa_no_existe',
+        detalle: `No hay ninguna cuenta con id_empresa ${idEmpresa}. Para resolver si existe con otro nombre o con otro id: buscar_empresa.`,
+      });
+      continue;
+    }
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      rechazos.push({
+        idEmpresa,
+        motivo: 'otra_organizacion',
+        detalle: `La cuenta ${idEmpresa} esta activa en la organizacion ${emp.organizacionActivaId}, no en ${idOrganizacion}.`,
+      });
+      continue;
+    }
+    if (emp.operaBajoId) {
+      rechazos.push({
+        idEmpresa,
+        motivo: 'identidad_absorbida',
+        detalle:
+          `La cuenta ${idEmpresa} fue absorbida por ${emp.operaBajoId} en una fusion de duplicados: es una identidad muerta. ` +
+          `Sacar de la cadencia a ${emp.operaBajoId}, que es la que de verdad corre.`,
+      });
+      continue;
+    }
+
+    const fechaAntes = emp.proximoFollowUpFecha;
+    const escrito = db.transaction((tx) => {
+      const pausadas: InscripcionPausada[] = [];
+      const cancelados: EnvioCancelado[] = [];
+
+      if (parsed.pausarInscripciones === true) {
+        // Vivas = sin fecha_fin. Una ya terminada no se vuelve a cerrar: pisarle motivo_fin y
+        // origen_fin borraria POR QUE se corto, y de ese dato depende quien puede volver a
+        // la cadencia (puedeVolverAInscribirse).
+        const vivas = tx
+          .select({
+            idInscripcion: inscripcion.idInscripcion,
+            idCampana: inscripcion.idCampana,
+            campana: campana.nombre,
+            estado: inscripcion.estado,
+          })
+          .from(inscripcion)
+          .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+          .where(and(eq(inscripcion.idEmpresa, idEmpresa), isNull(inscripcion.fechaFin)))
+          .orderBy(inscripcion.idInscripcion)
+          .all();
+
+        for (const v of vivas) {
+          tx.update(inscripcion)
+            .set({
+              estado: 'pausada',
+              // origen_fin 'manual' es el DATO del que depende la reversa: es el unico origen
+              // que puedeVolverAInscribirse admite. Sacarla asi la deja recuperable.
+              motivoFin: `baja manual desde el MCP (sacar_de_cadencia, no es aplazo)${nota}`,
+              origenFin: 'manual',
+              fechaFin: ahora,
+              updatedAt: ahora,
+            })
+            .where(eq(inscripcion.idInscripcion, v.idInscripcion))
+            .run();
+          pausadas.push({
+            idInscripcion: v.idInscripcion,
+            idCampana: v.idCampana,
+            campana: v.campana,
+            estadoAntes: v.estado,
+            estadoAhora: 'pausada',
+          });
+
+          const vivos = tx
+            .select({
+              idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+              canal: pasoInscripcion.canal,
+              estado: pasoInscripcion.estado,
+              fechaProgramada: pasoInscripcion.fechaProgramada,
+            })
+            .from(pasoInscripcion)
+            .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+            .where(and(eq(destinatario.idInscripcion, v.idInscripcion), inArray(pasoInscripcion.estado, ESTADOS_PASO_VIVOS)))
+            .all();
+
+          for (const p of vivos) {
+            tx.update(pasoInscripcion)
+              .set({ estado: 'cancelada' })
+              .where(eq(pasoInscripcion.idPasoInscripcion, p.idPasoInscripcion))
+              .run();
+            cancelados.push({
+              idPasoInscripcion: p.idPasoInscripcion,
+              idInscripcion: v.idInscripcion,
+              canal: p.canal,
+              estadoAntes: p.estado,
+              fechaProgramada: p.fechaProgramada,
+            });
+          }
+        }
+      }
+
+      if (parsed.limpiarFecha === true || parsed.nuevaFecha) {
+        tx.update(empresa)
+          .set({ proximoFollowUpFecha: parsed.limpiarFecha === true ? null : parsed.nuevaFecha!, updatedAt: ahora })
+          .where(eq(empresa.idEmpresa, idEmpresa))
+          .run();
+      }
+
+      const queCambio = [
+        parsed.pausarInscripciones === true ? `inscripciones pausadas: ${pausadas.length}, envios cancelados: ${cancelados.length}` : null,
+        parsed.limpiarFecha === true ? `fecha ${fechaAntes ?? '-'} -> NULL` : null,
+        parsed.nuevaFecha ? `fecha ${fechaAntes ?? '-'} -> ${parsed.nuevaFecha}` : null,
+      ]
+        .filter(Boolean)
+        .join('; ');
+
+      tx.insert(syncCambios)
+        .values({
+          fecha: ahora,
+          corrida: 'cockpit',
+          fuente: 'cockpit',
+          entidad: 'empresa',
+          idRegistro: idEmpresa,
+          accion: 'update',
+          // El texto dice explicito que NO es un aplazo: quien audite sync_cambios despues no
+          // tiene por que saber que existe una tabla aparte para los incumplimientos.
+          detalle: `sacar de cadencia (NO es aplazo, no cuenta como paso incumplido) por ${parsed.sacadoPor}${nota}. ${queCambio}`,
+        })
+        .run();
+
+      return { empresa: leerEmpresaEscrita(tx, idEmpresa), pausadas, cancelados };
+    });
+
+    cuentas.push({
+      idEmpresa,
+      empresa: escrito.empresa,
+      fechaAntes,
+      fechaAhora: escrito.empresa.proximoFollowUpFecha,
+      inscripcionesPausadas: escrito.pausadas,
+      enviosCancelados: escrito.cancelados,
+      cadenciaDespues: estadoCadencia({ idEmpresa }, idOrganizacion).cuentas[0],
+    });
+  }
+
+  return {
+    pedidas: parsed.idsEmpresa.length,
+    aplicadas: cuentas.length,
+    rechazadas: rechazos.length,
+    cuentaComoIncumplimiento: false,
+    cuentas,
+    rechazos,
+  };
+}
+
+// --- correrCadencia: mover un pedazo de la secuencia en bloque (2026-08-03) --------------
+//
+// Hermana de sacarDeCadencia, y la diferencia es el punto: sacarDeCadencia BAJA la cuenta de
+// la secuencia (pausa la inscripcion, cancela los envios); correrCadencia la deja corriendo y
+// solo corre las fechas. La primera es "esta cuenta no va"; la segunda, "esta cuenta va, pero
+// no hoy".
+//
+// La pidio el operador el 2026-08-03, el mismo dia que su cola abrio con 43 pasos vencidos de
+// cuentas en hold: agarrar un pedazo de la cadencia y correrlo N dias en bloque, sin que eso
+// cuente como paso incumplido. Hasta hoy eso se hacia cuenta por cuenta o no se hacia.
+//
+// Que NO hace, y es la mitad del valor: no toca el estado de los pasos, no escribe
+// seguimiento_aplazado y no encola nada a Notion. Correr una fecha no es incumplir un paso.
+// El resultado lo dice en el contrato (cuentaComoIncumplimiento: false) para que se pueda
+// comprobar sin leer este codigo.
+//
+// El pedazo se elige con idCampana (una campana de las que corre la cuenta) y con hasta (solo
+// los pasos programados hasta esa fecha, o sea "corre lo vencido y deja quieto lo que viene").
+// Sin ninguno de los dos, corre todo lo que todavia puede salir.
+const correrCadenciaSchema = z
+  .object({
+    idsEmpresa: z.array(z.string().trim().min(1)).min(1),
+    // Positivo aplaza, negativo adelanta. El tope existe para que un error de tipeo no mande
+    // una cadencia al 2029 sin que nadie lo note.
+    dias: z.number().int().min(-365).max(365),
+    idCampana: z.number().int().positive().optional(),
+    // Corte por fecha programada (YYYY-MM-DD), inclusive.
+    hasta: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+    // Mueve tambien empresa.proximo_follow_up_fecha los mismos dias. Default false: correr la
+    // cadencia y correr el seguimiento de la cuenta son dos decisiones distintas.
+    correrSeguimiento: z.boolean().optional().default(false),
+    motivo: z.string().trim().min(1).optional(),
+    corridoPor: z.string().trim().min(1).optional().default(EJECUTOR_POR_DEFECTO),
+  })
+  .superRefine((data, ctx) => {
+    if (data.dias === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'correrCadencia: dias en 0 no mueve nada. Seria un no-op que reporta exito.',
+      });
+    }
+    const vistos = new Set<string>();
+    const repetidos = data.idsEmpresa.filter((id) => (vistos.has(id) ? true : (vistos.add(id), false)));
+    if (repetidos.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `correrCadencia: idsEmpresa trae repetidos (${[...new Set(repetidos)].join(', ')}). Cada cuenta se corre una vez.`,
+      });
+    }
+  });
+export type CorrerCadenciaInput = z.input<typeof correrCadenciaSchema>;
+
+export type PasoCorrido = {
+  idPasoInscripcion: number;
+  idInscripcion: number;
+  idCampana: number;
+  campana: string | null;
+  canal: string;
+  estado: string;
+  fechaAntes: string | null;
+  fechaAhora: string | null;
+};
+
+export type CuentaCorrida = {
+  idEmpresa: string;
+  empresa: EmpresaEscrita;
+  fechaSeguimientoAntes: string | null;
+  fechaSeguimientoAhora: string | null;
+  pasosCorridos: PasoCorrido[];
+  // Los pasos que calificaban por estado pero no tienen fecha programada: no se les puede
+  // sumar dias a una fecha que no existe. Salen listados en vez de desaparecer.
+  pasosSinFecha: number[];
+  cadenciaDespues: CadenciaDeEmpresa;
+};
+
+export type RechazoCorrer = {
+  idEmpresa: string;
+  motivo: 'empresa_no_existe' | 'otra_organizacion' | 'identidad_absorbida';
+  detalle: string;
+};
+
+export type CorrerCadenciaResultado = {
+  pedidas: number;
+  aplicadas: number;
+  rechazadas: number;
+  pasosCorridos: number;
+  cuentaComoIncumplimiento: false;
+  cuentas: CuentaCorrida[];
+  rechazos: RechazoCorrer[];
+};
+
+export function correrCadencia(input: CorrerCadenciaInput, idOrganizacion: number): CorrerCadenciaResultado {
+  const parsed = correrCadenciaSchema.parse(input);
+  const ahora = new Date().toISOString();
+  const nota = parsed.motivo ? `: ${parsed.motivo}` : '';
+
+  const cuentas: CuentaCorrida[] = [];
+  const rechazos: RechazoCorrer[] = [];
+
+  for (const idEmpresa of parsed.idsEmpresa) {
+    const emp = db
+      .select({
+        organizacionActivaId: empresa.organizacionActivaId,
+        operaBajoId: empresa.operaBajoId,
+        proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, idEmpresa))
+      .get();
+
+    if (!emp) {
+      rechazos.push({
+        idEmpresa,
+        motivo: 'empresa_no_existe',
+        detalle: `No hay ninguna cuenta con id_empresa ${idEmpresa}. Para resolver si existe con otro nombre o con otro id: buscar_empresa.`,
+      });
+      continue;
+    }
+    if (emp.organizacionActivaId !== idOrganizacion) {
+      rechazos.push({
+        idEmpresa,
+        motivo: 'otra_organizacion',
+        detalle: `La cuenta ${idEmpresa} esta activa en la organizacion ${emp.organizacionActivaId}, no en ${idOrganizacion}.`,
+      });
+      continue;
+    }
+    if (emp.operaBajoId) {
+      rechazos.push({
+        idEmpresa,
+        motivo: 'identidad_absorbida',
+        detalle:
+          `La cuenta ${idEmpresa} fue absorbida por ${emp.operaBajoId} en una fusion de duplicados: es una identidad muerta. ` +
+          `Correr la cadencia de ${emp.operaBajoId}, que es la que de verdad corre.`,
+      });
+      continue;
+    }
+
+    const fechaSeguimientoAntes = emp.proximoFollowUpFecha;
+    const escrito = db.transaction((tx) => {
+      const condiciones = [
+        eq(inscripcion.idEmpresa, idEmpresa),
+        // Solo lo que todavia puede salir: 'enviada' y 'omitida' son historia, 'cancelada' la
+        // escribio sacarDeCadencia justamente para que no vuelva.
+        inArray(pasoInscripcion.estado, ESTADOS_PASO_VIVOS),
+      ];
+      if (parsed.idCampana) condiciones.push(eq(inscripcion.idCampana, parsed.idCampana));
+
+      const candidatos = tx
+        .select({
+          idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+          idInscripcion: inscripcion.idInscripcion,
+          idCampana: inscripcion.idCampana,
+          campana: campana.nombre,
+          canal: pasoInscripcion.canal,
+          estado: pasoInscripcion.estado,
+          fechaProgramada: pasoInscripcion.fechaProgramada,
+        })
+        .from(pasoInscripcion)
+        .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+        .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+        .leftJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+        .where(and(...condiciones))
+        .orderBy(pasoInscripcion.idPasoInscripcion)
+        .all();
+
+      const corridos: PasoCorrido[] = [];
+      const sinFecha: number[] = [];
+
+      for (const c of candidatos) {
+        if (!c.fechaProgramada) {
+          sinFecha.push(c.idPasoInscripcion);
+          continue;
+        }
+        // El dia de calendario en Bogota, no el recorte del ISO: hay filas guardadas como
+        // fecha pelada y otras como instante, y las dos tienen que correrse igual.
+        const dia = diaBogotaDeGuardado(c.fechaProgramada);
+        if (parsed.hasta && dia > parsed.hasta) continue;
+        const fechaAhora = sumarDias(dia, parsed.dias);
+        tx.update(pasoInscripcion)
+          .set({ fechaProgramada: fechaAhora })
+          .where(eq(pasoInscripcion.idPasoInscripcion, c.idPasoInscripcion))
+          .run();
+        corridos.push({
+          idPasoInscripcion: c.idPasoInscripcion,
+          idInscripcion: c.idInscripcion,
+          idCampana: c.idCampana,
+          campana: c.campana,
+          canal: c.canal,
+          estado: c.estado,
+          fechaAntes: c.fechaProgramada,
+          fechaAhora,
+        });
+      }
+
+      let fechaSeguimientoAhora = fechaSeguimientoAntes;
+      if (parsed.correrSeguimiento && fechaSeguimientoAntes) {
+        fechaSeguimientoAhora = sumarDias(diaBogotaDeGuardado(fechaSeguimientoAntes), parsed.dias);
+        tx.update(empresa)
+          .set({ proximoFollowUpFecha: fechaSeguimientoAhora, updatedAt: ahora })
+          .where(eq(empresa.idEmpresa, idEmpresa))
+          .run();
+      }
+
+      const alcance = [
+        parsed.idCampana ? `campana ${parsed.idCampana}` : 'todas sus campanas',
+        parsed.hasta ? `pasos hasta ${parsed.hasta}` : 'todos los pasos vivos',
+      ].join(', ');
+
+      tx.insert(syncCambios)
+        .values({
+          fecha: ahora,
+          corrida: 'cockpit',
+          fuente: 'cockpit',
+          entidad: 'empresa',
+          idRegistro: idEmpresa,
+          accion: 'update',
+          // Igual que sacarDeCadencia: el texto dice explicito que esto NO es un incumplimiento,
+          // para que quien audite sync_cambios no tenga que deducirlo.
+          detalle:
+            `correr cadencia ${parsed.dias > 0 ? '+' : ''}${parsed.dias}d (NO es aplazo, no cuenta como paso incumplido) ` +
+            `por ${parsed.corridoPor}${nota}. ${alcance}; pasos corridos: ${corridos.length}` +
+            (sinFecha.length > 0 ? `; sin fecha programada (no se movieron): ${sinFecha.length}` : '') +
+            (parsed.correrSeguimiento && fechaSeguimientoAntes ? `; seguimiento ${fechaSeguimientoAntes} -> ${fechaSeguimientoAhora}` : ''),
+        })
+        .run();
+
+      return { empresa: leerEmpresaEscrita(tx, idEmpresa), corridos, sinFecha, fechaSeguimientoAhora };
+    });
+
+    cuentas.push({
+      idEmpresa,
+      empresa: escrito.empresa,
+      fechaSeguimientoAntes,
+      fechaSeguimientoAhora: escrito.empresa.proximoFollowUpFecha,
+      pasosCorridos: escrito.corridos,
+      pasosSinFecha: escrito.sinFecha,
+      // Releida de la base despues de escribir: la prueba de donde quedaron las fechas, no un "ok".
+      cadenciaDespues: estadoCadencia({ idEmpresa }, idOrganizacion).cuentas[0],
+    });
+  }
+
+  return {
+    pedidas: parsed.idsEmpresa.length,
+    aplicadas: cuentas.length,
+    rechazadas: rechazos.length,
+    pasosCorridos: cuentas.reduce((n, c) => n + c.pasosCorridos.length, 0),
+    cuentaComoIncumplimiento: false,
+    cuentas,
+    rechazos,
+  };
 }
 
 // --- Identidad de cuentas: buscar / crear / actualizar (2026-07-24) --------------------
@@ -7522,6 +8391,14 @@ export function pausarInscripcion(idInscripcion: number, motivo: string, origen:
 //
 // Limpia los tres campos de fin, no solo el estado: dejar un motivo_fin/origen_fin viejo
 // en una inscripcion viva es dato que miente, y la proxima baja los sobreescribe igual.
+//
+// PENDIENTE PARA QUIEN CABLEE LA REVERSA (2026-08-03). Hoy esta funcion no tiene ningun caller
+// fuera de sus pruebas, asi que esto todavia no muerde. Cuando lo tenga: si la baja vino de
+// sacarDeCadencia, esa baja dejo pasos en estado 'cancelada', y el materializador corta al
+// encontrar una fila ya existente para el paso debido (el `break` del `yaExiste` en
+// materializarPasosDebidos). Reactivar sin devolver esos pasos a 'pendiente' deja la cadencia
+// atascada justo donde se corto, en silencio. Devolverlos es la contraparte natural, pero no se
+// escribe a ciegas desde aca: quien cablee la reversa decide si el paso vuelve o si se salta.
 export function reactivarInscripcion(idInscripcion: number) {
   const ahora = new Date().toISOString();
   db.update(inscripcion)

@@ -1,9 +1,9 @@
 // Shell reusable del cockpit (rediseño home). Server component: hace su propio fetch de los
 // datos del shell y renderiza sidebar + top bar + main. Cualquier ruta lo puede envolver.
 import type { ReactNode } from 'react';
-import { colaDelDia, colaLeads, listarCampanas, estadoConector, contarPorEstado, inscripcionesBloqueadas } from '../../db/repository';
+import { listarCampanas, estadoConector, contarPorEstado, inscripcionesBloqueadas } from '../../db/repository';
 import { ESTADOS_ACTIVOS } from '../../db/funnel';
-import { OWNER_COLA_SPLIT } from '../../cola/agenda.ts';
+import { cargarColaDeHoy } from '../../cola/hoy.ts';
 import { requireSession } from '../../lib/session';
 import { leerCookieModoPrueba } from '../../lib/cookie-modo';
 import { hoy as hoyDemo, offsetActual } from '../../lib/reloj';
@@ -35,7 +35,11 @@ export async function datosSidebar() {
 
   const hoy = hoyDemo();
 
-  const toquesHoy = (owner === OWNER_COLA_SPLIT ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion)).length;
+  // El badge cuenta EXACTAMENTE la lista que abre /cola (2026-08-03): la misma composicion,
+  // no una consulta parecida. Antes contaba solo colaLeads, asi que decia 0 con nueve
+  // follow-ups listados adentro. Vencido o de hoy, del owner, y sin on_hold por ninguna
+  // puerta: si el badge dice 0, no hay nada que hacer hoy.
+  const toquesHoy = cargarColaDeHoy(hoy, owner, usuario.idOrganizacion).filas.length;
   const campanasActivas = listarCampanas(usuario.idOrganizacion).filter((c) => c.estado === 'activa').length;
   const porEstado = contarPorEstado(undefined, usuario.idOrganizacion);
   const cuentasFunnel = ESTADOS_ACTIVOS.reduce((s, e) => s + (porEstado[e] ?? 0), 0);

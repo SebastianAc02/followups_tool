@@ -1,12 +1,8 @@
 import {
-  colaDelDia,
-  colaLeads,
-  colaCierres,
-  colaReagendar,
-  colaContactoIniciadoConSeguimiento,
+  colaSinProximoPaso,
+  colaProgramadas,
   colaContactoIniciadoSinSeguimiento,
   contadoresHoy,
-  agendaHoyCadencias,
   historialPasosDestinatario,
   empresasConRespuestaPendiente,
   resumenTrackingPorEmpresa,
@@ -21,14 +17,13 @@ import { BarraAhora } from "./BarraAhora";
 import { AgendaHoy } from "./AgendaHoy";
 import { ColaUnificada } from "./ColaUnificada";
 import { ContactoIniciadoSinSeguimiento } from "./ContactoIniciadoSinSeguimiento";
+import { SeccionFueraDeHoy } from "./SeccionFueraDeHoy";
 import { contarToquesHoy } from "./stats";
+import { cargarColaDeHoy } from "./hoy.ts";
 import {
   filaConVencimiento,
   unificarCola,
-  bucketDeEtapa,
-  pendientesDeHoy,
   vencidasDeHoy,
-  programadasFuturas,
   OWNER_COLA_SPLIT,
   type FilaAgenda,
   type FilaColaConBucket,
@@ -46,17 +41,15 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   const owner = sp.owner ?? (usuario.soloLectura || usuario.verTodoPipeline ? undefined : usuario.owner);
   const hoy = hoyDemo();
   const splitActivo = owner === OWNER_COLA_SPLIT;
-  const cola = splitActivo ? colaLeads(hoy, owner, usuario.idOrganizacion) : colaDelDia(hoy, owner, usuario.idOrganizacion);
-  const cierres = splitActivo ? colaCierres(owner, usuario.idOrganizacion) : [];
-  const reagendar = splitActivo ? colaReagendar(hoy, owner, usuario.idOrganizacion) : [];
-  // Bucket "Contacto iniciado con seguimiento" (2026-07-23): contacto_iniciado con fecha
-  // vencida-o-hoy y SIN cadencia activa. Sin esto, toda cuenta reactivada trabajada a mano
-  // (Wicom, Intel Go) quedaba invisible: no era 'lead', no era estado caliente, tenia fecha
-  // (no calificaba para sinSeguimiento) y no tenia inscripcion (no la levantaba
-  // agendaHoyCadencias).
-  const contactoIniciadoConSeguimiento = splitActivo
-    ? colaContactoIniciadoConSeguimiento(hoy, owner, usuario.idOrganizacion)
-    : [];
+
+  // La cola del dia sale de UNA composicion (app/cola/hoy.ts), la misma que cuenta el badge
+  // del nav y el contador del home. Todas sus filas tienen fecha vencida o de hoy y estado
+  // que admite toque: on_hold y firma_pago no entran por ninguna puerta, ni por cadencias.
+  const { filas: filasDeHoy, cadenciasAparte, enHold } = cargarColaDeHoy(hoy, owner, usuario.idOrganizacion);
+
+  // Lo que NO es trabajo de hoy y aun asi no puede desaparecer. Cada lista con su motivo.
+  const sinProximoPaso = splitActivo ? colaSinProximoPaso(owner, usuario.idOrganizacion) : [];
+  const programadas = splitActivo ? colaProgramadas(hoy, owner, usuario.idOrganizacion) : [];
   // Seccion "Contacto iniciado sin seguimiento" (2026-07-14): para CUALQUIER owner, no
   // solo el split de Sebastian. Sin owner por ser visitante, la seccion simplemente no se
   // muestra (decision anterior de Sebastian: un visitante no tiene "lo suyo" que completar).
@@ -68,59 +61,19 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
       ? colaContactoIniciadoSinSeguimiento(undefined, usuario.idOrganizacion)
       : [];
   const contadores = contadoresHoy(hoy, owner, usuario.idOrganizacion);
-  // V5.7: cadencias (automatico Apollo + manual Tier 1) no son por owner todavia
-  // (campana.owner es la campana masiva, no un individuo -- ver memoria del proyecto);
-  // se muestran a cualquier sesion, la cola unificada es informativa para todos.
-  // Parte 4 campanas: el historial (dias ya tocados) solo tiene sentido para los
-  // manuales -- son los unicos con boton de "Aprobar" que necesita saber en que
-  // paso va el lead. Se evita la consulta extra para los automaticos.
-  // splitActivo: la lista unificada de Sebastian solo debe traer SUS cadencias, no las de
-  // todos -- sin esto, cadenciasParaUnificar se mezclaria con empresas de otros owners.
-  const cadenciasHoy = agendaHoyCadencias(hoy, splitActivo ? owner : undefined).map((t) => ({
+
+  // Parte 4 campanas: el historial (dias ya tocados) solo tiene sentido para los manuales --
+  // son los unicos con boton de "Aprobar" que necesita saber en que paso va el lead.
+  const cadenciasHoy = cadenciasAparte.map((t) => ({
     ...t,
     historial: t.esManual === 1 ? historialPasosDestinatario(t.idDestinatario) : [],
   }));
 
-  const filas: FilaAgenda[] = cola.map((c, i) => filaConVencimiento(c, hoy, i === 0));
-
-  // Lista unificada (2026-07-14): solo para Sebastian. GrupoBatch (esManual=1 + modo=batch)
-  // queda fuera -- ese flujo aprueba varias empresas a la vez con un solo copy, no cabe en
-  // una fila por empresa; se sigue mostrando aparte reusando CadenciasHoy tal cual.
-  const cadenciasParaCadenciasHoy = splitActivo ? cadenciasHoy.filter((t) => t.esManual === 1 && t.modo === 'batch') : cadenciasHoy;
-  const cadenciasParaUnificar = splitActivo ? cadenciasHoy.filter((t) => !(t.esManual === 1 && t.modo === 'batch')) : [];
-
   const respuestasPendientes = new Set(empresasConRespuestaPendiente(usuario.idOrganizacion).map((f) => f.idEmpresa));
-
-  const filasParaUnificar: FilaColaConBucket[] = splitActivo
-    ? [
-        ...cola.map((c): FilaColaConBucket => ({ ...c, bucket: 'lead', respuestaPendiente: respuestasPendientes.has(c.id) })),
-        ...cierres.map((c): FilaColaConBucket => ({ ...c, bucket: 'cierre', respuestaPendiente: respuestasPendientes.has(c.id) })),
-        ...reagendar.map((c): FilaColaConBucket => ({ ...c, bucket: 'reagendar', respuestaPendiente: respuestasPendientes.has(c.id) })),
-        // bucket 'lead': contacto_iniciado no es estado caliente, asi que es la misma
-        // clasificacion que le daria bucketDeEtapa (usada para los pasos de cadencia). Es
-        // date-driven como colaLeads/colaReagendar, por eso filaUnificada le aplica
-        // filaConVencimiento (todo bucket != 'cierre' lo usa).
-        ...contactoIniciadoConSeguimiento.map(
-          (c): FilaColaConBucket => ({ ...c, bucket: 'lead', respuestaPendiente: respuestasPendientes.has(c.id) }),
-        ),
-        ...cadenciasParaUnificar.map(
-          (t): FilaColaConBucket => ({
-            id: t.idEmpresa,
-            empresa: t.empresaNombre,
-            ciudad: t.ciudad,
-            contacto: t.nombre,
-            cargo: null,
-            canal: t.canal,
-            estado: t.estadoNotion,
-            fecha: t.fechaProgramada ? t.fechaProgramada.slice(0, 10) : null,
-            campana: t.nombreCampana,
-            bucket: bucketDeEtapa(t.estadoNotion),
-            origen: 'cadencia',
-            respuestaPendiente: respuestasPendientes.has(t.idEmpresa),
-          }),
-        ),
-      ]
-    : [];
+  const filasParaUnificar: FilaColaConBucket[] = filasDeHoy.map((f) => ({
+    ...f,
+    respuestaPendiente: respuestasPendientes.has(f.id),
+  }));
 
   // Tracking por empresa para el pill "abrió/vio/clic" (2026-07-15). Un solo query para toda
   // la cola; el core (resumirTracking) decide texto y temperatura. El reloj de demo (hoyDemo)
@@ -134,51 +87,35 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
   });
 
   const filasUnificadas = splitActivo ? unificarCola(filasConTracking, hoy) : [];
+  const filas: FilaAgenda[] = splitActivo ? [] : filasConTracking.map((c, i) => filaConVencimiento(c, hoy, i === 0));
 
-  // Las tarjetas cuentan sobre las MISMAS filas que se listan abajo. En el split eso son las
-  // 4 fuentes juntas (leads/cierres/reagendar/cadencias); fuera del split, colaDelDia ya es
-  // la lista entera. Antes contaban `cola.length` -- solo colaLeads -- asi que un WhatsApp de
-  // cadencia salia listado con la tarjeta en 0 (2026-07-15).
-  const filasParaContar: FilaColaConBucket[] = splitActivo
-    ? filasParaUnificar
-    : cola.map((c): FilaColaConBucket => ({ ...c, bucket: 'lead' }));
-  const pendientes = pendientesDeHoy(filasParaContar, hoy);
-  const vencidos = vencidasDeHoy(filasParaContar, hoy);
-  // Tercera tarjeta (2026-07-24): sin ella, "Para hoy" en 0 sobre 9 filas listadas se leia
-  // como un error de la herramienta. Con las tres el cuadre cierra solo -- para hoy +
-  // programadas + lo que no tiene fecha = las filas de abajo.
-  const programadas = programadasFuturas(filasParaContar, hoy);
-  const totalListado = filasParaContar.length;
+  // El contador de arriba ES la lista de abajo (2026-08-03). Antes contaba sobre filas que
+  // incluian fecha futura y sin fecha, asi que no podia llegar a cero por definicion: 39
+  // cuentas org-wide aparecian todos los dias y no bajaban nunca. Ahora "Para hoy" = filas
+  // listadas, y lo que quedo fuera se muestra abajo con su motivo escrito.
+  const pendientes = filasConTracking.length;
+  const vencidos = vencidasDeHoy(filasConTracking, hoy);
 
   // La barra "AHORA" sale de la lista unificada, no de cola[0]: con 0 leads y un WhatsApp
   // debido, cola[0] era undefined y la barra desaparecia aunque hubiera trabajo. unificarCola
-  // ya ordena por urgencia, asi que su primera fila ES el siguiente toque -- y ya trae sev y
-  // severidadTexto resueltos (incluido el "sin fecha" de un cierre, que el calculo viejo de
-  // dias no sabia expresar).
-  const actual = splitActivo ? filasUnificadas[0] : cola[0] ? filaConVencimiento(cola[0], hoy, true) : undefined;
+  // ya ordena por urgencia, asi que su primera fila ES el siguiente toque.
+  const actual = splitActivo ? filasUnificadas[0] : filas[0];
 
   const toquesHoy = contarToquesHoy(contadores);
 
   return (
     <AppShell>
       <div className="mb-8">
-        {/* El titulo dice lo que la lista trae de verdad (2026-07-24). Decia "Leads" y "Leads
-            con follow-up vencido o de hoy" sobre una lista que en la practica es casi toda
-            colaCierres: cierres y reuniones agendadas, ninguno lead, ninguno vencido y
-            ninguno de hoy. colaCierres es la unica de las cinco consultas sin filtro de
-            fecha, asi que la lista incluye cosas con fecha futura y cosas sin fecha. */}
+        {/* El titulo dice lo que la lista trae de verdad: lo vencido y lo de hoy, del owner.
+            Lo que no es de hoy (sin fecha, programado, en hold) vive en sus secciones de
+            abajo, fuera del contador. */}
         <h2 className="font-serif text-2xl tracking-tight text-ink md:text-3xl">{splitActivo ? "Tus toques" : "Toques de hoy"}</h2>
-        <p className="mt-1 text-sm text-muted">
-          {splitActivo ? "Deals abiertos y follow-ups, con fecha o sin ella." : "Tu cola de follow-ups pendientes."}
-        </p>
+        <p className="mt-1 text-sm text-muted">Lo vencido y lo de hoy. Nada más.</p>
       </div>
 
-      {/* "Para hoy" cuenta fecha <= hoy sobre las mismas filas que se listan abajo, o sea un
-          subconjunto a proposito (ver pendientesDeHoy). El subtitulo dice de cuantas, para que
-          el numero no se lea como si faltaran filas. */}
       <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Para hoy" valor={pendientes} sub={`de ${totalListado} en la lista`} />
-        <StatCard label="Programadas" valor={programadas} sub="con fecha futura" />
+        <StatCard label="Para hoy" valor={pendientes} sub={pendientes > 0 ? "en la lista de abajo" : "al día"} />
+        <StatCard label="Programadas" valor={programadas.length} sub="con fecha futura" />
         <StatCard
           label="Toques hoy"
           valor={toquesHoy}
@@ -214,41 +151,49 @@ export default async function Cola({ searchParams }: { searchParams: Promise<{ o
 
       <section id="today-agenda">
         {splitActivo ? (
-          <>
-            {filasUnificadas.length === 0 ? (
-              <div className="rounded-xl border border-line-card bg-card py-8 text-center text-[13px] text-muted">
-                Sin follow-ups pendientes. Buen trabajo.
-              </div>
-            ) : (
-              <ColaUnificada filas={filasUnificadas} registrarTapAction={registrarTapAction} />
-            )}
-
-            {cadenciasParaCadenciasHoy.length > 0 && (
-              <div className="mt-4 overflow-hidden rounded-xl border border-line-card bg-card px-7 py-6">
-                <CadenciasHoy items={cadenciasParaCadenciasHoy} hoy={hoy} />
-              </div>
-            )}
-          </>
+          filasUnificadas.length === 0 ? (
+            <div className="rounded-xl border border-line-card bg-card py-8 text-center text-[13px] text-muted">
+              Sin follow-ups pendientes. Buen trabajo.
+            </div>
+          ) : (
+            <ColaUnificada filas={filasUnificadas} registrarTapAction={registrarTapAction} />
+          )
+        ) : filas.length === 0 ? (
+          <div className="rounded-xl border border-line-card bg-card py-8 text-center text-[13px] text-muted">
+            Sin follow-ups para hoy. Buen trabajo.
+          </div>
         ) : (
-          <>
-            {filas.length === 0 ? (
-              <div className="rounded-xl border border-line-card bg-card py-8 text-center text-[13px] text-muted">
-                Sin follow-ups para hoy. Buen trabajo.
-              </div>
-            ) : (
-              <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
-            )}
+          <AgendaHoy filas={filas} registrarTapAction={registrarTapAction} />
+        )}
 
-            {cadenciasHoy.length > 0 && (
-              <div className="mt-4 overflow-hidden rounded-xl border border-line-card bg-card px-7 py-6">
-                <CadenciasHoy items={cadenciasHoy} hoy={hoy} />
-              </div>
-            )}
-          </>
+        {cadenciasHoy.length > 0 && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-line-card bg-card px-7 py-6">
+            <CadenciasHoy items={cadenciasHoy} hoy={hoy} />
+          </div>
         )}
       </section>
 
+      <SeccionFueraDeHoy
+        titulo="Sin próximo paso decidido"
+        descripcion="Deals abiertos a los que les falta decidir el siguiente movimiento. Ponles fecha y entran a tu cola."
+        filas={sinProximoPaso}
+      />
+
       {owner && <ContactoIniciadoSinSeguimiento filas={sinSeguimiento} owner={owner} />}
+
+      <SeccionFueraDeHoy
+        titulo="Programadas"
+        descripcion="Tienen próximo paso con fecha y todavía no llega. Aparecen en tu cola el día que les toca."
+        filas={programadas}
+        conAcciones={false}
+      />
+
+      <SeccionFueraDeHoy
+        titulo="En hold, fuera de tu cola"
+        descripcion="Tienen un paso de cadencia vencido, pero están en hold: no cuentan como toque de hoy."
+        filas={enHold}
+        conAcciones={false}
+      />
     </AppShell>
   );
 }

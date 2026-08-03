@@ -41,6 +41,9 @@ import {
   programarEnviosTool,
   colaTool,
   aplazarSeguimientoTool,
+  estadoCadenciaTool,
+  sacarDeCadenciaTool,
+  correrCadenciaTool,
   snapshotEstadosTool,
   editarToqueTool,
   planearDiaTool,
@@ -85,6 +88,7 @@ export const TOOLS_LECTURA = [
   'deal_historia',
   'embudo',
   'envios_programados',
+  'estado_cadencia',
   'panel_metricas',
   'pipeline',
   'plan_vs_ejecutado',
@@ -96,6 +100,7 @@ export const TOOLS_ESCRITURA = [
   'actualizar_empresa',
   'aplazar_seguimiento',
   'cambiar_cadencia',
+  'correr_cadencia',
   'crear_cadencia',
   'crear_contacto',
   'crear_empresa',
@@ -111,6 +116,7 @@ export const TOOLS_ESCRITURA = [
   'reasignar_nit',
   'reconciliar_notion',
   'registrar_toque',
+  'sacar_de_cadencia',
   'snapshot_estados',
 ] as const;
 
@@ -739,6 +745,102 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
   );
 
   server.registerTool(
+    'sacar_de_cadencia',
+    {
+      description:
+        'Baja una cuenta de la cadencia, o corre su fecha de seguimiento, SIN registrar un incumplimiento. ' +
+        'NO es un aplazo y esa es la razon entera de que exista: aplazar_seguimiento escribe una fila en ' +
+        'seguimiento_aplazado, o sea un evento de "el paso no se hizo", y una cuenta que todavia no esta ' +
+        'para toque nunca tuvo un paso que incumplir (su fecha la puso el seed de Notion o un ' +
+        'enriquecimiento, no trabajo real). Esta accion no toca esa tabla nunca, no escribe ningun toque y ' +
+        'no encola nada a Notion. El resultado lo dice explicito en cuentaComoIncumplimiento: false. ' +
+        'ES LA UNICA QUE PUEDE DEJAR LA FECHA VACIA: limpiarFecha: true pone proximo_follow_up_fecha en ' +
+        'NULL, cosa que actualizar_empresa no permite (su campo exige minimo un caracter, asi que no hay ' +
+        'forma de vaciarlo) y que cambiar_cadencia tampoco, porque solo escribe lo que viene con valor. ' +
+        'Usala en vez de inventarle una fecha lejana a una cuenta que no tiene una fecha real. ' +
+        'pausarInscripciones ademas CORTA lo que ya estaba materializado: pausa las inscripciones vivas ' +
+        'con origen manual (el unico que admite reversa) y cancela los envios que todavia no salieron. Los ' +
+        'dos pasos hacen falta: pausar sola no alcanza porque la cola del worker no mira el estado de la ' +
+        'inscripcion, asi que un envio ya programado saldria igual despues de la baja. ' +
+        'Procesa UNA CUENTA A LA VEZ, cada una en su propia transaccion, y devuelve la empresa RELEIDA mas ' +
+        'el estado completo de su cadencia despues del cambio. Una cuenta que no se puede procesar (no ' +
+        'existe, es de otra organizacion, o es una identidad absorbida por una fusion) se RECHAZA con su ' +
+        'motivo y viaja en `rechazos`: cada id pedido sale en exactamente una de las dos listas y ninguno ' +
+        'se descarta en silencio.',
+      inputSchema: {
+        idsEmpresa: z.array(z.string().min(1)).min(1).describe('Las cuentas a sacar. Una fila de resultado por cada una, sin repetidos'),
+        pausarInscripciones: z
+          .boolean()
+          .optional()
+          .describe(
+            'true pausa las inscripciones vivas de la cuenta (origen manual, reversible) y cancela sus envios ' +
+              'pendientes. Sin esto solo se mueve la fecha y la secuencia sigue corriendo',
+          ),
+        nuevaFecha: z.string().min(1).optional().describe('YYYY-MM-DD. Corre el proximo follow-up a esa fecha. Excluyente con limpiarFecha'),
+        limpiarFecha: z
+          .boolean()
+          .optional()
+          .describe('true deja proximo_follow_up_fecha en NULL. Es un acto explicito: borrar una fecha por omision es como se pierde un follow-up'),
+        motivo: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Por que se saca, en prosa, para la bitacora. Si el operador no lo dijo, se omite: no se infiere ninguno'),
+        sacadoPor: z.string().min(1).optional().describe('Quien la saco. Si no viene, queda Sebastian Acosta Molina'),
+      },
+    },
+    async (input) => {
+      const r = sacarDeCadenciaTool(input as Parameters<typeof sacarDeCadenciaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'correr_cadencia',
+    {
+      description:
+        'Corre en BLOQUE las fechas de los pasos que todavia no salieron de una cadencia, N dias, SIN bajar ' +
+        'la cuenta de la secuencia y SIN registrar un incumplimiento. La diferencia con sacar_de_cadencia es ' +
+        'el punto entero: aquella baja la cuenta (pausa la inscripcion y cancela los envios), esta la deja ' +
+        'corriendo y solo mueve las fechas. Una es "esta cuenta no va"; la otra, "esta cuenta va, pero no hoy". ' +
+        'No toca el estado de ningun paso, no escribe seguimiento_aplazado y no encola nada a Notion: el ' +
+        'resultado lo dice explicito en cuentaComoIncumplimiento: false. ' +
+        'El pedazo se elige: idCampana limita a una campana, y hasta= corre solo los pasos programados hasta ' +
+        'esa fecha (o sea, lo vencido, dejando quieto lo que viene despues). Sin ninguno de los dos, corre ' +
+        'todo lo que todavia puede salir. Un paso ya enviado nunca se mueve, y uno sin fecha programada sale ' +
+        'listado en pasosSinFecha en vez de descartarse callado. ' +
+        'Procesa UNA CUENTA A LA VEZ, cada una en su transaccion, y devuelve la empresa RELEIDA mas el estado ' +
+        'completo de su cadencia despues del cambio. Una cuenta que no se puede procesar (no existe, es de ' +
+        'otra organizacion, o es una identidad absorbida) se RECHAZA con su motivo en `rechazos`.',
+      inputSchema: {
+        idsEmpresa: z.array(z.string().min(1)).min(1).describe('Las cuentas a correr. Una fila de resultado por cada una, sin repetidos'),
+        dias: z
+          .number()
+          .int()
+          .min(-365)
+          .max(365)
+          .describe('Cuantos dias se corre cada paso. Positivo aplaza, negativo adelanta. 0 se rechaza: no moveria nada'),
+        idCampana: z.number().int().positive().optional().describe('Limita el bloque a los pasos de esa campana. Sin esto, todas las de la cuenta'),
+        hasta: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .optional()
+          .describe('YYYY-MM-DD inclusive. Solo corre los pasos programados hasta ese dia: con hoy, corre lo vencido y deja lo futuro'),
+        correrSeguimiento: z
+          .boolean()
+          .optional()
+          .describe('true corre tambien proximo_follow_up_fecha de la cuenta los mismos dias. Default false: son dos decisiones distintas'),
+        motivo: z.string().min(1).optional().describe('Por que se corre, en prosa, para la bitacora. Si el operador no lo dijo, se omite'),
+        corridoPor: z.string().min(1).optional().describe('Quien la corrio. Si no viene, queda Sebastian Acosta Molina'),
+      },
+    },
+    async (input) => {
+      const r = correrCadenciaTool(input as Parameters<typeof correrCadenciaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
     'snapshot_estados',
     {
       description:
@@ -1352,6 +1454,44 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ fecha, owner, idOrganizacion }) => {
       const resultado = colaTool({ fecha, owner, idOrganizacion });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+    },
+  );
+
+  // El complemento de `cola`: lo que la cola esconde por regla de dominio. Existe porque los
+  // leads quedaban invisibles y no habia por donde mirarlos.
+  server.registerTool(
+    'estado_cadencia',
+    {
+      description:
+        'Como esta la cadencia de una cuenta o de un owner: sus inscripciones (activas, pausadas y ' +
+        'terminadas) con su campana, el paso en el que va y la fecha programada de ese paso, mas el ' +
+        'proximo_follow_up_fecha, proximo_canal y proximo_paso de la empresa. ' +
+        'INCLUYE LOS LEAD, que es su razon de existir: `cola` los excluye por regla de dominio (un lead es ' +
+        'un contacto dormido y no es trabajo del dia) y eso los deja invisibles, sin forma de leer su fecha ' +
+        'ni de saber si tienen una secuencia corriendo. Tampoco sirve cambiar_cadencia para esto: devuelve ' +
+        'las cadencias vivas pero exige idCampana o un campo de reprogramacion, asi que preguntarle un ' +
+        'estado contesta un error de validacion. ' +
+        'Devuelve TODAS las inscripciones, no solo las vivas: distinguir "nunca estuvo en cadencia" de "la ' +
+        'sacaron el martes" es la mitad de la pregunta, y para eso viajan motivoFin y origenFin. Cada paso ' +
+        'trae ademas esManual y aprobadoEn, que son los que deciden si de verdad va a salir (un paso de ' +
+        'WhatsApp sin aprobar no sale por mas que su fecha haya llegado). ' +
+        'Sin tope y sin truncar. Hace falta al menos un filtro: pedir la organizacion entera no es una ' +
+        'pregunta. Pedir un idEmpresa que no existe FALLA explicito en vez de devolver una lista vacia, ' +
+        'porque "no tiene cadencia" y "no esta en la base" son diagnosticos distintos.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).optional().describe('Una cuenta concreta. Si no existe en esta organizacion, falla'),
+        owner: z.string().min(1).optional().describe('Todas las cuentas de esa persona'),
+        estado: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Acota por estado_notion: lead|contacto_iniciado|reunion_agendada|oportunidad|cierre_documentacion|enviar_contrato|firma_pago|on_hold'),
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+      },
+    },
+    async ({ idEmpresa, owner, estado, idOrganizacion }) => {
+      const resultado = estadoCadenciaTool({ idEmpresa, owner, estado, idOrganizacion });
       return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
     },
   );

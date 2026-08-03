@@ -53,3 +53,29 @@ export const ETAPA_ONHOLD = 'on_hold';
 
 // Bandas del embudo = FUNNEL_ETAPAS sin la etapa ganada (que va como tarjeta de resultado).
 export const BANDAS_EMBUDO: EtapaFunnel[] = FUNNEL_ETAPAS.filter((e) => e.estado !== ETAPA_GANADA);
+
+// --- Que estado puede entrar a Toques (regla del operador, 2026-08-03) -------------------
+//
+// Toques es la pantalla del trabajo del dia, no el inventario del pipeline. La regla la
+// dicto Sebastian mirando su cola real, donde las cinco primeras filas eran cuentas en
+// on_hold (SILCOM, ITELKOM, Segitel, ITEC SOLUTIONS, REDES Y TELECOMUNICACIONES) con el
+// paso de apertura de "Precio ISPs B" vencido hace 6 dias:
+//
+//   - on_hold: NUNCA entra, por NINGUNA puerta, ni siquiera con un paso de cadencia
+//     vencido. "Todavia no van a entrar".
+//   - firma_pago: fuera, ya son clientes.
+//   - contacto_iniciado: SIEMPRE entra, es lo que mas le interesa ver.
+//   - reunion_agendada / oportunidad / cierre_documentacion / enviar_contrato: entran.
+//   - lead: solo con inscripcion activa (regla del 2026-07-15, la aplica colaLeads).
+//
+// El hueco que esta constante cierra es la puerta de las cadencias: agendaHoyCadencias
+// levanta pasos de inscripcion sin mirar estado_notion, asi que las on_hold se colaban por
+// ahi saltandose la exclusion que colaDelDia si aplicaba. La exclusion se hace en la
+// COMPOSICION de la cola (app/cola/hoy.ts), no dentro de agendaHoyCadencias: la campana de
+// reactivacion apunta a on_hold a proposito y sus envios y su caja de aprobacion de copys
+// siguen corriendo. Lo que cambia es que ese trabajo no se cuenta como toque del dia.
+export const ESTADOS_FUERA_DE_TOQUES = ['on_hold', 'firma_pago'] as const;
+
+export function estadoEntraAToques(estado: string | null | undefined): boolean {
+  return !(ESTADOS_FUERA_DE_TOQUES as readonly string[]).includes(estado ?? '');
+}

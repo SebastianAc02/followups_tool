@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { resumenHome, colaLeads, colaCierres, colaReagendar, agendaHoyCadencias, contarPorEstado, listarCampanas } from './db/repository';
+import { resumenHome, contarPorEstado, listarCampanas } from './db/repository';
 import { cargarPerfil } from './lib/perfil';
 import { hoy as hoyDemo } from './lib/reloj';
 import { AppShell } from './ui/shell/AppShell';
@@ -8,6 +8,7 @@ import { StatCard } from './ui/home/StatCard';
 import { PipelineBar } from './ui/home/PipelineBar';
 import { CampaignRow, type CampaignVM } from './ui/home/CampaignRow';
 import { OWNER_COLA_SPLIT } from './cola/agenda.ts';
+import { cargarColaDeHoy } from './cola/hoy.ts';
 
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
@@ -29,22 +30,14 @@ export default async function Dashboard() {
   const hoy = hoyDemo();
 
   const resumen = resumenHome(owner, hoy, perfil.idOrganizacion);
-  // Split (2026-07-14, corregido 2026-07-22): "toques para hoy"/"vencidos" del home deben
-  // contar las MISMAS 4 fuentes que /cola (leads + cierres + reagendar + cadencias), no solo
-  // colaLeads. Antes solo contaba leads, asi que las 25 de campana (que son on_hold, no lead)
-  // y los cierres no aparecian y el home mostraba 0 aunque hubiera trabajo. pendientesDeHoy =
-  // fecha <= hoy; vencidos = fecha < hoy (misma logica de app/cola/agenda.ts).
+  // "Toques para hoy" y "Vencidos" del home cuentan la MISMA lista que abre /cola y que el
+  // badge del nav (2026-08-03): una sola composicion, tres superficies. Antes el home sumaba
+  // sus propias cuatro fuentes a mano y le faltaba contacto_iniciado con seguimiento, asi que
+  // ninguno de los tres numeros coincidia. Vencidos = fecha < hoy sobre esa misma lista.
   if (owner === OWNER_COLA_SPLIT) {
-    const fechas: (string | null)[] = [
-      ...colaLeads(hoy, owner, perfil.idOrganizacion).map((c) => c.fecha ?? null),
-      ...colaCierres(owner, perfil.idOrganizacion).map((c) => c.fecha ?? null),
-      ...colaReagendar(hoy, owner, perfil.idOrganizacion).map((c) => c.fecha ?? null),
-      ...agendaHoyCadencias(hoy, owner)
-        .filter((t) => !(t.esManual === 1 && t.modo === 'batch'))
-        .map((t) => (t.fechaProgramada ? t.fechaProgramada.slice(0, 10) : null)),
-    ];
-    resumen.toquesHoy = fechas.filter((f) => f != null && f <= hoy).length;
-    resumen.vencidos = fechas.filter((f) => f != null && f < hoy).length;
+    const { filas } = cargarColaDeHoy(hoy, owner, perfil.idOrganizacion);
+    resumen.toquesHoy = filas.length;
+    resumen.vencidos = filas.filter((f) => f.fecha != null && f.fecha < hoy).length;
   }
   const porEstado = contarPorEstado(undefined, perfil.idOrganizacion);
   const campanas: CampaignVM[] = listarCampanas(perfil.idOrganizacion)

@@ -81,6 +81,9 @@ import {
   crearEmpresa,
   actualizarEmpresa,
   aplazarSeguimiento,
+  estadoCadencia,
+  sacarDeCadencia,
+  correrCadencia,
   snapshotEstados,
   editarToque,
   planearDia,
@@ -97,6 +100,12 @@ import {
   type AplazoActividad,
   type AplazarSeguimientoInput,
   type AplazarSeguimientoResultado,
+  type EstadoCadenciaInput,
+  type EstadoCadenciaResultado,
+  type SacarDeCadenciaInput,
+  type SacarDeCadenciaResultado,
+  type CorrerCadenciaInput,
+  type CorrerCadenciaResultado,
   type CambiarCadenciaInput,
   type MarcarPerdidaInput,
   type MarcarPerdidaResultado,
@@ -851,6 +860,47 @@ export function aplazarSeguimientoTool(
   idOrganizacion: number,
 ): AplazarSeguimientoResultado {
   return aplazarSeguimiento(input, idOrganizacion);
+}
+
+// --- estado_cadencia (LECTURA, 2026-08-03) ---------------------------------------------
+//
+// La lectura que le faltaba al MCP: como esta la cadencia de una cuenta o de un owner.
+// `cola` no puede darla porque excluye 'lead' por regla de dominio, y cambiar_cadencia
+// devuelve las cadencias vivas pero exige idCampana o un campo de reprogramacion, asi que
+// preguntarle "como esta esto" responde con un error de validacion en vez de con un estado.
+//
+// Adaptador delgado: el filtro y el corte viven en estadoCadencia() del dominio. Aca solo se
+// resuelve la organizacion, igual que las demas de lectura.
+
+export type EstadoCadenciaToolInput = EstadoCadenciaInput & { idOrganizacion?: number };
+
+export function estadoCadenciaTool(input: EstadoCadenciaToolInput): EstadoCadenciaResultado {
+  const { idOrganizacion, ...filtro } = input;
+  return estadoCadencia(filtro, resolverOrganizacion(idOrganizacion));
+}
+
+// --- sacar_de_cadencia (ESCRITURA, 2026-08-03) -----------------------------------------
+//
+// Adaptador delgado sobre sacarDeCadencia(). La accion que faltaba para bajar una cuenta de
+// la cola sin mentir: aplazar_seguimiento escribe un evento de incumplimiento, y una cuenta
+// que todavia no esta para toque no incumplio nada. Lo unico que se podia hacer hoy era
+// escribirle una fecha a ciegas con actualizar_empresa, que ademas no acepta vaciarla.
+//
+// Devuelve una fila por cada cuenta pedida, en `cuentas` o en `rechazos`, nunca en ninguna de
+// las dos: el descarte silencioso es el modo de falla que esta accion tiene prohibido.
+
+export function sacarDeCadenciaTool(input: SacarDeCadenciaInput, idOrganizacion: number): SacarDeCadenciaResultado {
+  return sacarDeCadencia(input, idOrganizacion);
+}
+
+// --- correr_cadencia (ESCRITURA, 2026-08-03) -------------------------------------------
+//
+// Adaptador delgado sobre correrCadencia(). Es el movimiento en BLOQUE que faltaba: agarrar
+// el pedazo vencido de una cadencia y correrlo N dias sin bajar la cuenta de la secuencia y
+// sin registrar un incumplimiento. sacar_de_cadencia baja la cuenta; esta la deja corriendo.
+
+export function correrCadenciaTool(input: CorrerCadenciaInput, idOrganizacion: number): CorrerCadenciaResultado {
+  return correrCadencia(input, idOrganizacion);
 }
 
 // --- editar_toque (ESCRITURA, 2026-07-26) ----------------------------------------------

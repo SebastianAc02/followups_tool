@@ -87,13 +87,19 @@ test('colaLeads: una inscripcion NO activa no lo revive', () => {
   assert.equal(r.some((f) => f.id === 'lp1'), false, 'pausada por respuesta detectada = ya no se le escribe');
 });
 
-test('colaCierres: estados calientes del owner, con y sin fecha, sin nocion de vencido', () => {
+// Cambiado el 2026-08-03: colaCierres pasa a exigir fecha VENCIDA O DE HOY. Antes traia
+// tambien las sin fecha y las futuras, con el argumento de que una cuenta en negociacion no
+// esta vencida solo por no tener fecha. El argumento es cierto para el pipeline y falso para
+// Toques: alimentaba el contador del dia con 39 cuentas org-wide que no bajaban nunca. Lo que
+// salio de aca no se perdio -- las sin fecha van a colaSinProximoPaso y las futuras a
+// colaProgramadas, las dos con seccion propia (ver repository.colaPorFecha.test.ts).
+test('colaCierres: estados calientes del owner con fecha vencida o de hoy', () => {
   // Organizacion 2, aislada: c6 (reunion_agendada + no_llego) tambien cumple el criterio
   // de colaReagendar, que corre en organizacion 1 en otro test de este mismo archivo (sin
   // limpieza entre tests, mismo problema documentado en repository.contarPorEstado.test.ts).
-  seedEmpresa('c1', OWNER, 'oportunidad', '2026-07-10', 2); // vencido segun fecha: igual entra
-  seedEmpresa('c2', OWNER, 'cierre_documentacion', null, 2); // sin fecha: igual entra
-  seedEmpresa('c3', OWNER, 'reunion_agendada', '2026-08-01', 2); // futuro, sin toque: igual entra
+  seedEmpresa('c1', OWNER, 'oportunidad', '2026-07-10', 2); // vencido: entra
+  seedEmpresa('c2', OWNER, 'cierre_documentacion', null, 2); // sin fecha: ya NO entra
+  seedEmpresa('c3', OWNER, 'reunion_agendada', '2026-08-01', 2); // futuro: ya NO entra
   seedEmpresa('c4', OWNER, 'lead', '2026-07-10', 2); // no es estado caliente: no entra
   seedEmpresa('c5', OTRO_OWNER, 'oportunidad', '2026-07-10', 2); // otro owner: no entra
 
@@ -103,9 +109,9 @@ test('colaCierres: estados calientes del owner, con y sin fecha, sin nocion de v
   seedEmpresa('c7', OWNER, 'oportunidad', '2026-07-10', 2);
   seedToque('c7', 'no_llego'); // no_llego pero NO es reunion_agendada: si entra (la exclusion es solo para reunion_agendada)
 
-  const r = colaCierres(OWNER, 2);
+  const r = colaCierres('2026-07-14', OWNER, 2);
   const ids = r.map((f) => f.id).sort();
-  assert.deepEqual(ids, ['c1', 'c2', 'c3', 'c7']);
+  assert.deepEqual(ids, ['c1', 'c7']);
 });
 
 test('colaReagendar: reunion_agendada cuyo ultimo toque fue no_llego, vencido o de hoy', () => {
@@ -170,6 +176,6 @@ test('colaLeads/colaCierres/colaReagendar: campana viene poblada solo si hay ins
   assert.deepEqual(r.map((f) => f.id), ['m1'], 'solo el lead con secuencia');
   assert.equal(r[0]?.campana, 'Reactivacion express');
 
-  const cierres = colaCierres(OWNER, 3);
+  const cierres = colaCierres('2026-07-14', OWNER, 3);
   assert.equal(cierres.find((f) => f.id === 'm2')?.campana, null, 'sin inscripcion, campana null');
 });
