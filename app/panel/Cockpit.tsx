@@ -20,6 +20,29 @@ function navegarConFiltro(router: ReturnType<typeof useRouter>, cambios: Record<
   router.push(`/panel?${params.toString()}`);
 }
 
+// Los atajos de rango. Existen porque la pregunta que mas se hace es "que llevo HOY" y ponerla
+// exigia escribir la misma fecha en dos calendarios, que es suficiente friccion para que nadie mire
+// el panel a media tarde.
+//
+// El dia base entra por PROP desde el servidor, no de `new Date()` del navegador: la app tiene un
+// reloj de demo por request (app/lib/reloj.ts) que corre la fecha en modo prueba, y un preset
+// calculado en el cliente apuntaria al dia de verdad mientras el resto de la pantalla muestra el
+// simulado. Es el mismo error que ya se corrigio en las tandas.
+function diaRelativo(base: string, dias: number): string {
+  const d = new Date(`${base}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+function presetsDeRango(hoy: string): { etiqueta: string; desde: string; hasta: string }[] {
+  return [
+    { etiqueta: 'Hoy', desde: hoy, hasta: hoy },
+    { etiqueta: 'Ayer', desde: diaRelativo(hoy, -1), hasta: diaRelativo(hoy, -1) },
+    { etiqueta: '7 días', desde: diaRelativo(hoy, -6), hasta: hoy },
+    { etiqueta: '30 días', desde: diaRelativo(hoy, -29), hasta: hoy },
+  ];
+}
+
 export function Cockpit({
   tablero,
   metricas,
@@ -27,6 +50,7 @@ export function Cockpit({
   owners,
   desde,
   hasta,
+  hoy,
 }: {
   tablero: TableroItem[];
   metricas: Record<string, MetricaValor>;
@@ -34,6 +58,7 @@ export function Cockpit({
   owners: string[];
   desde: string;
   hasta: string;
+  hoy: string;
 }) {
   const router = useRouter();
   const actuales = { owner, desde, hasta };
@@ -62,6 +87,25 @@ export function Cockpit({
             <option key={o} value={o}>{o}</option>
           ))}
         </select>
+
+        {presetsDeRango(hoy).map((p) => {
+          const activo = desde === p.desde && hasta === p.hasta;
+          return (
+            <button
+              key={p.etiqueta}
+              type="button"
+              aria-pressed={activo}
+              onClick={() => navegarConFiltro(router, { desde: p.desde, hasta: p.hasta }, actuales)}
+              className={
+                activo
+                  ? 'rounded-full border border-primary bg-primary/10 px-3 py-1.5 font-body text-xs font-semibold text-primary'
+                  : 'rounded-full border border-border bg-card px-3 py-1.5 font-body text-xs text-muted-foreground hover:text-foreground'
+              }
+            >
+              {p.etiqueta}
+            </button>
+          );
+        })}
 
         <input
           type="date"

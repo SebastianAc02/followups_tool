@@ -45,6 +45,14 @@ export type MetricasDatos = {
   // "sin_datos". No es null nunca (calcularConversionStage siempre devuelve un Record, aunque
   // este vacio).
   conversionStage?: Record<string, number>;
+  // Actividad del operador (2026-08-05). connectRate es number | null y el null es REAL: cero
+  // llamadas calificadas no es cero por ciento de conexion, es que no hay denominador. Mismo
+  // tratamiento que cicloVentaPromedio.
+  connectRate?: number | null;
+  connectRateDetalle?: Record<string, number>;
+  toquesPorGrupoCanal?: Record<string, number>;
+  textoDeduplicado?: Record<string, number>;
+  llamadasCuentasNuevas?: Record<string, number>;
 };
 
 const SIN_DATOS: MetricaValor = { estado: 'sin_datos' };
@@ -95,6 +103,19 @@ export function resolverMetrica(dataSource: DataSourceKey | null, datos: Metrica
       return datos.toquesAntesDeCerrarPromedio === undefined || datos.toquesAntesDeCerrarPromedio === null
         ? SIN_DATOS
         : { estado: 'ok', valor: datos.toquesAntesDeCerrarPromedio };
+    case 'connectRate':
+      // undefined = no se calculo. null = se calculo y no hay denominador (ninguna llamada con
+      // resultado). Los dos se ven igual en pantalla si se confunden, y significan cosas opuestas:
+      // uno es un hueco del reporte, el otro es un hecho del periodo.
+      return datos.connectRate === undefined || datos.connectRate === null ? SIN_DATOS : { estado: 'ok', valor: datos.connectRate };
+    case 'connectRateDetalle':
+      return datos.connectRateDetalle === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.connectRateDetalle };
+    case 'toquesPorGrupoCanal':
+      return datos.toquesPorGrupoCanal === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.toquesPorGrupoCanal };
+    case 'textoDeduplicado':
+      return datos.textoDeduplicado === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.textoDeduplicado };
+    case 'llamadasCuentasNuevas':
+      return datos.llamadasCuentasNuevas === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.llamadasCuentasNuevas };
     case 'conversionStage':
       return datos.conversionStage === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.conversionStage };
     default: {

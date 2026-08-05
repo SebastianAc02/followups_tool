@@ -28,7 +28,39 @@ const DEFAULT_IDS = [
   'lead_a_cliente', // ciclo de venta (cuanto tarda un cierre)
   'conversion_stage', // % de deals que avanzan de una etapa a la siguiente
   'mrr_estimado', // revenue estimado (0 hasta configurar tarifa del plan)
+  // Actividad del operador (2026-08-05): las cinco de abajo son las que responden "que hice hoy y
+  // por donde salio", que es para lo que el CRO abre el panel.
+  'connect_rate',
+  'connect_rate_detalle',
+  'toques_por_grupo_canal',
+  'texto_dedup',
+  'llamadas_cuentas_nuevas',
 ] as const;
+
+// Widgets que se INCORPORAN a un tablero ya guardado la primera vez que el usuario entra despues
+// de que existen.
+//
+// Sin esto, un widget nuevo solo lo ve quien nunca guardo su tablero: cargarTablero devuelve el
+// layout guardado tal cual, asi que el operador, que si tiene uno, no se enteraria de que la
+// metrica existe. Es la forma mas silenciosa de construir algo que nadie usa.
+//
+// No pisa ninguna decision del usuario, y por una razon concreta: estos widgets NO EXISTIAN cuando
+// el guardo su tablero, asi que su ausencia no puede ser un "los quite". El dia que alguien quite
+// uno a proposito, se saca de esta lista y deja de reaparecer.
+const INCORPORAR_SI_FALTAN = [
+  'connect_rate',
+  'connect_rate_detalle',
+  'toques_por_grupo_canal',
+  'texto_dedup',
+  'llamadas_cuentas_nuevas',
+] as const;
+
+export function incorporarWidgetsNuevos(layout: TableroItem[]): TableroItem[] {
+  const presentes = new Set(layout.map((i) => i.widgetId));
+  const faltantes = INCORPORAR_SI_FALTAN.filter((id) => !presentes.has(id));
+  if (faltantes.length === 0) return layout;
+  return faltantes.reduce((acc, id) => agregar(acc, id), layout);
+}
 
 export function tableroDefault(): TableroItem[] {
   return DEFAULT_IDS.map((id) => {

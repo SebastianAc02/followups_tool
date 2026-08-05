@@ -10939,6 +10939,89 @@ export type ToqueActividad = {
 // proximoPaso sale de empresa, no de toque: toque.proximo_paso existe en la tabla pero
 // ningun camino de escritura lo llena (ver registrarToque), asi que devolverlo seria una
 // columna siempre nula. Lo que responde "que sigue en esta cuenta" es empresa.proximo_paso.
+// --- actividad por canal (panel del CRO, 2026-08-05) -----------------------------------
+//
+// Las filas que alimentan connect rate, texto contra llamada, la deduplicacion de texto y las
+// llamadas a cuentas nuevas. La regla vive en app/core/actividad-canal.ts, pura; aca solo se lee.
+//
+// `esPrimerToqueDeLaCuenta` se decide contra TODA la historia de la cuenta y no contra el rango que
+// se esta mirando. Calcularlo dentro del rango haria que el conteo de llamadas a cuentas nuevas
+// subiera solo por mover la fecha de inicio del reporte, que es la forma mas facil de mentirse a uno
+// mismo con una metrica de prospeccion.
+//
+// Los entrantes de WhatsApp SI viajan: el nucleo los necesita para saber que una conversacion sigue
+// viva. Lo que nunca hacen es contar como actividad ni abrir una cuenta.
+export type ToqueActividadCanal = {
+  idEmpresa: string;
+  canal: string | null;
+  resultado: string | null;
+  fuente: string;
+  fechaDia: string | null;
+  fecha: string | null;
+  esPrimerToqueDeLaCuenta: boolean;
+};
+
+export function toquesParaActividadCanal(
+  desde: string,
+  hasta: string,
+  idOrganizacion: number,
+  filtros: { owner?: string } = {},
+): ToqueActividadCanal[] {
+  const diaToque = sql`coalesce(${toque.fechaDia}, substr(${toque.fecha}, 1, 10))`;
+  const condiciones = [eq(toque.idOrganizacion, idOrganizacion), sql`${diaToque} >= ${desde}`, sql`${diaToque} <= ${hasta}`];
+  if (filtros.owner) condiciones.push(eq(empresa.owner, filtros.owner));
+
+  const filas = db
+    .select({
+      idToque: toque.idToque,
+      idEmpresa: toque.idEmpresa,
+      canal: toque.canal,
+      resultado: toque.resultado,
+      fuente: toque.fuente,
+      fechaDia: sql<string | null>`${diaToque}`,
+      fecha: toque.fecha,
+    })
+    .from(toque)
+    .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
+    .where(and(...condiciones))
+    .orderBy(asc(sql`${diaToque}`), asc(toque.idToque))
+    .all();
+
+  const ids = [...new Set(filas.map((f) => f.idEmpresa))];
+  if (ids.length === 0) return [];
+
+  // El primer toque NUESTRO de cada cuenta, en toda su historia. Los entrantes se excluyen del
+  // minimo: un mensaje que nos llego no abre la cuenta, y contarlo dejaria marcada como trabajada
+  // una cuenta que nos escribio sola, con lo que la primera llamada real dejaria de ser la primera.
+  const primeros = new Map<string, string>();
+  for (const p of db
+    .select({ idEmpresa: toque.idEmpresa, primerDia: sql<string | null>`min(${diaToque})` })
+    .from(toque)
+    .where(and(inArray(toque.idEmpresa, ids), eq(toque.idOrganizacion, idOrganizacion), ne(toque.fuente, 'whatsapp_entrante')))
+    .groupBy(toque.idEmpresa)
+    .all()) {
+    if (p.primerDia) primeros.set(p.idEmpresa, p.primerDia);
+  }
+
+  // Empate en el dia: gana el id mas bajo, que es el que se escribio primero. Sin desempate, dos
+  // llamadas del mismo dia a una cuenta nueva contarian las dos como primera.
+  const yaMarcada = new Set<string>();
+  return filas.map((f) => {
+    const esPrimero =
+      f.fuente !== 'whatsapp_entrante' && f.fechaDia != null && f.fechaDia === primeros.get(f.idEmpresa) && !yaMarcada.has(f.idEmpresa);
+    if (esPrimero) yaMarcada.add(f.idEmpresa);
+    return {
+      idEmpresa: f.idEmpresa,
+      canal: f.canal,
+      resultado: f.resultado,
+      fuente: f.fuente,
+      fechaDia: f.fechaDia,
+      fecha: f.fecha,
+      esPrimerToqueDeLaCuenta: esPrimero,
+    };
+  });
+}
+
 export function toquesEnRango(
   desde: string,
   hasta: string,

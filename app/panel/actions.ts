@@ -17,7 +17,11 @@ export async function cargarTablero(): Promise<TableroItem[]> {
   if (!fila?.layout) return tableroDefault();
 
   const layout = parse(fila.layout);
-  return layout.length > 0 ? layout : tableroDefault();
+  if (layout.length === 0) return tableroDefault();
+  // Un tablero guardado no conoce los widgets que nacieron despues. Sin esto, la metrica nueva
+  // solo la ve quien nunca guardo su tablero, que es la forma mas silenciosa de construir algo que
+  // nadie usa. Ver el porque de que esto no pise ninguna decision del usuario en tablero.ts.
+  return incorporarWidgetsNuevos(layout);
 }
 
 export async function guardarTablero(layout: TableroItem[]): Promise<{ ok: true } | { ok: false; error: string }> {

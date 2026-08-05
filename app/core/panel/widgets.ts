@@ -56,7 +56,16 @@ export type DataSourceKey =
   // de etapa / dia; esta es conversion -- de los deals que llegaron a una etapa, que %
   // avanzo a la siguiente). Ver el detalle largo de "llego a la etapa" (high-water-mark)
   // en core/panel/conversionStage.ts.
-  | 'conversionStage';
+  | 'conversionStage'
+  // Actividad del operador, panel del CRO (2026-08-05). Las cinco responden "que hice y por
+  // donde salio", que es la pregunta que el panel no contestaba: tenia toques totales y toques
+  // por canal crudo, y ninguna de las dos dice si las llamadas conectaron ni si veinte WhatsApps
+  // de una misma conversacion son veinte toques o uno.
+  | 'connectRate'
+  | 'connectRateDetalle'
+  | 'toquesPorGrupoCanal'
+  | 'textoDeduplicado'
+  | 'llamadasCuentasNuevas';
 
 export type Widget = {
   id: string; // estable, ej 'toques_por_canal'
@@ -97,6 +106,21 @@ export const WIDGETS: readonly Widget[] = [
   // un array, no dibuja nada util para este dato.
   { id: 'segmentacion_persona', titulo: 'Segmentación por persona', grupo: 'segmentacion', tipo: 'barras', dataSource: 'segmentacionPorPersona', spanDefault: 4 },
   { id: 'toques_por_canal', titulo: 'Toques por canal', grupo: 'segmentacion', tipo: 'barras', dataSource: 'toquesPorCanal', spanDefault: 2 },
+  // Texto y llamada, no los cuatro canales sueltos: el operador piensa en dos, y WhatsApp mas
+  // correo a la misma cuenta son el mismo gesto por dos vias. La reunion va aparte porque no es
+  // un canal de contacto, es un desenlace.
+  { id: 'toques_por_grupo_canal', titulo: 'Texto contra llamada', grupo: 'segmentacion', tipo: 'barras', dataSource: 'toquesPorGrupoCanal', spanDefault: 2 },
+  // El numero que separa marcar de hablar. Sin el, "hice 20 llamadas" no distingue 20 tonos de
+  // 20 conversaciones, y las dos cuestan lo mismo en tiempo pero no valen lo mismo.
+  { id: 'connect_rate', titulo: 'Connect rate', grupo: 'throughput', tipo: 'kpi', dataSource: 'connectRate', spanDefault: 1 },
+  { id: 'connect_rate_detalle', titulo: 'Llamadas: conectadas contra no', grupo: 'throughput', tipo: 'barras', dataSource: 'connectRateDetalle', spanDefault: 2 },
+  // Los tres numeros lado a lado: crudo, deduplicado por dia y deduplicado por conversacion. La
+  // distancia entre ellos ES el dato, porque dice cuanto del volumen de texto es conversacion
+  // viva y cuanto es la misma conversacion contada muchas veces.
+  { id: 'texto_dedup', titulo: 'Texto: crudo contra deduplicado', grupo: 'segmentacion', tipo: 'barras', dataSource: 'textoDeduplicado', spanDefault: 2 },
+  // Cuanto de la marcacion abre cuentas y cuanto empuja las que ya estaban. Es la unica forma de
+  // ver si un dia de 20 llamadas fue prospeccion o seguimiento.
+  { id: 'llamadas_cuentas_nuevas', titulo: 'Llamadas: cuentas nuevas contra con historia', grupo: 'segmentacion', tipo: 'barras', dataSource: 'llamadasCuentasNuevas', spanDefault: 2 },
   { id: 'toques_por_resultado', titulo: 'Toques por resultado', grupo: 'segmentacion', tipo: 'barras', dataSource: 'toquesPorResultado', spanDefault: 2 },
 
   // Economia del deal
