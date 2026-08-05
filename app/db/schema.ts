@@ -126,6 +126,14 @@ export const empresa = sqliteTable('empresa', {
   // va a pedir y hoy no existe a nivel empresa. Existe cliente.fuente_lead, pero solo
   // cubre las 73 filas que ya son cliente y viene de Notion, no del origen real.
   fuenteLead: text('fuente_lead'),
+  // La procedencia del valor de arriba, que es lo que lo hace auditable (migracion 0030).
+  //
+  // Se llama `procedencia` y no `fuente` a proposito: la columna del dato YA se llama fuente_lead,
+  // y un `fuente_lead_fuente` seria ilegible en cualquier consulta. Aca fuente_lead es DE DONDE
+  // VINO LA CUENTA y procedencia es DE DONDE SALIO EL DATO (notion, el operador, Apollo).
+  fuenteLeadProcedencia: text('fuente_lead_procedencia'),
+  fuenteLeadFecha: text('fuente_lead_fecha'),
+  fuenteLeadQuien: text('fuente_lead_quien'),
   // Primer y ultimo toque en fecha ISO. No son derivables limpio de toque: 97 de 274
   // toques tienen fecha NULL, y los contactos por WhatsApp viven en mensaje_whatsapp,
   // fuera de toque. max(toque.fecha) daria una respuesta incompleta y silenciosa.

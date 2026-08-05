@@ -384,6 +384,22 @@ export type MotivoDescarte = (typeof MOTIVOS_DESCARTE)[number];
 // que viene. Que solo este venza es lo que permite exigirle fecha solo a el.
 export const MOTIVO_DESCARTE_CON_RETORNO: MotivoDescarte = 'congelada';
 
+// DE DONDE SALIO LA CUENTA (2026-08-05). La columna empresa.fuente_lead existe desde el 24-jul y
+// nunca tuvo camino de escritura: verificado, ningun codigo la llenaba, asi que las 1.956 filas
+// estan vacias. Es el mismo patron de las tres columnas de transcript, que vivieron meses en la
+// tabla sin que nada las escribiera.
+//
+// Los cuatro salen del comentario que dejo la migracion que creo la columna: "de donde salio el
+// lead: inbound, outbound, evento, referido. Es el corte que mas se va a pedir y hoy no existe a
+// nivel empresa".
+//
+// NO HAY UN VALOR PARA "NO SE". El NULL de la columna es ese estado, y se lee como "nadie lo
+// registro", jamas como outbound. Es tentador asumir outbound porque casi toda la prospeccion es
+// fria, y ese atajo corrompe justo la medicion para la que existe la columna: el costo de una
+// reunion partido por origen deja de servir si el grupo grande esta lleno de supuestos.
+export const FUENTES_LEAD = ['inbound', 'outbound', 'evento', 'referido'] as const;
+export type FuenteLead = (typeof FUENTES_LEAD)[number];
+
 export const ADVERTENCIA_SIN_VERIFICAR =
   'nadie verifico si esta cuenta es de un aliado: entra a la lista MARCADA, no como limpia';
 

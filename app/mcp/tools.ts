@@ -83,6 +83,10 @@ import {
   marcarDescarte,
   cuentasParaTandas,
   marcarTareaBloqueante,
+  marcarFuenteLead,
+  coberturaOrigenLead,
+  type MarcarFuenteLeadInput,
+  type MarcarFuenteLeadResultado,
   type MarcarTareaBloqueanteInput,
   type MarcarDescarteInput,
   type MarcarDescarteResultado,
@@ -529,6 +533,10 @@ export function marcarDescarteTool(input: MarcarDescarteInput, idOrganizacion: n
 
 export function marcarCanalTool(input: MarcarCanalInput, idOrganizacion: number): MarcarCanalResultado {
   return marcarCanal(input, idOrganizacion);
+}
+
+export function marcarFuenteLeadTool(input: MarcarFuenteLeadInput, idOrganizacion: number): MarcarFuenteLeadResultado {
+  return marcarFuenteLead(input, idOrganizacion);
 }
 
 export function marcarTareaBloqueanteTool(input: MarcarTareaBloqueanteInput, idOrganizacion: number) {

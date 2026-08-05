@@ -31,6 +31,7 @@ import {
   marcarDescarteTool,
   marcarCanalTool,
   marcarTareaBloqueanteTool,
+  marcarFuenteLeadTool,
   tandasTool,
   dashboardCroTool,
   buscarEmpresaTool,
@@ -73,6 +74,7 @@ import {
   TIPOS_TOQUE,
   ALIADOS,
   MOTIVOS_DESCARTE,
+  FUENTES_LEAD,
   TIPOS_PLAN,
   ORIGENES_PLAN,
   RITMOS_INGRESO,
@@ -122,6 +124,7 @@ export const TOOLS_ESCRITURA = [
   'marcar_aliado',
   'marcar_canal',
   'marcar_descarte',
+  'marcar_fuente_lead',
   'marcar_tarea_bloqueante',
   'marcar_no_ejecutado',
   'marcar_perdida',
@@ -708,6 +711,40 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
     async (input) => {
       const r = marcarTareaBloqueanteTool(input as Parameters<typeof marcarTareaBloqueanteTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_fuente_lead',
+    {
+      description:
+        'Dice DE DONDE SALIO una cuenta: inbound (nos escribio o llego solo), outbound (se prospecto ' +
+        'en frio), evento, o referido. Es lo que permite partir el costo de una reunion por origen: ' +
+        'cuantas llamadas cuesta una reunion si la cuenta vino sola contra si hubo que salir a ' +
+        'buscarla. Sin este campo el agregado esconde que no cuestan lo mismo. ' +
+        'REGLA DURA: una cuenta sin marcar NO es outbound, es una cuenta que nadie registro. Nunca ' +
+        'marques outbound "porque la mayoria lo es": ese atajo destruye la comparacion entera, que es ' +
+        'lo unico para lo que existe el campo. Si no sabes de donde salio, dejala sin marcar. ' +
+        'Manda origen:null para BORRAR un origen puesto por costumbre. ' +
+        'Envuelve marcarFuenteLead() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
+        origen: z
+          .enum(FUENTES_LEAD)
+          .nullable()
+          .describe('inbound | outbound | evento | referido. null BORRA el origen y devuelve la cuenta a "nadie lo registro"'),
+        procedencia: z
+          .string()
+          .min(1)
+          .describe('De donde salio EL DATO, no la cuenta: notion, operador, apollo. OBLIGATORIO. Ojo con la confusion: `origen` es de donde vino la cuenta'),
+        quien: z.string().min(1).describe('Quien lo dijo, con nombre. OBLIGATORIO'),
+        fecha: z.string().min(1).optional().describe('YYYY-MM-DD. Default: hoy'),
+        nota: z.string().min(1).optional().describe('El detalle en prosa, que queda en la bitacora con el antes y el despues'),
+      },
+    },
+    async (input) => {
+      const r = marcarFuenteLeadTool(input as Parameters<typeof marcarFuenteLeadTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );

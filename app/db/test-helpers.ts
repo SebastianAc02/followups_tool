@@ -72,6 +72,10 @@ export function crearDbPrueba() {
       -- que crearEmpresa reventaba con "table empresa has no column named fuente_lead". Es
       -- la misma clase de desincronizacion que ya documenta la cabecera de este archivo.
       fuente_lead TEXT,
+      -- Migracion 0030: la procedencia del origen del lead.
+      fuente_lead_procedencia TEXT,
+      fuente_lead_fecha TEXT,
+      fuente_lead_quien TEXT,
       fecha_primer_contacto TEXT,
       fecha_ultimo_contacto TEXT,
       razon_perdida TEXT,

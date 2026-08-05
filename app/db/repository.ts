@@ -153,6 +153,8 @@ import {
   ALIADOS,
   ALIADOS_CONFIRMADOS,
   MOTIVOS_DESCARTE,
+  FUENTES_LEAD,
+  type FuenteLead,
   MOTIVO_DESCARTE_CON_RETORNO,
   type MotivoDescarte,
   ADVERTENCIA_SIN_VERIFICAR,
@@ -10939,6 +10941,133 @@ export type ToqueActividad = {
 // proximoPaso sale de empresa, no de toque: toque.proximo_paso existe en la tabla pero
 // ningun camino de escritura lo llena (ver registrarToque), asi que devolverlo seria una
 // columna siempre nula. Lo que responde "que sigue en esta cuenta" es empresa.proximo_paso.
+// --- origen del lead (2026-08-05) ------------------------------------------------------
+//
+// De donde salio la cuenta. Es el corte que responde lo que el operador pregunta: cuantas llamadas
+// cuesta una reunion si la cuenta vino de un inbound contra si se prospecto en frio. El agregado
+// esconde que no cuestan lo mismo, y con un solo numero no se puede decidir donde poner el tiempo.
+
+export type ClasificacionOrigenLead = {
+  origen: FuenteLead | null;
+  // false cuando NADIE lo registro. Es distinto de "no vino de ningun lado", que no existe: toda
+  // cuenta salio de alguna parte, lo que falta es que alguien lo escriba.
+  registrado: boolean;
+  evidencia: Evidencia;
+};
+
+type FilaOrigenLead = {
+  fuenteLead: string | null;
+  fuenteLeadProcedencia: string | null;
+  fuenteLeadFecha: string | null;
+  fuenteLeadQuien: string | null;
+};
+
+function leerFilaOrigen(lector: typeof db | Tx, idEmpresa: string, idOrganizacion: number): FilaOrigenLead | undefined {
+  return lector
+    .select({
+      fuenteLead: empresa.fuenteLead,
+      fuenteLeadProcedencia: empresa.fuenteLeadProcedencia,
+      fuenteLeadFecha: empresa.fuenteLeadFecha,
+      fuenteLeadQuien: empresa.fuenteLeadQuien,
+    })
+    .from(empresa)
+    .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .get();
+}
+
+export function clasificarOrigenDeFila(fila: FilaOrigenLead | undefined): ClasificacionOrigenLead {
+  // Sin fila y sin valor son el mismo estado hacia afuera: nadie lo registro. Y ese estado NUNCA se
+  // traduce a outbound, por mas que casi toda la prospeccion sea fria.
+  if (!fila?.fuenteLead) {
+    return { origen: null, registrado: false, evidencia: { campo: 'fuente_lead', valor: null, fuente: null, fecha: null, quien: null } };
+  }
+  return {
+    origen: fila.fuenteLead as FuenteLead,
+    registrado: true,
+    evidencia: {
+      campo: 'fuente_lead',
+      valor: fila.fuenteLead,
+      fuente: fila.fuenteLeadProcedencia,
+      fecha: fila.fuenteLeadFecha,
+      quien: fila.fuenteLeadQuien,
+    },
+  };
+}
+
+export function origenDeLead(idEmpresa: string, idOrganizacion: number): ClasificacionOrigenLead {
+  return clasificarOrigenDeFila(leerFilaOrigen(db, idEmpresa, idOrganizacion));
+}
+
+// Sobre cuantas cuentas descansa cualquier comparacion por origen. Sin este numero al lado,
+// "inbound cierra mejor que outbound" calculado sobre el 3% del pipeline se lee como si fuera del
+// 100%. Al desplegar esto va a dar 0 con origen y 1.956 sin, que es la verdad.
+export function coberturaOrigenLead(idOrganizacion: number): { conOrigen: number; sinOrigen: number; fraccion: number } {
+  const fila = db
+    .select({
+      total: sql<number>`count(*)`,
+      con: sql<number>`sum(case when ${empresa.fuenteLead} is not null then 1 else 0 end)`,
+    })
+    .from(empresa)
+    .where(eq(empresa.organizacionActivaId, idOrganizacion))
+    .get();
+  const total = fila?.total ?? 0;
+  const con = fila?.con ?? 0;
+  return { conOrigen: con, sinOrigen: total - con, fraccion: total === 0 ? 0 : con / total };
+}
+
+// origen NULLABLE a proposito: es como se BORRA un origen puesto por costumbre. Sin eso, un valor
+// mal puesto queda para siempre indistinguible de uno verificado y ensucia la comparacion.
+const marcarFuenteLeadSchema = z.object({
+  idEmpresa: z.string().min(1),
+  origen: z.enum(FUENTES_LEAD).nullable(),
+  procedencia: z.string().min(1),
+  quien: z.string().min(1),
+  fecha: fechaDiaSchema.optional(),
+  nota: z.string().min(1).optional(),
+});
+export type MarcarFuenteLeadInput = z.input<typeof marcarFuenteLeadSchema>;
+export type MarcarFuenteLeadResultado = { idEmpresa: string; clasificacion: ClasificacionOrigenLead };
+
+export function marcarFuenteLead(input: MarcarFuenteLeadInput, idOrganizacion: number): MarcarFuenteLeadResultado {
+  const parsed = marcarFuenteLeadSchema.parse(input);
+  const instante = new Date();
+  const fecha = parsed.fecha ?? fechaBogotaISO(instante);
+
+  return db.transaction((tx) => {
+    const antes = leerFilaOrigen(tx, parsed.idEmpresa, idOrganizacion);
+    if (!antes) throw new Error(`Empresa ${parsed.idEmpresa} no existe o no esta activa en la organizacion ${idOrganizacion}`);
+
+    // Borrar el origen limpia tambien su procedencia: dejar el quien y la fecha de un dato que ya no
+    // esta seria evidencia colgando de nada. Lo que queda del borrado es la fila de sync_cambios.
+    tx.update(empresa)
+      .set({
+        fuenteLead: parsed.origen,
+        fuenteLeadProcedencia: parsed.origen ? parsed.procedencia : null,
+        fuenteLeadFecha: parsed.origen ? fecha : null,
+        fuenteLeadQuien: parsed.origen ? parsed.quien : null,
+        updatedAt: sql`datetime('now')`,
+      })
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .run();
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: instante.toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle:
+          `origen del lead: ${antes.fuenteLead ?? 'sin registrar'} -> ${parsed.origen ?? 'borrado'} | ` +
+          `procedencia ${parsed.procedencia} | lo dijo ${parsed.quien}${parsed.nota ? ` | ${parsed.nota}` : ''}`,
+      })
+      .run();
+
+    return { idEmpresa: parsed.idEmpresa, clasificacion: clasificarOrigenDeFila(leerFilaOrigen(tx, parsed.idEmpresa, idOrganizacion)) };
+  });
+}
+
 // --- actividad por canal (panel del CRO, 2026-08-05) -----------------------------------
 //
 // Las filas que alimentan connect rate, texto contra llamada, la deduplicacion de texto y las

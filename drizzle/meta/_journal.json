@@ -204,6 +204,20 @@
       "when": 1785900100000,
       "tag": "0029_auditoria_tarea",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1785910000000,
+      "tag": "0030_origen_lead",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1785910100000,
+      "tag": "0031_auditoria_origen_lead",
+      "breakpoints": true
     }
   ]
 }
