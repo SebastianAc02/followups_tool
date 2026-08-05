@@ -1044,3 +1044,43 @@ export const empresaCategoriaView = sqliteView('empresa_categoria', {
   categoria: text('categoria'),
   atacable: integer('atacable'),
 }).existing();
+
+// Estado por canal (punto 8 de la propuesta de tandas, 2026-08-04). Una fila por (id_empresa,
+// canal): si ESE canal esta vivo, muerto, o nadie lo verifico. Existe porque Intel Go acumulo
+// cuatro toques marcando la misma linea fuera de servicio -- nadie sabia que el numero estaba
+// muerto porque no habia donde escribirlo, asi que la cuenta seguia saliendo en la lista de
+// llamadas y se gastaban toques contra un tono de error.
+//
+// LA REGLA DURA, la misma que ya rige `empresa.aliado`: LA AUSENCIA DE DATO NUNCA SE LEE COMO
+// DATO NEGATIVO. Un canal sin fila NO es 'vivo', es 'sin_dato' -- la app arma ese valor leyendo
+// la ausencia (app/db/canal-estado.ts), nunca se escribe en la columna. 'vivo' significa que
+// alguien verifico que el numero funciona; 'sin_dato' que nadie lo verifico.
+//
+// `canal` es uno de CANALES_TOQUE (app/db/validation.ts), no CANALES: el estado de una reunion
+// tambien se pregunta (¿la sala/el zoom sigue vivo?), y reunion solo existe en el superset de
+// toque. `estado` es TEXT sin CHECK y sin dominio impuesto aca a proposito, mismo criterio que
+// canal/resultado en `toque`: el dominio lo enforza Zod en canal-estado.ts, porque un CHECK en
+// SQLite no se amplia despues sin recrear la tabla.
+//
+// fuente y quien NOT NULL: mismo criterio que aliado_fuente/aliado_quien. Un canal marcado muerto
+// sin quien lo dijo es exactamente el dato que despues nadie puede auditar.
+export const canalEstado = sqliteTable(
+  'canal_estado',
+  {
+    idCanalEstado: integer('id_canal_estado').primaryKey({ autoIncrement: true }),
+    idEmpresa: text('id_empresa').notNull(),
+    canal: text('canal').notNull(),
+    estado: text('estado').notNull(),
+    nota: text('nota'),
+    fuente: text('fuente').notNull(),
+    quien: text('quien').notNull(),
+    fecha: text('fecha').notNull(),
+    idOrganizacion: integer('id_organizacion').notNull(),
+    createdAt: text('created_at'),
+  },
+  (t) => [
+    // Un canal tiene UN estado, no un historial de opiniones simultaneas. Volver a marcar el
+    // mismo canal actualiza la fila (upsert en marcarCanal), no la duplica.
+    uniqueIndex('ux_canal_estado_empresa_canal_org').on(t.idEmpresa, t.canal, t.idOrganizacion),
+  ],
+);

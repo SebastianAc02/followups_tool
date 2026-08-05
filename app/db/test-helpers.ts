@@ -577,6 +577,25 @@ export function crearDbPrueba() {
       actualizado_por TEXT
     );
 
+    -- Migracion 0027: estado por canal, una fila por (id_empresa, canal). estado sin CHECK a
+    -- proposito (mismo criterio que canal/resultado en toque): el dominio lo enforza Zod en
+    -- app/db/canal-estado.ts, no un CHECK que no se puede ampliar despues sin recrear la tabla.
+    CREATE TABLE canal_estado (
+      id_canal_estado INTEGER PRIMARY KEY AUTOINCREMENT,
+      id_empresa TEXT NOT NULL,
+      canal TEXT NOT NULL,
+      estado TEXT NOT NULL,
+      nota TEXT,
+      fuente TEXT NOT NULL,
+      quien TEXT NOT NULL,
+      fecha TEXT NOT NULL,
+      id_organizacion INTEGER NOT NULL,
+      created_at TEXT
+    );
+
+    CREATE UNIQUE INDEX ux_canal_estado_empresa_canal_org
+      ON canal_estado (id_empresa, canal, id_organizacion);
+
     CREATE VIEW empresa_categoria AS
         SELECT e.id_empresa, e.nombre_oficial,
             CASE
