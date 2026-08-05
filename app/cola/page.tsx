@@ -82,7 +82,15 @@ export default async function Cola({
           <CuentaActual
             ficha={ficha}
             clasificacion={clasificacion}
-            hrefRegistrar={`/llamada/${clasificacion.idEmpresa}`}
+            // ?vista con el canal del proximo paso: sin esto la pantalla siempre aterrizaba en la
+            // vista de llamadas, asi que una cuenta de WhatsApp o de correo obligaba a cambiar de
+            // pestana a mano. decidirVista solo lo usa cuando la secuencia no tiene un paso activo
+            // que mande, asi que la cadencia sigue ganando cuando la hay.
+            hrefRegistrar={
+              clasificacion.proximoCanal === 'whatsapp' || clasificacion.proximoCanal === 'correo'
+                ? `/llamada/${clasificacion.idEmpresa}?vista=${clasificacion.proximoCanal}`
+                : `/llamada/${clasificacion.idEmpresa}`
+            }
             hrefSiguiente={posicionSiguiente ? `/cola?tanda=${posicionSiguiente.tanda}&i=${posicionSiguiente.indice}` : null}
           />
           <ListaTanda grupos={grupos} actual={posicion} total={totalCola} />

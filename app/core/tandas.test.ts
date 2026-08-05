@@ -31,6 +31,7 @@ function cuenta(over: Partial<CuentaParaTanda> = {}): CuentaParaTanda {
     canalMuerto: false,
     toques: [],
     ultimoToqueDia: null,
+    proximoCanal: null,
     ...over,
   };
 }
@@ -258,6 +259,16 @@ test('sin fecha de referencia los dias son null, no cero', () => {
   const r = clasificarTanda(cuenta(), { hoy: HOY, piso: 1000 });
 
   assert.equal(r.diasEnEstado, null);
+});
+
+// La pantalla de Toques manda al operador a la vista del canal correcto. Sin este dato siempre lo
+// mandaba a la de llamadas, asi que en una cuenta de WhatsApp o de correo aterrizaba en la pestana
+// equivocada y tenia que cambiarla a mano: una friccion por cuenta, en la pantalla cuyo proposito
+// entero es que no tenga que decidir nada.
+test('el canal del proximo paso viaja con la cuenta, para no aterrizar en la pestana equivocada', () => {
+  const r = clasificarTanda(cuenta({ proximoCanal: 'whatsapp' }), { hoy: HOY, piso: 1000 });
+
+  assert.equal(r.proximoCanal, 'whatsapp');
 });
 
 // El tamano decide si una cuenta se llama, y produccion trae numeros inventados: UICOM figuraba con

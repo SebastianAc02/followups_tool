@@ -164,6 +164,7 @@ import { elegirDestinatarioDefault } from '../core/inscripcion';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { clasificarTanda, TANDAS } from '../core/tandas.ts';
+import { hoy as hoyDelRequest } from '../lib/reloj.ts';
 import {
   llamadasPorReunionConseguida,
   mixPorCanal,
@@ -175,7 +176,6 @@ import {
   type ToqueDashboardCRO,
 } from '../core/dashboard-cro.ts';
 import { marcarCanal, type MarcarCanalInput, type MarcarCanalResultado } from '../db/canal-estado.ts';
-import { fechaBogotaISO as hoyBogota } from '../lib/date-utils.ts';
 
 // El corte bajo el cual un ISP no cierra. Es hipotesis medida, no ley: por eso `tandas` lo recibe
 // como parametro y esto es solo el default.
@@ -547,8 +547,12 @@ export type TandasInput = { idOrganizacion?: number; owner?: string; piso?: numb
 
 export function tandasTool(input: TandasInput) {
   const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
-  const hoy = hoyBogota();
-  const cuentas = cuentasParaTandas(idOrganizacion);
+  // hoy() y no la fecha real: es el reloj de demo por request, que en modo prueba corre la fecha y
+  // en produccion cae a la real por construccion (isps.db no tiene la cookie de modo prueba). Sin
+  // esto, en modo prueba las tandas quedaban en la fecha de verdad y el resto de la pantalla en la
+  // simulada.
+  const hoy = hoyDelRequest();
+  const cuentas = cuentasParaTandas(idOrganizacion, hoy);
 
   const clasificadas = cuentas.map((c) =>
     clasificarTanda(c, { hoy, piso: input.piso ?? PISO_USUARIOS_DEFAULT, owner: input.owner }),
@@ -623,7 +627,7 @@ export function dashboardCroTool(input: DashboardCroInput) {
     mixPorCanal: mixPorCanal(toques),
     embudoReuniones: embudoReuniones(toques),
     mixPorTipo: mixPorTipoToque(toques),
-    cierresSinMovimiento: cierresSinMovimiento(toques, hoyBogota(), input.umbralDiasCierre),
+    cierresSinMovimiento: cierresSinMovimiento(toques, hoyDelRequest(), input.umbralDiasCierre),
     tasaRespuesta: tasaRespuestaPorEtapa(toques),
     // La mitad de la conversacion que hoy no entra en ninguna metrica: 143 mensajes entrantes en 15
     // cuentas. Van aparte y NO suman a ningun denominador de esfuerzo: no los hizo el operador.

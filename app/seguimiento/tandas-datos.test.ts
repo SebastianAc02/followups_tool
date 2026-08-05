@@ -28,6 +28,7 @@ function cuenta(idEmpresa: string, tanda: GrupoTanda['tanda'], diasEnEstado: num
     usuarios: { valor: null, fuente: null, confirmado: false },
     advertencias: [] as string[],
     owner: 'Sebastian Acosta Molina',
+    proximoCanal: null,
     diasEnEstado,
   };
 }

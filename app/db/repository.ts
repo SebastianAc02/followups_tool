@@ -1841,7 +1841,11 @@ export function marcarTareaBloqueante(input: MarcarTareaBloqueanteInput, idOrgan
 // La regla no vive aca: vive en app/core/tandas.ts, pura y probada aparte. Este bloque solo lee y
 // arma. Mezclarlas obligaria a montar una base para probar el orden de las reglas, que es
 // justamente lo que hay que poder cambiar sin miedo.
-export function cuentasParaTandas(idOrganizacion: number): CuentaParaTanda[] {
+// `hoy` entra por parametro y no se lee de un reloj adentro. La app tiene un reloj de demo por
+// request (app/lib/reloj.ts) que corre la fecha en modo prueba; si esta funcion consultara la fecha
+// real por su cuenta, en modo prueba el vencimiento de una congelada se evaluaria contra un dia y la
+// tanda contra otro, y las dos mitades de la misma pantalla se contradirian.
+export function cuentasParaTandas(idOrganizacion: number, hoy: string): CuentaParaTanda[] {
   const filas = db
     .select({
       idEmpresa: empresa.idEmpresa,
@@ -1860,6 +1864,7 @@ export function cuentasParaTandas(idOrganizacion: number): CuentaParaTanda[] {
       fechaRetorno: empresa.fechaRetorno,
       tareaBloqueante: empresa.tareaBloqueante,
       tareaBloqueanteDesde: empresa.tareaBloqueanteDesde,
+      proximoCanal: empresa.proximoCanal,
       usuarios: empresaUsuarios.usuariosEfectivos,
       // De donde salio el tamano. Se prefiere la fuente de los REALES cuando hay reales; si no, la
       // de los estimados. usuarios_efectivos es COALESCE(reales, estimados), asi que la fuente
@@ -1951,9 +1956,10 @@ export function cuentasParaTandas(idOrganizacion: number): CuentaParaTanda[] {
       usuarios: f.usuarios,
       usuariosFuente: f.usuariosReales != null ? f.usuariosRealesFuente : f.usuariosEstFuente,
       aliado: clasificarAliadoDeFila(propia, hermana && hermana.idEmpresa !== f.idEmpresa ? hermana : null),
-      descarte: clasificarDescarteDeFila(f, fechaBogotaISO()),
+      descarte: clasificarDescarteDeFila(f, hoy),
       tareaBloqueante: f.tareaBloqueante,
       tareaBloqueanteDesde: f.tareaBloqueanteDesde,
+      proximoCanal: f.proximoCanal,
       tieneCadencia: conCadencia.has(f.idEmpresa),
       canalMuerto: canalesMuertos.has(f.idEmpresa),
       toques: porEmpresa.get(f.idEmpresa) ?? [],

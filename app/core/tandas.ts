@@ -56,6 +56,11 @@ export type CuentaParaTanda = {
   // El dia del ultimo toque REAL (no entrante). Separado de `toques` porque responde otra pregunta:
   // si ya se trabajo la cuenta hoy.
   ultimoToqueDia: string | null;
+  // Por donde toca el proximo toque. No lo usa ninguna regla: viaja para que la pantalla mande al
+  // operador a la vista del canal correcto. Sin el, una cuenta de WhatsApp o de correo aterriza en
+  // la de llamadas y hay que cambiar de pestana a mano, una friccion por cuenta justo en la
+  // pantalla cuyo proposito es que no tenga que decidir nada.
+  proximoCanal: string | null;
 };
 
 export type OpcionesTanda = {
@@ -80,6 +85,7 @@ export type ResultadoTanda = {
   // marcada; no se esconde ni se aprueba.
   advertencias: string[];
   owner: string | null;
+  proximoCanal: string | null;
   // CUANTOS DIAS LLEVA QUIETA EN ESTE ESTADO. Es la pregunta que la pantalla de Seguimiento no sabe
   // responder hoy: una cuenta con 20 dias en "tocado sin respuesta" no es lo mismo que una de 2, y
   // hoy se ven iguales.
@@ -147,6 +153,7 @@ export function clasificarTanda(c: CuentaParaTanda, opts: OpcionesTanda): Result
       confirmado: c.usuarios != null && c.usuariosFuente === 'notion',
     },
     advertencias,
+    proximoCanal: c.proximoCanal,
   };
   const con = (tanda: Tanda, regla: string, evidencia: Evidencia): ResultadoTanda => ({
     ...base,

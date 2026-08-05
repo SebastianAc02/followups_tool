@@ -45,6 +45,7 @@ function cuenta(idEmpresa: string, diasEnEstado: number | null = null) {
     usuarios: { valor: null, fuente: null, confirmado: false },
     advertencias: [] as string[],
     owner: 'Sebastian Acosta Molina',
+    proximoCanal: null,
     diasEnEstado,
   };
 }
