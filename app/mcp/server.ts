@@ -64,6 +64,7 @@ import {
   RAZONES_PERDIDA,
   OBJECIONES,
   ACCIONES_CLIENTE,
+  TIPOS_TOQUE,
   TIPOS_PLAN,
   ORIGENES_PLAN,
   RITMOS_INGRESO,
@@ -145,6 +146,17 @@ const ACCION_CLIENTE_DESCRIBE =
   'infiere del resultado del toque (no_contesto NO es sin_cliente por si solo). Un ordinal ' +
   'inventado corrompe justo la medicion para la que existe el campo.';
 
+const TIPO_TOQUE_DESCRIBE =
+  'A QUE fue el toque, en el vocabulario de la secuencia comercial: frio (primer contacto, la cuenta ' +
+  'no sabe quien llama), reactivacion (la cuenta ya se toco antes y llevaba tiempo quieta), ' +
+  'seguimiento (empuja una conversacion viva), reunion (agenda, confirma o corre una reunion), ' +
+  'cierre (empuja firma, contrato o pago). Es un EJE DISTINTO de canal: canal es por donde se toco, ' +
+  'tipo es a que. Un WhatsApp empujando la firma es canal whatsapp y tipo cierre. ' +
+  'OMITILO si el operador no dijo que clase de toque fue: vacio significa "no se dijo" y JAMAS se ' +
+  'deriva de la etapa de la cuenta ni del canal. La derivacion por etapa es justo lo que contamino el ' +
+  'mix hasta hoy, porque la etapa la mueve el toque mismo: la llamada fria que consigue la reunion ' +
+  'deja la cuenta en reunion_agendada y despues se cuenta como toque de reunion.';
+
 // Organizacion default para las WRITE tools cuando el caller no la fija (solo el server
 // standalone legacy, que hoy corre en modo solo-lectura y por tanto nunca registra escritura).
 // El camino real (app/api/mcp/route.ts) SIEMPRE pasa la organizacion de la sesion.
@@ -172,6 +184,7 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
       inputSchema: {
         idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
         canal: z.enum(CANALES_TOQUE).describe('reunion es un canal de toque valido; no es un canal de cadencia'),
+        tipoToque: z.enum(TIPOS_TOQUE).optional().describe(TIPO_TOQUE_DESCRIBE),
         resultado: z
           .enum(RESULTADOS)
           .describe(
@@ -282,6 +295,11 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
           .min(1)
           .describe('Por que se edita, en prosa y OBLIGATORIO: "llego la duracion de tl;dv" no es lo mismo que "me equivoque al dictar". Queda en la bitacora junto a los campos que cambiaron'),
         canal: z.enum(CANALES_TOQUE).optional(),
+        tipoToque: z
+          .enum(TIPOS_TOQUE)
+          .nullable()
+          .optional()
+          .describe(`null BORRA el tipo (lo vuelve a "no se dijo"). ${TIPO_TOQUE_DESCRIBE}`),
         resultado: z.enum(RESULTADOS).optional(),
         fecha: z.string().min(1).optional().describe('YYYY-MM-DD, el dia en que PASO el toque. Corrige fecha_dia y el timestamp; no toca el texto original de las filas viejas sin fecha parseable'),
         duracionSegundos: z.number().int().nonnegative().nullable().optional().describe('null borra el valor. Este es el campo que dejo tres reuniones de 55, 71 y 50 minutos sin poder registrarse'),
@@ -529,6 +547,10 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
       inputSchema: {
         idEmpresa: z.string().min(1),
         canal: z.enum(CANALES_TOQUE),
+        tipoToque: z
+          .enum(TIPOS_TOQUE)
+          .optional()
+          .describe(`En que CLASE de toque se cayo la cuenta: perder en un cierre y perder en un frio son dos problemas distintos. ${TIPO_TOQUE_DESCRIBE}`),
         razonPerdida: z.enum(RAZONES_PERDIDA).describe('Por que se pierde/parquea la cuenta (obligatorio, vocabulario cerrado)'),
         razonPerdidaNota: z.string().min(1).optional().describe('El detalle en prosa, aparte del valor acotado'),
         quePaso: z.string().min(1).optional(),

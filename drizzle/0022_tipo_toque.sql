@@ -1,0 +1,13 @@
+-- 0022: tipo_toque, a QUE fue el toque. Ver TIPOS_TOQUE en app/db/validation.ts.
+--
+-- NUMERADA 0022 Y NO 0021, con el idx 21 del journal dejado LIBRE a proposito. La 0021
+-- (atribucion_reunion) nacio en otra rama y todavia no esta commiteada: si esta se llamara 0021,
+-- las dos migraciones distintas competirian por el mismo nombre y el mismo indice, y la que
+-- llegara segunda se perderia en silencio o reventaria el merge del journal. Con el hueco, la
+-- 0021 entra en su lugar cuando aterrice y las dos quedan en el orden correcto sin que nadie
+-- tenga que renumerar nada.
+--
+-- Nullable y sin default: NULL es "no se dijo". Las filas viejas se quedan asi y NO se
+-- backfillean, porque la etapa de origen de cada toque no quedo guardada y el tipo de lo ya
+-- capturado no se puede reconstruir sin inventarlo.
+ALTER TABLE `toque` ADD `tipo_toque` text;

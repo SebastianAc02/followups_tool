@@ -189,6 +189,17 @@ export const toque = sqliteTable(
     // que nadie sabe, y borrar el texto seria perder el unico rastro que queda de cuando fueron.
     fechaTexto: text('fecha_texto'),
     canal: text('canal'),
+    // QUE CLASE de toque fue, uno de TIPOS_TOQUE (app/db/validation.ts). Eje distinto de `canal`:
+    // canal es por donde se toco, tipo es a que se toco. Existe porque el mix por tipo se venia
+    // derivando de la etapa de la cuenta, y la etapa la mueve el toque mismo unas lineas mas
+    // abajo en este mismo write path: la llamada fria que consigue la reunion deja la cuenta en
+    // reunion_agendada y despues se lee como toque de reunion.
+    //
+    // NULL = no se dijo. Sin default y sin inferencia, mismo criterio que accion_cliente. Las
+    // filas viejas quedan en NULL y NO se rellenan hacia atras: la etapa de origen de cada toque
+    // no quedo guardada, asi que el tipo de lo ya capturado no se puede reconstruir sin
+    // inventarlo, y un mix sobre valores inventados mide el invento.
+    tipoToque: text('tipo_toque'),
     resultado: text('resultado'),
     // Cuanto duro, en segundos. Nullable: un correo no dura, y un toque viejo no lo sabe. Sin
     // esta columna no se puede separar la llamada de 40 segundos que no fue conversacion de la

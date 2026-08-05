@@ -119,6 +119,8 @@ export function crearDbPrueba() {
       fecha_dia TEXT,
       fecha_texto TEXT,
       canal TEXT,
+      -- Migracion 0022: a QUE fue el toque (TIPOS_TOQUE), eje distinto de por donde se toco.
+      tipo_toque TEXT,
       resultado TEXT,
       -- Migracion 0014: cuanto duro, en segundos.
       duracion_segundos INTEGER,

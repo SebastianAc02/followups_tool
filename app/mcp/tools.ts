@@ -781,6 +781,18 @@ function conteosActividad(toques: ToqueActividad[]) {
   return {
     porCanal: contar(toques.map((t) => t.canal)),
     porResultado: contar(toques.map((t) => t.resultado)),
+    // El mix por TIPO, con la misma forma que el bloque de duracion de abajo y por la misma
+    // razon: porTipo cuenta solo lo que alguien dijo, y cuantos se quedaron mudos va aparte, en
+    // su propia llave. Presentar el mix de los 30 que traen tipo como si fuera el de los 96
+    // toques del periodo es la lectura falsa que este corte tiene que hacer imposible.
+    //
+    // Los mudos NO se reparten ni se rellenan mirando la etapa de la cuenta: derivar es lo que
+    // contamino el mix que este bloque viene a reemplazar (ver TIPOS_TOQUE en validation.ts).
+    tipo: {
+      porTipo: contar(toques.map((t) => t.tipoToque).filter((t): t is string => t != null)),
+      toquesConTipo: toques.filter((t) => t.tipoToque != null).length,
+      toquesSinTipo: toques.filter((t) => t.tipoToque == null).length,
+    },
     porEjecutor: contar(toques.map((t) => t.ejecutadoPor)),
     // Segundos totales de lo que SI trae duracion, y cuantos toques no la traen. Un promedio
     // calculado sobre los que la traen y presentado como si fuera de todos seria falso.

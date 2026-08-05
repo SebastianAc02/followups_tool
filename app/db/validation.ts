@@ -307,6 +307,27 @@ export const NIVEL_ACCION_CLIENTE: Record<AccionCliente, number> = {
   se_compromete: 6, // "el jueves te confirmo", firma, paga
 };
 
+// QUE CLASE de toque fue, en el vocabulario de la secuencia comercial (propuesta de tandas,
+// 2026-08-04). Eje distinto de `canal`, y por eso columna distinta: canal es POR DONDE se toco
+// (llamada, whatsapp, correo, reunion), tipo es A QUE fue. Un WhatsApp empujando la firma es
+// canal whatsapp y tipo cierre, y sin las dos columnas no hay forma de preguntar cuantos cierres
+// se trabajaron por WhatsApp.
+//
+// POR QUE NO SE DERIVA DE LA ETAPA, que es como se venia contando. La etapa de la cuenta la
+// MUEVE el toque mismo (estadoDestinoPorToque, unas lineas mas abajo en el write path): la
+// llamada fria que consigue la reunion deja la cuenta en reunion_agendada, asi que leer la etapa
+// despues del hecho cuenta esa llamada como toque de reunion. El mix medido el 2026-08-04 (18
+// cierre, 21 reunion, 41 seguimiento, 15 reactivacion, 1 frio) esta contaminado exactamente por
+// ahi, y no tiene arreglo hacia atras: la etapa de origen no quedo guardada en el toque.
+//
+// NULL cuando no se dijo, jamas inferido, mismo criterio que accion_cliente. Se decidio opcional
+// y no obligatorio (operador, 2026-08-04) porque los cuatro caminos de escritura de la web
+// (app/actions.ts, app/llamada/[id]/actions.ts) no tienen a quien preguntarle el tipo, y un
+// obligatorio ahi se paga inventando el valor. El silencio se mide en vez de taparse: el mix de
+// `actividad` devuelve los sin tipo en su propia llave.
+export const TIPOS_TOQUE = ['frio', 'reactivacion', 'seguimiento', 'reunion', 'cierre'] as const;
+export type TipoToque = (typeof TIPOS_TOQUE)[number];
+
 // Quien ejecuta un toque cuando el caller no lo dice (decision del operador, 2026-07-25).
 // Revierte la regla anterior ("NULL = no atribuido, nunca se asume"): en la practica dejo 71 de
 // 71 toques del ultimo mes sin ejecutor, o sea el 100% del dato perdido por proteger un caso
@@ -640,6 +661,10 @@ export const registrarToqueSchema = z
     // mismo dia). Existe para el toque que se dicta al dia siguiente, que antes entraba con la
     // fecha de cuando se escribio y no de cuando paso.
     fecha: fechaDiaSchema.optional(),
+    // A QUE fue el toque, en el vocabulario de la secuencia. Opcional de verdad y SIN default:
+    // ausente queda NULL, que significa "no se dijo". No se deriva del canal ni de la etapa de
+    // la cuenta, que es de donde salia hasta hoy y por donde entra la contaminacion.
+    tipoToque: z.enum(TIPOS_TOQUE).optional(),
     duracionSegundos: z.number().int().nonnegative().optional(),
     quePaso: z.string().min(1).optional(),
     proximoFollowUp: z.string().min(1).optional(),
@@ -787,6 +812,9 @@ export const editarToqueSchema = z
     canal: z.enum(CANALES_TOQUE).optional(),
     resultado: z.enum(RESULTADOS).optional(),
     fecha: fechaDiaSchema.optional(),
+    // nullable ademas de optional, igual que sus vecinos: un tipo puesto por costumbre tiene que
+    // poder volver a "no se dijo", no solo cambiarse por otro.
+    tipoToque: z.enum(TIPOS_TOQUE).nullable().optional(),
     duracionSegundos: z.number().int().nonnegative().nullable().optional(),
     quePaso: z.string().min(1).nullable().optional(),
     razonPerdida: z.enum(RAZONES_PERDIDA).nullable().optional(),

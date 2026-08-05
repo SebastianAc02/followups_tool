@@ -146,6 +146,7 @@ import {
   RAZON_PERDIDA_LABELS,
   OBJECIONES,
   ACCIONES_CLIENTE,
+  TIPOS_TOQUE,
   EJECUTOR_POR_DEFECTO,
   fechaDiaSchema,
   type Canal,
@@ -751,6 +752,7 @@ export type ToqueEscrito = {
   fecha: string | null;
   fechaDia: string | null;
   canal: string | null;
+  tipoToque: string | null;
   resultado: string | null;
   duracionSegundos: number | null;
   quePaso: string | null;
@@ -797,6 +799,7 @@ function leerToqueEscrito(
       fecha: toque.fecha,
       fechaDia: toque.fechaDia,
       canal: toque.canal,
+      tipoToque: toque.tipoToque,
       resultado: toque.resultado,
       duracionSegundos: toque.duracionSegundos,
       quePaso: toque.quePaso,
@@ -946,6 +949,10 @@ export function registrarToque(input: RegistrarToqueInput, idOrganizacion: numbe
         // null: solo se llena hacia atrás, para el historial importado que no se pudo parsear.
         fechaDia,
         canal: parsed.canal,
+        // NULL cuando el caller no lo dijo. No se deriva de emp.estadoNotion (que esta a la
+        // mano unas lineas arriba) ni del canal: derivarlo es exactamente lo que contamino el
+        // mix que esta columna viene a arreglar.
+        tipoToque: parsed.tipoToque ?? null,
         resultado: parsed.resultado,
         duracionSegundos: parsed.duracionSegundos ?? null,
         quePaso: parsed.quePaso ?? null,
@@ -1133,6 +1140,7 @@ export function editarToque(input: EditarToqueInput, idOrganizacion: number): Ed
       if (valor !== undefined) patch[campo] = valor;
     };
     tomar('canal', parsed.canal);
+    tomar('tipoToque', parsed.tipoToque);
     tomar('resultado', parsed.resultado);
     tomar('duracionSegundos', parsed.duracionSegundos);
     tomar('quePaso', parsed.quePaso);
@@ -1220,6 +1228,10 @@ export function editarToque(input: EditarToqueInput, idOrganizacion: number): Ed
 const marcarPerdidaSchema = z.object({
   idEmpresa: z.string().min(1),
   canal: z.enum(CANALES_TOQUE),
+  // En que clase de toque se cayo la cuenta. Perder en un cierre y perder en un frio son dos
+  // problemas distintos: el primero dice que el proceso llego y no cerro, el segundo que ni
+  // siquiera arranco. Opcional y NULL cuando no se dijo, igual que en registrarToque.
+  tipoToque: z.enum(TIPOS_TOQUE).optional(),
   // Cerrada en los siete valores del negocio (2026-07-25). Era texto libre y produjo UNA fila
   // en 285 toques, en prosa: no se podia agrupar nada. La prosa sigue entrando, en la nota.
   razonPerdida: z.enum(RAZONES_PERDIDA),
@@ -1267,6 +1279,7 @@ export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number)
         fecha: fechaCompleta,
         fechaDia,
         canal: parsed.canal,
+        tipoToque: parsed.tipoToque ?? null,
         // 'perdido' desde el 2026-07-25: con la taxonomia ampliada, "la cuenta no va" tiene su
         // propio valor. 'contesto_no' (el que escribia antes) sigue siendo valido y sigue
         // significando lo mismo; se deja de escribir aca porque perdido es mas preciso.
@@ -10257,6 +10270,7 @@ export type ToqueActividad = {
   fechaDia: string | null;
   fechaTexto: string | null;
   canal: string | null;
+  tipoToque: string | null;
   resultado: string | null;
   duracionSegundos: number | null;
   idEmpresa: string;
@@ -10324,6 +10338,7 @@ export function toquesEnRango(
       fechaDia: toque.fechaDia,
       fechaTexto: toque.fechaTexto,
       canal: toque.canal,
+      tipoToque: toque.tipoToque,
       resultado: toque.resultado,
       duracionSegundos: toque.duracionSegundos,
       idEmpresa: toque.idEmpresa,

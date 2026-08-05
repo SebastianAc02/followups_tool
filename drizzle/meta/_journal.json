@@ -148,6 +148,13 @@
       "when": 1785284599798,
       "tag": "0020_hilo_gmail",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1785895319496,
+      "tag": "0022_tipo_toque",
+      "breakpoints": true
     }
   ]
 }
