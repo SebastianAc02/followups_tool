@@ -353,6 +353,37 @@ export type Aliado = (typeof ALIADOS)[number];
 // porque nadie sabe y una cuenta que nadie miro no se descarta a ciegas.
 export const ALIADOS_CONFIRMADOS: readonly Aliado[] = ['sae_plus', 'ultimo_kilometro', 'integrapay'];
 
+// POR QUE una cuenta no entra a la lista, cuando la razon no es que se haya perdido
+// (propuesta de tandas, 2026-08-04). Columna aparte de razon_perdida a proposito: una cuenta
+// puede rechazar sin estar perdida, y "ya es cliente" o "congelada hasta octubre" sacan la cuenta
+// de la lista de hoy sin que el deal se haya caido. Contarlas como perdidas ensuciaria el embudo.
+//
+// Los seis salen de los descartes reales del 2026-08-04, que hasta ese dia vivian en la memoria
+// del operador o en prosa dentro del proximo paso:
+//   dijo_que_no            - lo dijo y quedo escrito en texto libre. Hay que leerlo frase por frase
+//   congelada              - vuelve en una fecha. La UNICA que exige fechaRetorno
+//   ya_es_cliente          - Servinet Redes y Sistemas Zomac, que produccion mostraba en on hold
+//   no_avanzo_tras_reunion - Simect Group: tuvo reunion y no avanzo
+//   otro_dueno             - el proximo paso decia "FUP Felipe" y el owner de la ficha decia otra cosa
+//   no_califica            - por tamano o por fit, verificado
+//
+// ESTA LISTA ES DERIVADA, NO DICTADA. La propuesta pide el campo estructurado y no enumera sus
+// valores; estos seis se sacaron de los descartes que costaron las cuatro correcciones de esa
+// sesion. Es TEXT sin CHECK, asi que corregir la lista es una linea de Zod y ninguna migracion.
+export const MOTIVOS_DESCARTE = [
+  'dijo_que_no',
+  'congelada',
+  'ya_es_cliente',
+  'no_avanzo_tras_reunion',
+  'otro_dueno',
+  'no_califica',
+] as const;
+export type MotivoDescarte = (typeof MOTIVOS_DESCARTE)[number];
+
+// El unico motivo con reloj. Los demas no vencen: "ya es cliente" no deja de ser cierto el mes
+// que viene. Que solo este venza es lo que permite exigirle fecha solo a el.
+export const MOTIVO_DESCARTE_CON_RETORNO: MotivoDescarte = 'congelada';
+
 export const ADVERTENCIA_SIN_VERIFICAR =
   'nadie verifico si esta cuenta es de un aliado: entra a la lista MARCADA, no como limpia';
 

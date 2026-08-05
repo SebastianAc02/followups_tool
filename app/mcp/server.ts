@@ -28,6 +28,7 @@ import {
   cambiarCadenciaTool,
   marcarPerdidaTool,
   marcarAliadoTool,
+  marcarDescarteTool,
   buscarEmpresaTool,
   crearEmpresaTool,
   actualizarEmpresaTool,
@@ -67,6 +68,7 @@ import {
   ACCIONES_CLIENTE,
   TIPOS_TOQUE,
   ALIADOS,
+  MOTIVOS_DESCARTE,
   TIPOS_PLAN,
   ORIGENES_PLAN,
   RITMOS_INGRESO,
@@ -112,6 +114,7 @@ export const TOOLS_ESCRITURA = [
   'enviar_whatsapp_directo',
   'lanzar_campana',
   'marcar_aliado',
+  'marcar_descarte',
   'marcar_no_ejecutado',
   'marcar_perdida',
   'mover_estado',
@@ -606,6 +609,47 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
     async (input) => {
       const r = marcarAliadoTool(input as Parameters<typeof marcarAliadoTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_descarte',
+    {
+      description:
+        'Dice POR QUE una cuenta no entra a la lista, cuando la razon no es que se haya perdido. ' +
+        'DESCARTE NO ES PERDIDA: una cuenta puede rechazar sin que el deal se caiga, y "ya es cliente" ' +
+        'o "congelada hasta octubre" la sacan de la lista de hoy sin tocar el embudo. Para una perdida ' +
+        'real usa marcar_perdida, no esto. ' +
+        'La congelada EXIGE fechaRetorno y por eso vuelve sola el dia que dice, sin que nadie escriba ' +
+        'nada: el vencimiento se evalua al leer. Manda motivo:null para LEVANTAR un descarte mal puesto. ' +
+        'Devuelve la clasificacion releida, que ya dice si el descarte esta vigente hoy. ' +
+        'Envuelve marcarDescarte() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
+        motivo: z
+          .enum(MOTIVOS_DESCARTE)
+          .nullable()
+          .describe(
+            'dijo_que_no | congelada (vuelve en una fecha) | ya_es_cliente | no_avanzo_tras_reunion | ' +
+              'otro_dueno (el proximo paso dice que la lleva otra persona) | no_califica. ' +
+              'null LEVANTA el descarte y devuelve la cuenta a la lista',
+          ),
+        nota: z.string().min(1).optional().describe('El detalle en prosa. No reemplaza al motivo: el filtro corre sobre el campo acotado'),
+        fechaRetorno: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'YYYY-MM-DD, cuando vuelve. OBLIGATORIA con motivo=congelada y prohibida en los demas, ' +
+              'que no vencen. Sin ella la cuenta sale de la lista y nada la devuelve',
+          ),
+        fuente: z.string().min(1).describe('De donde salio: notion, operador, el cliente. OBLIGATORIO'),
+        quien: z.string().min(1).describe('Quien lo dijo, con nombre. OBLIGATORIO'),
+      },
+    },
+    async (input) => {
+      const r = marcarDescarteTool(input as Parameters<typeof marcarDescarteTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );

@@ -80,6 +80,9 @@ import {
   marcarAliado,
   type MarcarAliadoInput,
   type MarcarAliadoResultado,
+  marcarDescarte,
+  type MarcarDescarteInput,
+  type MarcarDescarteResultado,
   buscarEmpresa,
   crearEmpresa,
   actualizarEmpresa,
@@ -496,6 +499,12 @@ export function marcarPerdidaTool(input: MarcarPerdidaInput, idOrganizacion: num
 // que quedo escrito y con que procedencia, que es el dato que hace auditable la lista despues.
 export function marcarAliadoTool(input: MarcarAliadoInput, idOrganizacion: number): MarcarAliadoResultado {
   return marcarAliado(input, idOrganizacion);
+}
+
+// Por que la cuenta no entra a la lista. Devuelve la clasificacion releida, que ya trae resuelto
+// si el descarte esta vigente: una congelada con fecha pasada vuelve sola y la respuesta lo dice.
+export function marcarDescarteTool(input: MarcarDescarteInput, idOrganizacion: number): MarcarDescarteResultado {
+  return marcarDescarte(input, idOrganizacion);
 }
 
 // --- Identidad de cuentas (2026-07-24) --------------------------------------------------

@@ -34,6 +34,12 @@ export function crearDbPrueba() {
       aliado_fuente TEXT,
       aliado_fecha TEXT,
       aliado_quien TEXT,
+      -- Migracion 0025: por que la cuenta no entra a la lista, y cuando vuelve si estaba congelada.
+      motivo_descarte TEXT,
+      motivo_descarte_nota TEXT,
+      descarte_fecha TEXT,
+      descarte_quien TEXT,
+      fecha_retorno TEXT,
       estado_comercial TEXT NOT NULL,
       estado_notion TEXT,
       prioridad_comercial INTEGER,

@@ -43,6 +43,21 @@ export const empresa = sqliteTable('empresa', {
   aliadoFuente: text('aliado_fuente'),
   aliadoFecha: text('aliado_fecha'),
   aliadoQuien: text('aliado_quien'),
+  // POR QUE la cuenta no entra a la lista, uno de MOTIVOS_DESCARTE. Separada de razon_perdida:
+  // una cuenta puede rechazar sin estar perdida, y meterlas juntas las contaria a todas como
+  // perdidas en el embudo. El texto libre va en la nota y no reemplaza al valor: el filtro corre
+  // sobre la columna acotada, que es lo que hoy obliga a leer el proximo paso frase por frase.
+  motivoDescarte: text('motivo_descarte'),
+  motivoDescarteNota: text('motivo_descarte_nota'),
+  descarteFecha: text('descarte_fecha'),
+  descarteQuien: text('descarte_quien'),
+  // Cuando vuelve una cuenta congelada, ISO YYYY-MM-DD. Hoy ese dato vive en prosa dentro del
+  // proximo paso ("no antes de octubre"), asi que la cuenta sale de la lista a mano y vuelve solo
+  // si alguien se acuerda. Como fecha real sale sola y vuelve sola, sin que nadie escriba nada el
+  // dia del retorno: el vencimiento se evalua al leer (clasificarDescarte), no con un barrido.
+  //
+  // Obligatoria cuando el motivo es 'congelada' y prohibida en los demas, que no vencen.
+  fechaRetorno: text('fecha_retorno'),
   estadoComercial: text('estado_comercial').notNull(),
   estadoNotion: text('estado_notion'),
   prioridadComercial: integer('prioridad_comercial'),

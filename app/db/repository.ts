@@ -149,6 +149,9 @@ import {
   TIPOS_TOQUE,
   ALIADOS,
   ALIADOS_CONFIRMADOS,
+  MOTIVOS_DESCARTE,
+  MOTIVO_DESCARTE_CON_RETORNO,
+  type MotivoDescarte,
   ADVERTENCIA_SIN_VERIFICAR,
   type Aliado,
   EJECUTOR_POR_DEFECTO,
@@ -1574,6 +1577,174 @@ export function marcarAliado(input: MarcarAliadoInput, idOrganizacion: number): 
         heredadoDe: null,
         evidencia: evidenciaDe(escrita),
       },
+    };
+  });
+}
+
+// --- descarte (por que la cuenta no entra a la lista) ---------------------------------
+
+export type ClasificacionDescarte = {
+  // true cuando la cuenta NO entra a la lista hoy. Una congelada vencida da false aunque tenga
+  // motivo escrito: el motivo dice que paso, `descartada` dice que pasa hoy.
+  descartada: boolean;
+  motivo: MotivoDescarte | null;
+  nota: string | null;
+  // Solo la congelada la tiene. null en los demas motivos, que no vencen.
+  fechaRetorno: string | null;
+  // Si el descarte sigue en pie. Para los motivos sin reloj es igual a `descartada`; para la
+  // congelada es lo que cambia solo el dia del retorno.
+  vigente: boolean;
+  evidencia: Evidencia;
+};
+
+type FilaDescarte = {
+  motivoDescarte: string | null;
+  motivoDescarteNota: string | null;
+  descarteFecha: string | null;
+  descarteQuien: string | null;
+  fechaRetorno: string | null;
+};
+
+function leerFilaDescarte(lector: typeof db | Tx, idEmpresa: string, idOrganizacion: number): FilaDescarte | undefined {
+  return lector
+    .select({
+      motivoDescarte: empresa.motivoDescarte,
+      motivoDescarteNota: empresa.motivoDescarteNota,
+      descarteFecha: empresa.descarteFecha,
+      descarteQuien: empresa.descarteQuien,
+      fechaRetorno: empresa.fechaRetorno,
+    })
+    .from(empresa)
+    .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .get();
+}
+
+const SIN_DESCARTE: ClasificacionDescarte = {
+  descartada: false,
+  motivo: null,
+  nota: null,
+  fechaRetorno: null,
+  vigente: false,
+  evidencia: { campo: 'motivo_descarte', valor: null, fuente: null, fecha: null, quien: null },
+};
+
+// La regla, sin base de datos, para que la lectura de una cuenta y la de una lista de 476 no
+// puedan divergir. Mismo criterio que clasificarAliadoDeFila.
+//
+// `hoy` entra como parametro y no se lee de un reloj adentro: una funcion que consulta la hora es
+// una funcion que no se puede probar en dos dias distintos, y probar los dos lados del
+// vencimiento es justo lo que hace util a esta columna.
+export function clasificarDescarteDeFila(fila: FilaDescarte | undefined, hoy: string): ClasificacionDescarte {
+  if (!fila?.motivoDescarte) return { ...SIN_DESCARTE, evidencia: { ...SIN_DESCARTE.evidencia } };
+
+  const motivo = fila.motivoDescarte as MotivoDescarte;
+  // El vencimiento se evalua al LEER, no con un barrido nocturno que alguien tenga que acordarse
+  // de correr. Comparacion de strings ISO, que en YYYY-MM-DD ordena igual que las fechas.
+  const vencida = motivo === MOTIVO_DESCARTE_CON_RETORNO && fila.fechaRetorno != null && hoy >= fila.fechaRetorno;
+
+  return {
+    // El motivo NO se borra al vencer: la cuenta vuelve a la lista y el historial sigue diciendo
+    // que estuvo congelada y hasta cuando. Sin eso, una cuenta reaparece sin explicacion.
+    descartada: !vencida,
+    motivo,
+    nota: fila.motivoDescarteNota,
+    fechaRetorno: fila.fechaRetorno,
+    vigente: !vencida,
+    evidencia: {
+      campo: 'motivo_descarte',
+      valor: motivo,
+      fuente: 'herramienta',
+      fecha: fila.descarteFecha,
+      quien: fila.descarteQuien,
+    },
+  };
+}
+
+export function clasificarDescarte(idEmpresa: string, idOrganizacion: number, hoy: string): ClasificacionDescarte {
+  return clasificarDescarteDeFila(leerFilaDescarte(db, idEmpresa, idOrganizacion), hoy);
+}
+
+// motivo NULLABLE a proposito: es como se LEVANTA un descarte mal puesto. Sin eso, una cuenta
+// sacada de la lista por error se queda afuera para siempre o hay que corregirla por SQL.
+const marcarDescarteSchema = z
+  .object({
+    idEmpresa: z.string().min(1),
+    motivo: z.enum(MOTIVOS_DESCARTE).nullable(),
+    nota: z.string().min(1).optional(),
+    fechaRetorno: fechaDiaSchema.optional(),
+    fuente: z.string().min(1),
+    quien: z.string().min(1),
+  })
+  .superRefine((data, ctx) => {
+    // El invariante que hace util a la fecha. Una congelada sin fecha es una cuenta que sale de la
+    // lista y no tiene nada que la devuelva: exactamente el hold que cae al fondo de la columna y
+    // que nadie vuelve a abrir.
+    if (data.motivo === MOTIVO_DESCARTE_CON_RETORNO && !data.fechaRetorno) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fechaRetorno'],
+        message: "fechaRetorno es obligatoria cuando el motivo es 'congelada': sin fecha la cuenta sale de la lista y nada la devuelve",
+      });
+    }
+    // Al reves tambien: una fecha de retorno sobre un motivo que no vence promete un regreso que
+    // nunca va a ocurrir, porque nadie la va a mirar.
+    if (data.fechaRetorno && data.motivo !== MOTIVO_DESCARTE_CON_RETORNO) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fechaRetorno'],
+        message: `fechaRetorno solo aplica con motivo '${MOTIVO_DESCARTE_CON_RETORNO}': los demas motivos no vencen`,
+      });
+    }
+  });
+export type MarcarDescarteInput = z.input<typeof marcarDescarteSchema>;
+
+export type MarcarDescarteResultado = {
+  idEmpresa: string;
+  clasificacion: ClasificacionDescarte;
+};
+
+export function marcarDescarte(input: MarcarDescarteInput, idOrganizacion: number): MarcarDescarteResultado {
+  const parsed = marcarDescarteSchema.parse(input);
+  const instante = new Date();
+  const hoy = fechaBogotaISO(instante);
+
+  return db.transaction((tx) => {
+    const antes = leerFilaDescarte(tx, parsed.idEmpresa, idOrganizacion);
+    if (!antes) throw new Error(`Empresa ${parsed.idEmpresa} no existe o no esta activa en la organizacion ${idOrganizacion}`);
+
+    // Levantar un descarte limpia las cinco columnas: dejar la nota o el quien de un descarte que
+    // ya no existe deja evidencia colgando de nada. Lo que queda del levantamiento es la fila de
+    // sync_cambios de abajo, con el antes y el motivo del cambio.
+    tx.update(empresa)
+      .set({
+        motivoDescarte: parsed.motivo,
+        motivoDescarteNota: parsed.nota ?? null,
+        descarteFecha: parsed.motivo ? hoy : null,
+        descarteQuien: parsed.motivo ? parsed.quien : null,
+        fechaRetorno: parsed.motivo ? (parsed.fechaRetorno ?? null) : null,
+        updatedAt: sql`datetime('now')`,
+      })
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .run();
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: instante.toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle:
+          `descarte: ${antes.motivoDescarte ?? 'ninguno'} -> ${parsed.motivo ?? 'levantado'}` +
+          `${parsed.fechaRetorno ? ` | vuelve ${parsed.fechaRetorno}` : ''} | fuente ${parsed.fuente} | ` +
+          `lo dijo ${parsed.quien}${parsed.nota ? ` | ${parsed.nota}` : ''}`,
+      })
+      .run();
+
+    return {
+      idEmpresa: parsed.idEmpresa,
+      clasificacion: clasificarDescarteDeFila(leerFilaDescarte(tx, parsed.idEmpresa, idOrganizacion), hoy),
     };
   });
 }

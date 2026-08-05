@@ -169,6 +169,20 @@
       "when": 1785897100000,
       "tag": "0024_auditoria_aliado",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1785898000000,
+      "tag": "0025_descarte",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1785898100000,
+      "tag": "0026_auditoria_descarte",
+      "breakpoints": true
     }
   ]
 }
