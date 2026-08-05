@@ -11088,6 +11088,10 @@ export type ToqueActividadCanal = {
   fechaDia: string | null;
   fecha: string | null;
   esPrimerToqueDeLaCuenta: boolean;
+  // El origen de la CUENTA, repetido en cada toque suyo. Se trae en el mismo join para no pagar
+  // una query mas: la conversion por origen necesita saber de donde salio la cuenta de cada toque.
+  origenLead: string | null;
+  reunionFechaPropuesta: string | null;
 };
 
 export function toquesParaActividadCanal(
@@ -11109,6 +11113,8 @@ export function toquesParaActividadCanal(
       fuente: toque.fuente,
       fechaDia: sql<string | null>`${diaToque}`,
       fecha: toque.fecha,
+      origenLead: empresa.fuenteLead,
+      reunionFechaPropuesta: toque.reunionFechaPropuesta,
     })
     .from(toque)
     .innerJoin(empresa, eq(empresa.idEmpresa, toque.idEmpresa))
@@ -11147,6 +11153,8 @@ export function toquesParaActividadCanal(
       fechaDia: f.fechaDia,
       fecha: f.fecha,
       esPrimerToqueDeLaCuenta: esPrimero,
+      origenLead: f.origenLead,
+      reunionFechaPropuesta: f.reunionFechaPropuesta,
     };
   });
 }

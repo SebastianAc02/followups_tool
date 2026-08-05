@@ -51,7 +51,7 @@ test('serialize/parse hacen roundtrip', () => {
 // los que importan. Estas cinco tienen dato real desde el primer dia y son justo las que el operador
 // dijo que quiere ver. El criterio sigue siendo el mismo, lo que cambio es que ahora hay cinco
 // metricas que lo cumplen.
-test('tableroDefault trae las 4 metricas objetivas del CRO mas las 5 de actividad, todas del catalogo real', () => {
+test('tableroDefault trae las 4 metricas objetivas del CRO mas las 7 de actividad y origen, todas del catalogo real', () => {
   const def = tableroDefault();
   assert.deepEqual(
     def.map((w) => w.widgetId),
@@ -65,6 +65,8 @@ test('tableroDefault trae las 4 metricas objetivas del CRO mas las 5 de activida
       'toques_por_grupo_canal',
       'texto_dedup',
       'llamadas_cuentas_nuevas',
+      'conversion_por_origen',
+      'cobertura_origen_lead',
     ],
   );
   assert.ok(def.every((w) => typeof w.widgetId === 'string' && w.span > 0));
@@ -81,7 +83,7 @@ test('un tablero guardado recibe los widgets nuevos sin perder los que ya tenia 
 
   assert.deepEqual(despues.slice(0, 2), guardado, 'lo que el usuario tenia queda igual y de primero');
   assert.ok(despues.some((w) => w.widgetId === 'connect_rate'));
-  assert.equal(despues.length, guardado.length + 5);
+  assert.equal(despues.length, guardado.length + 7);
 });
 
 test('incorporar dos veces no duplica nada', () => {

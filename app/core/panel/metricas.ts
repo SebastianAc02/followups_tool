@@ -53,6 +53,8 @@ export type MetricasDatos = {
   toquesPorGrupoCanal?: Record<string, number>;
   textoDeduplicado?: Record<string, number>;
   llamadasCuentasNuevas?: Record<string, number>;
+  conversionPorOrigen?: Record<string, number>;
+  coberturaOrigenLead?: Record<string, number>;
 };
 
 const SIN_DATOS: MetricaValor = { estado: 'sin_datos' };
@@ -116,6 +118,10 @@ export function resolverMetrica(dataSource: DataSourceKey | null, datos: Metrica
       return datos.textoDeduplicado === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.textoDeduplicado };
     case 'llamadasCuentasNuevas':
       return datos.llamadasCuentasNuevas === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.llamadasCuentasNuevas };
+    case 'conversionPorOrigen':
+      return datos.conversionPorOrigen === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.conversionPorOrigen };
+    case 'coberturaOrigenLead':
+      return datos.coberturaOrigenLead === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.coberturaOrigenLead };
     case 'conversionStage':
       return datos.conversionStage === undefined ? SIN_DATOS : { estado: 'ok', valor: datos.conversionStage };
     default: {

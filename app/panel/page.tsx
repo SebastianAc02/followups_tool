@@ -27,6 +27,8 @@ import {
   empresasParaConversionStage,
   toquesParaActividadCanal,
 } from '../db/repository';
+import { conversionPorOrigen, type ToqueConOrigen } from '../core/conversion-origen';
+import { coberturaOrigenLead } from '../db/repository';
 import {
   type ToqueCanal,
   connectRate,
@@ -86,6 +88,8 @@ export default async function Panel({
   const dedupDia = textoDeduplicado(filasCanal, { modo: 'dia' });
   const dedupConversacion = textoDeduplicado(filasCanal, { modo: 'conversacion' });
   const novedad = llamadasPorNovedadDeCuenta(filasCanal);
+  const porOrigen = conversionPorOrigen(filasCanal as unknown as ToqueConOrigen[]);
+  const cobertura = coberturaOrigenLead(usuario.idOrganizacion);
 
   const actividadDeCanal = {
     // La tasa se guarda en porcentaje redondeado a un decimal: el widget de KPI pinta un numero, no
@@ -115,6 +119,17 @@ export default async function Panel({
     llamadasCuentasNuevas: {
       'Cuentas nuevas': novedad.aCuentasNuevas,
       'Con historia': novedad.aCuentasConHistoria,
+    },
+    // Un origen sin reuniones da null y NO cero: cero llamadas por reunion diria que la reunion
+    // salio gratis. Se omite del widget en vez de pintar un numero que miente.
+    conversionPorOrigen: Object.fromEntries(
+      porOrigen.porOrigen.filter((g) => g.llamadasPorReunion !== null).map((g) => [g.origen, Math.round(g.llamadasPorReunion! * 10) / 10]),
+    ),
+    // El denominador de la comparacion de arriba. Hoy va a decir 0 con origen y ~1.956 sin, porque
+    // la columna nace vacia; esa es la verdad y verla es lo que empuja a llenarla.
+    coberturaOrigenLead: {
+      'Con origen': cobertura.conOrigen,
+      'Sin registrar': cobertura.sinOrigen,
     },
   };
   // followUpPorDeal (conectado 2026-07-22): "deal" es la MISMA definicion que ya usa

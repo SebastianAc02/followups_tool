@@ -65,7 +65,11 @@ export type DataSourceKey =
   | 'connectRateDetalle'
   | 'toquesPorGrupoCanal'
   | 'textoDeduplicado'
-  | 'llamadasCuentasNuevas';
+  | 'llamadasCuentasNuevas'
+  // Cuantas llamadas cuesta una reunion, PARTIDO por de donde salio la cuenta. Al desplegar da
+  // todo en "sin registrar", porque fuente_lead nace vacia: eso es la verdad y tiene que verse.
+  | 'conversionPorOrigen'
+  | 'coberturaOrigenLead';
 
 export type Widget = {
   id: string; // estable, ej 'toques_por_canal'
@@ -120,6 +124,10 @@ export const WIDGETS: readonly Widget[] = [
   { id: 'texto_dedup', titulo: 'Texto: crudo contra deduplicado', grupo: 'segmentacion', tipo: 'barras', dataSource: 'textoDeduplicado', spanDefault: 2 },
   // Cuanto de la marcacion abre cuentas y cuanto empuja las que ya estaban. Es la unica forma de
   // ver si un dia de 20 llamadas fue prospeccion o seguimiento.
+  { id: 'conversion_por_origen', titulo: 'Llamadas por reunión, según de dónde salió la cuenta', grupo: 'velocity', tipo: 'barras', dataSource: 'conversionPorOrigen', spanDefault: 2 },
+  // Va al lado del de arriba a proposito: sin saber sobre cuantas cuentas descansa, una comparacion
+  // entre inbound y outbound calculada sobre el 3% del pipeline se lee como si fuera del 100%.
+  { id: 'cobertura_origen_lead', titulo: 'Cuentas con origen registrado', grupo: 'velocity', tipo: 'barras', dataSource: 'coberturaOrigenLead', spanDefault: 2 },
   { id: 'llamadas_cuentas_nuevas', titulo: 'Llamadas: cuentas nuevas contra con historia', grupo: 'segmentacion', tipo: 'barras', dataSource: 'llamadasCuentasNuevas', spanDefault: 2 },
   { id: 'toques_por_resultado', titulo: 'Toques por resultado', grupo: 'segmentacion', tipo: 'barras', dataSource: 'toquesPorResultado', spanDefault: 2 },
 

@@ -35,6 +35,8 @@ const DEFAULT_IDS = [
   'toques_por_grupo_canal',
   'texto_dedup',
   'llamadas_cuentas_nuevas',
+  'conversion_por_origen',
+  'cobertura_origen_lead',
 ] as const;
 
 // Widgets que se INCORPORAN a un tablero ya guardado la primera vez que el usuario entra despues
@@ -53,6 +55,8 @@ const INCORPORAR_SI_FALTAN = [
   'toques_por_grupo_canal',
   'texto_dedup',
   'llamadas_cuentas_nuevas',
+  'conversion_por_origen',
+  'cobertura_origen_lead',
 ] as const;
 
 export function incorporarWidgetsNuevos(layout: TableroItem[]): TableroItem[] {
