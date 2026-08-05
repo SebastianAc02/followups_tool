@@ -82,6 +82,7 @@ import {
   type MarcarAliadoResultado,
   marcarDescarte,
   cuentasParaTandas,
+  toquesParaActividadCanal,
   marcarTareaBloqueante,
   marcarFuenteLead,
   coberturaOrigenLead,
@@ -168,6 +169,7 @@ import { elegirDestinatarioDefault } from '../core/inscripcion';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
 import { clasificarTanda, TANDAS } from '../core/tandas.ts';
+import { reporteDelDia, vistaDeEquipo, nivelPara, type ToquesReporteDia, type ToqueReporteCanal } from '../core/reporte-dia.ts';
 import { hoy as hoyDelRequest } from '../lib/reloj.ts';
 import {
   llamadasPorReunionConseguida,
@@ -601,6 +603,49 @@ export function tandasTool(input: TandasInput) {
     sinTamanoConfirmado: clasificadas.filter((c) => !c.usuarios.confirmado).length,
     fueraOmitidas: input.incluirDescartadas ? 0 : clasificadas.length - visibles.length,
   };
+}
+
+// --- reporte del dia -------------------------------------------------------------------
+//
+// El mismo reporte que pinta /reporte, para que el brain lo pueda pedir sin abrir el navegador.
+// La regla de visibilidad es LA MISMA y vive en el dominio, no en la pantalla: si viviera solo en la
+// pagina, el MCP seria la puerta de atras que devuelve entero lo que la pantalla filtra.
+export type ReporteDiaInput = { dia?: string; owner?: string; idOrganizacion?: number };
+
+export function reporteDiaTool(input: ReporteDiaInput, ownerDeLaSesion?: string) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const dia = input.dia ?? hoyDelRequest();
+  const owner = input.owner ?? ownerDeLaSesion;
+  if (!owner) {
+    throw new Error('Falta el owner: mandalo explicito, o conectate con una sesion que tenga owner asignado');
+  }
+
+  const plan = planVsEjecutadoTool({ desde: dia, owner, idOrganizacion });
+  // Dos proyecciones del MISMO conjunto de filas. Ninguna funcion del repository trae todas las
+  // columnas del reporte y no se pueden fusionar fila a fila (vienen en orden distinto y ninguna
+  // expone idToque), asi que cada bloque usa la que le sirve. Ver reporte-dia.ts.
+  const filas: ToquesReporteDia = {
+    canal: toquesParaActividadCanal(dia, dia, idOrganizacion, { owner }) as unknown as ToqueReporteCanal[],
+    dashboard: toquesEnRango(dia, dia, idOrganizacion, { owner }).map((t) => ({
+      idEmpresa: t.idEmpresa,
+      canal: t.canal,
+      tipoToque: t.tipoToque,
+      resultado: t.resultado as never,
+      fuente: t.fuente,
+      fechaDia: t.fechaDia,
+      fecha: t.fecha,
+      estado: t.estado,
+      reunionFechaPropuesta: t.reunionFechaPropuesta,
+      reunionFechaOcurrida: t.reunionFechaOcurrida,
+    })),
+  };
+
+  const completo = reporteDelDia(filas, { planeados: plan.total.planeados, ejecutados: plan.total.ejecutados }, { dia, owner });
+  // Sin owner de sesion (server standalone legacy, sin OAuth) NO se asume que el caller es el dueño:
+  // se entrega el nivel de equipo, que es el conservador. Asumir lo contrario convertiria un
+  // despliegue mal configurado en una fuga.
+  const nivel = ownerDeLaSesion ? nivelPara({ owner: ownerDeLaSesion, admin: false, verTodoPipeline: false }, owner) : 'equipo';
+  return nivel === 'completo' ? completo : vistaDeEquipo(completo);
 }
 
 // --- dashboard del CRO ----------------------------------------------------------------

@@ -34,6 +34,7 @@ import {
   marcarFuenteLeadTool,
   tandasTool,
   dashboardCroTool,
+  reporteDiaTool,
   buscarEmpresaTool,
   crearEmpresaTool,
   actualizarEmpresaTool,
@@ -104,6 +105,7 @@ export const TOOLS_LECTURA = [
   'panel_metricas',
   'pipeline',
   'plan_vs_ejecutado',
+  'reporte_dia',
   'tandas',
   'tracking_correo',
 ] as const;
@@ -1482,6 +1484,32 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ idOrganizacion, owner, piso, incluirDescartadas }) => {
       const r = tandasTool({ idOrganizacion, owner, piso, incluirDescartadas });
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'reporte_dia',
+    {
+      description:
+        'EL REPORTE DEL DIA de una persona: toques ejecutados, reuniones conseguidas, llamadas por ' +
+        'reunion, connect rate, no-show rate, lo que estaba planeado y no salio, mix por canal y por ' +
+        'tipo, texto crudo contra deduplicado, llamadas a cuentas nuevas y conversion por origen. ' +
+        'Es lo mismo que muestra la pantalla /reporte. ' +
+        'DOS NIVELES: si pedis TU propia cartera devuelve el detalle completo; si pedis la de otra ' +
+        'persona devuelve solo actividad, conversion a reunion y tasas, que es lo que el operador ' +
+        'decidio compartir con el equipo. Ni admin ni el rol de CRO abren el nivel completo ajeno. ' +
+        'Dos numeros que hay que leer bien: una llamada SIN resultado no cuenta como no contestada, ' +
+        'va en sinCalificar y sale del denominador del connect rate; y una tasa sin denominador viene ' +
+        'null, que significa "no hay con que calcularla", nunca cero.',
+      inputSchema: {
+        dia: z.string().min(1).optional().describe('YYYY-MM-DD. Default: hoy'),
+        owner: z.string().min(1).optional().describe('De quien es el reporte. Default: el owner de la sesion'),
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+      },
+    },
+    async ({ dia, owner, idOrganizacion }) => {
+      const r = reporteDiaTool({ dia, owner, idOrganizacion }, opts.owner);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
