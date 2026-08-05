@@ -80,7 +80,28 @@ export type ResultadoTanda = {
   // marcada; no se esconde ni se aprueba.
   advertencias: string[];
   owner: string | null;
+  // CUANTOS DIAS LLEVA QUIETA EN ESTE ESTADO. Es la pregunta que la pantalla de Seguimiento no sabe
+  // responder hoy: una cuenta con 20 dias en "tocado sin respuesta" no es lo mismo que una de 2, y
+  // hoy se ven iguales.
+  //
+  // Se calcula aca y no en la pantalla a proposito. Pedirle a la UI que reste fechas es como se
+  // producen dos respuestas distintas a la misma pregunta, y ademas la fecha de referencia CAMBIA
+  // segun la tanda: una cuenta bloqueada cuenta desde que se bloqueo, no desde su ultimo toque,
+  // porque lo que duele es que la tarea lleve dos semanas sin hacerse.
+  //
+  // null cuando no hay fecha de referencia. NO cero: una cuenta sin toques no lleva "cero dias
+  // quieta", lleva un tiempo desconocido, y devolver cero la pondria de primera en un orden de mas
+  // viejo a mas nuevo, que es justo al reves de la verdad.
+  diasEnEstado: number | null;
 };
+
+function diasEntre(desde: string | null, hasta: string): number | null {
+  if (!desde) return null;
+  const a = Date.parse(`${desde}T00:00:00Z`);
+  const b = Date.parse(`${hasta}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.floor((b - a) / 86400000);
+}
 
 const ETAPAS_CIERRE = ['cierre_documentacion', 'contrato', 'firma', 'negociacion'];
 const ETAPA_REUNION = 'reunion_agendada';
@@ -127,7 +148,16 @@ export function clasificarTanda(c: CuentaParaTanda, opts: OpcionesTanda): Result
     },
     advertencias,
   };
-  const con = (tanda: Tanda, regla: string, evidencia: Evidencia): ResultadoTanda => ({ ...base, tanda, regla, evidencia });
+  const con = (tanda: Tanda, regla: string, evidencia: Evidencia): ResultadoTanda => ({
+    ...base,
+    tanda,
+    regla,
+    evidencia,
+    // La fecha de la evidencia es la que corresponde a la regla que clasifico, asi que ya viene con
+    // el significado correcto: el bloqueo para bloqueado_por_tarea, el ultimo toque para la racha.
+    // El ultimo toque queda de respaldo para las tandas cuya evidencia no es una fecha (la etapa).
+    diasEnEstado: diasEntre(evidencia.fecha ?? c.ultimoToqueDia, opts.hoy),
+  });
 
   // 1. FUERA. Va de primera porque si la cuenta no es nuestra, su etapa, sus toques y su tamano son
   // irrelevantes. Los cuatro descartes que costaron rehacer la lista del 4-ago debieron salir aca.

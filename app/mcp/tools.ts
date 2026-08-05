@@ -559,10 +559,18 @@ export function tandasTool(input: TandasInput) {
 
   const porTanda: Record<string, typeof clasificadas> = {};
   for (const c of visibles) (porTanda[c.tanda] ??= []).push(c);
-  // El orden DENTRO de cada tanda: lo mas viejo primero. Lo que lleva mas tiempo quieto sube solo,
-  // que es lo que la pantalla de Seguimiento no sabe hacer hoy.
+  // El orden DENTRO de cada tanda: lo mas viejo primero, por dias en el estado. Lo que lleva mas
+  // tiempo quieto sube solo, que es lo que la pantalla de Seguimiento no sabe hacer hoy.
+  //
+  // Las cuentas SIN dias conocidos van al final y no de primeras. Un null no es "cero dias": es un
+  // tiempo desconocido, y ponerlo arriba en un orden de mas viejo a mas nuevo seria afirmar lo que
+  // no se sabe, en la posicion de mas atencion de la lista.
   for (const lista of Object.values(porTanda)) {
-    lista.sort((a, b) => (a.evidencia.fecha ?? '').localeCompare(b.evidencia.fecha ?? ''));
+    lista.sort((a, b) => {
+      if (a.diasEnEstado == null) return b.diasEnEstado == null ? 0 : 1;
+      if (b.diasEnEstado == null) return -1;
+      return b.diasEnEstado - a.diasEnEstado;
+    });
   }
 
   return {

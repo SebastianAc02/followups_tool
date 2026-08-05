@@ -222,6 +222,44 @@ test('sin cadencia y sin toques la cuenta es invisible, y esa es su propia tanda
   assert.equal(r.tanda, 'sin_campana');
 });
 
+// "Quien se esta enfriando. Una cuenta con 20 dias en tocado sin respuesta no es lo mismo que una de
+// 2, y hoy se ven iguales." Es la pregunta que la pantalla de Seguimiento no sabe responder, y no la
+// puede responder si la clasificacion no le entrega el numero ya calculado: pedirle a la UI que reste
+// fechas es como se producen dos respuestas distintas a la misma pregunta.
+test('cada cuenta dice cuantos dias lleva en su estado, que es lo que distingue una de 20 de una de 2', () => {
+  const vieja = clasificarTanda(
+    cuenta({ ultimoToqueDia: '2026-07-15', toques: [toque('2026-07-15')] }),
+    { hoy: HOY, piso: 1000 },
+  );
+  const fresca = clasificarTanda(
+    cuenta({ ultimoToqueDia: '2026-08-02', toques: [toque('2026-08-02')] }),
+    { hoy: HOY, piso: 1000 },
+  );
+
+  assert.equal(vieja.diasEnEstado, 20);
+  assert.equal(fresca.diasEnEstado, 2);
+});
+
+// Una cuenta bloqueada cuenta los dias desde que se bloqueo, no desde el ultimo toque: lo que duele
+// es que la tarea lleve dos semanas sin hacerse.
+test('una cuenta bloqueada cuenta los dias desde el bloqueo, no desde el ultimo toque', () => {
+  const r = clasificarTanda(
+    cuenta({ tareaBloqueante: 'conseguir el numero del gerente', tareaBloqueanteDesde: '2026-07-22', ultimoToqueDia: '2026-08-03', toques: [toque('2026-08-03')] }),
+    { hoy: HOY, piso: 1000 },
+  );
+
+  assert.equal(r.tanda, 'bloqueado_por_tarea');
+  assert.equal(r.diasEnEstado, 13);
+});
+
+// Una cuenta sin toques no lleva "cero dias quieta": lleva un tiempo desconocido. Devolver 0 la
+// pondria arriba en un orden de mas viejo a mas nuevo, que es justo al reves de la verdad.
+test('sin fecha de referencia los dias son null, no cero', () => {
+  const r = clasificarTanda(cuenta(), { hoy: HOY, piso: 1000 });
+
+  assert.equal(r.diasEnEstado, null);
+});
+
 // El tamano decide si una cuenta se llama, y produccion trae numeros inventados: UICOM figuraba con
 // 3.000 y tiene 60. Un piso aplicado sobre el numero equivocado no desordena una lista, cambia a
 // quien se llama, asi que de donde salio el numero viaja siempre.

@@ -38,7 +38,17 @@ async function conectar() {
 
 const leer = (res: unknown) => JSON.parse(((res as { content: { text: string }[] }).content)[0].text);
 
-const buscar = (cuerpo: { tandas: { tanda: string; cuentas: { idEmpresa: string }[] }[] }, id: string) => {
+// El cuerpo llega como JSON del protocolo, sin tipos. Se declara lo que estas pruebas leen y nada
+// mas: tipar la respuesta entera aca la duplicaria y las dos copias se desincronizarian.
+type CuentaEnRespuesta = {
+  idEmpresa: string;
+  regla: string;
+  evidencia: { campo: string };
+  advertencias: string[];
+  diasEnEstado: number | null;
+};
+
+const buscar = (cuerpo: { tandas: { tanda: string; cuentas: CuentaEnRespuesta[] }[] }, id: string) => {
   for (const grupo of cuerpo.tandas) {
     const c = grupo.cuentas.find((x) => x.idEmpresa === id);
     if (c) return { tanda: grupo.tanda, cuenta: c };
@@ -57,7 +67,7 @@ test('tandas devuelve cada cuenta con la regla que la clasifico y su evidencia',
 
   assert.ok(encontrada, 'la cuenta tiene que salir en alguna tanda');
   assert.ok(typeof encontrada.cuenta.regla === 'string' && encontrada.cuenta.regla.length > 0);
-  assert.ok('evidencia' in encontrada.cuenta && 'campo' in (encontrada.cuenta as never as { evidencia: object }).evidencia);
+  assert.ok('campo' in encontrada.cuenta.evidencia);
 });
 
 // El fallo del 4-ago en la superficie donde ocurrio. La cuenta entra, pero entra marcada, y el
@@ -68,7 +78,7 @@ test('una cuenta sin aliado verificado entra a la lista MARCADA, y el hueco se r
   const encontrada = buscar(cuerpo, 't-frio');
 
   assert.notEqual(encontrada?.tanda, 'fuera');
-  assert.ok((encontrada?.cuenta as never as { advertencias: string[] }).advertencias.some((a) => a.includes('aliado')));
+  assert.ok(encontrada?.cuenta.advertencias.some((a) => a.includes('aliado')));
   assert.ok(cuerpo.sinVerificarAliado >= 1);
 });
 
