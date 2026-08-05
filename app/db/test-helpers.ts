@@ -40,6 +40,10 @@ export function crearDbPrueba() {
       descarte_fecha TEXT,
       descarte_quien TEXT,
       fecha_retorno TEXT,
+      -- Migracion 0028: la tarea del operador que tiene quieta a la cuenta.
+      tarea_bloqueante TEXT,
+      tarea_bloqueante_desde TEXT,
+      tarea_bloqueante_quien TEXT,
       estado_comercial TEXT NOT NULL,
       estado_notion TEXT,
       prioridad_comercial INTEGER,

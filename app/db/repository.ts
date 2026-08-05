@@ -1,3 +1,5 @@
+import type { CuentaParaTanda } from '../core/tandas.ts';
+import type { ToqueParaAgotamiento } from '../core/agotamiento.ts';
 import {
   and,
   or,
@@ -1745,6 +1747,128 @@ export function marcarDescarte(input: MarcarDescarteInput, idOrganizacion: numbe
     return {
       idEmpresa: parsed.idEmpresa,
       clasificacion: clasificarDescarteDeFila(leerFilaDescarte(tx, parsed.idEmpresa, idOrganizacion), hoy),
+    };
+  });
+}
+
+// --- tandas (armar la lista del dia) ---------------------------------------------------
+//
+// Trae TODO lo que la clasificacion necesita en CINCO queries para las ~1.965 cuentas, no una por
+// cuenta. Es la diferencia entre una accion y las diez consultas distintas que costo armar esto a
+// mano el 2026-08-04.
+//
+// La regla no vive aca: vive en app/core/tandas.ts, pura y probada aparte. Este bloque solo lee y
+// arma. Mezclarlas obligaria a montar una base para probar el orden de las reglas, que es
+// justamente lo que hay que poder cambiar sin miedo.
+export function cuentasParaTandas(
+  idOrganizacion: number,
+  opts: { canalesMuertos?: Set<string> } = {},
+): CuentaParaTanda[] {
+  const filas = db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      owner: empresa.owner,
+      estadoNotion: empresa.estadoNotion,
+      aliadoCol: empresa.aliado,
+      aliadoFuente: empresa.aliadoFuente,
+      aliadoFecha: empresa.aliadoFecha,
+      aliadoQuien: empresa.aliadoQuien,
+      idEmpresaMatriz: empresa.idEmpresaMatriz,
+      motivoDescarte: empresa.motivoDescarte,
+      motivoDescarteNota: empresa.motivoDescarteNota,
+      descarteFecha: empresa.descarteFecha,
+      descarteQuien: empresa.descarteQuien,
+      fechaRetorno: empresa.fechaRetorno,
+      tareaBloqueante: empresa.tareaBloqueante,
+      tareaBloqueanteDesde: empresa.tareaBloqueanteDesde,
+      usuarios: empresaUsuarios.usuariosEfectivos,
+      // De donde salio el tamano. Se prefiere la fuente de los REALES cuando hay reales; si no, la
+      // de los estimados. usuarios_efectivos es COALESCE(reales, estimados), asi que la fuente
+      // tiene que seguir el mismo orden o diria de donde salio un numero que no es el que viaja.
+      usuariosRealesFuente: empresaUsuarios.usuariosRealesFuente,
+      usuariosReales: empresaUsuarios.usuariosReales,
+      usuariosEstFuente: empresaUsuarios.usuariosEstFuente,
+    })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    // empresa_viva: una filial absorbida (opera_bajo_id) no es una cuenta que se llame aparte de su
+    // matriz. Aca SI aplica el filtro, al reves que en cuentasParaReconciliar: esto arma una lista
+    // de llamadas, no un cruce contra Notion.
+    .where(and(eq(empresa.organizacionActivaId, idOrganizacion), isNull(empresa.operaBajoId)))
+    .orderBy(asc(empresa.nombreOficial))
+    .all();
+
+  const ids = filas.map((f) => f.idEmpresa);
+  const matrices = [...new Set(filas.map((f) => f.idEmpresaMatriz).filter((m): m is string => m != null))];
+  const hermanas = hermanasConfirmadas(db, matrices);
+
+  // Los toques de TODAS las cuentas de un golpe, agrupados en memoria. Incluye los entrantes de
+  // WhatsApp: el contador de racha los necesita para saber que la racha se reinicio.
+  const porEmpresa = new Map<string, ToqueParaAgotamiento[]>();
+  const ultimoReal = new Map<string, string>();
+  if (ids.length > 0) {
+    for (const t of db
+      .select({
+        idEmpresa: toque.idEmpresa,
+        resultado: toque.resultado,
+        fuente: toque.fuente,
+        fechaDia: toque.fechaDia,
+        fecha: toque.fecha,
+      })
+      .from(toque)
+      .where(and(inArray(toque.idEmpresa, ids), eq(toque.idOrganizacion, idOrganizacion)))
+      .all()) {
+      const lista = porEmpresa.get(t.idEmpresa) ?? [];
+      lista.push({ resultado: t.resultado as never, fuente: t.fuente, fechaDia: t.fechaDia, fecha: t.fecha });
+      porEmpresa.set(t.idEmpresa, lista);
+      // El ultimo toque REAL, que responde otra pregunta que la racha: si ya se trabajo la cuenta
+      // hoy. Un entrante no cuenta, porque no lo hizo el operador.
+      if (t.fuente !== 'whatsapp_entrante') {
+        const dia = t.fechaDia ?? t.fecha?.slice(0, 10) ?? '';
+        if (dia && dia > (ultimoReal.get(t.idEmpresa) ?? '')) ultimoReal.set(t.idEmpresa, dia);
+      }
+    }
+  }
+
+  // Quien esta en una cadencia VIVA. Una inscripcion terminada no cuenta: la cuenta volvio a estar
+  // sola, que es justo lo que la tanda sin_campana quiere ver.
+  const conCadencia = new Set(
+    ids.length === 0
+      ? []
+      : db
+          .select({ idEmpresa: inscripcion.idEmpresa })
+          .from(inscripcion)
+          .where(and(inArray(inscripcion.idEmpresa, ids), eq(inscripcion.estado, 'activa')))
+          .all()
+          .map((r) => r.idEmpresa),
+  );
+
+  return filas.map((f) => {
+    const propia: FilaAliado = {
+      idEmpresa: f.idEmpresa,
+      aliado: f.aliadoCol,
+      aliadoFuente: f.aliadoFuente,
+      aliadoFecha: f.aliadoFecha,
+      aliadoQuien: f.aliadoQuien,
+      idEmpresaMatriz: f.idEmpresaMatriz,
+    };
+    const hermana = f.idEmpresaMatriz ? (hermanas.get(f.idEmpresaMatriz) ?? null) : null;
+    return {
+      idEmpresa: f.idEmpresa,
+      nombre: f.nombre,
+      owner: f.owner,
+      estadoNotion: f.estadoNotion,
+      usuarios: f.usuarios,
+      usuariosFuente: f.usuariosReales != null ? f.usuariosRealesFuente : f.usuariosEstFuente,
+      aliado: clasificarAliadoDeFila(propia, hermana && hermana.idEmpresa !== f.idEmpresa ? hermana : null),
+      descarte: clasificarDescarteDeFila(f, fechaBogotaISO()),
+      tareaBloqueante: f.tareaBloqueante,
+      tareaBloqueanteDesde: f.tareaBloqueanteDesde,
+      tieneCadencia: conCadencia.has(f.idEmpresa),
+      canalMuerto: opts.canalesMuertos?.has(f.idEmpresa) ?? false,
+      toques: porEmpresa.get(f.idEmpresa) ?? [],
+      ultimoToqueDia: ultimoReal.get(f.idEmpresa) ?? null,
     };
   });
 }

@@ -58,6 +58,19 @@ export const empresa = sqliteTable('empresa', {
   //
   // Obligatoria cuando el motivo es 'congelada' y prohibida en los demas, que no vencen.
   fechaRetorno: text('fecha_retorno'),
+  // LA TAREA DEL OPERADOR que tiene quieta a la cuenta. NULL = no esta bloqueada.
+  //
+  // Jigartel llevaba desde el 22-jul sin moverse porque faltaba conseguir el numero de un gerente.
+  // Hoy eso se esconde entre las cuentas que no contestan, y son cosas distintas: una espera al
+  // prospecto, la otra es deuda propia. La segunda no se destraba con un toque mas, se destraba
+  // haciendo la tarea, y por eso la tanda 'bloqueado_por_tarea' la separa.
+  //
+  // Es TEXTO, no un booleano: "esta bloqueada" no sirve de nada sin saber por que. Y la fecha desde
+  // cuando es la otra mitad del dato, porque lo que duele no es que este bloqueada, es que lleve
+  // dos semanas asi.
+  tareaBloqueante: text('tarea_bloqueante'),
+  tareaBloqueanteDesde: text('tarea_bloqueante_desde'),
+  tareaBloqueanteQuien: text('tarea_bloqueante_quien'),
   estadoComercial: text('estado_comercial').notNull(),
   estadoNotion: text('estado_notion'),
   prioridadComercial: integer('prioridad_comercial'),
