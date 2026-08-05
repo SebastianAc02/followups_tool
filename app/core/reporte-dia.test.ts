@@ -10,12 +10,17 @@
 // tasas, mis toques efectivos ejecutados y ya, solo eso".
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reporteDelDia, vistaDeEquipo, nivelPara, type ToqueReporte } from './reporte-dia.ts';
+import { reporteDelDia, vistaDeEquipo, nivelPara, type ToqueReporteCanal, type ToquesReporteDia } from './reporte-dia.ts';
+import type { ToqueDashboardCRO } from './dashboard-cro.ts';
 
 const DIA = '2026-08-05';
 const OWNER = 'Sebastian Acosta Molina';
 
-function toque(over: Partial<ToqueReporte> = {}): ToqueReporte {
+// Dos proyecciones de la MISMA fila (mismo criterio que el repository: toquesParaActividadCanal
+// trae esPrimerToqueDeLaCuenta/origenLead, toquesEnRango trae tipoToque/estado/reunionFechaOcurrida,
+// y ninguna de las dos funciones trae las columnas de la otra -- ver comentario largo en
+// reporte-dia.ts sobre por que son dos arreglos y no uno).
+function toqueCanal(over: Partial<ToqueReporteCanal> = {}): ToqueReporteCanal {
   return {
     idEmpresa: 'e1',
     canal: 'llamada',
@@ -30,15 +35,47 @@ function toque(over: Partial<ToqueReporte> = {}): ToqueReporte {
   };
 }
 
+function toqueDashboard(over: Partial<ToqueDashboardCRO> = {}): ToqueDashboardCRO {
+  return {
+    idEmpresa: 'e1',
+    canal: 'llamada',
+    tipoToque: null,
+    resultado: 'no_contesto',
+    fuente: 'cockpit',
+    fechaDia: DIA,
+    fecha: `${DIA}T12:00:00.000Z`,
+    estado: 'contacto_iniciado',
+    reunionFechaPropuesta: null,
+    reunionFechaOcurrida: null,
+    ...over,
+  };
+}
+
+// Fixture de una sola fila representada en las dos proyecciones a la vez -- el caso comun de
+// la mayoria de los tests, donde no importa la particion, solo que los conteos salgan bien.
+function fila(over: { canal?: Partial<ToqueReporteCanal>; dashboard?: Partial<ToqueDashboardCRO> } = {}): {
+  canal: ToqueReporteCanal;
+  dashboard: ToqueDashboardCRO;
+} {
+  return { canal: toqueCanal(over.canal), dashboard: toqueDashboard(over.dashboard) };
+}
+
+function toques(filas: ReturnType<typeof fila>[]): ToquesReporteDia {
+  return { canal: filas.map((f) => f.canal), dashboard: filas.map((f) => f.dashboard) };
+}
+
 const SIN_PLAN = { planeados: 0, ejecutados: 0 };
 
 test('el reporte completo trae la actividad del dia separada de los entrantes', () => {
   const r = reporteDelDia(
-    [
-      toque(),
-      toque({ canal: 'whatsapp', resultado: null }),
-      toque({ canal: 'whatsapp', resultado: null, fuente: 'whatsapp_entrante' }),
-    ],
+    toques([
+      fila(),
+      fila({ canal: { canal: 'whatsapp', resultado: null }, dashboard: { canal: 'whatsapp', resultado: null } }),
+      fila({
+        canal: { canal: 'whatsapp', resultado: null, fuente: 'whatsapp_entrante' },
+        dashboard: { canal: 'whatsapp', resultado: null, fuente: 'whatsapp_entrante' },
+      }),
+    ]),
     SIN_PLAN,
     { dia: DIA, owner: OWNER },
   );
@@ -51,12 +88,12 @@ test('el reporte completo trae la actividad del dia separada de los entrantes', 
 // contesto" hundiria el connect rate con un dato que no existe.
 test('una llamada sin calificar no cuenta como no contestada y sale del denominador', () => {
   const r = reporteDelDia(
-    [
-      toque({ resultado: 'contesto_sigue_seguimiento' }),
-      toque({ resultado: 'no_contesto' }),
-      toque({ resultado: null }),
-      toque({ resultado: null }),
-    ],
+    toques([
+      fila({ canal: { resultado: 'contesto_sigue_seguimiento' }, dashboard: { resultado: 'contesto_sigue_seguimiento' } }),
+      fila({ canal: { resultado: 'no_contesto' }, dashboard: { resultado: 'no_contesto' } }),
+      fila({ canal: { resultado: null }, dashboard: { resultado: null } }),
+      fila({ canal: { resultado: null }, dashboard: { resultado: null } }),
+    ]),
     SIN_PLAN,
     { dia: DIA, owner: OWNER },
   );
@@ -70,11 +107,20 @@ test('una llamada sin calificar no cuenta como no contestada y sale del denomina
 
 test('el no-show rate sale de las reuniones propuestas, con su N al lado', () => {
   const r = reporteDelDia(
-    [
-      toque({ canal: 'reunion', resultado: 'reunion_buena', reunionFechaPropuesta: DIA }),
-      toque({ canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA }),
-      toque({ canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA }),
-    ],
+    toques([
+      fila({
+        canal: { canal: 'reunion', resultado: 'reunion_buena', reunionFechaPropuesta: DIA },
+        dashboard: { canal: 'reunion', resultado: 'reunion_buena', reunionFechaPropuesta: DIA },
+      }),
+      fila({
+        canal: { canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA },
+        dashboard: { canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA },
+      }),
+      fila({
+        canal: { canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA },
+        dashboard: { canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA },
+      }),
+    ]),
     SIN_PLAN,
     { dia: DIA, owner: OWNER },
   );
@@ -84,19 +130,75 @@ test('el no-show rate sale de las reuniones propuestas, con su N al lado', () =>
   assert.equal(r.reuniones.noShowRate, 2 / 3);
 });
 
+// Mismo criterio EXACTO que embudoReuniones en dashboard-cro.ts: una reunion cuenta como
+// ocurrida por reunionFechaOcurrida O por un resultado en RESULTADOS_REUNION_OCURRIDA. Una
+// version que solo mira el resultado (sin el camino de la fecha) subcuenta las reuniones
+// importadas de Notion con fecha de ocurrencia pero sin el resultado detallado.
+test('una reunion cuenta como ocurrida por reunionFechaOcurrida aunque no traiga resultado detallado', () => {
+  const r = reporteDelDia(
+    toques([
+      fila({
+        canal: { canal: 'reunion', resultado: null, reunionFechaPropuesta: DIA },
+        dashboard: { canal: 'reunion', resultado: null, reunionFechaPropuesta: DIA, reunionFechaOcurrida: DIA },
+      }),
+    ]),
+    SIN_PLAN,
+    { dia: DIA, owner: OWNER },
+  );
+
+  assert.equal(r.reuniones.ocurridas, 1);
+  assert.equal(r.reuniones.sinDesenlace, 0);
+});
+
 // Sin denominador la tasa es null y jamas cero. Cero por ciento de no-show con cero reuniones diria
 // que el dia salio perfecto, cuando lo que pasa es que no hubo reuniones.
 test('sin reuniones el no-show rate es null, no cero', () => {
-  const r = reporteDelDia([toque()], SIN_PLAN, { dia: DIA, owner: OWNER });
+  const r = reporteDelDia(toques([fila()]), SIN_PLAN, { dia: DIA, owner: OWNER });
 
   assert.equal(r.reuniones.propuestas, 0);
   assert.equal(r.reuniones.noShowRate, null);
 });
 
 test('lo que estaba planeado y no salio queda contado aparte', () => {
-  const r = reporteDelDia([toque()], { planeados: 12, ejecutados: 5 }, { dia: DIA, owner: OWNER });
+  const r = reporteDelDia(toques([fila()]), { planeados: 12, ejecutados: 5 }, { dia: DIA, owner: OWNER });
 
   assert.deepEqual(r.plan, { planeados: 12, ejecutados: 5, noSalieron: 7 });
+});
+
+// El bug que este test existe para atrapar: mixPorTipo corria sobre el arreglo de
+// actividad-canal, que NUNCA trae tipoToque (no es una de sus columnas), asi que siempre
+// reportaba sinTipo=todos aunque el dato si estuviera cargado. tipoToque vive en la
+// proyeccion de toquesEnRango (el arreglo `dashboard`), no en la de toquesParaActividadCanal.
+test('el mix por tipo lee tipoToque de la proyeccion que si lo trae', () => {
+  const r = reporteDelDia(
+    toques([
+      fila({ dashboard: { tipoToque: 'seguimiento' } }),
+      fila({ dashboard: { tipoToque: 'seguimiento' } }),
+      fila({ dashboard: { tipoToque: null } }),
+    ]),
+    SIN_PLAN,
+    { dia: DIA, owner: OWNER },
+  );
+
+  assert.deepEqual(r.mixPorTipo.porTipo, { seguimiento: 2 });
+  assert.equal(r.mixPorTipo.conTipo, 2);
+  assert.equal(r.mixPorTipo.sinTipo, 1);
+});
+
+test('el mix por canal literal (dashboard-cro) viaja aparte del agrupado texto/llamada/reunion', () => {
+  const r = reporteDelDia(
+    toques([
+      fila({ canal: { canal: 'llamada' }, dashboard: { canal: 'llamada' } }),
+      fila({ canal: { canal: 'whatsapp' }, dashboard: { canal: 'whatsapp' } }),
+      fila({ canal: { canal: 'correo' }, dashboard: { canal: 'correo' } }),
+    ]),
+    SIN_PLAN,
+    { dia: DIA, owner: OWNER },
+  );
+
+  assert.deepEqual(r.mixPorCanal.porCanal, { llamada: 1, whatsapp: 1, correo: 1 });
+  assert.equal(r.mixPorCanal.total, 3);
+  assert.deepEqual(r.actividad.porGrupoCanal, { texto: 2, llamada: 1, reunion: 0 });
 });
 
 // --- los dos niveles ---------------------------------------------------------------------
@@ -117,13 +219,19 @@ test('ni admin ni el rol de CRO abren el nivel completo de otra persona', () => 
 // que viaja al cliente y se esconde en el render esta a un clic de no estar escondido.
 test('el nivel de equipo NO CONTIENE las llaves del nivel completo, no vienen vacias', () => {
   const completo = reporteDelDia(
-    [toque({ canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA }), toque()],
+    toques([
+      fila({
+        canal: { canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA },
+        dashboard: { canal: 'reunion', resultado: 'no_llego', reunionFechaPropuesta: DIA },
+      }),
+      fila(),
+    ]),
     { planeados: 10, ejecutados: 2 },
     { dia: DIA, owner: OWNER },
   );
   const equipo = vistaDeEquipo(completo);
 
-  for (const llave of ['reuniones', 'plan', 'mixPorTipo', 'texto', 'cuentas', 'origen', 'llamadas']) {
+  for (const llave of ['reuniones', 'plan', 'mixPorTipo', 'mixPorCanal', 'texto', 'cuentas', 'origen', 'llamadas']) {
     assert.equal(llave in equipo, false, `el nivel de equipo no puede traer ${llave}`);
   }
   // Y el JSON serializado tampoco, que es lo que de verdad viaja al navegador.
@@ -134,7 +242,13 @@ test('el nivel de equipo NO CONTIENE las llaves del nivel completo, no vienen va
 
 test('el nivel de equipo trae exactamente lo que el operador dijo que puede verse', () => {
   const completo = reporteDelDia(
-    [toque({ resultado: 'contesto_reunion', reunionFechaPropuesta: DIA }), toque()],
+    toques([
+      fila({
+        canal: { resultado: 'contesto_reunion', reunionFechaPropuesta: DIA },
+        dashboard: { resultado: 'contesto_reunion', reunionFechaPropuesta: DIA },
+      }),
+      fila(),
+    ]),
     SIN_PLAN,
     { dia: DIA, owner: OWNER },
   );
@@ -149,7 +263,16 @@ test('el nivel de equipo trae exactamente lo que el operador dijo que puede vers
 // La vista de equipo DERIVA del completo, no recalcula. Si recalculara, los dos numeros podrian
 // discrepar y nadie sabria cual creer.
 test('los numeros del nivel de equipo son los mismos del completo, no un recalculo', () => {
-  const completo = reporteDelDia([toque({ resultado: 'contesto_reunion', reunionFechaPropuesta: DIA })], SIN_PLAN, { dia: DIA, owner: OWNER });
+  const completo = reporteDelDia(
+    toques([
+      fila({
+        canal: { resultado: 'contesto_reunion', reunionFechaPropuesta: DIA },
+        dashboard: { resultado: 'contesto_reunion', reunionFechaPropuesta: DIA },
+      }),
+    ]),
+    SIN_PLAN,
+    { dia: DIA, owner: OWNER },
+  );
   const equipo = vistaDeEquipo(completo);
 
   assert.equal(equipo.conversion.llamadasPorReunion, completo.conversion.llamadasPorReunion);

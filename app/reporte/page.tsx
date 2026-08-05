@@ -1,9 +1,11 @@
 import { requireSession } from '../lib/session';
 import { hoy as hoyDelRequest } from '../lib/reloj';
 import { AppShell } from '../ui/shell/AppShell';
-import { toquesParaActividadCanal, ownersConToques } from '../db/repository';
+import { toquesParaActividadCanal, toquesEnRango, ownersConToques } from '../db/repository';
 import { planVsEjecutadoTool } from '../mcp/tools';
-import { reporteDelDia, vistaDeEquipo, nivelPara, type ToqueReporte } from '../core/reporte-dia';
+import { reporteDelDia, vistaDeEquipo, nivelPara, type ToqueReporteCanal, type ToquesReporteDia } from '../core/reporte-dia';
+import type { ToqueCanal } from '../core/actividad-canal';
+import type { ToqueDashboardCRO } from '../core/dashboard-cro';
 import { ReporteCompletoVista, ReporteEquipoVista } from './Vistas';
 
 // El reporte del dia de UN operador. Dos niveles de detalle segun quien mire, decididos ACA, en el
@@ -28,10 +30,34 @@ export default async function Reporte({
   // persona y casi siempre va a caer en nivel de equipo.
   const owner = params.owner || usuario.owner;
 
-  const filas = toquesParaActividadCanal(dia, dia, usuario.idOrganizacion, { owner }) as unknown as ToqueReporte[];
+  // Dos lecturas del mismo `toque` (mismo dia, mismo owner, mismo join): ninguna trae sola todas
+  // las columnas que el reporte necesita -- toquesParaActividadCanal trae esPrimerToqueDeLaCuenta
+  // y origenLead pero no tipoToque/reunionFechaOcurrida, toquesEnRango es al reves. Se combinan
+  // como dos arreglos (no se fusionan fila a fila: ninguna de las dos trae idToque en su tipo de
+  // salida y ademas vienen en orden distinto). Ver el comentario largo en core/reporte-dia.ts.
+  const filasCanal: ToqueReporteCanal[] = toquesParaActividadCanal(dia, dia, usuario.idOrganizacion, { owner }).map((f) => ({
+    ...f,
+    resultado: f.resultado as ToqueCanal['resultado'],
+  }));
+  const filasDashboard: ToqueDashboardCRO[] = toquesEnRango(dia, dia, usuario.idOrganizacion, { owner }).map((t) => ({
+    idEmpresa: t.idEmpresa,
+    canal: t.canal,
+    tipoToque: t.tipoToque,
+    resultado: t.resultado as ToqueDashboardCRO['resultado'],
+    fuente: t.fuente,
+    fechaDia: t.fechaDia,
+    fecha: t.fecha,
+    estado: t.estado,
+    reunionFechaPropuesta: t.reunionFechaPropuesta,
+    reunionFechaOcurrida: t.reunionFechaOcurrida,
+  }));
+  const toques: ToquesReporteDia = { canal: filasCanal, dashboard: filasDashboard };
+
+  // planVsEjecutadoTool ya existe en el MCP y responde exactamente "cuantos estaban planeados y
+  // no salieron" -- no se reimplementa el cruce contra toque_planeado aca.
   const plan = planVsEjecutadoTool({ desde: dia, owner, idOrganizacion: usuario.idOrganizacion });
 
-  const completo = reporteDelDia(filas, { planeados: plan.total.planeados, ejecutados: plan.total.ejecutados }, { dia, owner });
+  const completo = reporteDelDia(toques, { planeados: plan.total.planeados, ejecutados: plan.total.ejecutados }, { dia, owner });
   const nivel = nivelPara(usuario, owner);
 
   const owners = ownersConToques();

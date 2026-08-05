@@ -1,26 +1,52 @@
 // El reporte del dia, en dos niveles (dictado del operador, 2026-08-05). Puro: sin DB y sin I/O,
-// mismo criterio que dashboard-cro.ts y actividad-canal.ts.
+// mismo criterio que dashboard-cro.ts y actividad-canal.ts -- recibe arreglos ya leidos y
+// devuelve numeros y clasificaciones auditables.
 //
 // POR QUE DOS TIPOS Y NO UNO CON CAMPOS OPCIONALES. Lo que ve un tercero es un OBJETO DISTINTO,
 // construido en el servidor. Un reporte completo que viaja al cliente y se esconde en el render esta
 // a un "ver codigo fuente" de no estar escondido, y esto es observacion sobre el trabajo de una
 // persona: el repo ya tiene una regla dura sobre que eso no sale (CLAUDE.md del brain, regla 23).
 //
-// Dictado textual sobre el nivel de equipo: "lo que pueda ver la parte del equipo es solamente lo
-// que a mi me interesa que vean: mi actividad real, mis conversiones a reunion, mis tasas, mis
-// toques efectivos ejecutados y ya, solo eso".
-import { RESULTADOS_CONTESTO, RESULTADOS_REUNION_OCURRIDA, type Resultado } from '../db/validation.ts';
+// POR QUE DOS ARREGLOS DE ENTRADA Y NO UNO SOLO. La forma sugerida del encargo era un unico
+// `toques: ToqueX[]`, pero ninguna funcion existente del repository trae TODAS las columnas que
+// este reporte necesita en una sola fila: toquesParaActividadCanal trae esPrimerToqueDeLaCuenta y
+// origenLead pero NO tipoToque/reunionFechaOcurrida, y toquesEnRango (la que arma ToqueDashboardCRO,
+// consumida hoy por dashboardCroTool en mcp/tools.ts) trae tipoToque/reunionFechaOcurrida pero NO
+// esPrimerToqueDeLaCuenta/origenLead. Las dos leen el mismo `toque` con el mismo filtro de dia y
+// owner, asi que representan el MISMO conjunto de filas, solo que proyectado distinto -- lo que no
+// se puede es fusionarlas fila a fila, porque ninguna trae idToque en su tipo de salida y ademas
+// vienen en ORDEN DISTINTO (una ordena por fecha asc+id asc, la otra por fecha desc+id desc); cruzar
+// por posicion de arreglo asignaria mal el tipoToque de un toque a otro. Por eso `ToquesReporteDia`
+// es un objeto con las dos proyecciones, y cada bloque del reporte usa la que le sirve.
 import { toquesPorGrupo, connectRate, textoDeduplicado, llamadasPorNovedadDeCuenta, type ToqueCanal } from './actividad-canal.ts';
-import { mixPorTipoToque, respuestasEntrantesWhatsapp, type ToqueDashboardCRO } from './dashboard-cro.ts';
+import {
+  mixPorCanal as mixPorCanalCRO,
+  mixPorTipoToque,
+  embudoReuniones,
+  llamadasPorReunionConseguida,
+  respuestasEntrantesWhatsapp,
+  type ToqueDashboardCRO,
+} from './dashboard-cro.ts';
 import { conversionPorOrigen, type ToqueConOrigen } from './conversion-origen.ts';
 
-export type ToqueReporte = ToqueCanal & {
+// La proyeccion de toquesParaActividadCanal (ToqueCanal) mas los dos campos que esa misma
+// funcion ya trae y ToqueCanal no modela (origenLead, reunionFechaPropuesta) -- ver
+// ToqueActividadCanal en app/db/repository.ts, es exactamente esta forma.
+export type ToqueReporteCanal = ToqueCanal & {
   origenLead: string | null;
   reunionFechaPropuesta: string | null;
 };
 
-// Lo que el dia planeaba contra lo que salio. Entra ya calculado (planVsEjecutado del MCP) porque
-// vive en otra tabla y este archivo no lee nada.
+export type ToquesReporteDia = {
+  // De toquesParaActividadCanal(dia, dia, idOrganizacion, {owner}).
+  canal: ToqueReporteCanal[];
+  // De toquesEnRango(dia, dia, idOrganizacion, {owner}), mapeado a ToqueDashboardCRO (mismo
+  // adaptador que ya hace dashboardCroTool en app/mcp/tools.ts).
+  dashboard: ToqueDashboardCRO[];
+};
+
+// Lo que el dia planeaba contra lo que salio. Entra ya calculado (planVsEjecutadoTool del MCP)
+// porque vive en otra tabla (toque_planeado) y este archivo no lee nada.
 export type PlanDelDia = { planeados: number; ejecutados: number };
 
 export type Tasa = number | null;
@@ -35,6 +61,11 @@ export type ReporteCompleto = {
     porGrupoCanal: { texto: number; llamada: number; reunion: number };
     entrantesWhatsapp: { mensajes: number; cuentas: number };
   };
+  // Mix por el valor LITERAL de canal (llamada/whatsapp/correo/reunion/sin_canal), distinto del
+  // agrupado texto/llamada/reunion de arriba: ese agrupa whatsapp+correo en "texto" porque asi
+  // piensa el operador el canal de contacto; este es el detalle sin agrupar, mismo criterio que
+  // dashboardCroTool.
+  mixPorCanal: { porCanal: Record<string, number>; total: number };
   conversion: { llamadas: number; reunionesConseguidas: number; llamadasPorReunion: Tasa };
   llamadas: { total: number; conectadas: number; noConectadas: number; sinCalificar: number; connectRate: Tasa };
   reuniones: { propuestas: number; ocurridas: number; noShow: number; sinDesenlace: number; noShowRate: Tasa };
@@ -60,39 +91,35 @@ function tasa(numerador: number, denominador: number): Tasa {
   return denominador === 0 ? null : numerador / denominador;
 }
 
-const esEntrante = (t: ToqueReporte) => t.fuente === 'whatsapp_entrante';
+export function reporteDelDia(toques: ToquesReporteDia, plan: PlanDelDia, ctx: { dia: string; owner: string }): ReporteCompleto {
+  const ejecutadosCanal = toques.canal.filter((t) => t.fuente !== 'whatsapp_entrante');
+  const grupo = toquesPorGrupo(toques.canal);
+  const conexion = connectRate(toques.canal);
+  const novedad = llamadasPorNovedadDeCuenta(toques.canal);
+  const porOrigen = conversionPorOrigen(toques.canal as ToqueConOrigen[]);
 
-export function reporteDelDia(toques: ToqueReporte[], plan: PlanDelDia, ctx: { dia: string; owner: string }): ReporteCompleto {
-  const ejecutados = toques.filter((t) => !esEntrante(t));
-  const grupo = toquesPorGrupo(toques);
-  const conexion = connectRate(toques);
-  const entrantes = respuestasEntrantesWhatsapp(toques as unknown as ToqueDashboardCRO[]);
-  const tipo = mixPorTipoToque(toques as unknown as ToqueDashboardCRO[]);
-  const novedad = llamadasPorNovedadDeCuenta(toques);
-  const porOrigen = conversionPorOrigen(toques as unknown as ToqueConOrigen[]);
-
-  // Reunion CONSEGUIDA: el toque dejo una fecha propuesta. Es el mismo criterio de
-  // llamadasPorReunionConseguida en dashboard-cro.ts, y se mantiene igual a proposito para que los
-  // dos numeros se puedan comparar entre pantallas.
-  const propuestas = ejecutados.filter((t) => t.reunionFechaPropuesta);
-  const ocurridas = ejecutados.filter(
-    (t) => t.resultado && RESULTADOS_REUNION_OCURRIDA.includes(t.resultado as Resultado),
-  );
-  const noShow = ejecutados.filter((t) => t.resultado === 'no_llego');
+  // Los tres bloques que necesitan tipoToque/reunionFechaOcurrida SIEMPRE leen `toques.dashboard`,
+  // nunca `toques.canal` (que no trae esas columnas -- ver el comentario largo arriba del archivo).
+  const mix = mixPorCanalCRO(toques.dashboard);
+  const tipo = mixPorTipoToque(toques.dashboard);
+  const embudo = embudoReuniones(toques.dashboard);
+  const costoReunion = llamadasPorReunionConseguida(toques.dashboard);
+  const entrantes = respuestasEntrantesWhatsapp(toques.dashboard);
 
   return {
     nivel: 'completo',
     dia: ctx.dia,
     owner: ctx.owner,
     actividad: {
-      toquesEjecutados: ejecutados.length,
+      toquesEjecutados: ejecutadosCanal.length,
       porGrupoCanal: { texto: grupo.texto, llamada: grupo.llamada, reunion: grupo.reunion },
       entrantesWhatsapp: { mensajes: entrantes.totalMensajes, cuentas: entrantes.cuentasUnicas },
     },
+    mixPorCanal: { porCanal: mix.porCanal, total: mix.total },
     conversion: {
-      llamadas: conexion.llamadas,
-      reunionesConseguidas: propuestas.length,
-      llamadasPorReunion: tasa(conexion.llamadas, propuestas.length),
+      llamadas: costoReunion.llamadas,
+      reunionesConseguidas: costoReunion.reunionesPropuestas,
+      llamadasPorReunion: costoReunion.llamadasPorReunion,
     },
     llamadas: {
       total: conexion.llamadas,
@@ -102,20 +129,18 @@ export function reporteDelDia(toques: ToqueReporte[], plan: PlanDelDia, ctx: { d
       connectRate: conexion.tasa,
     },
     reuniones: {
-      propuestas: propuestas.length,
-      ocurridas: ocurridas.length,
-      noShow: noShow.length,
-      // Lo que todavia no tiene desenlace. Nunca negativo: una reunion puede figurar como ocurrida
-      // en un dia distinto al que se propuso, asi que la resta puede pasarse.
-      sinDesenlace: Math.max(0, propuestas.length - ocurridas.length - noShow.length),
-      noShowRate: tasa(noShow.length, propuestas.length),
+      propuestas: embudo.propuestas,
+      ocurridas: embudo.ocurridas,
+      noShow: embudo.noShow,
+      sinDesenlace: embudo.sinDesenlace,
+      noShowRate: tasa(embudo.noShow, embudo.propuestas),
     },
     plan: { planeados: plan.planeados, ejecutados: plan.ejecutados, noSalieron: Math.max(0, plan.planeados - plan.ejecutados) },
     mixPorTipo: { porTipo: tipo.porTipo, conTipo: tipo.toquesConTipo, sinTipo: tipo.toquesSinTipo },
     texto: {
-      crudos: textoDeduplicado(toques, { modo: 'dia' }).crudos,
-      porDia: textoDeduplicado(toques, { modo: 'dia' }).deduplicados,
-      porConversacion: textoDeduplicado(toques, { modo: 'conversacion' }).deduplicados,
+      crudos: textoDeduplicado(toques.canal, { modo: 'dia' }).crudos,
+      porDia: textoDeduplicado(toques.canal, { modo: 'dia' }).deduplicados,
+      porConversacion: textoDeduplicado(toques.canal, { modo: 'conversacion' }).deduplicados,
     },
     cuentas: { aCuentasNuevas: novedad.aCuentasNuevas, aCuentasConHistoria: novedad.aCuentasConHistoria },
     origen: {
