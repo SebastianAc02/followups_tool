@@ -131,7 +131,7 @@ function Lienzo({
   // tarjeta), lo que dejaba `findIndex` en -1 y el reordenar() se saltaba en silencio --
   // causa raiz del bug "se mueve pero no se guarda" que reporto Sebastian.
   return (
-    <div className="grid auto-rows-min grid-cols-2 gap-3 md:grid-cols-4">
+    <div className="grid auto-rows-min grid-cols-2 gap-4 md:grid-cols-4">
       <SortableContext items={layout.map((i) => i.widgetId)} strategy={rectSortingStrategy}>
         {layout.map((item, idx) => {
           const widget = WIDGETS.find((w) => w.id === item.widgetId);
