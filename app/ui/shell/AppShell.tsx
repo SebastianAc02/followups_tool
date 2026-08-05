@@ -71,6 +71,11 @@ export async function datosSidebar() {
     // 11) lo abrio a todos los usuarios -- ya no admin-only, el item siempre aparece.
     // Antes se rotulaba "Pipeline" y apuntaba aca.
     { href: '/panel', label: 'Panel', icon: <IconPanel /> },
+    // Reporte del dia: la actividad de UNA persona en UN dia. Va al lado del Panel porque son la
+    // misma pregunta a dos escalas (el panel es el rango, el reporte es el dia) y separarlos en el
+    // nav obligaria a recordar cual responde cual. Lo que se ve adentro depende de quien mire: el
+    // dueño de la cartera ve el detalle, el resto ve actividad, conversion y tasas.
+    { href: '/reporte', label: 'Reporte del día', icon: <IconPanel /> },
     { href: '/conectores', label: 'Conectores', icon: <IconConectores />, badge: `${conectadosReales + 1}/3`, badgeTone: conectadosReales < 2 ? 'overdue' : 'neutral' },
   ];
 
