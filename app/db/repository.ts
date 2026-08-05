@@ -147,6 +147,10 @@ import {
   OBJECIONES,
   ACCIONES_CLIENTE,
   TIPOS_TOQUE,
+  ALIADOS,
+  ALIADOS_CONFIRMADOS,
+  ADVERTENCIA_SIN_VERIFICAR,
+  type Aliado,
   EJECUTOR_POR_DEFECTO,
   fechaDiaSchema,
   type Canal,
@@ -1336,6 +1340,240 @@ export function marcarPerdida(input: MarcarPerdidaInput, idOrganizacion: number)
       toque: leerToqueEscrito(tx, Number(insertado.lastInsertRowid)),
       empresa: leerEmpresaEscrita(tx, parsed.idEmpresa),
       transicion: huboTransicion ? { de: emp.estadoNotion, a: ESTADO_ON_HOLD } : null,
+    };
+  });
+}
+
+// --- aliado (de quien es la cuenta) ---------------------------------------------------
+//
+// La evidencia con la que viaja CUALQUIER clasificacion que salga de aca. Es el requisito que
+// hizo falta el 2026-08-04: nueve tandas sobre 95 cuentas costaron diez consultas y cuatro
+// correcciones, y cada correccion obligo a rehacer la lista entera porque no habia forma de ver
+// que regla habia clasificado a cada cuenta ni con que valor. Una lista que no se puede auditar
+// se rehace a mano, que es el trabajo que todo esto viene a quitar.
+export type Evidencia = {
+  campo: string;
+  // El valor que disparo la regla. null cuando la regla se disparo por la AUSENCIA del valor,
+  // que es un caso distinto y tiene que poder distinguirse a simple vista.
+  valor: string | null;
+  fuente: string | null;
+  fecha: string | null;
+  quien: string | null;
+};
+
+export type ClasificacionAliado = {
+  aliado: Aliado;
+  // false SOLO cuando nadie miro. ninguno_verificado es verificado:true, y esa es la diferencia
+  // que costo dos cuentas en una lista de llamadas.
+  verificado: boolean;
+  // Texto visible cuando la cuenta entra sin verificar. null cuando hay dato. Existe para que la
+  // advertencia viaje con la fila y no dependa de que quien pinte la lista se acuerde de mirar
+  // el booleano de al lado.
+  advertencia: string | null;
+  // El id de la cuenta HERMANA de la que salio el valor, cuando no salio de esta cuenta. null
+  // cuando el dato es propio.
+  heredadoDe: string | null;
+  evidencia: Evidencia;
+};
+
+const EVIDENCIA_VACIA: Evidencia = { campo: 'aliado', valor: null, fuente: null, fecha: null, quien: null };
+
+function clasificacionSinVerificar(): ClasificacionAliado {
+  return {
+    aliado: 'sin_verificar',
+    verificado: false,
+    advertencia: ADVERTENCIA_SIN_VERIFICAR,
+    heredadoDe: null,
+    evidencia: { ...EVIDENCIA_VACIA },
+  };
+}
+
+type FilaAliado = {
+  idEmpresa: string;
+  aliado: string | null;
+  aliadoFuente: string | null;
+  aliadoFecha: string | null;
+  aliadoQuien: string | null;
+  idEmpresaMatriz: string | null;
+};
+
+function leerFilaAliado(lector: typeof db | Tx, idEmpresa: string, idOrganizacion: number): FilaAliado | undefined {
+  return lector
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      aliado: empresa.aliado,
+      aliadoFuente: empresa.aliadoFuente,
+      aliadoFecha: empresa.aliadoFecha,
+      aliadoQuien: empresa.aliadoQuien,
+      idEmpresaMatriz: empresa.idEmpresaMatriz,
+    })
+    .from(empresa)
+    .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+    .get();
+}
+
+function evidenciaDe(fila: FilaAliado): Evidencia {
+  return {
+    campo: 'aliado',
+    valor: fila.aliado,
+    fuente: fila.aliadoFuente,
+    fecha: fila.aliadoFecha,
+    quien: fila.aliadoQuien,
+  };
+}
+
+// La regla, sin base de datos. Se separa de la lectura porque corre en dos sitios con formas
+// distintas de traer los datos: una cuenta suelta (dos queries) y una lista de 476 (dos queries
+// para TODAS, ver cuentasParaReconciliar). Si la regla viviera dentro del acceso a datos, la
+// version de lista tendria que reimplementarla y las dos se desincronizarian, que es como se
+// producen dos respuestas distintas a la misma pregunta.
+//
+// `hermanaConfirmada` es la cuenta del mismo grupo que SI tiene un aliado confirmado, o null. El
+// que la busca decide como; aca solo se decide que hacer con ella.
+export function clasificarAliadoDeFila(fila: FilaAliado | undefined, hermanaConfirmada: FilaAliado | null): ClasificacionAliado {
+  // Una cuenta que no existe (o que es de otra organizacion) tampoco se descarta a ciegas: se
+  // reporta como no verificada, que es la verdad, en vez de lanzar y dejar la lista sin la fila.
+  if (!fila) return clasificacionSinVerificar();
+
+  if (fila.aliado) {
+    return {
+      aliado: fila.aliado as Aliado,
+      verificado: true,
+      advertencia: null,
+      heredadoDe: null,
+      evidencia: evidenciaDe(fila),
+    };
+  }
+
+  if (hermanaConfirmada) {
+    return {
+      aliado: hermanaConfirmada.aliado as Aliado,
+      verificado: true,
+      advertencia: null,
+      heredadoDe: hermanaConfirmada.idEmpresa,
+      evidencia: evidenciaDe(hermanaConfirmada),
+    };
+  }
+
+  return clasificacionSinVerificar();
+}
+
+// Las cuentas del grupo que SI tienen un aliado confirmado, indexadas por matriz.
+//
+// Solo CONFIRMADOS. Un ninguno_verificado de la hermana no se propaga: dice que la hermana no es
+// de un aliado, no dice nada de esta cuenta, y heredarlo fabricaria el dato negativo que toda
+// esta columna existe para impedir.
+function hermanasConfirmadas(lector: typeof db | Tx, matrices: string[]): Map<string, FilaAliado> {
+  const mapa = new Map<string, FilaAliado>();
+  if (matrices.length === 0) return mapa;
+
+  const filas = lector
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      aliado: empresa.aliado,
+      aliadoFuente: empresa.aliadoFuente,
+      aliadoFecha: empresa.aliadoFecha,
+      aliadoQuien: empresa.aliadoQuien,
+      idEmpresaMatriz: empresa.idEmpresaMatriz,
+    })
+    .from(empresa)
+    .where(and(inArray(empresa.idEmpresaMatriz, matrices), inArray(empresa.aliado, [...ALIADOS_CONFIRMADOS])))
+    .orderBy(asc(empresa.idEmpresa))
+    .all();
+
+  // La primera por id gana, para que la respuesta sea la misma en dos corridas seguidas. Un grupo
+  // con dos aliados distintos es un dato contradictorio y se resuelve marcando la cuenta, no
+  // eligiendo al azar en cada lectura.
+  for (const f of filas) {
+    if (f.idEmpresaMatriz && !mapa.has(f.idEmpresaMatriz)) mapa.set(f.idEmpresaMatriz, f);
+  }
+  return mapa;
+}
+
+// De quien es una cuenta, con la evidencia de por que se dice eso.
+//
+// LEE, NO ESCRIBE, ni siquiera cuando hereda. Escribir el valor heredado dejaria sobre la cuenta
+// un dato que nadie afirmo sobre ella, y al dia siguiente nadie podria distinguirlo de uno
+// verificado: la herencia se recalcula en cada lectura y por eso siempre dice de donde salio.
+export function clasificarAliado(idEmpresa: string, idOrganizacion: number): ClasificacionAliado {
+  const fila = leerFilaAliado(db, idEmpresa, idOrganizacion);
+  if (!fila) return clasificacionSinVerificar();
+  if (fila.aliado || !fila.idEmpresaMatriz) return clasificarAliadoDeFila(fila, null);
+
+  const hermana = hermanasConfirmadas(db, [fila.idEmpresaMatriz]).get(fila.idEmpresaMatriz) ?? null;
+  // La cuenta no se hereda a si misma: sin esto, una cuenta ya marcada que ademas es la primera
+  // de su grupo se reportaria como heredada de ella misma.
+  return clasificarAliadoDeFila(fila, hermana && hermana.idEmpresa !== idEmpresa ? hermana : null);
+}
+
+// fuente y quien son OBLIGATORIOS, no un extra. Es la regla de procedencia del brain: un dato
+// sensible entra con su fuente o no entra. Un aliado sin quien lo dijo es justo el dato que
+// nadie puede auditar despues, y esta columna nace de un error de auditoria.
+const marcarAliadoSchema = z.object({
+  idEmpresa: z.string().min(1),
+  aliado: z.enum(ALIADOS),
+  fuente: z.string().min(1),
+  quien: z.string().min(1),
+  // El dia en que se verifico. Default hoy; se manda explicito cuando el dato se verifico antes
+  // y se esta registrando despues.
+  fecha: fechaDiaSchema.optional(),
+  nota: z.string().min(1).optional(),
+});
+export type MarcarAliadoInput = z.input<typeof marcarAliadoSchema>;
+
+export type MarcarAliadoResultado = {
+  idEmpresa: string;
+  clasificacion: ClasificacionAliado;
+};
+
+export function marcarAliado(input: MarcarAliadoInput, idOrganizacion: number): MarcarAliadoResultado {
+  const parsed = marcarAliadoSchema.parse(input);
+  const instante = new Date();
+  const fecha = parsed.fecha ?? fechaBogotaISO(instante);
+
+  return db.transaction((tx) => {
+    const fila = leerFilaAliado(tx, parsed.idEmpresa, idOrganizacion);
+    if (!fila) throw new Error(`Empresa ${parsed.idEmpresa} no existe o no esta activa en la organizacion ${idOrganizacion}`);
+
+    tx.update(empresa)
+      .set({
+        aliado: parsed.aliado,
+        aliadoFuente: parsed.fuente,
+        aliadoFecha: fecha,
+        aliadoQuien: parsed.quien,
+        updatedAt: sql`datetime('now')`,
+      })
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .run();
+
+    // El rastro, con el valor ANTERIOR: una cuenta que pasa de sae_plus a ninguno_verificado es
+    // un cambio que alguien va a querer poder discutir, y sin el antes no se puede.
+    tx.insert(syncCambios)
+      .values({
+        fecha: instante.toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle:
+          `aliado: ${fila.aliado ?? 'sin_verificar'} -> ${parsed.aliado} | fuente ${parsed.fuente} | ` +
+          `lo dijo ${parsed.quien}${parsed.nota ? ` | ${parsed.nota}` : ''}`,
+      })
+      .run();
+
+    // Relectura desde la fila escrita, no desde el input. Se reusa la traduccion de
+    // clasificarAliado para que la escritura y la lectura no puedan divergir.
+    const escrita = leerFilaAliado(tx, parsed.idEmpresa, idOrganizacion)!;
+    return {
+      idEmpresa: parsed.idEmpresa,
+      clasificacion: {
+        aliado: escrita.aliado as Aliado,
+        verificado: true,
+        advertencia: null,
+        heredadoDe: null,
+        evidencia: evidenciaDe(escrita),
+      },
     };
   });
 }
@@ -10990,6 +11228,10 @@ export type FilaCuenta = {
   estado: string | null;
   owner: string | null;
   notionPageId: string | null;
+  // Solo cuando se pide (conAliado). Ausente y no null: la lista de reconciliacion no responde
+  // esta pregunta, y una llave en null diria que la cuenta no tiene aliado en vez de que nadie
+  // la pregunto. El mismo error de leer el vacio como dato, un nivel mas arriba.
+  aliado?: ClasificacionAliado;
 };
 
 // Lista minima para cruzar contra Notion: seis campos y nada mas. Existe porque
@@ -11001,8 +11243,8 @@ export type FilaCuenta = {
 // es la que faltaba: el 2026-07-25, REDVIVA existia en produccion con su NIT, dominio y telefono,
 // pero sin estado_notion, asi que no salia en `pipeline` y se concluyo que habia que crearla
 // cuando en realidad solo habia que enlazarla.
-export function cuentasParaReconciliar(idOrganizacion: number): FilaCuenta[] {
-  return db
+export function cuentasParaReconciliar(idOrganizacion: number, opts: { conAliado?: boolean } = {}): FilaCuenta[] {
+  const filas = db
     .select({
       idEmpresa: empresa.idEmpresa,
       nombre: empresa.nombreOficial,
@@ -11010,6 +11252,15 @@ export function cuentasParaReconciliar(idOrganizacion: number): FilaCuenta[] {
       estado: empresa.estadoNotion,
       owner: empresa.owner,
       notionPageId: empresa.notionPageId,
+      // Se traen SIEMPRE en el select y se descartan abajo si no se pidieron: son cinco columnas
+      // de la misma fila que ya se esta leyendo, asi que no cuestan una query mas. Lo que la
+      // bandera controla es lo que VIAJA en la respuesta, que es donde estaba el costo real
+      // (`pipeline` pesa 142 KB por traer de mas, y esta lista existe para no hacer eso).
+      aliadoCol: empresa.aliado,
+      aliadoFuente: empresa.aliadoFuente,
+      aliadoFecha: empresa.aliadoFecha,
+      aliadoQuien: empresa.aliadoQuien,
+      idEmpresaMatriz: empresa.idEmpresaMatriz,
     })
     .from(empresa)
     .where(
@@ -11026,6 +11277,29 @@ export function cuentasParaReconciliar(idOrganizacion: number): FilaCuenta[] {
     )
     .orderBy(asc(empresa.nombreOficial))
     .all();
+
+  // Una sola query mas para TODO el grupo de las 476, no una por cuenta. La regla se aplica en
+  // memoria con clasificarAliadoDeFila, la misma que usa la lectura de una cuenta suelta: dos
+  // caminos, una sola regla.
+  const matrices = [...new Set(filas.map((f) => f.idEmpresaMatriz).filter((m): m is string => m != null))];
+  const hermanas = opts.conAliado ? hermanasConfirmadas(db, matrices) : new Map<string, FilaAliado>();
+
+  return filas.map(({ aliadoCol, aliadoFuente, aliadoFecha, aliadoQuien, idEmpresaMatriz, ...cuenta }) => {
+    if (!opts.conAliado) return cuenta;
+    const propia: FilaAliado = {
+      idEmpresa: cuenta.idEmpresa,
+      aliado: aliadoCol,
+      aliadoFuente,
+      aliadoFecha,
+      aliadoQuien,
+      idEmpresaMatriz,
+    };
+    const hermana = idEmpresaMatriz ? (hermanas.get(idEmpresaMatriz) ?? null) : null;
+    return {
+      ...cuenta,
+      aliado: clasificarAliadoDeFila(propia, hermana && hermana.idEmpresa !== cuenta.idEmpresa ? hermana : null),
+    };
+  });
 }
 
 // --- Bucle PBX (enriquecimiento del decisor) ---------------------------------------

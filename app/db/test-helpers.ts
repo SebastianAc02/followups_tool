@@ -29,6 +29,11 @@ export function crearDbPrueba() {
       es_cliente INTEGER NOT NULL DEFAULT 0,
       en_conversacion INTEGER NOT NULL DEFAULT 0,
       crm_software TEXT,
+      -- Migracion 0023: de quien es la cuenta, y la procedencia de ese dato.
+      aliado TEXT,
+      aliado_fuente TEXT,
+      aliado_fecha TEXT,
+      aliado_quien TEXT,
       estado_comercial TEXT NOT NULL,
       estado_notion TEXT,
       prioridad_comercial INTEGER,

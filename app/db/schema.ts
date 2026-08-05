@@ -28,6 +28,21 @@ export const empresa = sqliteTable('empresa', {
   esCliente: integer('es_cliente').notNull().default(0),
   enConversacion: integer('en_conversacion').notNull().default(0),
   crmSoftware: text('crm_software'),
+  // De QUIEN es la cuenta, uno de ALIADOS (app/db/validation.ts). Se infería de crm_software, que
+  // solo se llena tras el primer toque: la cuenta que nunca se ha tocado, que es justo la que se
+  // va a llamar, no tenia como decirlo.
+  //
+  // NULL significa sin_verificar, JAMAS "no es aliado". Nadie lee esta columna cruda: se lee por
+  // clasificarAliado(), que traduce el NULL a sin_verificar y le cuelga la advertencia. Las 476
+  // filas viejas nacen en NULL y NO se backfillean a ninguno_verificado, porque eso seria
+  // fabricar en masa el dato negativo que costo rehacer una lista de 95 cuentas.
+  aliado: text('aliado'),
+  // La procedencia del valor de arriba, que es lo que lo hace auditable. Sin esto la clasificacion
+  // dice "es de SAE Plus" y nadie puede preguntar quien lo dijo ni cuando, que es exactamente la
+  // pregunta que hubo que responder a mano el 4-ago sobre cuatro cuentas.
+  aliadoFuente: text('aliado_fuente'),
+  aliadoFecha: text('aliado_fecha'),
+  aliadoQuien: text('aliado_quien'),
   estadoComercial: text('estado_comercial').notNull(),
   estadoNotion: text('estado_notion'),
   prioridadComercial: integer('prioridad_comercial'),

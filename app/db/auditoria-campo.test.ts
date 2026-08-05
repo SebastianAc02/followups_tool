@@ -27,26 +27,36 @@ BEGIN
     WHERE id_empresa = NEW.id_empresa AND OLD.updated_at = NEW.updated_at;
 END;`;
 
-function sqlDeLaMigracion(): string {
+// TODAS las migraciones que tocan la auditoria, en orden de numero, no solo la primera.
+//
+// El trigger se RECREA cada vez que `empresa` gana columnas (SQLite no sabe alterar un trigger:
+// DROP + CREATE). Leer solo el primer archivo que lo define dejaria esta prueba verificando una
+// version que produccion ya reemplazo, que es exactamente el punto ciego que la prueba existe
+// para tapar. Se ejecutan todas, en el mismo orden en que corren en el deploy.
+function sqlsDeAuditoria(): string[] {
   const dir = path.join(process.cwd(), 'drizzle');
-  const archivo = fs
+  const archivos = fs
     .readdirSync(dir)
     .filter((f) => f.endsWith('.sql'))
+    .sort()
     .map((f) => path.join(dir, f))
-    .find((f) => fs.readFileSync(f, 'utf8').includes('CREATE TRIGGER `empresa_auditoria_campo`'));
-  assert.ok(archivo, 'no se encontro la migracion que crea empresa_auditoria_campo');
-  return fs.readFileSync(archivo, 'utf8');
+    .filter((f) => fs.readFileSync(f, 'utf8').includes('auditoria_campo'));
+  assert.ok(archivos.length > 0, 'no se encontro la migracion que crea empresa_auditoria_campo');
+  return archivos.map((f) => fs.readFileSync(f, 'utf8'));
 }
 
-const MIGRACION = sqlDeLaMigracion();
+const MIGRACIONES = sqlsDeAuditoria();
 
 function dbConAuditoria() {
   const ruta = crearDbPrueba();
   const db = new Database(ruta);
   db.exec(TRIGGER_VIEJO);
-  // Mismo corte que usa el migrador de drizzle (readMigrationFiles).
-  for (const stmt of MIGRACION.split('--> statement-breakpoint')) {
-    if (stmt.trim()) db.exec(stmt);
+  // Mismo corte que usa el migrador de drizzle (readMigrationFiles), archivo por archivo y en
+  // orden: la ultima recreacion del trigger es la que queda viva, igual que en el deploy.
+  for (const migracion of MIGRACIONES) {
+    for (const stmt of migracion.split('--> statement-breakpoint')) {
+      if (stmt.trim()) db.exec(stmt);
+    }
   }
   db.prepare(
     `INSERT INTO empresa (id_empresa, tipo_id, nombre_oficial, nombre_normalizado, estado_comercial,
@@ -139,7 +149,9 @@ test('con recursive_triggers encendido no se duplican filas ni se dispara el buc
 test('el trigger cubre todas las columnas de empresa menos updated_at', () => {
   // Este es el test que evita el punto ciego: si manana alguien agrega una columna a empresa y
   // no la agrega al trigger, ese campo cambiaria sin dejar rastro y nadie se enteraria.
-  const cuerpo = MIGRACION.slice(MIGRACION.indexOf('CREATE TRIGGER `empresa_auditoria_campo`'));
+  // La ULTIMA definicion, no la primera: es la que queda viva despues de correr todas.
+  const todas = MIGRACIONES.join('\n');
+  const cuerpo = todas.slice(todas.lastIndexOf('CREATE TRIGGER `empresa_auditoria_campo`'));
   const cubiertas = new Set([...cuerpo.matchAll(/'empresa', NEW\.id_empresa, '([a-z0-9_]+)'/g)].map((m) => m[1]));
 
   const { db, cerrar } = dbConAuditoria();

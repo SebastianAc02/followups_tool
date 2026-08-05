@@ -328,6 +328,34 @@ export const NIVEL_ACCION_CLIENTE: Record<AccionCliente, number> = {
 export const TIPOS_TOQUE = ['frio', 'reactivacion', 'seguimiento', 'reunion', 'cierre'] as const;
 export type TipoToque = (typeof TIPOS_TOQUE)[number];
 
+// DE QUIEN es la cuenta, cuando no es nuestra (propuesta de tandas, 2026-08-04). Hasta hoy esto
+// se infería de crm_software, que solo se llena despues del primer toque: o sea que la cuenta que
+// nunca se ha tocado, que es justo la que se va a llamar, no tenia como decirlo.
+//
+// LOS DOS ULTIMOS VALORES NO SON LO MISMO Y AHI ESTA TODO EL PUNTO:
+//   ninguno_verificado - alguien miro y esta cuenta no es de ningun aliado. ES un dato.
+//   sin_verificar      - nadie miro. NO es un dato, es la falta de uno.
+//
+// El 4-ago Fiesta Telecomunicaciones y Tunortetv pasaron el filtro de aliados porque su campo
+// estaba vacio y el vacio se leyo como "no es aliado". Las dos son de SAE Plus, la lista de
+// llamadas salio mal y hubo que rehacerla entera. Colapsar los dos silencios en uno es
+// literalmente el error, no una simplificacion de el.
+//
+// Una columna vacia en la base significa SIEMPRE sin_verificar, y la lectura lo dice con
+// advertencia (clasificarAliado en repository.ts) en vez de dejar que quien lea saque la
+// conclusion facil. Una cuenta sin verificar SALE en la lista, marcada; no se esconde ni se
+// aprueba.
+export const ALIADOS = ['sae_plus', 'ultimo_kilometro', 'integrapay', 'ninguno_verificado', 'sin_verificar'] as const;
+export type Aliado = (typeof ALIADOS)[number];
+
+// Los tres que sacan una cuenta de la lista. ninguno_verificado y sin_verificar NO estan aca, y
+// por razones opuestas: el primero porque ya se verifico que la cuenta es propia, el segundo
+// porque nadie sabe y una cuenta que nadie miro no se descarta a ciegas.
+export const ALIADOS_CONFIRMADOS: readonly Aliado[] = ['sae_plus', 'ultimo_kilometro', 'integrapay'];
+
+export const ADVERTENCIA_SIN_VERIFICAR =
+  'nadie verifico si esta cuenta es de un aliado: entra a la lista MARCADA, no como limpia';
+
 // Quien ejecuta un toque cuando el caller no lo dice (decision del operador, 2026-07-25).
 // Revierte la regla anterior ("NULL = no atribuido, nunca se asume"): en la practica dejo 71 de
 // 71 toques del ultimo mes sin ejecutor, o sea el 100% del dato perdido por proteger un caso

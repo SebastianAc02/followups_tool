@@ -77,6 +77,9 @@ import {
   actualizarEstadoNotion,
   cambiarCadencia,
   marcarPerdida,
+  marcarAliado,
+  type MarcarAliadoInput,
+  type MarcarAliadoResultado,
   buscarEmpresa,
   crearEmpresa,
   actualizarEmpresa,
@@ -425,14 +428,20 @@ export function embudoTool(input: EmbudoInput) {
 // responder lo mismo, y pesa 142 KB. Cruzar contra Notion no necesita nada de eso: necesita el
 // page_id (la llave) y los dos campos que de verdad cambian, estado y owner.
 
-export type CuentasInput = { idOrganizacion?: number };
+export type CuentasInput = { idOrganizacion?: number; conAliado?: boolean };
 
 export function cuentasTool(input: CuentasInput) {
   const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
-  const filas = cuentasParaReconciliar(idOrganizacion);
+  const filas = cuentasParaReconciliar(idOrganizacion, { conAliado: input.conAliado });
   return {
     organizacion: idOrganizacion,
     total: filas.length,
+    // Solo cuando se pidio la clasificacion. Es el tamano del hueco, y sin el numero arriba hay
+    // que recorrer 476 filas para saber si la lista se puede usar o si medio pipeline esta sin
+    // mirar. Las sin verificar NO se restan del total: entran a la lista, marcadas.
+    ...(input.conAliado
+      ? { sinVerificarAliado: filas.filter((f) => f.aliado && !f.aliado.verificado).length }
+      : {}),
     // Se reportan aparte porque son las dos poblaciones que rompen un cruce ingenuo: las que no
     // tienen page_id no se pueden cruzar por llave, y las que no tienen etapa no salen en
     // `pipeline` aunque existan.
@@ -481,6 +490,12 @@ export function cambiarCadenciaTool(input: CambiarCadenciaInput, idOrganizacion:
 // estaba on_hold no genera fila de historico, y eso hay que poder verlo.
 export function marcarPerdidaTool(input: MarcarPerdidaInput, idOrganizacion: number): MarcarPerdidaResultado {
   return marcarPerdida(input, idOrganizacion);
+}
+
+// De quien es la cuenta. Devuelve la clasificacion RELEIDA, no un ok: quien marca necesita ver
+// que quedo escrito y con que procedencia, que es el dato que hace auditable la lista despues.
+export function marcarAliadoTool(input: MarcarAliadoInput, idOrganizacion: number): MarcarAliadoResultado {
+  return marcarAliado(input, idOrganizacion);
 }
 
 // --- Identidad de cuentas (2026-07-24) --------------------------------------------------

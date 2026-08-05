@@ -27,6 +27,7 @@ import {
   moverEstadoTool,
   cambiarCadenciaTool,
   marcarPerdidaTool,
+  marcarAliadoTool,
   buscarEmpresaTool,
   crearEmpresaTool,
   actualizarEmpresaTool,
@@ -65,6 +66,7 @@ import {
   OBJECIONES,
   ACCIONES_CLIENTE,
   TIPOS_TOQUE,
+  ALIADOS,
   TIPOS_PLAN,
   ORIGENES_PLAN,
   RITMOS_INGRESO,
@@ -109,6 +111,7 @@ export const TOOLS_ESCRITURA = [
   'empujar_envios',
   'enviar_whatsapp_directo',
   'lanzar_campana',
+  'marcar_aliado',
   'marcar_no_ejecutado',
   'marcar_perdida',
   'mover_estado',
@@ -566,6 +569,43 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
     async (input) => {
       const r = marcarPerdidaTool(input as Parameters<typeof marcarPerdidaTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_aliado',
+    {
+      description:
+        'Dice DE QUIEN es una cuenta: sae_plus, ultimo_kilometro, integrapay, o ninguno_verificado ' +
+        'cuando ya se miro y no es de nadie. Devuelve la clasificacion RELEIDA con su procedencia. ' +
+        'Existe porque esto se inferia de crm_software, que solo se llena despues del primer toque: ' +
+        'la cuenta que nunca se ha tocado, que es justo la que se va a llamar, no tenia como decirlo. ' +
+        'OJO CON LOS DOS SILENCIOS: ninguno_verificado significa que alguien miro y la cuenta es ' +
+        'propia; una cuenta sin marcar significa que NADIE MIRO, y eso no es lo mismo. Nunca marques ' +
+        'ninguno_verificado para "limpiar" una cuenta sobre la que no tengas la verificacion: asi ' +
+        'entraron dos cuentas de SAE Plus a una lista de llamadas el 2026-08-04. ' +
+        'Envuelve marcarAliado() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
+        aliado: z
+          .enum(ALIADOS)
+          .describe(
+            'sae_plus | ultimo_kilometro | integrapay = la cuenta es del aliado y sale de las listas. ' +
+              'ninguno_verificado = SE VERIFICO que no es de ningun aliado. sin_verificar = devolverla ' +
+              'al estado de "nadie miro", que es lo correcto cuando la verificacion resulto no valer',
+          ),
+        fuente: z
+          .string()
+          .min(1)
+          .describe('De donde salio el dato: notion, operador, el aliado mismo. OBLIGATORIO: sin fuente no se puede auditar despues'),
+        quien: z.string().min(1).describe('Quien lo dijo, con nombre. OBLIGATORIO, por lo mismo'),
+        fecha: z.string().min(1).optional().describe('YYYY-MM-DD, cuando se verifico. Default: hoy'),
+        nota: z.string().min(1).optional().describe('El detalle en prosa, que queda en la bitacora junto al antes y el despues'),
+      },
+    },
+    async (input) => {
+      const r = marcarAliadoTool(input as Parameters<typeof marcarAliadoTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
@@ -1239,13 +1279,27 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
       description:
         'Lista minima de cuentas para cruzar contra Notion: idEmpresa, nombre (razon social), ' +
         'nombreNotion (marca comercial), estado, owner y notionPageId. CRUZA SIEMPRE POR ' +
-        'notionPageId, nunca por nombre. Incluye cuentas sin etapa, que `pipeline` no muestra.',
+        'notionPageId, nunca por nombre. Incluye cuentas sin etapa, que `pipeline` no muestra. ' +
+        'Con conAliado:true agrega DE QUIEN es cada cuenta, con su evidencia, y el conteo de las ' +
+        'que nadie ha verificado.',
       inputSchema: {
         idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+        conAliado: z
+          .boolean()
+          .optional()
+          .describe(
+            'Agrega a cada cuenta su clasificacion de aliado con evidencia (regla, valor, fuente, ' +
+              'fecha, quien lo dijo) y devuelve sinVerificarAliado con el tamano del hueco. ' +
+              'PONELO EN true PARA ARMAR CUALQUIER LISTA DE LLAMADAS: sin esto la lista no dice ' +
+              'cuales cuentas son de un aliado ni cuales nadie ha mirado, y una cuenta sin ' +
+              'verificar se lee como propia. Asi entraron dos cuentas de SAE Plus a una lista de ' +
+              'llamadas el 2026-08-04. Va apagado por default porque el uso original de esta tool ' +
+              'es cruzar contra Notion, y ahi no hace falta',
+          ),
       },
     },
-    async ({ idOrganizacion }) => {
-      const resultado = cuentasTool({ idOrganizacion });
+    async ({ idOrganizacion, conAliado }) => {
+      const resultado = cuentasTool({ idOrganizacion, conAliado });
       return { content: [{ type: 'text', text: JSON.stringify(resultado) }] };
     },
   );
