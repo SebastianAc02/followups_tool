@@ -25,7 +25,15 @@ import {
   segmentacionPorPersona,
   toquesAntesDeCerrarPromedio,
   empresasParaConversionStage,
+  toquesParaActividadCanal,
 } from '../db/repository';
+import {
+  type ToqueCanal,
+  connectRate,
+  toquesPorGrupo,
+  textoDeduplicado,
+  llamadasPorNovedadDeCuenta,
+} from '../core/actividad-canal';
 import { WIDGETS } from '../core/panel/widgets';
 import { resolverMetrica, type MetricaValor } from '../core/panel/metricas';
 import { cargarTablero } from './actions';
@@ -61,6 +69,54 @@ export default async function Panel({
   const diasVentana = Math.max(1, diasEntre(desde, hasta) + 1);
 
   const toquesTotal = contarToquesEnRango(desde, hasta, owner);
+
+  // Las cinco metricas de actividad salen de UNA sola lectura: son cortes distintos sobre las
+  // mismas filas, y pedirlas por separado seria cinco queries para responder una pregunta.
+  //
+  // El cast de `resultado`: la columna es TEXT y produccion tiene cinco filas con prosa de la epoca
+  // en que era texto libre, o sea valores fuera del vocabulario. El nucleo pregunta si el valor
+  // esta en RESULTADOS_CONTESTO, asi que una prosa vieja cae del lado de "no conecto". Es la
+  // direccion conservadora (hunde la tasa en vez de inflarla) y son cinco filas sobre cientos.
+  const filasCanal = toquesParaActividadCanal(desde, hasta, usuario.idOrganizacion, owner ? { owner } : {}).map((f) => ({
+    ...f,
+    resultado: f.resultado as ToqueCanal['resultado'],
+  }));
+  const conexion = connectRate(filasCanal);
+  const porGrupo = toquesPorGrupo(filasCanal);
+  const dedupDia = textoDeduplicado(filasCanal, { modo: 'dia' });
+  const dedupConversacion = textoDeduplicado(filasCanal, { modo: 'conversacion' });
+  const novedad = llamadasPorNovedadDeCuenta(filasCanal);
+
+  const actividadDeCanal = {
+    // La tasa se guarda en porcentaje redondeado a un decimal: el widget de KPI pinta un numero, no
+    // formatea fracciones. null viaja tal cual y resolverMetrica lo traduce a "sin datos", que es
+    // la verdad cuando ninguna llamada quedo calificada.
+    connectRate: conexion.tasa === null ? null : Math.round(conexion.tasa * 1000) / 10,
+    // Las llamadas sin resultado van en su propia barra y NO del lado de las que no conectaron. Es
+    // una llamada que nadie califico, y meterla del lado negativo hunde la tasa con un dato que no
+    // existe.
+    connectRateDetalle: {
+      Conectadas: conexion.conectadas,
+      'No conectaron': conexion.noConectadas,
+      'Sin calificar': conexion.sinResultado,
+    },
+    toquesPorGrupoCanal: {
+      Texto: porGrupo.texto,
+      Llamada: porGrupo.llamada,
+      Reunión: porGrupo.reunion,
+    },
+    // Los tres lado a lado. La distancia entre ellos ES el dato: dice cuanto del volumen de texto
+    // es conversacion viva y cuanto es la misma conversacion contada muchas veces.
+    textoDeduplicado: {
+      Crudo: dedupDia.crudos,
+      'Por día': dedupDia.deduplicados,
+      'Por conversación': dedupConversacion.deduplicados,
+    },
+    llamadasCuentasNuevas: {
+      'Cuentas nuevas': novedad.aCuentasNuevas,
+      'Con historia': novedad.aCuentasConHistoria,
+    },
+  };
   // followUpPorDeal (conectado 2026-07-22): "deal" es la MISMA definicion que ya usa
   // leadsTocadosEnRango (empresa distinta con toque en el rango) -- se reusan los dos
   // conteos que este objeto YA calcula para toques_total/leads_tocados en vez de volver a
@@ -71,6 +127,7 @@ export default async function Panel({
     promedioDiario: promedioDiario(toquesTotal),
     leadsTocados,
     toquesPorCanal: toquesPorCanal(desde, hasta, owner),
+    ...actividadDeCanal,
     toquesPorResultado: toquesPorResultado(desde, hasta, owner),
     campanasActivas: campanasActivas(),
     inscripcionesActivas: inscripcionesActivas(),
@@ -117,6 +174,7 @@ export default async function Panel({
         email={usuario.email}
         desde={desde}
         hasta={hasta}
+        hoy={hoy}
         owner={owner}
         owners={owners}
       />

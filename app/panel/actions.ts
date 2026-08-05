@@ -2,7 +2,7 @@
 
 import { requireSession } from '../lib/session';
 import { leerTablero, guardarTablero as guardarTableroRepo } from '../db/panel-tablero-repository';
-import { parse, serialize, tableroDefault, type TableroItem } from '../core/panel/tablero';
+import { parse, serialize, tableroDefault, incorporarWidgetsNuevos, type TableroItem } from '../core/panel/tablero';
 
 // Fase 4 (plan-produccion-cro-campana.md, tarea 11): /panel se abre a todos los usuarios
 // autenticados, ya no admin-only (ver el comentario largo en page.tsx). Se mantiene el
