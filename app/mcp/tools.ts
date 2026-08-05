@@ -81,6 +81,9 @@ import {
   type MarcarAliadoInput,
   type MarcarAliadoResultado,
   marcarDescarte,
+  cuentasParaTandas,
+  marcarTareaBloqueante,
+  type MarcarTareaBloqueanteInput,
   type MarcarDescarteInput,
   type MarcarDescarteResultado,
   buscarEmpresa,
@@ -160,6 +163,23 @@ import { MAX_INTENTOS } from '../core/push';
 import { elegirDestinatarioDefault } from '../core/inscripcion';
 import { calcularConversionStage } from '../core/panel/conversionStage';
 import { FUNNEL_ETAPAS } from '../db/funnel';
+import { clasificarTanda, TANDAS } from '../core/tandas.ts';
+import {
+  llamadasPorReunionConseguida,
+  mixPorCanal,
+  embudoReuniones,
+  mixPorTipoToque,
+  cierresSinMovimiento,
+  tasaRespuestaPorEtapa,
+  respuestasEntrantesWhatsapp,
+  type ToqueDashboardCRO,
+} from '../core/dashboard-cro.ts';
+import { marcarCanal, type MarcarCanalInput, type MarcarCanalResultado } from '../db/canal-estado.ts';
+import { fechaBogotaISO as hoyBogota } from '../lib/date-utils.ts';
+
+// El corte bajo el cual un ISP no cierra. Es hipotesis medida, no ley: por eso `tandas` lo recibe
+// como parametro y esto es solo el default.
+const PISO_USUARIOS_DEFAULT = 1000;
 import { probabilidadCierrePorEtapa, type ProbabilidadCierre } from '../core/probabilidadCierre';
 // El mismo parser que usa el wizard web (app/campanas/nueva/actions.ts). Ver la nota en
 // crearCadenciaTool: es donde vive la extraccion de [variables] y la directiva [[firma]].
@@ -505,6 +525,102 @@ export function marcarAliadoTool(input: MarcarAliadoInput, idOrganizacion: numbe
 // si el descarte esta vigente: una congelada con fecha pasada vuelve sola y la respuesta lo dice.
 export function marcarDescarteTool(input: MarcarDescarteInput, idOrganizacion: number): MarcarDescarteResultado {
   return marcarDescarte(input, idOrganizacion);
+}
+
+export function marcarCanalTool(input: MarcarCanalInput, idOrganizacion: number): MarcarCanalResultado {
+  return marcarCanal(input, idOrganizacion);
+}
+
+export function marcarTareaBloqueanteTool(input: MarcarTareaBloqueanteInput, idOrganizacion: number) {
+  return marcarTareaBloqueante(input, idOrganizacion);
+}
+
+// --- tandas (la lista del dia, ya ordenada) -------------------------------------------
+//
+// Reemplaza las diez consultas distintas y las cuatro correcciones de memoria que costo armar esto
+// a mano el 2026-08-04 sobre 95 cuentas. Cada cuenta viaja con la regla que la clasifico y su
+// evidencia: sin eso la lista no se puede auditar y toca rehacerla, que es el problema entero.
+//
+// El piso por default es 1.000 usuarios, que es el corte bajo el cual un ISP no cierra. Se puede
+// mover porque es una hipotesis, no una ley.
+export type TandasInput = { idOrganizacion?: number; owner?: string; piso?: number; incluirDescartadas?: boolean };
+
+export function tandasTool(input: TandasInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const hoy = hoyBogota();
+  const cuentas = cuentasParaTandas(idOrganizacion);
+
+  const clasificadas = cuentas.map((c) =>
+    clasificarTanda(c, { hoy, piso: input.piso ?? PISO_USUARIOS_DEFAULT, owner: input.owner }),
+  );
+  // `fuera` se OMITE por default y no se borra: incluirDescartadas la trae de vuelta con su regla y
+  // su evidencia, que es como se audita un descarte sin tener que ir a mirar cuenta por cuenta.
+  const visibles = input.incluirDescartadas ? clasificadas : clasificadas.filter((c) => c.tanda !== 'fuera');
+
+  const porTanda: Record<string, typeof clasificadas> = {};
+  for (const c of visibles) (porTanda[c.tanda] ??= []).push(c);
+  // El orden DENTRO de cada tanda: lo mas viejo primero. Lo que lleva mas tiempo quieto sube solo,
+  // que es lo que la pantalla de Seguimiento no sabe hacer hoy.
+  for (const lista of Object.values(porTanda)) {
+    lista.sort((a, b) => (a.evidencia.fecha ?? '').localeCompare(b.evidencia.fecha ?? ''));
+  }
+
+  return {
+    organizacion: idOrganizacion,
+    hoy,
+    owner: input.owner ?? null,
+    piso: input.piso ?? PISO_USUARIOS_DEFAULT,
+    // En el orden de prioridad de TANDAS, no alfabetico ni por tamano: el orden ES la respuesta a
+    // "que hago ahora".
+    tandas: TANDAS.filter((t) => porTanda[t]?.length).map((t) => ({ tanda: t, total: porTanda[t].length, cuentas: porTanda[t] })),
+    totales: Object.fromEntries(TANDAS.map((t) => [t, porTanda[t]?.length ?? 0])),
+    // Los dos huecos que hacen que una lista no se pueda dar por buena. Van arriba, no escondidos
+    // dentro de cada cuenta: quien pide la lista tiene que ver de una si medio pipeline esta sin
+    // verificar antes de empezar a llamar.
+    sinVerificarAliado: clasificadas.filter((c) => c.advertencias.some((a) => a.startsWith('aliado'))).length,
+    sinTamanoConfirmado: clasificadas.filter((c) => !c.usuarios.confirmado).length,
+    fueraOmitidas: input.incluirDescartadas ? 0 : clasificadas.length - visibles.length,
+  };
+}
+
+// --- dashboard del CRO ----------------------------------------------------------------
+//
+// Los siete bloques sobre las mismas filas, leidas una sola vez. Lo que el doc dice que NO va:
+// toques totales como metrica principal. Un dia de 25 llamadas sin reunion no vale mas que uno de
+// 5 con dos reuniones, asi que el titular es el costo de una reunion, no el volumen.
+export type DashboardCroInput = { desde: string; hasta: string; idOrganizacion?: number; owner?: string; umbralDiasCierre?: number };
+
+export function dashboardCroTool(input: DashboardCroInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const filas = toquesEnRango(input.desde, input.hasta, idOrganizacion, input.owner ? { owner: input.owner } : {});
+  const toques: ToqueDashboardCRO[] = filas.map((t) => ({
+    idEmpresa: t.idEmpresa,
+    canal: t.canal,
+    tipoToque: t.tipoToque,
+    resultado: t.resultado as never,
+    fuente: t.fuente,
+    fechaDia: t.fechaDia,
+    fecha: t.fecha,
+    estado: t.estado,
+    reunionFechaPropuesta: t.reunionFechaPropuesta,
+    reunionFechaOcurrida: t.reunionFechaOcurrida,
+  }));
+
+  return {
+    organizacion: idOrganizacion,
+    desde: input.desde,
+    hasta: input.hasta,
+    owner: input.owner ?? null,
+    costoDeUnaReunion: llamadasPorReunionConseguida(toques),
+    mixPorCanal: mixPorCanal(toques),
+    embudoReuniones: embudoReuniones(toques),
+    mixPorTipo: mixPorTipoToque(toques),
+    cierresSinMovimiento: cierresSinMovimiento(toques, hoyBogota(), input.umbralDiasCierre),
+    tasaRespuesta: tasaRespuestaPorEtapa(toques),
+    // La mitad de la conversacion que hoy no entra en ninguna metrica: 143 mensajes entrantes en 15
+    // cuentas. Van aparte y NO suman a ningun denominador de esfuerzo: no los hizo el operador.
+    entrantesWhatsapp: respuestasEntrantesWhatsapp(toques),
+  };
 }
 
 // --- Identidad de cuentas (2026-07-24) --------------------------------------------------

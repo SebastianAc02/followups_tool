@@ -29,6 +29,10 @@ import {
   marcarPerdidaTool,
   marcarAliadoTool,
   marcarDescarteTool,
+  marcarCanalTool,
+  marcarTareaBloqueanteTool,
+  tandasTool,
+  dashboardCroTool,
   buscarEmpresaTool,
   crearEmpresaTool,
   actualizarEmpresaTool,
@@ -90,6 +94,7 @@ export const TOOLS_LECTURA = [
   'cambios_desde',
   'cola',
   'cuentas',
+  'dashboard_cro',
   'deal_historia',
   'embudo',
   'envios_programados',
@@ -97,6 +102,7 @@ export const TOOLS_LECTURA = [
   'panel_metricas',
   'pipeline',
   'plan_vs_ejecutado',
+  'tandas',
   'tracking_correo',
 ] as const;
 
@@ -114,7 +120,9 @@ export const TOOLS_ESCRITURA = [
   'enviar_whatsapp_directo',
   'lanzar_campana',
   'marcar_aliado',
+  'marcar_canal',
   'marcar_descarte',
+  'marcar_tarea_bloqueante',
   'marcar_no_ejecutado',
   'marcar_perdida',
   'mover_estado',
@@ -650,6 +658,56 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
     async (input) => {
       const r = marcarDescarteTool(input as Parameters<typeof marcarDescarteTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_canal',
+    {
+      description:
+        'Dice si una linea o un canal de una cuenta esta VIVO o MUERTO. Intel Go acumulo cuatro toques ' +
+        'marcando un numero fuera de servicio porque no habia donde escribirlo. Una cuenta con algun ' +
+        'canal muerto sale de la lista de llamadas (tanda esperar) en vez de gastar el quinto toque. ' +
+        'OJO: no existe escribir "sin_dato". Un canal sin marcar YA es sin_dato, que significa que ' +
+        'nadie verifico la linea, y eso NO es lo mismo que verificar que funciona. ' +
+        'Envuelve marcarCanal() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
+        canal: z.enum(CANALES_TOQUE).describe('El canal que se esta calificando'),
+        estado: z.enum(['vivo', 'muerto']).describe('vivo = se verifico que funciona. muerto = se verifico que no'),
+        nota: z.string().min(1).optional().describe('Que paso: "tono de fuera de servicio", "el numero es de otra empresa"'),
+        fuente: z.string().min(1).describe('De donde salio. OBLIGATORIO'),
+        quien: z.string().min(1).describe('Quien lo verifico. OBLIGATORIO'),
+        fecha: z.string().min(1).optional().describe('YYYY-MM-DD. Default: hoy'),
+      },
+    },
+    async (input) => {
+      const r = marcarCanalTool(input as Parameters<typeof marcarCanalTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_tarea_bloqueante',
+    {
+      description:
+        'Dice que TAREA DEL OPERADOR tiene quieta a una cuenta. Jigartel llevaba desde el 22-jul sin ' +
+        'moverse porque faltaba conseguir el numero de un gerente, y eso hoy se esconde entre las ' +
+        'cuentas que no contestan. Son cosas distintas: una espera al prospecto, la otra es deuda ' +
+        'propia y no se destraba con un toque mas. La cuenta sale en la tanda bloqueado_por_tarea. ' +
+        'Manda tarea:null cuando se destrabo. ' +
+        'Si la cuenta YA estaba bloqueada por lo mismo, la fecha NO se mueve: reescribirla borraria ' +
+        'el dato que importa, que es cuanto lleva quieta. Devuelve diasBloqueada.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
+        tarea: z.string().min(1).nullable().describe('Que hay que hacer, en prosa. null = se destrabo'),
+        quien: z.string().min(1).describe('Quien lo reporta. OBLIGATORIO'),
+        desde: z.string().min(1).optional().describe('YYYY-MM-DD, desde cuando esta quieta. Default hoy. Mandalo cuando el bloqueo empezo antes'),
+      },
+    },
+    async (input) => {
+      const r = marcarTareaBloqueanteTool(input as Parameters<typeof marcarTareaBloqueanteTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
@@ -1345,6 +1403,77 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     async ({ idOrganizacion, conAliado }) => {
       const resultado = cuentasTool({ idOrganizacion, conAliado });
       return { content: [{ type: 'text', text: JSON.stringify(resultado) }] };
+    },
+  );
+
+  server.registerTool(
+    'tandas',
+    {
+      description:
+        'LA LISTA DEL DIA, ya clasificada y ordenada. Empieza por aca para saber a quien llamar: ' +
+        'reemplaza las diez consultas distintas y las cuatro correcciones de memoria que costo armar ' +
+        'esto a mano sobre 95 cuentas. Devuelve las cuentas agrupadas en tandas, EN ORDEN DE ' +
+        'PRIORIDAD (fuera, esperar, bloqueado_por_tarea, cierre, reunion, respondio, agotada, ' +
+        'enfriandose, rellamada, frio, cadencia, sin_campana) y dentro de cada una lo mas viejo ' +
+        'primero, para que lo que lleva mas tiempo quieto suba solo. ' +
+        'CADA CUENTA VIAJA CON LA REGLA QUE LA CLASIFICO Y SU EVIDENCIA (campo, valor, fuente, fecha, ' +
+        'quien lo dijo): sin eso la lista no se puede auditar y toca rehacerla a mano. ' +
+        'Lee arriba sinVerificarAliado y sinTamanoConfirmado ANTES de empezar a llamar: dicen cuanto ' +
+        'de la lista descansa en datos que nadie confirmo. Una cuenta sin verificar SALE en la lista, ' +
+        'marcada en advertencias, nunca escondida ni aprobada.',
+      inputSchema: {
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+        owner: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Solo las cuentas de este dueno. Las de otro salen en la tanda fuera con regla otro_dueno'),
+        piso: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe(
+            'Usuarios minimos para llamar en frio. Default 1000, el corte bajo el cual un ISP no cierra. ' +
+              'Una cuenta SIN tamano NO cae bajo el piso: entra a frio marcada, porque no medida no es chica',
+          ),
+        incluirDescartadas: z
+          .boolean()
+          .optional()
+          .describe('Trae tambien la tanda fuera, con la regla y la evidencia de por que cada cuenta salio. Para auditar descartes'),
+      },
+    },
+    async ({ idOrganizacion, owner, piso, incluirDescartadas }) => {
+      const r = tandasTool({ idOrganizacion, owner, piso, incluirDescartadas });
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'dashboard_cro',
+    {
+      description:
+        'Los siete bloques del tablero del CRO sobre un rango: costo de una reunion en llamadas, mix ' +
+        'por canal, embudo de reuniones (propuestas, ocurridas, no-show, sin desenlace), mix por tipo ' +
+        'de toque, cierres sin movimiento, tasa de respuesta PARTIDA POR ETAPA y respuestas entrantes ' +
+        'de WhatsApp. ' +
+        'Dos cosas que hay que leer bien: el mix por tipo cuenta SOLO los toques que traen tipo y deja ' +
+        'los mudos en su propia llave, asi que un mix de 30 sobre 96 toques no se puede confundir con ' +
+        'la foto completa; y los mensajes ENTRANTES de WhatsApp van aparte y no suman a ningun ' +
+        'denominador de esfuerzo, porque no los hizo el operador. ' +
+        'Toques totales NO es la metrica principal: un dia de 25 llamadas sin reunion no vale mas que ' +
+        'uno de 5 con dos reuniones.',
+      inputSchema: {
+        desde: z.string().min(1).describe('YYYY-MM-DD'),
+        hasta: z.string().min(1).describe('YYYY-MM-DD'),
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+        owner: z.string().min(1).optional(),
+        umbralDiasCierre: z.number().int().positive().optional().describe('Dias sin movimiento para que un cierre cuente como en riesgo. Default 7'),
+      },
+    },
+    async ({ desde, hasta, idOrganizacion, owner, umbralDiasCierre }) => {
+      const r = dashboardCroTool({ desde, hasta, idOrganizacion, owner, umbralDiasCierre });
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
 

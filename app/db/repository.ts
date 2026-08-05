@@ -1,3 +1,4 @@
+import { estadosDeCanales } from './canal-estado.ts';
 import type { CuentaParaTanda } from '../core/tandas.ts';
 import type { ToqueParaAgotamiento } from '../core/agotamiento.ts';
 import {
@@ -1751,6 +1752,86 @@ export function marcarDescarte(input: MarcarDescarteInput, idOrganizacion: numbe
   });
 }
 
+// La tarea del operador que tiene quieta a la cuenta. tarea NULLABLE = se destrabo.
+//
+// Existe por la misma razon que cada write path de este proyecto: una columna sin accion que la
+// escriba es una columna que se queda vacia para siempre. Las tres de transcript vivieron meses asi.
+const marcarTareaBloqueanteSchema = z.object({
+  idEmpresa: z.string().min(1),
+  tarea: z.string().min(1).nullable(),
+  quien: z.string().min(1),
+  // Desde cuando esta quieta. Default hoy. Se manda explicito cuando el bloqueo empezo antes y se
+  // esta registrando ahora, que es el caso normal al descubrirlo: lo que duele no es que este
+  // bloqueada, es que lleve dos semanas asi.
+  desde: fechaDiaSchema.optional(),
+});
+export type MarcarTareaBloqueanteInput = z.input<typeof marcarTareaBloqueanteSchema>;
+
+export function marcarTareaBloqueante(input: MarcarTareaBloqueanteInput, idOrganizacion: number) {
+  const parsed = marcarTareaBloqueanteSchema.parse(input);
+  const instante = new Date();
+  const hoy = fechaBogotaISO(instante);
+
+  return db.transaction((tx) => {
+    const antes = tx
+      .select({ tareaBloqueante: empresa.tareaBloqueante, tareaBloqueanteDesde: empresa.tareaBloqueanteDesde })
+      .from(empresa)
+      .where(and(eq(empresa.idEmpresa, parsed.idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+      .get();
+    if (!antes) throw new Error(`Empresa ${parsed.idEmpresa} no existe o no esta activa en la organizacion ${idOrganizacion}`);
+
+    // Si YA estaba bloqueada por lo mismo, la fecha NO se mueve. Reescribirla cada vez que alguien
+    // vuelve a marcar el bloqueo borraria el dato que importa: cuanto lleva quieta.
+    const mismaTarea = parsed.tarea != null && parsed.tarea === antes.tareaBloqueante;
+    const desde = parsed.tarea == null ? null : mismaTarea ? (antes.tareaBloqueanteDesde ?? parsed.desde ?? hoy) : (parsed.desde ?? hoy);
+
+    tx.update(empresa)
+      .set({
+        tareaBloqueante: parsed.tarea,
+        tareaBloqueanteDesde: desde,
+        tareaBloqueanteQuien: parsed.tarea ? parsed.quien : null,
+        updatedAt: sql`datetime('now')`,
+      })
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .run();
+
+    tx.insert(syncCambios)
+      .values({
+        fecha: instante.toISOString(),
+        corrida: 'cockpit',
+        fuente: 'cockpit',
+        entidad: 'empresa',
+        idRegistro: parsed.idEmpresa,
+        accion: 'update',
+        detalle: `tarea bloqueante: ${antes.tareaBloqueante ?? 'ninguna'} -> ${parsed.tarea ?? 'destrabada'} | lo dijo ${parsed.quien}`,
+      })
+      .run();
+
+    const escrita = tx
+      .select({
+        tareaBloqueante: empresa.tareaBloqueante,
+        tareaBloqueanteDesde: empresa.tareaBloqueanteDesde,
+        tareaBloqueanteQuien: empresa.tareaBloqueanteQuien,
+      })
+      .from(empresa)
+      .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+      .get()!;
+
+    return {
+      idEmpresa: parsed.idEmpresa,
+      bloqueada: escrita.tareaBloqueante != null,
+      tarea: escrita.tareaBloqueante,
+      // Cuantos dias lleva quieta, que es la mitad del dato y la razon de que la fecha no se mueva.
+      desde: escrita.tareaBloqueanteDesde,
+      diasBloqueada:
+        escrita.tareaBloqueanteDesde == null
+          ? null
+          : Math.floor((Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${escrita.tareaBloqueanteDesde}T00:00:00Z`)) / 86400000),
+      quien: escrita.tareaBloqueanteQuien,
+    };
+  });
+}
+
 // --- tandas (armar la lista del dia) ---------------------------------------------------
 //
 // Trae TODO lo que la clasificacion necesita en CINCO queries para las ~1.965 cuentas, no una por
@@ -1760,10 +1841,7 @@ export function marcarDescarte(input: MarcarDescarteInput, idOrganizacion: numbe
 // La regla no vive aca: vive en app/core/tandas.ts, pura y probada aparte. Este bloque solo lee y
 // arma. Mezclarlas obligaria a montar una base para probar el orden de las reglas, que es
 // justamente lo que hay que poder cambiar sin miedo.
-export function cuentasParaTandas(
-  idOrganizacion: number,
-  opts: { canalesMuertos?: Set<string> } = {},
-): CuentaParaTanda[] {
+export function cuentasParaTandas(idOrganizacion: number): CuentaParaTanda[] {
   const filas = db
     .select({
       idEmpresa: empresa.idEmpresa,
@@ -1800,6 +1878,17 @@ export function cuentasParaTandas(
     .all();
 
   const ids = filas.map((f) => f.idEmpresa);
+  // Que cuentas tienen ALGUN canal marcado como muerto. Una sola query para todas. Solo 'muerto'
+  // saca a la cuenta: 'sin_dato' es que nadie verifico la linea, y eso no es motivo para dejar de
+  // llamar (misma regla que aliado, la ausencia no es un dato negativo).
+  const canalesMuertos = new Set<string>();
+  if (ids.length > 0) {
+    for (const [idEmpresa, porCanal] of estadosDeCanales(ids, idOrganizacion)) {
+      for (const c of porCanal.values()) {
+        if (c.estado === 'muerto') { canalesMuertos.add(idEmpresa); break; }
+      }
+    }
+  }
   const matrices = [...new Set(filas.map((f) => f.idEmpresaMatriz).filter((m): m is string => m != null))];
   const hermanas = hermanasConfirmadas(db, matrices);
 
@@ -1866,7 +1955,7 @@ export function cuentasParaTandas(
       tareaBloqueante: f.tareaBloqueante,
       tareaBloqueanteDesde: f.tareaBloqueanteDesde,
       tieneCadencia: conCadencia.has(f.idEmpresa),
-      canalMuerto: opts.canalesMuertos?.has(f.idEmpresa) ?? false,
+      canalMuerto: canalesMuertos.has(f.idEmpresa),
       toques: porEmpresa.get(f.idEmpresa) ?? [],
       ultimoToqueDia: ultimoReal.get(f.idEmpresa) ?? null,
     };
