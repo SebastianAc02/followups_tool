@@ -1,15 +1,23 @@
-// Página de Seguimiento: vista operativa por toque (numero de contacto en la cadencia).
+// Página de Seguimiento: vista operativa por tanda (rediseño de tandas, paso 6, 2026-08-04).
 // El embudo por etapa comercial vive aparte, en /pipeline (lente distinto, no un tab de aca).
 // Envuelta por layout.tsx que ya hace requireSession() + AppShell, así que esta página
 // solo renderiza el contenido específico de seguimiento.
+//
+// Por qué se rehizo: agrupar por "Toque uno, Toque dos, Aún no entran, Sin cadencia" solo tenía
+// sentido con una cadencia única para todos, y la prueba de que no aplicaba era "Sin cadencia:
+// 15" -- quince cuentas que la vista no sabía dónde poner. Ahora cada cuenta cae en EXACTAMENTE
+// una tanda (mismo cálculo que Toques y el MCP, tandasTool), y la columna responde dos preguntas
+// que la vista vieja no contestaba: quién se está enfriando y qué está esperando del operador.
 import { requireSession } from '../lib/session';
 import { hoy as hoyDemo } from '../lib/reloj';
-import { kpisPipeline, pipelineGlobal, pipelineSinCadencia, empresasConRespuestaPendiente } from '../db/repository';
-import { canalNormalizado } from '../cola/agenda.ts';
+import { kpisPipeline } from '../db/repository';
 import { SeguimientoShell } from '../ui/seguimiento/SeguimientoShell';
 import { KpiRow, type KpiData } from '../ui/seguimiento/KpiRow';
-import { EtapaGroup, type EtapaGroupData } from '../ui/seguimiento/EtapaGroup';
-import type { EmpresaRowData } from '../ui/seguimiento/EmpresaRow';
+import { TandaColumna } from '../ui/seguimiento/TandaColumna';
+import { EnfriandoseCallout } from '../ui/seguimiento/EnfriandoseCallout';
+import { DeudaOperadorCallout } from '../ui/seguimiento/DeudaOperadorCallout';
+import { ContadoresTandas } from '../ui/ContadoresTandas';
+import { cargarTandasDelDia, deudaDelOperador, masViejasEnEstado } from './tandas-datos.ts';
 import { ReportesPanel, type ReporteMockData } from '../ui/seguimiento/ReportesPanel';
 import { AjustesPanel, type AjustesMockData } from '../ui/seguimiento/AjustesPanel';
 
@@ -55,8 +63,9 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
 
   const usuario = await requireSession();
   const hoy = hoyDemo();
+  const owner = usuario.verTodoPipeline ? undefined : usuario.owner;
 
-  const kpisRaw = kpisPipeline(usuario.idOrganizacion, hoy, usuario.verTodoPipeline ? undefined : usuario.owner);
+  const kpisRaw = kpisPipeline(usuario.idOrganizacion, hoy, owner);
   const kpis: KpiData = {
     enSecuencia: kpisRaw.enSecuencia,
     entrandoHoy: kpisRaw.entrandoHoy,
@@ -65,199 +74,23 @@ async function SeguimientoContent({ tab }: { tab?: string }) {
     cerradas: kpisRaw.cerradasOptOut,
   };
 
-  const filas = pipelineGlobal(usuario.idOrganizacion, hoy, undefined, usuario.verTodoPipeline ? undefined : usuario.owner);
-
-  // Distinción pedida por Sebastián (2026-07-22): las que YA arrancan (toque de hoy) van en
-  // sus grupos "Toque N"; las que AÚN NO entran (primer paso, programadas para un día futuro,
-  // sin tocar todavía) van en su propio grupo, para no inflar "Toque uno" con las que todavía
-  // no empiezan. "No entra" = primer paso (orden <= 1) y sin toque de hoy.
-  const noEntran = filas.filter((f) => !f.esHoy && (f.pasoActual ?? 1) <= 1);
-  const noEntranIds = new Set(noEntran.map((f) => f.idInscripcion));
-  const filasEnSecuencia = filas.filter((f) => !noEntranIds.has(f.idInscripcion));
-
-  // Pedido de Sebastián (2026-07-10): el overview agrupa por NUMERO DE TOQUE (el
-  // paso 1-indexed de la cadencia), no por día de calendario ni por etapa del funnel
-  // (D1 sigue valiendo para el Home, no aca). "Toque uno" es mas claro para el equipo
-  // que "día 0" -- un toque no implica una etapa comercial, solo dice cuantos
-  // contactos lleva la empresa en el playbook y por que canal le toca el siguiente.
-  // pasoActual null (inscripcion sin paso activo, ej. ya se agotaron los pasos) cae
-  // en un grupo aparte en vez de perderse.
-  const pasos = [...new Set(filasEnSecuencia.map((f) => f.pasoActual))].sort((a, b) => {
-    if (a === null) return 1;
-    if (b === null) return -1;
-    return a - b;
-  });
-
-  const grupos = pasos
-    .map((paso) => {
-      const empresasPaso = filasEnSecuencia.filter((f) => f.pasoActual === paso);
-      if (empresasPaso.length === 0) return null;
-
-      const mezclaCanales = { ll: 0, wa: 0, co: 0 };
-      let toquesHoy = 0;
-      const empresas: EmpresaRowData[] = empresasPaso.map((f) => {
-        const canal = canalNormalizado(f.canal);
-        if (canal === 'llamada') mezclaCanales.ll += 1;
-        else if (canal === 'whatsapp') mezclaCanales.wa += 1;
-        else mezclaCanales.co += 1;
-        if (f.esHoy) toquesHoy += 1;
-
-        return {
-          id: f.idEmpresa,
-          nombre: f.empresa,
-          contacto: f.contacto ?? 'Sin contacto activo',
-          cargo: f.cargo ?? '',
-          pasoActual: `Paso ${f.pasoActual}/${f.totalPasos}`,
-          diaSecuencia: f.diaSecuencia ?? 0,
-          cadencia: f.campana,
-          objetivo: f.objetivo,
-          canal,
-          esHoy: f.esHoy,
-        };
-      });
-
-      const data: EtapaGroupData = {
-        estado: paso === null ? 'sin-toque' : `toque-${paso}`,
-        toque: paso ?? undefined,
-        label: paso === null ? 'Fuera de secuencia (pasos agotados)' : undefined,
-        total: empresasPaso.length,
-        mezclaCanales,
-        toquesHoy,
-      };
-
-      return { data, empresas };
-    })
-    .filter((g): g is { data: EtapaGroupData; empresas: EmpresaRowData[] } => g !== null);
-
-  // Franja "Sin cadencia" (2026-07-14): los toques manuales pendientes que no estan en
-  // ninguna cadencia activa. Van en su propia franja al final, separados de los "Toque N"
-  // cadenceados, para que Seguimiento muestre todo lo pendiente y no solo lo del motor.
-  // Franja "Respondieron" (2026-07-14): empresas con una respuesta sin ver. Separada de
-  // los grupos "Toque N" a propósito -- pipelineGlobal solo trae inscripcion.estado =
-  // 'activa', y una empresa recién pausada por respuesta cae fuera de esos grupos. No se
-  // toca pipelineGlobal: una respuesta es "bandeja de revisión pendiente", no "progreso
-  // de cadencia", son conceptos distintos aunque ambos vivan en /seguimiento.
-  const respondieron = empresasConRespuestaPendiente(usuario.idOrganizacion, usuario.verTodoPipeline ? undefined : usuario.owner);
-  const grupoRespondieron = (() => {
-    if (respondieron.length === 0) return null;
-    const empresas: EmpresaRowData[] = respondieron.map((f) => ({
-      id: f.idEmpresa,
-      nombre: f.empresa,
-      contacto: f.contacto ?? 'Sin contacto activo',
-      cargo: f.cargo ?? '',
-      pasoActual: 'Respondió',
-      diaSecuencia: 0,
-      cadencia: 'Nueva respuesta',
-      objetivo: null,
-      canal: canalNormalizado(f.canal),
-      respondio: true,
-    }));
-
-    const data: EtapaGroupData = {
-      estado: 'respondieron',
-      label: 'Respondieron',
-      total: respondieron.length,
-    };
-
-    return { data, empresas };
-  })();
-
-  // B (2026-07-15): cada quien ve SUS cuentas. El visitante de solo lectura no tiene
-  // cuentas propias, asi que no se le arma la franja (no una vacia con su nombre).
-  // verTodoPipeline (CRO, Fase 3, 2026-07-21): la unica excepcion a "cada quien lo suyo" --
-  // Felipe y Sebastian siguen viendo solo su propia franja, owner sigue siendo obligatorio
-  // para ellos.
-  const filasSinCadencia = usuario.soloLectura
-    ? []
-    : pipelineSinCadencia(usuario.idOrganizacion, hoy, usuario.verTodoPipeline ? undefined : usuario.owner);
-  const grupoSinCadencia = (() => {
-    if (filasSinCadencia.length === 0) return null;
-    const mezclaCanales = { ll: 0, wa: 0, co: 0 };
-    let toquesHoy = 0;
-    const empresas: EmpresaRowData[] = filasSinCadencia.map((f) => {
-      const canal = canalNormalizado(f.canal);
-      if (canal === 'llamada') mezclaCanales.ll += 1;
-      else if (canal === 'whatsapp') mezclaCanales.wa += 1;
-      else mezclaCanales.co += 1;
-      if (f.esHoy) toquesHoy += 1;
-
-      return {
-        id: f.idEmpresa,
-        nombre: f.empresa,
-        contacto: f.contacto ?? 'Sin contacto activo',
-        cargo: f.cargo ?? '',
-        pasoActual: 'Toque manual',
-        diaSecuencia: 0,
-        cadencia: 'Sin cadencia',
-        objetivo: null,
-        canal,
-        esHoy: f.esHoy,
-      };
-    });
-
-    const data: EtapaGroupData = {
-      estado: 'sin-cadencia',
-      label: 'Sin cadencia',
-      total: filasSinCadencia.length,
-      mezclaCanales,
-      toquesHoy,
-    };
-
-    return { data, empresas };
-  })();
-
-  // Grupo "Aún no entran": las inscritas cuyo primer toque está programado para un día
-  // futuro (no arrancan hoy). Separadas de "Toque uno" para que ahí solo se vea lo de hoy.
-  const grupoNoEntran = (() => {
-    if (noEntran.length === 0) return null;
-    const mezclaCanales = { ll: 0, wa: 0, co: 0 };
-    const empresas: EmpresaRowData[] = noEntran.map((f) => {
-      const canal = canalNormalizado(f.canal);
-      if (canal === 'llamada') mezclaCanales.ll += 1;
-      else if (canal === 'whatsapp') mezclaCanales.wa += 1;
-      else mezclaCanales.co += 1;
-      return {
-        id: f.idEmpresa,
-        nombre: f.empresa,
-        contacto: f.contacto ?? 'Sin contacto activo',
-        cargo: f.cargo ?? '',
-        pasoActual: 'Aún no entra',
-        diaSecuencia: f.diaSecuencia ?? 0,
-        cadencia: f.campana,
-        objetivo: f.objetivo,
-        canal,
-        esHoy: false,
-      };
-    });
-
-    const data: EtapaGroupData = {
-      estado: 'no-entran',
-      label: 'Aún no entran · programadas para después',
-      total: noEntran.length,
-      mezclaCanales,
-      toquesHoy: 0,
-    };
-
-    return { data, empresas };
-  })();
-
-  const todosLosGrupos = [
-    ...(grupoRespondieron ? [grupoRespondieron] : []),
-    ...grupos,
-    ...(grupoNoEntran ? [grupoNoEntran] : []),
-    ...(grupoSinCadencia ? [grupoSinCadencia] : []),
-  ];
+  // El MISMO cálculo que usa Toques y el MCP (tandasTool): nadie mueve nada a mano. Cada cuenta
+  // cae en EXACTAMENTE una tanda, en el orden de prioridad de TANDAS -- 'fuera' ya viene omitida.
+  const datosTandas = cargarTandasDelDia(usuario.idOrganizacion, owner);
 
   return (
     <div className="space-y-6">
       <KpiRow data={kpis} />
+      <ContadoresTandas sinVerificarAliado={datosTandas.sinVerificarAliado} sinTamanoConfirmado={datosTandas.sinTamanoConfirmado} />
+      <div>
+        <EnfriandoseCallout cuentas={masViejasEnEstado(datosTandas)} />
+        <DeudaOperadorCallout grupo={deudaDelOperador(datosTandas)} />
+      </div>
       <div className="space-y-2">
-        {todosLosGrupos.map((g, i) => (
-          <EtapaGroup key={g.data.estado} data={g.data} empresas={g.empresas} defaultExpanded={i === 0} />
+        {datosTandas.tandas.map((g, i) => (
+          <TandaColumna key={g.tanda} grupo={g} defaultExpanded={i === 0} />
         ))}
-        {todosLosGrupos.length === 0 && (
-          <p className="text-sm text-muted px-2">No hay inscripciones activas ni toques manuales pendientes.</p>
-        )}
+        {datosTandas.tandas.length === 0 && <p className="px-2 text-sm text-muted">Sin cuentas en pipeline.</p>}
       </div>
     </div>
   );
