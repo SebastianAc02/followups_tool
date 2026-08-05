@@ -24,7 +24,12 @@ export async function avanzarDiaDemo(): Promise<void> {
   // relee sola dentro del mismo request).
   marcarOffsetDias(actual + 1);
 
-  await materializarYEmpujarAhora();
+  // conTracking: en modo prueba el worker no mira pruebas.db (es ciego al modo, por diseño),
+  // asi que el poll de tracking -- el UNICO camino que detecta aperturas, clics y respuestas
+  // POR CORREO -- no corria nunca. Sin esto se podia contestar el correo de la demo y la
+  // cadencia seguia escribiendo. Corre primero, dentro de este request: ver el comentario de
+  // materializarYEmpujarAhora para por que el orden importa en una sola pasada.
+  await materializarYEmpujarAhora({ conTracking: true });
 
   revalidatePath('/', 'layout');
 }
