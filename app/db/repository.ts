@@ -4841,6 +4841,9 @@ const COLUMNA_SEGMENTO: Record<Exclude<CampoSegmento, 'rol'>, { col: SQLiteColum
   owner: { col: empresa.owner, numerico: false },
   usuarios: { col: empresaUsuarios.usuariosEstimados, numerico: true },
   en_notion: { col: empresa.notionPageId, numerico: false },
+  // La PK. Unico campo pensado para una lista de ids puntuales (ver validation.ts), no
+  // para un valor humano: el caller ya sabe exactamente que empresas quiere.
+  id_empresa: { col: empresa.idEmpresa, numerico: false },
 };
 
 // Coerce los valores de una condicion a numero cuando el campo es numerico (prioridad,

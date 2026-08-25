@@ -1255,6 +1255,12 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
                   'ciudad, departamento, owner: TEXTO LIBRE, sin dominio cerrado — acá un valor inexistente sí devuelve ' +
                   'cero en silencio, así que el owner se escribe exacto ("Sebastian Acosta Molina"). ' +
                   'en_notion: usar es_null (nunca entró al CRM) / no_null (sí está). ' +
+                  'id_empresa: empresa.id_empresa (la PK), TEXTO LIBRE — el único campo pensado para apuntar a una ' +
+                  'LISTA PUNTUAL de empresas que no comparten ninguna otra columna (ej. las que entraron a un evento ' +
+                  'por scraping/patrón de correo): {"campo":"id_empresa","op":"en","valores":["EMP-1","EMP-2",...]}. ' +
+                  'Solo admite en/no_en: es PK NOT NULL, así que es_null/no_null se RECHAZAN en Zod (siempre ' +
+                  'contestarían "todas" o "ninguna", no lo que el caller quiere). Un id que no existe hoy SÍ da ' +
+                  'cero en silencio, igual que ciudad/departamento/owner. ' +
                   'OPERADORES: en, no_en (con "valores": []), es_null, no_null, entre ("desde"/"hasta"), mayor_que, ' +
                   'menor_que ("valor"). ' +
                   'Ejemplo: {"condiciones":[{"campo":"estado","op":"en","valores":["lead"]}]}. ' +

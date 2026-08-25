@@ -85,6 +85,20 @@ test('definicionSegmento rechaza es_null sobre rol (1-a-muchos, sin semantica de
   assert.equal(r.success, false);
 });
 
+// id_empresa: el campo que le faltaba al segmento para apuntar a una lista puntual de
+// empresas (campana ConmuTV 2026-08-25, ver crear_cadencia en server.ts).
+test('definicionSegmento acepta id_empresa con en/no_en (lista puntual de empresas)', () => {
+  const r = definicionSegmentoSchema.safeParse({
+    condiciones: [{ campo: 'id_empresa', op: 'en', valores: ['e1', 'e2'] }],
+  });
+  assert.equal(r.success, true);
+});
+
+test('definicionSegmento rechaza es_null/no_null sobre id_empresa (PK NOT NULL, no informa nada)', () => {
+  assert.equal(definicionSegmentoSchema.safeParse({ condiciones: [{ campo: 'id_empresa', op: 'es_null' }] }).success, false);
+  assert.equal(definicionSegmentoSchema.safeParse({ condiciones: [{ campo: 'id_empresa', op: 'no_null' }] }).success, false);
+});
+
 test('definicionSegmento acepta orden y limite opcionales', () => {
   const r = definicionSegmentoSchema.safeParse({
     condiciones: [{ campo: 'categoria', op: 'en', valores: ['isp'] }],

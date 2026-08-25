@@ -470,6 +470,25 @@ test('owner y ciudad son texto libre: un valor que no existe SI es cero, no un e
   assert.equal(contarSegmento({ condiciones: [{ campo: 'owner', op: 'en', valores: ['Nadie Con Ese Nombre'] }] }, 1), 0);
 });
 
+// id_empresa: el campo para apuntar a una lista puntual de empresas (campana ConmuTV
+// 2026-08-25) que no comparten ninguna otra columna que las agrupe.
+test('id_empresa con en devuelve exactamente esa lista, ni una empresa mas', () => {
+  const def = { condiciones: [{ campo: 'id_empresa' as const, op: 'en' as const, valores: ['e1', 'e5', 'e-no-existe'] }] };
+  // e-no-existe no esta en la base: no truena (texto libre, sin dominio cerrado), solo no matchea.
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id).sort(), ['e1', 'e5']);
+  assert.equal(contarSegmento(def, 1), 2);
+});
+
+test('id_empresa con no_en excluye la lista y deja el resto', () => {
+  const def = { condiciones: [{ campo: 'id_empresa' as const, op: 'no_en' as const, valores: ['e1', 'e2', 'e3', 'e4', 'e5', 'e6'] }] };
+  assert.deepEqual(empresasDeSegmento(def, 1).map((e) => e.id), ['e7']);
+});
+
+test('id_empresa rechaza es_null/no_null: es la PK, siempre NOT NULL', () => {
+  assert.throws(() => contarSegmento({ condiciones: [{ campo: 'id_empresa', op: 'es_null' }] } as any, 1));
+  assert.throws(() => contarSegmento({ condiciones: [{ campo: 'id_empresa', op: 'no_null' }] } as any, 1));
+});
+
 test('diagnosticoSegmento senala cual condicion sola mata el conjunto', () => {
   const def = {
     condiciones: [

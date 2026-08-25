@@ -530,6 +530,18 @@ export const CAMPOS_SEGMENTO = [
   // Task 7 ya saca del embudo); no_null = si esta en Notion. Segmentacion, no embudo:
   // aca es donde vive filtrar "cazar leads que nunca entraron al CRM" (causa raiz 1).
   'en_notion',
+  // empresa.id_empresa (la PK). Existe para el caso que ningun otro campo cubre: una
+  // lista de empresas puntuales que no comparten ninguna columna que las agrupe (ej. las
+  // que entraron a un evento por scraping/patron de correo, campana ConmuTV 2026-08-25).
+  // Sin esto, apuntar a una lista curada de N empresas exactas no tenia forma de
+  // expresarse en un segmento: departamento/ciudad sobregeneralizan y no hay columna
+  // "campana"/"evento" en empresa. Texto libre, igual que ciudad/departamento/owner: no
+  // tiene DOMINIO_SEGMENTO (un id que no matchea nada SI es cero, no un error) y se
+  // excluye de es_null/no_null (ver CAMPOS_SEGMENTO_NULEABLES): es PK NOT NULL, esas dos
+  // operaciones siempre contestarian lo mismo (todo o nada) y no dicen nada util; el
+  // caller que llega aca ya trae la lista de ids, así que en/no_en es el unico operador
+  // con sentido.
+  'id_empresa',
 ] as const;
 export type CampoSegmento = (typeof CAMPOS_SEGMENTO)[number];
 
@@ -579,7 +591,13 @@ export type CampoSegmentoNumerico = (typeof CAMPOS_SEGMENTO_NUMERICOS)[number];
 // no tiene una semantica de columna ahi, y condicionRol lo rechaza en tiempo de ejecucion.
 // Excluirlo aca mueve ese rechazo a Zod (falla explicita en el Copiloto) en vez de reventar
 // la query al correr el segmento.
-const CAMPOS_SEGMENTO_NULEABLES = CAMPOS_SEGMENTO.filter((c) => c !== 'rol');
+//
+// id_empresa tambien se excluye: es la PK, NOT NULL siempre, asi que es_null/no_null
+// contestarian "todas" o "ninguna" de forma constante y nunca lo que el caller quiere
+// (matchear una lista puntual). No es una trampa de dominio como categoria='otro' -- la
+// consulta correria y daria un numero real -- pero es un numero que no informa nada, y
+// se rechaza en Zod para que el unico camino sea en/no_en con la lista de ids.
+const CAMPOS_SEGMENTO_NULEABLES = CAMPOS_SEGMENTO.filter((c) => c !== 'rol' && c !== 'id_empresa');
 
 const condicionEnSchema = z.object({
   campo: z.enum(CAMPOS_SEGMENTO),
