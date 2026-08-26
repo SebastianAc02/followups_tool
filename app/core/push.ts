@@ -6,6 +6,7 @@
 // existen, y el indice unico id_destinatario+id_paso (V5.1) es quien de verdad
 // garantiza que nunca hay dos filas para el mismo par.
 import type { CanalEntrega, DestinatarioEnvio, PasoEnvio } from './ports/envio';
+import { tienePlaceholderSinResolver } from './render-copy';
 
 export type FilaPasoInscripcion = {
   idPasoInscripcion: number;
@@ -72,6 +73,24 @@ export async function pushPendientes(
       if (ms > 0) await esperar(ms);
     }
     primero = false;
+    // Red de seguridad final (incidente ConmuTV, 2026-08-25): sin importar qué falló arriba
+    // (el fallback de nombre, el render por canal, algo nuevo mañana), esto es lo último que
+    // corre antes de tocar al proveedor real. Bloquea SOLO esta fila -- no apaga el ciclo ni
+    // tumba las demás -- y NO aplica ningún fallback silencioso: si el fallback de arriba
+    // tenía un bug, taparlo acá otra vez lo esconde para siempre. Se marca 'fallo' agotado
+    // (MAX_INTENTOS de una) porque reintentar un texto roto no lo arregla solo; alguien tiene
+    // que corregir la versión del paso y volver a materializar.
+    const placeholderEnCuerpo = tienePlaceholderSinResolver(fila.paso.cuerpo);
+    const placeholderEnAsunto = fila.paso.asunto != null && tienePlaceholderSinResolver(fila.paso.asunto);
+    if (placeholderEnCuerpo || placeholderEnAsunto) {
+      console.error(
+        `push bloqueó paso_inscripcion ${fila.idPasoInscripcion} (canal ${fila.paso.canal}): quedó un placeholder ` +
+          `[variable] sin resolver en ${placeholderEnCuerpo ? 'el cuerpo' : ''}${placeholderEnCuerpo && placeholderEnAsunto ? ' y ' : ''}` +
+          `${placeholderEnAsunto ? 'el asunto' : ''}. NO se manda: revisar la versión del paso y volver a materializar.`,
+      );
+      deps.marcarFallo(fila.idPasoInscripcion, MAX_INTENTOS, null);
+      continue;
+    }
     try {
       deps.marcarEnviando(fila.idPasoInscripcion);
       const resultado = await envio.enviarPaso(fila.proveedorCampanaId, fila.destinatario, fila.paso);

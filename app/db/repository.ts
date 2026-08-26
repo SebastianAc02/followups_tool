@@ -72,6 +72,7 @@ import { previsualizarInscripcion, type PasoRequerido, type PasoAjustado, type E
 import { calcularGoteo, type RitmoIngreso } from '../core/goteo';
 import { proximoPasoDebido, type ConfigCalendario } from '../core/motor-cadencia';
 import { MAX_INTENTOS, type FilaPasoInscripcion } from '../core/push';
+import { renderizarCopy } from '../core/render-copy';
 import type { CampanaConSecuencia, DestinatarioResuelto } from '../core/tracking';
 import {
   normalizarTelefono,
@@ -8379,6 +8380,41 @@ export function registrarPasoEnviadoConToque(
 // tiene linea activa propia se salta ENTERA (esa fila no aparece), en vez de gastar un
 // reintento fallido -- mismo criterio de "no hay a donde mandar, no lo intentes" que
 // tenia el gate global, pero aplicado por campana en vez de a la corrida completa.
+// Fallback de saludo (incidente ConmuTV, 2026-08-25): el 100% de una campaña de ~126
+// correos salió con "Hola [nombre]," literal porque el contacto no tenía nombre y
+// renderizarCopy, por diseño, deja el placeholder crudo cuando falta el dato (correcto en
+// el editor humano de /llamada y /cola, donde alguien lo va a ver antes de mandar; una fuga
+// en el envío automático de una campaña, que a nadie se le muestra antes de salir).
+// Cadena: contacto principal (si es usable) -> representante legal -> representante legal
+// suplente -> nombre de la empresa. Nunca None: el último escalón siempre tiene dato.
+function nombreEsUsable(nombre: string | null, nombreEmpresa: string): nombre is string {
+  if (!nombre) return false;
+  const limpio = nombre.trim();
+  if (limpio === '') return false;
+  // Import mal cargado que puso el nombre de la empresa en el campo de la persona: no es un
+  // saludo real ("Hola Giganav," lee tan robotico como "Hola [nombre],").
+  return limpio.toLowerCase() !== nombreEmpresa.trim().toLowerCase();
+}
+
+function repLegalDe(idEmpresa: string): string | null {
+  const filas = db
+    .select({ nombre: contacto.nombre, cargoCategoria: contacto.cargoCategoria })
+    .from(contacto)
+    .where(and(eq(contacto.idEmpresa, idEmpresa), inArray(contacto.cargoCategoria, ['rep_legal', 'rep_legal_suplente'])))
+    .all();
+  const repLegal = filas.find((f) => f.cargoCategoria === 'rep_legal' && f.nombre?.trim());
+  if (repLegal?.nombre) return repLegal.nombre;
+  const suplente = filas.find((f) => f.cargoCategoria === 'rep_legal_suplente' && f.nombre?.trim());
+  return suplente?.nombre ?? null;
+}
+
+export function nombreParaSaludo(idEmpresa: string, nombreContacto: string | null, nombreEmpresa: string): string {
+  if (nombreEsUsable(nombreContacto, nombreEmpresa)) return nombreContacto;
+  const repLegal = repLegalDe(idEmpresa);
+  if (nombreEsUsable(repLegal, nombreEmpresa)) return repLegal as string;
+  return nombreEmpresa;
+}
+
 export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Date().toISOString()): FilaPasoInscripcion[] {
   const condiciones = [
     eq(pasoInscripcion.canal, canal),
@@ -8437,6 +8473,7 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
       telefono: contacto.telefono,
       nombre: contacto.nombre,
       cargo: contacto.cargo,
+      idEmpresa: empresa.idEmpresa,
       empresaNombre: empresa.nombreOficial,
       asunto: versionPaso.asunto,
       cuerpo: versionPaso.cuerpo,
@@ -8460,16 +8497,45 @@ export function pasoInscripcionesPendientes(canal: Canal, ahora: string = new Da
     .all();
 
   if (canal !== 'whatsapp') {
-    return filas.map((f) => ({
-      idPasoInscripcion: f.idPasoInscripcion,
-      proveedorCampanaId: f.proveedorCampanaId as string,
-      destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
-      paso: { asunto: f.asunto, cuerpo: f.cuerpoFinal ?? f.cuerpo ?? '', canal: f.canal },
-      intentos: f.intentos,
-      owner: f.owner,
-      idOrganizacion: f.idOrganizacion,
-      aprobadaEnvioGmail: f.aprobadaEnvioGmail === 1,
-    }));
+    return filas.map((f) => {
+      // Correo automático de campaña NUNCA pasa por revisión humana (esa es la compuerta de
+      // whatsapp, no la de este canal): cuerpoFinal siempre es NULL acá, así que sin este
+      // render el placeholder [nombre] de la plantilla cruda salía intacto a producción --
+      // exactamente el bug de ConmuTV (2026-08-25). Si alguna vez SÍ hay cuerpoFinal (un canal
+      // futuro que reuse esta función con revisión propia), ese ya viene resuelto y se respeta
+      // tal cual, sin volver a renderizar encima.
+      if (f.canal === 'correo' && f.cuerpoFinal === null) {
+        const datos: Record<string, string> = {
+          nombre: nombreParaSaludo(f.idEmpresa, f.nombre, f.empresaNombre),
+          empresa: f.empresaNombre,
+          ...(f.cargo ? { cargo: f.cargo } : {}),
+        };
+        return {
+          idPasoInscripcion: f.idPasoInscripcion,
+          proveedorCampanaId: f.proveedorCampanaId as string,
+          destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
+          paso: {
+            asunto: f.asunto ? renderizarCopy(f.asunto, datos).texto : f.asunto,
+            cuerpo: renderizarCopy(f.cuerpo ?? '', datos).texto,
+            canal: f.canal,
+          },
+          intentos: f.intentos,
+          owner: f.owner,
+          idOrganizacion: f.idOrganizacion,
+          aprobadaEnvioGmail: f.aprobadaEnvioGmail === 1,
+        };
+      }
+      return {
+        idPasoInscripcion: f.idPasoInscripcion,
+        proveedorCampanaId: f.proveedorCampanaId as string,
+        destinatario: { email: f.email, telefono: f.telefono, nombre: f.nombre, empresa: f.empresaNombre, cargo: f.cargo },
+        paso: { asunto: f.asunto, cuerpo: f.cuerpoFinal ?? f.cuerpo ?? '', canal: f.canal },
+        intentos: f.intentos,
+        owner: f.owner,
+        idOrganizacion: f.idOrganizacion,
+        aprobadaEnvioGmail: f.aprobadaEnvioGmail === 1,
+      };
+    });
   }
 
   // whatsapp: cada campana rutea por la linea ACTIVA de SU DUENO (fijarOwnerCampana),

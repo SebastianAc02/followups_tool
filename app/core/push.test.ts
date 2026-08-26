@@ -124,6 +124,44 @@ test('tras agotar MAX_INTENTOS, marcarFallo recibe proximoIntento null (no se re
   assert.strictEqual(fallidos[0].proximoIntento, null);
 });
 
+// Incidente ConmuTV (2026-08-25): ~126 correos salieron con "Hola [nombre]," literal porque
+// nada en el camino de envío verificaba el texto ANTES de tocar al proveedor. Esta red no
+// reemplaza el fallback de arriba (repository.ts, nombreParaSaludo): es la última barrera, la
+// que tiene que sostener aunque ese fallback tenga un bug que hoy no conocemos.
+test('push bloquea un paso cuyo CUERPO trae un placeholder [algo] sin resolver, y nunca llama al proveedor', async () => {
+  const filaRota: FilaSimulada = { ...filaBase(1, 'ana@empresa.com'), paso: { asunto: 'Hola', cuerpo: 'Hola [nombre], una pregunta rápida', canal: 'correo' } };
+  const { deps, filas } = depsFalsos([filaRota]);
+  const envio = envioFalso(() => true);
+
+  await pushPendientes(deps, envio);
+
+  assert.deepEqual(envio.llamadas, [], 'nunca se manda: no hay fallback silencioso en este punto tardío');
+  assert.strictEqual(filas.get(1)!.estado, 'fallo');
+  assert.strictEqual(filas.get(1)!.intentos, MAX_INTENTOS, 'se agota de una: reintentar un texto roto no lo arregla solo');
+});
+
+test('push bloquea tambien si el placeholder sin resolver esta en el ASUNTO, no solo en el cuerpo', async () => {
+  const filaRota: FilaSimulada = { ...filaBase(2, 'beto@empresa.com'), paso: { asunto: 'Hola [nombre]', cuerpo: 'cuerpo ya limpio', canal: 'correo' } };
+  const { deps, filas } = depsFalsos([filaRota]);
+  const envio = envioFalso(() => true);
+
+  await pushPendientes(deps, envio);
+
+  assert.deepEqual(envio.llamadas, []);
+  assert.strictEqual(filas.get(2)!.estado, 'fallo');
+});
+
+test('un cuerpo limpio (sin corchetes) pasa de largo la red: la guarda no bloquea texto sano', async () => {
+  const filaSana = filaBase(3, 'clara@empresa.com');
+  const { deps, filas } = depsFalsos([filaSana]);
+  const envio = envioFalso(() => true);
+
+  await pushPendientes(deps, envio);
+
+  assert.deepEqual(envio.llamadas, ['clara@empresa.com']);
+  assert.strictEqual(filas.get(3)!.estado, 'enviada');
+});
+
 test('calcularProximoIntentoPush crece y tiene tope', () => {
   const ahora = new Date('2026-07-06T10:00:00.000Z');
   const t1 = calcularProximoIntentoPush(1, ahora).getTime() - ahora.getTime();

@@ -44,3 +44,13 @@ export function renderizarCopy(
 
   return { texto: resultado, faltantes };
 }
+
+// Guarda del camino REAL de envío (incidente ConmuTV, 2026-08-25): antes de que push.ts
+// entregue un texto al adaptador del proveedor, esto confirma que ningún [placeholder]
+// sobrevivió. No le importa POR QUÉ sigue ahí -- el fallback de datos falló, un canal se
+// saltó el render, un bug futuro -- solo que un texto con un placeholder crudo JAMÁS debe
+// llegar a producción. Misma regex que renderizarCopy, exportada aparte porque push.ts
+// (core puro, sin conocer nada de copy) es quien la necesita justo antes de mandar.
+export function tienePlaceholderSinResolver(texto: string): boolean {
+  return /\[([^[\]]+)\]/.test(texto);
+}
