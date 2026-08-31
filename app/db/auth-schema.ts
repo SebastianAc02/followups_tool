@@ -184,6 +184,41 @@ export const oauthConsent = sqliteTable(
   ],
 );
 
+// Reset de password self-service (2026-08-31, soporte interno: usuario perdio su clave).
+// Tabla PROPIA y no el mecanismo nativo de Better Auth (requestPasswordReset/reset-password
+// de node_modules/better-auth/dist/api/routes/password.mjs): ese mecanismo guarda el token
+// CRUDO dentro de `verification.identifier` (`reset-password:${token}`), sin hashear. Aca se
+// exige lo contrario -- el token nunca toca la base en claro -- asi que se guarda solo su
+// sha256 (tokenHash) y se compara por hash al confirmar. La contraseña nueva SI se escribe
+// con el hasher de Better Auth (`hashPassword` de 'better-auth/crypto', ver
+// app/lib/password-reset.ts) para que el login normal (email+password) siga funcionando
+// igual con la clave nueva. Igual que oauth_application/oauth_access_token/oauth_consent
+// arriba: tabla nueva de auth, fuera de app/db/schema.ts, migrada a mano
+// (scripts/migrate_password_reset_apply.py), no por drizzle-kit generate.
+export const passwordResetToken = sqliteTable(
+  "password_reset_token",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [index("password_reset_token_userId_idx").on(table.userId)],
+);
+
+export const passwordResetTokenRelations = relations(passwordResetToken, ({ one }) => ({
+  user: one(user, {
+    fields: [passwordResetToken.userId],
+    references: [user.id],
+  }),
+}));
+
 export const userRelations = relations(user, ({ many }) => ({
   sessions: many(session),
   accounts: many(account),
