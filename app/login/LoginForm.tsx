@@ -81,6 +81,10 @@ export default function LoginForm() {
             Recordar sesión
           </label>
 
+          <Link href="/olvide-password" className="ac-sub" style={{ display: 'block', marginTop: '-8px' }}>
+            ¿Olvidaste tu password?
+          </Link>
+
           {error && <div className="ac-error">{error}</div>}
 
           <button className="ac-btn" disabled={enviando}>
