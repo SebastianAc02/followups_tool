@@ -61,6 +61,7 @@ import {
   lanzarCampanaTool,
   crearCadenciaTool,
   enviarWhatsappDirectoTool,
+  enviarCorreoDirectoTool,
   trackingCorreoTool,
   type SesionLanzamiento,
 } from './tools';
@@ -121,6 +122,7 @@ export const TOOLS_ESCRITURA = [
   'crear_empresa',
   'editar_toque',
   'empujar_envios',
+  'enviar_correo_directo',
   'enviar_whatsapp_directo',
   'lanzar_campana',
   'marcar_aliado',
@@ -1333,6 +1335,64 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
         );
       }
       const r = await enviarWhatsappDirectoTool(input as Parameters<typeof enviarWhatsappDirectoTool>[0], sesion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  // El equivalente de enviar_whatsapp_directo para correo: UN correo suelto a UNA cuenta, YA,
+  // sin crear una cadencia/campaña a mano. A diferencia de WhatsApp, correo SÍ deja fila real de
+  // tracking (paso_inscripcion mínimo, de un solo uso) porque el pixel de apertura necesita ese
+  // enganche -- ver la nota de diseño larga en tools.ts (enviarCorreoDirectoTool).
+  server.registerTool(
+    'enviar_correo_directo',
+    {
+      description:
+        'Manda UN correo a UNA cuenta, YA, por el Gmail conectado y verificado de quien llama -- sin crear una ' +
+        'cadencia ni campaña a mano para un texto ya redactado. EN SECO POR DEFAULT: sin confirmar:true no manda ' +
+        'nada, solo previsualiza destinatarios/cc/asunto/cuerpo (ya convertido de texto plano a HTML) y el ' +
+        'remitente resuelto, más cada bloqueo (empresa inexistente, email inválido, sin Gmail conectado). El ' +
+        'cuerpo se manda como TEXTO PLANO: saltos de línea y guiones de lista se preservan, no se acepta HTML ya ' +
+        'armado. Solo lleva pixel de apertura -- NO reescribe los links del cuerpo para trackear clics. Al ' +
+        'confirmar, deja la MISMA fila de tracking que un correo de campaña real (paso_inscripcion con su ' +
+        'proveedor_campana_id), así que tracking_correo (filtrando por idEmpresa) va a poder ver la apertura ' +
+        'después. Devuelve RELEÍDO lo que quedó: envio.estado tiene que decir "enviada", más el ' +
+        'proveedorMensajeId real de Gmail y el proveedorCampanaId que quedó horneado en el pixel -- nunca un ' +
+        '{ok:true} ciego.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('id_empresa de destino. La cuenta tiene que existir ya (crear_empresa si no)'),
+        destinatarios: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe(
+            'Emails de "To", al menos uno. SOLO el primero correlaciona el pixel de apertura (queda como contacto.email ' +
+              'para tracking_correo): si no existe un contacto con ese email en la empresa, se crea uno nuevo (fuente ' +
+              'mcp_correo_directo). Los demás salen en el "To" pero sin atribución propia de apertura.',
+          ),
+        cc: z.array(z.string().min(1)).optional().describe('Emails en copia. Optativo'),
+        asunto: z.string().min(1),
+        cuerpo: z
+          .string()
+          .min(1)
+          .describe(
+            'Texto plano, tal como se dicta: saltos de línea simples y dobles, guiones de lista. Se convierte a HTML ' +
+              'mínimo antes de mandar (párrafo por línea en blanco, <br> por salto simple) -- no mandar HTML ya armado.',
+          ),
+        confirmar: z
+          .boolean()
+          .optional()
+          .describe('false o ausente = previsualización en seco, no manda nada. true = MANDA de verdad. No tiene vuelta atrás'),
+      },
+    },
+    async (input) => {
+      // Mismo guard que enviar_whatsapp_directo: owner e idUsuario salen de la sesión OAuth,
+      // nunca del input. El server standalone por token no tiene sesión.
+      if (!sesion || !sesion.owner.trim() || !sesion.idUsuario.trim()) {
+        throw new Error(
+          'enviar_correo_directo: esta sesión no trae usuario ni owner (el server standalone por token no los tiene). ' +
+            'Solo se puede mandar desde el MCP autenticado por OAuth, donde la sesión dice a nombre de quién sale el correo.',
+        );
+      }
+      const r = await enviarCorreoDirectoTool(input as Parameters<typeof enviarCorreoDirectoTool>[0], idOrganizacion, sesion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );

@@ -20,6 +20,7 @@ const {
   intercambiarCodigoPorCredencial,
   emailGmailConectado,
   construirUrlConsentimientoGmail,
+  enviarCorreoDirectoGmail,
 } = await import('./gmail.ts');
 
 function credencialDePrueba() {
@@ -423,6 +424,81 @@ test('leerEventosNuevos: mensaje de mailer-daemon de OTRO destinatario no genera
   const adapter = crearGmailAdapter('user-12');
   const eventos = await adapter.leerEventosNuevos('thread-ok', new Date(0).toISOString());
   assert.deepStrictEqual(eventos, []);
+});
+
+// enviar_correo_directo (MCP, 2026-09-01): enviarCorreoDirectoGmail admite varios "To" + cc y
+// NUNCA reescribe links de clic (a diferencia de enviarPaso) -- solo pixel de apertura.
+test('enviarCorreoDirectoGmail arma To/Cc de varios destinatarios y NO reescribe links de clic', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-directo-1');
+  let mensajeDecodificado = '';
+
+  t.mock.method(globalThis, 'fetch', async (url: string | URL, init: RequestInit = {}) => {
+    const href = url.toString();
+    if (href === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    if (href === 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send') {
+      const cuerpo = JSON.parse(init.body as string) as { raw: string };
+      mensajeDecodificado = Buffer.from(cuerpo.raw, 'base64url').toString('utf8');
+      return new Response(JSON.stringify({ id: 'msg-directo-1', threadId: 'thread-directo-1' }), { status: 200 });
+    }
+    throw new Error(`fetch no mockeado: ${href}`);
+  });
+
+  const resultado = await enviarCorreoDirectoGmail(
+    'user-directo-1',
+    ['gerencia@ruralink.com.co'],
+    ['felipe@onepay.la'],
+    'Integración OnePay Ruralink',
+    '<p>Detalle: <a href="https://docs.onepay.la/client/invoices/index">ver</a></p>',
+    'gmail-directo-9',
+  );
+
+  assert.strictEqual(resultado.mensajeId, 'msg-directo-1');
+  assert.strictEqual(resultado.hiloId, 'thread-directo-1');
+  assert.match(mensajeDecodificado, /^To: gerencia@ruralink\.com\.co/);
+  assert.match(mensajeDecodificado, /Cc: felipe@onepay\.la/);
+  // El link del cuerpo sale TAL CUAL, sin pasar por /api/track/click -- instrucción explícita
+  // del operador para este envío puntual.
+  assert.match(mensajeDecodificado, /href="https:\/\/docs\.onepay\.la\/client\/invoices\/index"/);
+  assert.doesNotMatch(mensajeDecodificado, /api\/track\/click/);
+  // El pixel SÍ va, correlacionado al proveedorCampanaId y al primer destinatario.
+  assert.match(
+    mensajeDecodificado,
+    /<img src="https:\/\/app\.test\/api\/track\/open\?c=gmail-directo-9&e=gerencia@ruralink\.com\.co" width="1" height="1" alt="" style="display:none" \/>/,
+  );
+});
+
+test('enviarCorreoDirectoGmail sin cc: no manda header Cc', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-directo-2');
+  let mensajeDecodificado = '';
+
+  t.mock.method(globalThis, 'fetch', async (url: string | URL, init: RequestInit = {}) => {
+    const href = url.toString();
+    if (href === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    const cuerpo = JSON.parse(init.body as string) as { raw: string };
+    mensajeDecodificado = Buffer.from(cuerpo.raw, 'base64url').toString('utf8');
+    return new Response(JSON.stringify({ id: 'msg-directo-2' }), { status: 200 });
+  });
+
+  await enviarCorreoDirectoGmail('user-directo-2', ['solo@destino.com'], [], 'Asunto', '<p>cuerpo</p>', 'gmail-directo-10');
+  assert.doesNotMatch(mensajeDecodificado, /\nCc: /);
+});
+
+test('enviarCorreoDirectoGmail propaga el error de Gmail con mensaje claro', async (t) => {
+  guardarCredencialConector('gmail', credencialDePrueba(), 'user-directo-3');
+  t.mock.method(globalThis, 'fetch', async (url: string | URL) => {
+    if (url.toString() === 'https://oauth2.googleapis.com/token') {
+      return new Response(JSON.stringify({ access_token: 'access-xyz' }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ error: { message: 'quota exceeded' } }), { status: 429 });
+  });
+  await assert.rejects(
+    () => enviarCorreoDirectoGmail('user-directo-3', ['a@b.com'], [], 'a', 'b', 'gmail-directo-11'),
+    /quota exceeded/,
+  );
 });
 
 test.after(() => borrarDbPrueba(dbPath));

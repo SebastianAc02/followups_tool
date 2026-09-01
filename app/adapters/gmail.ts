@@ -195,6 +195,64 @@ function armarMensajeCrudo(destinatario: string, asunto: string, cuerpoHtml: str
   return base64Url(mensaje);
 }
 
+// enviar_correo_directo (MCP, 2026-09-01): mismo raw-message que armarMensajeCrudo pero (a)
+// admite VARIOS destinatarios + cc, cosa que ningun paso de cadencia necesita hoy (siempre es
+// un contacto), y (b) NUNCA reescribe links de clic -- instruccion explicita del operador: un
+// correo suelto solo lleva pixel de apertura, sin tocar las URLs del cuerpo. El pixel se
+// correlaciona contra destinatarios[0] (el primer "To", el mismo email que
+// prepararEnvioCorreoDirecto deja en contacto.email para que resolverDestinatarioPorEmail lo
+// encuentre): un cc nunca es a quien se le atribuye la apertura.
+function armarMensajeCrudoDirecto(
+  destinatarios: string[],
+  cc: string[],
+  asunto: string,
+  cuerpoHtml: string,
+  proveedorCampanaId: string,
+): string {
+  const asuntoSeguro = codificarHeaderSiHaceFalta(sinCrlf(asunto));
+  let cuerpo = cuerpoHtml;
+  const base = appBaseUrl();
+  if (!base) {
+    console.error('[gmail] APP_BASE_URL no esta seteada: este correo directo se manda SIN tracking (sin pixel de apertura).');
+  }
+  if (base) {
+    const params = { baseUrl: base, proveedorCampanaId };
+    cuerpo = inyectarPixelApertura(cuerpo, params).replaceAll('{{email}}', destinatarios[0]);
+  }
+  const headers = [
+    `To: ${destinatarios.map(sinCrlf).join(', ')}`,
+    ...(cc.length > 0 ? [`Cc: ${cc.map(sinCrlf).join(', ')}`] : []),
+    `Subject: ${asuntoSeguro}`,
+    'Content-Type: text/html; charset=utf-8',
+  ];
+  const mensaje = [...headers, '', cuerpo].join('\r\n');
+  return base64Url(mensaje);
+}
+
+// Envío directo (tools.ts, enviarCorreoDirectoTool): UN correo YA, a uno o varios destinatarios
+// más cc opcional, sin pasar por paso_inscripcion en el momento de armar el mensaje -- el
+// caller (repository.prepararEnvioCorreoDirecto) ya dejó la fila de tracking ANTES de llamar
+// esto, así que lo único que falta acá es mandar de verdad y devolver el id real de Gmail.
+export async function enviarCorreoDirectoGmail(
+  idUsuario: string,
+  destinatarios: string[],
+  cc: string[],
+  asunto: string,
+  cuerpoHtml: string,
+  proveedorCampanaId: string,
+): Promise<{ mensajeId: string; hiloId: string | undefined }> {
+  const credencial = leerCredencial(idUsuario);
+  const accessToken = await refrescarAccessToken(credencial.refreshToken);
+  const res = await fetch(GMAIL_SEND_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw: armarMensajeCrudoDirecto(destinatarios, cc, asunto, cuerpoHtml, proveedorCampanaId) }),
+  });
+  const data = (await res.json()) as GmailSendRespuesta;
+  if (!res.ok || !data.id) throw new Error(`Gmail respondio ${res.status} al mandar: ${data.error?.message ?? 'sin detalle'}`);
+  return { mensajeId: data.id, hiloId: data.threadId };
+}
+
 type GmailSendRespuesta = { id?: string; threadId?: string; error?: { message?: string } };
 
 async function enviarCorreoGmail(

@@ -5707,6 +5707,260 @@ export function crearCadenciaConCampana(
   });
 }
 
+// Lectura minima, reusada por prepararEnvioCorreoDirecto y por el preview en seco de
+// enviarCorreoDirectoTool (que no puede llamar a prepararEnvioCorreoDirecto porque esa
+// escribe). null si la empresa no existe -- ese es el unico bloqueo que este helper reporta,
+// el resto (formato de email, Gmail conectado) lo valida quien llama.
+export function empresaNombrePorId(idEmpresa: string): string | null {
+  const f = db.select({ nombreOficial: empresa.nombreOficial }).from(empresa).where(eq(empresa.idEmpresa, idEmpresa)).get();
+  return f?.nombreOficial ?? null;
+}
+
+// --- enviar_correo_directo (ESCRITURA, MCP, 2026-09-01) --------------------------------
+//
+// El movimiento que le faltaba a correo, simetrico a enviar_whatsapp_directo (2026-07-28): UN
+// correo a UNA cuenta, YA, sin que el operador tenga que armar una cadencia/campana a mano para
+// mandar un texto que el ya redacto. La diferencia con WhatsApp es deliberada: WhatsApp
+// bypasea paso_inscripcion por completo porque no hay pixel de apertura equivalente para ese
+// canal (ver la nota larga en tools.ts, enviarWhatsappDirectoTool). Correo SI tiene pixel
+// (core/tracking-links.ts) y el operador lo pidio explicito, asi que esta funcion NO puede
+// tomar el mismo atajo: tiene que dejar la MISMA fila que resolverDestinatarioPorEmail y
+// trackingCorreo ya saben leer (paso_inscripcion -> destinatario -> contacto,
+// destinatario -> inscripcion -> empresa, inscripcion -> campana -> proveedor_campana_id), o
+// el pixel sale al aire sin nada que lo enganche a la empresa -- exactamente el "pixel
+// paralelo que tracking_correo no sabe leer" que el operador pidio no construir.
+//
+// Arma el mismo andamiaje minimo que crearCadenciaConCampana (cadencia+paso+version+segmento+
+// campana), pero de UN solo paso, para UNA sola empresa -- el segmento usa la condicion
+// campo:'id_empresa' que ya existe para este mismo proposito ("apuntar una lista puntual de
+// empresas", commit 8d1bcf2, crear_cadencia) reducida a una lista de una. Crea ademas la
+// inscripcion+destinatario+contacto de esa empresa a mano, en vez de pasar por inscribirCampana
+// (que calcula goteo/fechas para un segmento completo, pensado para una campana con muchas
+// empresas, no para "mandalo ya a esta").
+//
+// Todo en UNA transaccion, y el envio real de Gmail queda AFUERA a proposito (mismo patron que
+// push.ts: marcarPasoInscripcionEnviando/enviar de verdad/marcarPasoInscripcionEnviada) porque
+// la conexion de esta DB es sincrona y un await de red no puede vivir dentro de un
+// db.transaction. El caller (tools.ts) manda de verdad ENTRE prepararEnvioCorreoDirecto y
+// registrarPasoEnviadoConToque.
+//
+// Por que el paso_inscripcion que queda 'pendiente' durante esa ventana no se lo puede llevar el
+// worker: pasoInscripcionesPendientes exige, para cualquier canal, `esManual=0 OR
+// aprobadoEn IS NOT NULL` -- este paso nace con esManual=1 y aprobadoEn nunca se toca, asi que
+// esa condicion es SIEMPRE falsa para el. No hace falta ademas dejar la campana en 'borrador'
+// ni el proveedor_campana_id en NULL (aunque de todas formas ayudan, y por eso van seteados
+// desde ya: correo exige proveedor_campana_id no nulo para salir, otra puerta cerrada).
+export type PrepararEnvioCorreoDirectoInput = {
+  idEmpresa: string;
+  // El primero es el correlator del pixel (el mismo email que queda en contacto.email, contra
+  // el que resolverDestinatarioPorEmail busca). Los siguientes, si vienen, son mas "To" sin
+  // pixel propio -- este mecanismo solo sabe correlacionar UN email por envio.
+  destinatarios: string[];
+  cc: string[];
+  asunto: string;
+  cuerpoHtml: string;
+  owner: string;
+};
+
+export type PrepararEnvioCorreoDirectoResultado = {
+  idCampana: number;
+  proveedorCampanaId: string;
+  idPasoInscripcion: number;
+  idContacto: number;
+  contactoCreado: boolean;
+  idEmpresa: string;
+  empresaNombre: string;
+};
+
+export function prepararEnvioCorreoDirecto(
+  input: PrepararEnvioCorreoDirectoInput,
+  idOrganizacion: number,
+): PrepararEnvioCorreoDirectoResultado {
+  if (input.destinatarios.length === 0) {
+    throw new Error('enviar_correo_directo: hace falta al menos un destinatario');
+  }
+  if (!input.owner.trim()) {
+    throw new Error('enviar_correo_directo: owner vacío, es de quién sale el correo');
+  }
+  const empresaNombre = empresaNombrePorId(input.idEmpresa);
+  if (!empresaNombre) throw new Error(`enviar_correo_directo: la empresa ${input.idEmpresa} no existe`);
+
+  const emailPrincipal = input.destinatarios[0].trim().toLowerCase();
+  const ahora = new Date().toISOString();
+
+  return db.transaction((tx) => {
+    // Find-or-create del contacto que correlaciona el pixel. No pasa por crearContacto: su
+    // chequeo de duplicado_probable existe para un humano cargando la libreta de contactos a
+    // mano, y aca el email YA ES la instruccion explicita de a quien mandarle -- no hay
+    // ambiguedad que resolver, solo un dato que reusar si ya existe o crear si no.
+    const existentes = contactosDeEmpresa(input.idEmpresa, tx);
+    const yaExiste = existentes.find((c) => c.email?.trim().toLowerCase() === emailPrincipal);
+    let idContacto: number;
+    let contactoCreado = false;
+    if (yaExiste) {
+      idContacto = yaExiste.idContacto;
+    } else {
+      const insContacto = tx
+        .insert(contacto)
+        .values({
+          idEmpresa: input.idEmpresa,
+          email: input.destinatarios[0].trim(),
+          esPrincipal: 0,
+          esKeyDecisionMaker: 0,
+          fuente: 'mcp_correo_directo',
+        })
+        .run();
+      idContacto = Number(insContacto.lastInsertRowid);
+      contactoCreado = true;
+    }
+
+    const insCadencia = tx
+      .insert(cadencia)
+      .values({
+        nombre: `Correo directo: ${input.asunto}`,
+        descripcion: `Envío puntual a ${input.idEmpresa}, de ${input.owner}`,
+        activa: 1,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+    const idCadencia = Number(insCadencia.lastInsertRowid);
+
+    const insPaso = tx
+      .insert(pasoCadencia)
+      .values({ idCadencia, orden: 1, diaOffset: 0, canal: 'correo', esManual: 1, createdAt: ahora })
+      .run();
+    const idPaso = Number(insPaso.lastInsertRowid);
+
+    const insVersion = tx
+      .insert(versionPaso)
+      .values({
+        idPaso,
+        nombre: 'default',
+        asunto: input.asunto,
+        cuerpo: input.cuerpoHtml,
+        esDefault: 1,
+        activa: 1,
+        peso: 1,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+    const idVersion = Number(insVersion.lastInsertRowid);
+
+    // Segmento de una sola empresa: misma condicion campo:'id_empresa' de crear_cadencia
+    // (commit 8d1bcf2), aca con una lista de un elemento. Nadie vuelve a evaluar este segmento
+    // (no se pasa por inscribirCampana), pero su definicion queda valida por si algo lo lee.
+    const definicion: DefinicionSegmento = { condiciones: [{ campo: 'id_empresa', op: 'en', valores: [input.idEmpresa] }] };
+    const insSegmento = tx
+      .insert(segmento)
+      .values({
+        nombre: `Correo directo: ${input.idEmpresa}`,
+        definicion: JSON.stringify(definicion),
+        idOrganizacion,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+    const idSegmento = Number(insSegmento.lastInsertRowid);
+
+    const insCampana = tx
+      .insert(campana)
+      .values({
+        nombre: `Correo directo: ${input.asunto}`,
+        idCadencia,
+        idSegmento,
+        estado: 'activa',
+        modo: 'prioritaria',
+        reglaFaltante: 'cola',
+        ritmoIngreso: 'diario',
+        owner: input.owner,
+        idOrganizacion,
+        createdAt: ahora,
+        updatedAt: ahora,
+      })
+      .run();
+    const idCampana = Number(insCampana.lastInsertRowid);
+
+    // Gmail no tiene secuencia externa (no implementa MotorSecuencia, ver core/ports/envio.ts):
+    // el id sintetico es el mismo patron que ya usa lanzarCampanaAction para una campana de
+    // cadencia real (`gmail-camp-${idCampana}`), aca con su propio prefijo para que no
+    // colisione ni se confunda con una campana lanzada por la web.
+    const proveedorCampanaId = `gmail-directo-${idCampana}`;
+    tx.update(campana).set({ proveedorCampanaId, updatedAt: ahora }).where(eq(campana.idCampana, idCampana)).run();
+
+    const insInscripcion = tx
+      .insert(inscripcion)
+      .values({ idCampana, idEmpresa: input.idEmpresa, estado: 'activa', pasoActual: 1, fechaInscripcion: ahora, createdAt: ahora, updatedAt: ahora })
+      .run();
+    const idInscripcion = Number(insInscripcion.lastInsertRowid);
+
+    const insDestinatario = tx.insert(destinatario).values({ idInscripcion, idContacto, estado: 'activo', createdAt: ahora }).run();
+    const idDestinatario = Number(insDestinatario.lastInsertRowid);
+
+    const insPasoInscripcion = tx
+      .insert(pasoInscripcion)
+      .values({ idDestinatario, idPaso, idVersion, canal: 'correo', estado: 'pendiente', fechaProgramada: ahora, createdAt: ahora })
+      .run();
+    const idPasoInscripcion = Number(insPasoInscripcion.lastInsertRowid);
+
+    return { idCampana, proveedorCampanaId, idPasoInscripcion, idContacto, contactoCreado, idEmpresa: input.idEmpresa, empresaNombre };
+  });
+}
+
+// Releido POST-envio para enviar_correo_directo: lo que la tool devuelve al confirmar no es el
+// eco del input, es esto -- estado real de paso_inscripcion (para probar que de verdad quedo
+// 'enviada' y no 'fallo'), el proveedor_mensaje_id/hilo que Gmail devolvio, y el
+// proveedor_campana_id que quedo horneado en el pixel del correo que salio (para poder cruzarlo
+// a mano contra tracking_correo si hace falta). null solo si idPasoInscripcion no existe, que no
+// deberia pasar nunca porque lo devuelve la misma transaccion que lo crea.
+export type EnvioCorreoDirectoLeido = {
+  idPasoInscripcion: number;
+  idCampana: number;
+  proveedorCampanaId: string | null;
+  idEmpresa: string;
+  empresaNombre: string;
+  idContacto: number;
+  contactoEmail: string | null;
+  estado: string;
+  proveedor: string | null;
+  proveedorMensajeId: string | null;
+  proveedorHiloId: string | null;
+  fechaEnviada: string | null;
+  asunto: string | null;
+  cuerpo: string | null;
+};
+
+export function envioCorreoDirectoLeido(idPasoInscripcion: number): EnvioCorreoDirectoLeido | null {
+  const f = db
+    .select({
+      idPasoInscripcion: pasoInscripcion.idPasoInscripcion,
+      idCampana: campana.idCampana,
+      proveedorCampanaId: campana.proveedorCampanaId,
+      idEmpresa: inscripcion.idEmpresa,
+      empresaNombre: empresa.nombreOficial,
+      idContacto: contacto.idContacto,
+      contactoEmail: contacto.email,
+      estado: pasoInscripcion.estado,
+      proveedor: pasoInscripcion.proveedor,
+      proveedorMensajeId: pasoInscripcion.proveedorMensajeId,
+      proveedorHiloId: pasoInscripcion.proveedorHiloId,
+      fechaEnviada: pasoInscripcion.fechaEnviada,
+      asunto: versionPaso.asunto,
+      cuerpo: versionPaso.cuerpo,
+    })
+    .from(pasoInscripcion)
+    .innerJoin(destinatario, eq(destinatario.idDestinatario, pasoInscripcion.idDestinatario))
+    .innerJoin(contacto, eq(contacto.idContacto, destinatario.idContacto))
+    .innerJoin(inscripcion, eq(inscripcion.idInscripcion, destinatario.idInscripcion))
+    .innerJoin(empresa, eq(empresa.idEmpresa, inscripcion.idEmpresa))
+    .innerJoin(campana, eq(campana.idCampana, inscripcion.idCampana))
+    .innerJoin(versionPaso, eq(versionPaso.idVersion, pasoInscripcion.idVersion))
+    .where(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion))
+    .get();
+  return f ?? null;
+}
+
 // --- releer una campana entera --------------------------------------------------------
 //
 // La relectura que exige la regla del write-path: una tool de escritura devuelve lo que quedo
@@ -8323,6 +8577,12 @@ export function registrarPasoEnviadoConToque(
   proveedorMensajeId: string,
   fechaEnviada: string,
   cuerpoFinal: string,
+  // proveedorHiloId (enviar_correo_directo, 2026-09-01): opcional y aditivo, mismo criterio que
+  // marcarPasoInscripcionEnviada -- un caller que no lo tiene (el unico de hoy, llamada/actions.ts)
+  // no lo manda y la fila queda igual que siempre. Sin el, un correo directo por Gmail no dejaria
+  // el hilo escrito y hilosGmailDeCampana caeria al fallback de proveedorMensajeId (valido para un
+  // hilo nuevo, pero mejor dejar el dato real cuando se tiene).
+  proveedorHiloId?: string,
 ) {
   const fila = db
     .select({ canal: pasoInscripcion.canal, idContacto: destinatario.idContacto, idEmpresa: inscripcion.idEmpresa })
@@ -8338,7 +8598,7 @@ export function registrarPasoEnviadoConToque(
     // ni duplica el toque si un doble-click lo dispara dos veces).
     const res = tx
       .update(pasoInscripcion)
-      .set({ estado: 'enviada', proveedor, proveedorMensajeId, fechaEnviada })
+      .set({ estado: 'enviada', proveedor, proveedorMensajeId, fechaEnviada, ...(proveedorHiloId ? { proveedorHiloId } : {}) })
       .where(and(eq(pasoInscripcion.idPasoInscripcion, idPasoInscripcion), inArray(pasoInscripcion.estado, ['pendiente', 'fallo'])))
       .run();
     if (res.changes === 0) return;

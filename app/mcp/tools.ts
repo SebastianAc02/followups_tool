@@ -149,7 +149,15 @@ import {
   type ActualizarContactoInput,
   type ActualizarContactoResultado,
   type ContactoEscrito,
+  contactosDeEmpresa,
+  empresaNombrePorId,
+  prepararEnvioCorreoDirecto,
+  envioCorreoDirectoLeido,
+  registrarPasoEnviadoConToque,
+  marcarPasoInscripcionFallo,
+  type PrepararEnvioCorreoDirectoResultado,
 } from '../db/repository';
+import { textoPlanoAHtml } from '../core/texto-plano-html';
 import {
   RESULTADOS_REUNION_OCURRIDA,
   type RegistrarToqueInput,
@@ -2093,6 +2101,211 @@ export async function enviarWhatsappDirectoTool(
     estadoProveedor,
     owner: sesion.owner,
     enviadoEn,
+  };
+}
+
+// --- enviar_correo_directo (ESCRITURA, 2026-09-01) -------------------------------------
+//
+// El movimiento que le faltaba al MCP para "mandale este correo a esta cuenta, ya" sin armar
+// una cadencia/campaña de un solo uso (regla 18: al MCP se le agrega el movimiento que le
+// falta, no se le rodea). Mismo gesto que enviar_whatsapp_directo (UN mensaje, YA, por la
+// cuenta de quien llama) pero NO el mismo mecanismo: WhatsApp bypasea paso_inscripcion entero
+// porque no hay pixel de apertura para ese canal; correo SÍ lo tiene y el operador lo pidió
+// explícito, así que esta tool deja la fila real en paso_inscripcion (repository.
+// prepararEnvioCorreoDirecto arma el cadencia+paso+versión+segmento+campaña+inscripción+
+// destinatario mínimos de un solo uso) para que tracking_correo la pueda leer después,
+// exactamente igual que un correo salido de una campaña real -- nunca un pixel paralelo que
+// tracking_correo no sepa correlacionar a la empresa.
+//
+// EN SECO POR DEFAULT: sin confirmar:true no escribe ni manda nada. Devuelve a qué
+// destinatario(s)/cc le llegaría, el asunto, el cuerpo YA convertido a HTML (para revisar el
+// render antes de mandar), el remitente resuelto (el Gmail conectado y verificado de quien
+// llama) y cada bloqueo que impediría confirmar. Un correo real no tiene deshacer, así que el
+// default es el que no manda.
+//
+// NO reescribe links de clic en el cuerpo -- instrucción explícita del operador: este envío
+// puntual solo lleva pixel de apertura. El cuerpo entra como TEXTO PLANO (saltos de línea,
+// guiones de lista) y se convierte a HTML mínimo (textoPlanoAHtml) antes de mandar: Gmail
+// siempre manda text/html en esta app, y sin la conversión los saltos de línea del dictado se
+// colapsan en un solo párrafo pegado.
+//
+// Si Gmail ya recibió el correo pero la escritura de tracking fallara (no debería: pasa
+// primero), o si Gmail rechaza el envío DESPUÉS de que la cadencia/campaña/paso ya quedaron
+// creados (el andamiaje se escribe ANTES de mandar, porque el pixel necesita el
+// proveedorCampanaId horneado en el HTML desde antes de salir), el error lo dice explícito con
+// los ids que quedaron para que se pueda diagnosticar o reintentar -- nunca se inventa un
+// resultado ni se calla la mitad hecha.
+export type EnviarCorreoDirectoInput = {
+  idEmpresa: string;
+  destinatarios: string[];
+  cc?: string[];
+  asunto: string;
+  // Texto plano: saltos de línea simples y dobles, guiones de lista. Se convierte a HTML antes
+  // de mandar (textoPlanoAHtml) -- no se manda tal cual ni se acepta HTML ya armado.
+  cuerpo: string;
+  confirmar?: boolean;
+};
+
+export type EnviarCorreoDirectoDeps = {
+  // Resuelve el Gmail conectado y verificado del owner que llama, para el preview del
+  // remitente. Import dinámico (mismo criterio que el resto de deps de este archivo): el resto
+  // del MCP, todo lectura, no tiene por qué arrastrar el adaptador de Gmail solo por importar
+  // tools.ts.
+  remitente: (idUsuario: string) => Promise<string | null>;
+  // El envío real. proveedorCampanaId ya viene resuelto (lo generó prepararEnvioCorreoDirecto)
+  // porque el pixel tiene que llevarlo horneado en el HTML antes de salir.
+  enviar: (
+    idUsuario: string,
+    destinatarios: string[],
+    cc: string[],
+    asunto: string,
+    cuerpoHtml: string,
+    proveedorCampanaId: string,
+  ) => Promise<{ mensajeId: string; hiloId: string | undefined }>;
+};
+
+const DEPS_ENVIAR_CORREO_DIRECTO_DEFAULT: EnviarCorreoDirectoDeps = {
+  remitente: async (idUsuario) => {
+    const { emailGmailConectado } = await import('../adapters/gmail');
+    return emailGmailConectado(idUsuario);
+  },
+  enviar: async (idUsuario, destinatarios, cc, asunto, cuerpoHtml, proveedorCampanaId) => {
+    const { enviarCorreoDirectoGmail } = await import('../adapters/gmail');
+    return enviarCorreoDirectoGmail(idUsuario, destinatarios, cc, asunto, cuerpoHtml, proveedorCampanaId);
+  },
+};
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export type EnviarCorreoDirectoResultado = {
+  confirmado: boolean;
+  idEmpresa: string;
+  empresaNombre: string | null;
+  destinatarios: string[];
+  cc: string[];
+  asunto: string;
+  cuerpoHtml: string;
+  remitente: string | null;
+  contactoExistente: { idContacto: number; email: string | null } | null;
+  bloqueos: string[];
+  advertencias: string[];
+  // Releído DESPUÉS de mandar. null mientras confirmado sea false.
+  envio: {
+    idCampana: number;
+    proveedorCampanaId: string;
+    idPasoInscripcion: number;
+    idContacto: number;
+    contactoCreado: boolean;
+    estado: string;
+    proveedor: string | null;
+    proveedorMensajeId: string | null;
+    proveedorHiloId: string | null;
+    fechaEnviada: string | null;
+  } | null;
+  nota: string;
+};
+
+export async function enviarCorreoDirectoTool(
+  input: EnviarCorreoDirectoInput,
+  idOrganizacion: number,
+  sesion: SesionLanzamiento,
+  deps: EnviarCorreoDirectoDeps = DEPS_ENVIAR_CORREO_DIRECTO_DEFAULT,
+): Promise<EnviarCorreoDirectoResultado> {
+  // owner/idUsuario de la SESIÓN, nunca del input -- mismo criterio que enviar_whatsapp_directo:
+  // un cliente no elige a nombre de quién sale el correo.
+  if (!sesion.owner.trim() || !sesion.idUsuario.trim()) {
+    throw new Error(
+      'enviar_correo_directo: esta sesión no trae usuario ni owner (el server standalone por token no los tiene). ' +
+        'Solo se puede mandar desde el MCP autenticado por OAuth, donde la sesión dice a nombre de quién sale el correo.',
+    );
+  }
+
+  const destinatarios = input.destinatarios.map((d) => d.trim()).filter((d) => d.length > 0);
+  const cc = (input.cc ?? []).map((d) => d.trim()).filter((d) => d.length > 0);
+  const asunto = input.asunto.trim();
+  const cuerpoTexto = input.cuerpo;
+
+  const bloqueos: string[] = [];
+  const advertencias: string[] = [];
+
+  if (destinatarios.length === 0) bloqueos.push('destinatarios vacío: hace falta al menos un email de destino');
+  for (const d of destinatarios) if (!EMAIL_RE.test(d)) bloqueos.push(`'${d}' no es un email válido`);
+  for (const d of cc) if (!EMAIL_RE.test(d)) bloqueos.push(`cc '${d}' no es un email válido`);
+  if (!asunto) bloqueos.push('asunto vacío');
+  if (!cuerpoTexto.trim()) bloqueos.push('cuerpo vacío, no hay qué mandar');
+
+  const empresaNombre = empresaNombrePorId(input.idEmpresa);
+  if (!empresaNombre) bloqueos.push(`la empresa ${input.idEmpresa} no existe`);
+
+  const remitente = await deps.remitente(sesion.idUsuario);
+  if (!remitente) {
+    bloqueos.push(`${sesion.owner} no tiene Gmail conectado y verificado. Sin eso no hay por dónde mandar (mismo gate que lanzar_campana).`);
+  }
+
+  let contactoExistente: { idContacto: number; email: string | null } | null = null;
+  if (empresaNombre && destinatarios.length > 0) {
+    const emailPrincipal = destinatarios[0].toLowerCase();
+    const existente = contactosDeEmpresa(input.idEmpresa).find((c) => c.email?.trim().toLowerCase() === emailPrincipal);
+    contactoExistente = existente ? { idContacto: existente.idContacto, email: existente.email } : null;
+    if (!existente) {
+      advertencias.push(`no hay contacto con '${destinatarios[0]}' en esta empresa todavía: se va a crear uno nuevo (fuente mcp_correo_directo).`);
+    }
+  }
+
+  const cuerpoHtml = textoPlanoAHtml(cuerpoTexto);
+
+  const base = { idEmpresa: input.idEmpresa, empresaNombre, destinatarios, cc, asunto, cuerpoHtml, remitente, contactoExistente, bloqueos, advertencias };
+
+  if (input.confirmar !== true || bloqueos.length > 0) {
+    return {
+      ...base,
+      confirmado: false,
+      envio: null,
+      nota:
+        bloqueos.length > 0
+          ? 'No se mandó nada: hay bloqueos que resolver antes de confirmar.'
+          : 'En seco: no se escribió ni se mandó nada. Con confirmar: true sale de verdad, por el Gmail de quien llama.',
+    };
+  }
+
+  const preparado: PrepararEnvioCorreoDirectoResultado = prepararEnvioCorreoDirecto(
+    { idEmpresa: input.idEmpresa, destinatarios, cc, asunto, cuerpoHtml, owner: sesion.owner },
+    idOrganizacion,
+  );
+
+  try {
+    const enviado = await deps.enviar(sesion.idUsuario, destinatarios, cc, asunto, cuerpoHtml, preparado.proveedorCampanaId);
+    registrarPasoEnviadoConToque(preparado.idPasoInscripcion, 'gmail', enviado.mensajeId, new Date().toISOString(), cuerpoTexto, enviado.hiloId);
+  } catch (e) {
+    marcarPasoInscripcionFallo(preparado.idPasoInscripcion, 1, null);
+    throw new Error(
+      `enviar_correo_directo: la campaña ${preparado.idCampana} (paso ${preparado.idPasoInscripcion}) quedó creada pero Gmail rechazó el ` +
+        `envío: ${e instanceof Error ? e.message : String(e)}. El paso quedó marcado 'fallo', no 'enviada' -- se puede reintentar apuntándole a ` +
+        `ese idPasoInscripcion con empujar_envios, o volver a llamar enviar_correo_directo (crea uno nuevo).`,
+    );
+  }
+
+  const releido = envioCorreoDirectoLeido(preparado.idPasoInscripcion);
+  if (!releido) throw new Error(`enviar_correo_directo: el paso ${preparado.idPasoInscripcion} no se pudo releer después de mandarlo`);
+
+  return {
+    ...base,
+    confirmado: true,
+    envio: {
+      idCampana: releido.idCampana,
+      proveedorCampanaId: releido.proveedorCampanaId ?? preparado.proveedorCampanaId,
+      idPasoInscripcion: releido.idPasoInscripcion,
+      idContacto: releido.idContacto,
+      contactoCreado: preparado.contactoCreado,
+      estado: releido.estado,
+      proveedor: releido.proveedor,
+      proveedorMensajeId: releido.proveedorMensajeId,
+      proveedorHiloId: releido.proveedorHiloId,
+      fechaEnviada: releido.fechaEnviada,
+    },
+    nota:
+      'Mandado y releído: envio.estado tiene que decir "enviada". El pixel de apertura quedó horneado con envio.proveedorCampanaId + el email ' +
+      'de destinatarios[0] -- tracking_correo filtrando por idEmpresa (o por idCampana=envio.idCampana) lo va a encontrar apenas se abra el correo.',
   };
 }
 
