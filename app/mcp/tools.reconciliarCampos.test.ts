@@ -121,7 +121,29 @@ test('la razon de perdida mapea etiqueta de Notion y slug, con o sin tilde', () 
   assert.equal(mapearRazonPerdidaNotion('Ya tiene pasarela'), 'ya_tiene_pasarela');
   assert.equal(mapearRazonPerdidaNotion('  no califica icp '), 'no_califica_icp');
   assert.equal(mapearRazonPerdidaNotion('timing_malo'), 'timing_malo');
-  assert.equal(mapearRazonPerdidaNotion('Ghosting'), null);
+  assert.equal(mapearRazonPerdidaNotion('Ghosting'), 'ghosting');
+  assert.equal(mapearRazonPerdidaNotion('No califica (ICP)'), 'no_califica');
+  assert.equal(mapearRazonPerdidaNotion('no_califica'), 'no_califica');
+  assert.equal(mapearRazonPerdidaNotion('No califica ICP'), 'no_califica_icp', 'la etiqueta vieja sigue en su slug');
+  assert.equal(mapearRazonPerdidaNotion('Se fue con la competencia'), null);
+});
+
+test('Ghosting y No califica (ICP) de Notion se escriben como slug', () => {
+  seed('rc-60', P(60));
+  seed('rc-61', P(61));
+  const r = reconciliarNotionTool(
+    {
+      paginas: [
+        { pageId: P(60), estado: 'On Hold', razonPerdida: 'Ghosting' },
+        { pageId: P(61), estado: 'On Hold', razonPerdida: 'No califica (ICP)' },
+      ],
+      aplicar: true,
+    },
+    ORG,
+  );
+  assert.deepEqual(r.razonSinMapeo, []);
+  assert.equal(fila('rc-60').razon_perdida, 'ghosting');
+  assert.equal(fila('rc-61').razon_perdida, 'no_califica');
 });
 
 test('dry-run: llena lo vacio, lista cada pisada con de/a, agrupa por campo y no escribe', () => {
@@ -249,10 +271,10 @@ test('usuarios en 0 no se escriben y se reportan', () => {
 test('una razon que no mapea va a razonSinMapeo y el resto de la pagina se aplica', () => {
   seed('rc-5', P(5));
   const r = reconciliarNotionTool(
-    { paginas: [{ pageId: P(5), estado: 'Lead', razonPerdida: 'Ghosting', proximoPaso: 'Volver a llamar' }], aplicar: true },
+    { paginas: [{ pageId: P(5), estado: 'Lead', razonPerdida: 'Se fue con la competencia', proximoPaso: 'Volver a llamar' }], aplicar: true },
     ORG,
   );
-  assert.deepEqual(r.razonSinMapeo, [{ pageId: P(5), razonPerdida: 'Ghosting' }]);
+  assert.deepEqual(r.razonSinMapeo, [{ pageId: P(5), razonPerdida: 'Se fue con la competencia' }]);
   const f = fila('rc-5');
   assert.equal(f.razon_perdida, null);
   assert.equal(f.proximo_paso, 'Volver a llamar');

@@ -208,9 +208,14 @@ export const RESULTADOS_CONTESTO: readonly Resultado[] = [
 // escrita, y es prosa ("Tamano insuficiente, el ISP es muy pequeno para el pricing actual"),
 // que en esta lista es no_califica_icp con su nota. Esa fila NO se toca.
 //
-// Ghosting no esta aca a proposito, aunque el pipeline lo tenga como opcion: es un RESULTADO
-// del toque ('ghosting'), no una causa de perdida. Quien se pierde por ghosting deja las dos
-// cosas escritas, el resultado y la razon real si se conoce.
+// ghosting y no_califica entran el 2026-09-21 porque el pipeline de Notion los tiene como
+// opcion de Razon Perdida ("Ghosting", "No califica (ICP)") y reconciliar_notion los mandaba
+// a razonSinMapeo. Antes ghosting se dejaba fuera a proposito por ser tambien un RESULTADO
+// del toque ('ghosting'); se acepta igual porque es la razon que el pipeline registra cuando
+// la causa real no se conoce. Si se conoce, va esa y no ghosting.
+// OJO no_califica y no_califica_icp dicen lo mismo. no_califica_icp queda por compatibilidad
+// (filas ya escritas y su etiqueta "No califica ICP"); no_califica es el que corresponde a la
+// etiqueta vigente del pipeline. Al contar perdidas por fit hay que sumar los dos.
 export const RAZONES_PERDIDA = [
   'precio',
   'ya_tiene_pasarela',
@@ -219,6 +224,8 @@ export const RAZONES_PERDIDA = [
   'no_califica_icp',
   'sin_presupuesto',
   'disputa_interna',
+  'ghosting',
+  'no_califica',
 ] as const;
 export type RazonPerdida = (typeof RAZONES_PERDIDA)[number];
 
@@ -233,6 +240,8 @@ export const RAZON_PERDIDA_LABELS: Record<RazonPerdida, string> = {
   no_califica_icp: 'No califica ICP',
   sin_presupuesto: 'Sin presupuesto',
   disputa_interna: 'Disputa interna',
+  ghosting: 'Ghosting',
+  no_califica: 'No califica (ICP)',
 };
 
 // La objecion VIVA, el mismo bloqueo antes de que mate el deal.

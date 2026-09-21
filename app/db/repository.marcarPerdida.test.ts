@@ -70,6 +70,21 @@ test('marcarPerdida encola estado + razonPerdida al outbox cuando la empresa tie
   assert.equal(fila!.payload.razonPerdida, 'Sin presupuesto', 'a Notion viaja la etiqueta legible, no el slug');
 });
 
+test('marcarPerdida acepta ghosting y no_califica, y a Notion viajan sus etiquetas', () => {
+  seedEmpresa('mp-gh', 'oportunidad', 'page-mp-gh');
+  seedEmpresa('mp-nc', 'oportunidad', 'page-mp-nc');
+  marcarPerdida({ idEmpresa: 'mp-gh', canal: 'whatsapp', razonPerdida: 'ghosting' }, 1);
+  marcarPerdida({ idEmpresa: 'mp-nc', canal: 'llamada', razonPerdida: 'no_califica' }, 1);
+  const pend = outboxPendientes();
+  assert.equal(pend.find((p) => p.payload.notionPageId === 'page-mp-gh')!.payload.razonPerdida, 'Ghosting');
+  assert.equal(pend.find((p) => p.payload.notionPageId === 'page-mp-nc')!.payload.razonPerdida, 'No califica (ICP)');
+});
+
+test('marcarPerdida rechaza una razon fuera del vocabulario', () => {
+  seedEmpresa('mp-mala', 'oportunidad');
+  assert.throws(() => marcarPerdida({ idEmpresa: 'mp-mala', canal: 'llamada', razonPerdida: 'competencia' } as any, 1));
+});
+
 test('marcarPerdida exige razonPerdida (Zod): sin ella, lanza', () => {
   seedEmpresa('mp4', 'oportunidad');
   assert.throws(() => marcarPerdida({ idEmpresa: 'mp4', canal: 'llamada', razonPerdida: '' } as any, 1));
