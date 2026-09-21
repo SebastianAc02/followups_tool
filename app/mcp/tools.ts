@@ -160,6 +160,9 @@ import {
 import { textoPlanoAHtml } from '../core/texto-plano-html';
 import {
   RESULTADOS_REUNION_OCURRIDA,
+  RAZONES_PERDIDA,
+  RAZON_PERDIDA_LABELS,
+  type RazonPerdida,
   type RegistrarToqueInput,
   type EditarToqueInput,
   type PlanearDiaInput,
@@ -495,6 +498,11 @@ export type MoverEstadoInput = {
   estado: string;
   fecha?: string;
   origen?: OrigenCambio;
+  // Update opcional en la misma transaccion (2026-09-21): cambiar de etapa y dejar el siguiente
+  // paso en una sola llamada. Solo escribe lo que venga.
+  owner?: string;
+  proximoPaso?: string;
+  fechaProximoPaso?: string;
 };
 
 // Devuelve la empresa releida y la transicion que quedo escrita, con su origen (2026-07-25,
@@ -512,6 +520,11 @@ export function moverEstadoTool(input: MoverEstadoInput, idOrganizacion: number)
   return actualizarEstadoNotion(input.idEmpresa, input.estado, idOrganizacion, input.fecha ?? hoy(), {
     encolarNotion: debeEncolarHaciaNotion(input.origen),
     origenTransicion: input.origen === 'notion' ? 'reconciliacion' : 'manual',
+    update: {
+      owner: input.owner,
+      proximoPaso: input.proximoPaso,
+      proximoFollowUpFecha: input.fechaProximoPaso,
+    },
   });
 }
 
@@ -840,24 +853,70 @@ export function actualizarContactoTool(input: ActualizarContactoInput, idOrganiz
 // Reconciliar en lote. El estado llega como lo escribe Notion ("Firma y Pago Realizado") y se
 // traduce aca, no en el core del plan: mapearEstadoNotion lanza ante un valor desconocido, y se
 // quiere que una pagina rara ensucie SOLO su fila, no que tumbe el lote entero.
+//
+// Mismo criterio para la razon de perdida (2026-09-21): llega como la etiqueta de Notion ("Ya
+// tiene pasarela") y se guarda como el slug de RAZONES_PERDIDA, que es como la cuenta la base
+// (marcar_perdida escribe el slug en toque.razon_perdida). Una etiqueta que no mapea NO se
+// escribe como prosa: va a razonSinMapeo y el resto de la pagina sigue.
+export type PaginaNotionEntrada = {
+  pageId: string;
+  estado: string;
+  owner?: string | null;
+  nombre?: string | null;
+  usuarios?: number | null;
+  fechaUltimoContacto?: string | null;
+  proximoPaso?: string | null;
+  fechaProximoPaso?: string | null;
+  razonPerdida?: string | null;
+};
+
 export type ReconciliarNotionInput = {
-  paginas: { pageId: string; estado: string; owner?: string | null; nombre?: string | null }[];
+  paginas: PaginaNotionEntrada[];
   aplicar?: boolean;
 };
+
+function normalizarEtiqueta(v: string): string {
+  return v
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[_\s]+/g, ' ')
+    .trim();
+}
+
+const RAZON_POR_ETIQUETA = new Map<string, RazonPerdida>(
+  RAZONES_PERDIDA.flatMap((slug) => [
+    [normalizarEtiqueta(slug), slug] as [string, RazonPerdida],
+    [normalizarEtiqueta(RAZON_PERDIDA_LABELS[slug]), slug] as [string, RazonPerdida],
+  ]),
+);
+
+export function mapearRazonPerdidaNotion(v: string): RazonPerdida | null {
+  return RAZON_POR_ETIQUETA.get(normalizarEtiqueta(v)) ?? null;
+}
 
 export function reconciliarNotionTool(input: ReconciliarNotionInput, idOrganizacion: number) {
   const traducidas: PaginaNotion[] = [];
   const sinMapeo: { pageId: string; estado: string }[] = [];
+  const razonSinMapeo: { pageId: string; razonPerdida: string }[] = [];
   for (const p of input.paginas) {
+    let estado: string;
     try {
-      traducidas.push({ ...p, estado: mapearEstadoNotion(p.estado) });
+      estado = mapearEstadoNotion(p.estado);
     } catch {
       sinMapeo.push({ pageId: p.pageId, estado: p.estado });
+      continue;
     }
+    let razonPerdida: string | null = null;
+    if (p.razonPerdida?.trim()) {
+      razonPerdida = mapearRazonPerdidaNotion(p.razonPerdida);
+      if (razonPerdida === null) razonSinMapeo.push({ pageId: p.pageId, razonPerdida: p.razonPerdida });
+    }
+    traducidas.push({ ...p, estado, razonPerdida });
   }
   // aplicar por defecto FALSE: se mira el plan antes de escribir.
   const r = reconciliarNotion(traducidas, idOrganizacion, input.aplicar === true, hoy());
-  return { ...r, sinMapeo };
+  return { ...r, sinMapeo, razonSinMapeo };
 }
 
 export type CambiosDesdeInput = { desde: string; idOrganizacion?: number };

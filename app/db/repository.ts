@@ -23,6 +23,7 @@ import {
 } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
+import path from 'node:path';
 // dbReal ademas de db: organizacion_miembro es IDENTIDAD y NO conmuta con el modo prueba
 // (spec: "identidad siempre real, negocio conmutable"). Este archivo conmuta entero, asi que
 // las pocas lecturas de identidad que viven aca piden dbReal explicito -- ver
@@ -116,6 +117,7 @@ import {
 } from '../core/empresa-identidad';
 import {
   planReconciliacion,
+  type CuentaBase,
   type PaginaNotion,
   type PlanReconciliacion,
 } from '../core/reconciliacion/planReconciliacion';
@@ -10299,8 +10301,22 @@ export type MoverEstadoResultado = {
   empresa: EmpresaEscrita | null;
   transicion: { de: string | null; a: string; fecha: string; origen: OrigenTransicion | null } | null;
   // Por que no se movio, cuando no se movio. Sin esto, "ya estaba en esa etapa" y "esa empresa
-  // no es tuya" devolvian lo mismo: nada.
+  // no es tuya" devolvian lo mismo: nada. Habla SOLO de la etapa: con update, una cuenta que ya
+  // estaba en la etapa igual puede tener campos escritos (ver camposActualizados).
   motivo?: 'sin_cambio' | 'empresa_no_encontrada';
+  // Columnas de empresa que el update de esta llamada cambio de valor (2026-09-21). Vacio si no
+  // vino update o si lo que vino ya era lo que habia.
+  camposActualizados: ('owner' | 'proximo_paso' | 'proximo_follow_up_fecha')[];
+};
+
+// El update opcional que viaja con un cambio de etapa (2026-09-21): "cambiar de estado y
+// poner el siguiente paso" en una sola llamada y una sola transaccion, en vez de mover_estado
+// seguido de actualizar_empresa, donde la segunda puede fallar y dejar la cuenta en la etapa
+// nueva con el proximo paso de la etapa vieja.
+export type UpdateConEstado = {
+  owner?: string;
+  proximoPaso?: string;
+  proximoFollowUpFecha?: string; // YYYY-MM-DD
 };
 
 export function actualizarEstadoNotion(
@@ -10311,49 +10327,122 @@ export function actualizarEstadoNotion(
   // origenTransicion (2026-07-25) queda en el historico y decide si esta fila cuenta como
   // movimiento comercial o como cuadre. Es distinto del `origen` de origen-cambio.ts, que
   // decide si el cambio VIAJA a Notion: uno habla del historico, el otro del outbox.
-  opts: { encolarNotion?: boolean; origenTransicion?: OrigenTransicion } = {},
+  opts: { encolarNotion?: boolean; origenTransicion?: OrigenTransicion; update?: UpdateConEstado } = {},
 ): MoverEstadoResultado {
+  const update: UpdateConEstado = {};
+  for (const [k, v] of Object.entries(opts.update ?? {}) as [keyof UpdateConEstado, string | undefined][]) {
+    const t = v?.trim();
+    if (v !== undefined && !t) throw new Error(`${k} vino vacio: un update no borra campos, omitelo si no cambia`);
+    if (t) update[k] = t;
+  }
+  if (update.proximoFollowUpFecha !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(update.proximoFollowUpFecha)) {
+    throw new Error(`fechaProximoPaso tiene que ser YYYY-MM-DD, llego "${update.proximoFollowUpFecha}"`);
+  }
+
   return db.transaction((tx) => {
     const emp = tx
-      .select({ estadoNotion: empresa.estadoNotion })
+      .select({
+        estadoNotion: empresa.estadoNotion,
+        owner: empresa.owner,
+        proximoPaso: empresa.proximoPaso,
+        proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      })
       .from(empresa)
       .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
       .get();
     // No existe, o existe en otra organizacion. Las dos son "no la toco", y se dicen con el
     // mismo motivo a proposito: el caller no tiene por que enterarse de cuentas ajenas.
-    if (!emp) return { empresa: null, transicion: null, motivo: 'empresa_no_encontrada' as const };
-    // Ya estaba en esa etapa: no se escribe fila de historico redundante. Se devuelve la empresa
-    // igual, releida, porque el estado que el caller queria ES el que hay.
-    if (emp.estadoNotion === estadoNuevo) {
-      return { empresa: leerEmpresaEscrita(tx, idEmpresa), transicion: null, motivo: 'sin_cambio' as const };
+    if (!emp) return { empresa: null, transicion: null, motivo: 'empresa_no_encontrada' as const, camposActualizados: [] };
+
+    const cambiaEstado = emp.estadoNotion !== estadoNuevo;
+    const sets: Record<string, unknown> = {};
+    const camposActualizados: MoverEstadoResultado['camposActualizados'] = [];
+    if (update.owner !== undefined && update.owner !== emp.owner) {
+      sets.owner = update.owner;
+      camposActualizados.push('owner');
+    }
+    if (update.proximoPaso !== undefined && update.proximoPaso !== emp.proximoPaso) {
+      sets.proximoPaso = update.proximoPaso;
+      camposActualizados.push('proximo_paso');
+    }
+    if (update.proximoFollowUpFecha !== undefined && update.proximoFollowUpFecha !== emp.proximoFollowUpFecha) {
+      sets.proximoFollowUpFecha = update.proximoFollowUpFecha;
+      camposActualizados.push('proximo_follow_up_fecha');
     }
 
-    escribirTransicionEstado(tx, idEmpresa, emp.estadoNotion, estadoNuevo, idOrganizacion, fecha, opts.origenTransicion);
+    // Ya estaba en esa etapa y no hay campo que cambie: no se escribe nada. Se devuelve la
+    // empresa igual, releida, porque el estado que el caller queria ES el que hay.
+    if (!cambiaEstado && camposActualizados.length === 0) {
+      return { empresa: leerEmpresaEscrita(tx, idEmpresa), transicion: null, motivo: 'sin_cambio' as const, camposActualizados };
+    }
+
+    if (cambiaEstado) {
+      escribirTransicionEstado(tx, idEmpresa, emp.estadoNotion, estadoNuevo, idOrganizacion, fecha, opts.origenTransicion);
+    }
+    if (camposActualizados.length > 0) {
+      // El owner no tiene tabla de historico propia: el trigger empresa_auditoria_campo
+      // (drizzle/0015) deja valor anterior y nuevo en auditoria_campo con este UPDATE.
+      sets.updatedAt = new Date().toISOString();
+      tx.update(empresa)
+        .set(sets)
+        .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+        .run();
+      tx.insert(syncCambios)
+        .values({
+          fecha: new Date().toISOString(),
+          corrida: 'cockpit',
+          fuente: 'cockpit',
+          entidad: 'empresa',
+          idRegistro: idEmpresa,
+          accion: 'update',
+          detalle: `mover_estado con update: ${camposActualizados.join(', ')}`,
+        })
+        .run();
+    }
 
     if (opts.encolarNotion) {
-      encolarOutboxNotion(tx, idEmpresa, { estado: estadoNuevo });
+      const cambio: Omit<CambioNotion, 'notionPageId'> = {};
+      if (cambiaEstado) cambio.estado = estadoNuevo;
+      if (sets.proximoPaso !== undefined) cambio.proximoPaso = update.proximoPaso;
+      if (sets.proximoFollowUpFecha !== undefined) cambio.fechaProximoPaso = update.proximoFollowUpFecha;
+      if (Object.keys(cambio).length > 0) encolarOutboxNotion(tx, idEmpresa, cambio);
     }
 
     // Relectura de la fila de historico recien escrita: el `origen` que se devuelve sale de la
     // tabla, no del parametro que entro.
-    const escrita = tx
-      .select({
-        de: empresaEstadoHistorial.estadoAnterior,
-        a: empresaEstadoHistorial.estadoNuevo,
-        fecha: empresaEstadoHistorial.fecha,
-        origen: empresaEstadoHistorial.origen,
-      })
-      .from(empresaEstadoHistorial)
-      .where(and(eq(empresaEstadoHistorial.idEmpresa, idEmpresa), eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion)))
-      .orderBy(desc(empresaEstadoHistorial.id))
-      .limit(1)
-      .get();
+    const escrita = cambiaEstado
+      ? tx
+          .select({
+            de: empresaEstadoHistorial.estadoAnterior,
+            a: empresaEstadoHistorial.estadoNuevo,
+            fecha: empresaEstadoHistorial.fecha,
+            origen: empresaEstadoHistorial.origen,
+          })
+          .from(empresaEstadoHistorial)
+          .where(and(eq(empresaEstadoHistorial.idEmpresa, idEmpresa), eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion)))
+          .orderBy(desc(empresaEstadoHistorial.id))
+          .limit(1)
+          .get()
+      : undefined;
+
+    const releida = leerEmpresaEscrita(tx, idEmpresa);
+    // Lo releido tiene que ser lo pedido; si no, se revierte en vez de devolver algo falso.
+    if (
+      releida.estadoNotion !== estadoNuevo ||
+      (sets.owner !== undefined && releida.owner !== update.owner) ||
+      (sets.proximoPaso !== undefined && releida.proximoPaso !== update.proximoPaso) ||
+      (sets.proximoFollowUpFecha !== undefined && releida.proximoFollowUpFecha !== update.proximoFollowUpFecha)
+    ) {
+      throw new Error(`mover_estado: ${idEmpresa} no quedo como se pidio al releer; no se escribio nada`);
+    }
 
     return {
-      empresa: leerEmpresaEscrita(tx, idEmpresa),
+      empresa: releida,
       transicion: escrita
         ? { de: escrita.de, a: escrita.a, fecha: escrita.fecha, origen: escrita.origen as OrigenTransicion | null }
         : null,
+      ...(cambiaEstado ? {} : { motivo: 'sin_cambio' as const }),
+      camposActualizados,
     };
   });
 }
@@ -11108,45 +11197,289 @@ export function snapshotEstados(fecha: string, idOrganizacion: number): Snapshot
 
 // --- Reconciliar contra Notion en lote ------------------------------------------------
 
-export type ReconciliarNotionResultado = PlanReconciliacion & { aplicado: boolean };
+// Lo que quedo escrito en una cuenta despues de reconciliar, RELEIDO de la base dentro de la
+// misma transaccion. Es la unica prueba de que el plan se aplico: el eco del input no lo es.
+export type CuentaReconciliadaEscrita = {
+  idEmpresa: string;
+  nombre: string;
+  estado: string | null;
+  owner: string | null;
+  fechaUltimoContacto: string | null;
+  proximoPaso: string | null;
+  proximoFollowUpFecha: string | null;
+  razonPerdida: string | null;
+  usuariosReales: number | null;
+  usuariosEstimados: number | null;
+  usuariosEfectivos: number | null;
+  usuariosFuente: string | null;
+  // La fila de empresa_estado_historial que escribio ESTA corrida, o null si el estado no cambio.
+  transicion: { de: string | null; a: string; fecha: string; origen: string | null } | null;
+};
+
+export type ReconciliarNotionResultado = PlanReconciliacion & {
+  aplicado: boolean;
+  // Ruta del respaldo VACUUM INTO tomado antes de escribir. null en dry-run o cuando el plan no
+  // tenia nada que escribir (no se respalda para no escribir nada).
+  respaldo: string | null;
+  escrito: CuentaReconciliadaEscrita[];
+};
+
+// Lo mismo que cuentasParaReconciliar (mismo universo, mismo WHERE, sin EMPRESA_VIVA por la
+// misma razon) pero con los campos que ahora se cruzan. Funcion aparte y no columnas nuevas en
+// aquella: `cuentas` devuelve FilaCuenta tal cual y existe justamente para ser liviana.
+function cuentasBaseParaReconciliar(idOrganizacion: number): CuentaBase[] {
+  return db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      estado: empresa.estadoNotion,
+      owner: empresa.owner,
+      notionPageId: empresa.notionPageId,
+      usuariosReales: empresaUsuarios.usuariosReales,
+      usuariosEstimados: empresaUsuarios.usuariosEstimados,
+      usuariosEfectivos: empresaUsuarios.usuariosEfectivos,
+      fechaUltimoContacto: empresa.fechaUltimoContacto,
+      proximoPaso: empresa.proximoPaso,
+      proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      razonPerdida: empresa.razonPerdida,
+    })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        or(isNotNull(empresa.estadoNotion), isNotNull(empresa.notionPageId)),
+      ),
+    )
+    .orderBy(asc(empresa.nombreOficial))
+    .all();
+}
+
+// Respaldo consistente de la base ANTES de una escritura en lote (docs/base-de-produccion.md:
+// la base esta en WAL y un cp no arrastra el -wal; VACUUM INTO si). Queda al lado de la base,
+// con la misma convencion de nombre que los respaldos manuales (backup-<algo>-<fecha>.db). Si el
+// respaldo falla, la excepcion sube y no se escribe nada: sin red no se escribe produccion.
+export function respaldarBaseAntesDeEscribir(etiqueta: string): string {
+  const archivo = db.$client.name;
+  if (!archivo || archivo === ':memory:') {
+    throw new Error('No se puede respaldar una base en memoria: no hay archivo al lado del cual dejar el respaldo');
+  }
+  const marca = new Date().toISOString().replace(/[:.]/g, '-');
+  const destino = path.join(path.dirname(archivo), `backup-${etiqueta}-${marca}.db`);
+  db.run(sql`VACUUM INTO ${destino}`);
+  return destino;
+}
+
+// Upsert de empresa_usuarios para la reconciliacion. En esta rama no existe todavia
+// escribirUsuariosEnTx (vive en el trabajo sin commitear de actualizar_usuarios, 2026-08-21);
+// cuando eso aterrice, esta funcion se reemplaza por aquella, que hace exactamente lo mismo:
+// solo escribe lo que vino, deja la columna de fuente de cada valor y nunca nombra
+// usuarios_efectivos (columna generada).
+function escribirUsuariosEnTx(
+  tx: Tx,
+  idEmpresa: string,
+  valores: { usuariosReales?: number; usuariosEstimados?: number },
+  fuente: string,
+  actualizadoPor: string,
+  ahora: string,
+): void {
+  const sets: Record<string, unknown> = { actualizadoEn: ahora, actualizadoPor };
+  if (valores.usuariosReales !== undefined) {
+    sets.usuariosReales = valores.usuariosReales;
+    sets.usuariosRealesFuente = fuente;
+  }
+  if (valores.usuariosEstimados !== undefined) {
+    sets.usuariosEstimados = valores.usuariosEstimados;
+    sets.usuariosEstFuente = fuente;
+  }
+  if (valores.usuariosReales === undefined && valores.usuariosEstimados === undefined) return;
+  tx.insert(empresaUsuarios)
+    .values({ idEmpresa, ...sets })
+    .onConflictDoUpdate({ target: empresaUsuarios.idEmpresa, set: sets })
+    .run();
+}
+
+function leerCuentaReconciliada(
+  tx: Tx,
+  idEmpresa: string,
+  idOrganizacion: number,
+  idHistorialAntes: number,
+): CuentaReconciliadaEscrita {
+  const fila = tx
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      estado: empresa.estadoNotion,
+      owner: empresa.owner,
+      fechaUltimoContacto: empresa.fechaUltimoContacto,
+      proximoPaso: empresa.proximoPaso,
+      proximoFollowUpFecha: empresa.proximoFollowUpFecha,
+      razonPerdida: empresa.razonPerdida,
+      usuariosReales: empresaUsuarios.usuariosReales,
+      usuariosEstimados: empresaUsuarios.usuariosEstimados,
+      usuariosEfectivos: empresaUsuarios.usuariosEfectivos,
+      usuariosFuente: empresaUsuarios.usuariosEstFuente,
+    })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(eq(empresa.idEmpresa, idEmpresa))
+    .get();
+  if (!fila) throw new Error(`La cuenta ${idEmpresa} no quedo escrita`);
+  const t = tx
+    .select({
+      de: empresaEstadoHistorial.estadoAnterior,
+      a: empresaEstadoHistorial.estadoNuevo,
+      fecha: empresaEstadoHistorial.fecha,
+      origen: empresaEstadoHistorial.origen,
+    })
+    .from(empresaEstadoHistorial)
+    .where(
+      and(
+        eq(empresaEstadoHistorial.idEmpresa, idEmpresa),
+        eq(empresaEstadoHistorial.idOrganizacion, idOrganizacion),
+        gt(empresaEstadoHistorial.id, idHistorialAntes),
+      ),
+    )
+    .orderBy(desc(empresaEstadoHistorial.id))
+    .limit(1)
+    .get();
+  return { ...fila, transicion: t ?? null };
+}
 
 // Recibe lo que dice Notion y alinea la base. Ejecuta el plan que arma el core
-// (planReconciliacion): solo escribe el caso "misma pagina, distinto estado u owner", que es el
-// unico que no implica decidir identidad. Todo lo demas sale reportado para que lo mire Sebastian.
+// (planReconciliacion): escribe el caso "misma pagina, distinto valor" en estado, owner y los
+// cinco campos opcionales (usuarios, fecha de ultimo contacto, proximo paso, su fecha, razon de
+// perdida). Todo lo que implica decidir identidad sale reportado para que lo mire Sebastian.
 //
 // aplicar:false es dry-run y es el modo por defecto a proposito: se mira el plan antes de que
 // escriba. El costo de equivocarse aca es escribir sobre el CRM de otra persona.
 //
-// El estado se escribe con encolarNotion:false SIEMPRE. Es la definicion misma de esta operacion:
-// el dato vino de Notion, devolverlo es el bounce-back.
+// Con aplicar:true (2026-09-21): respaldo VACUUM INTO primero, despues UNA transaccion para el
+// lote entero (antes era una por cuenta y un error a mitad dejaba medio lote escrito), el plan
+// se recalcula DENTRO de la transaccion para no aplicar uno viejo, y cada cuenta se relee y se
+// compara contra lo que el plan decia. Si una sola no cuadra, se revierte todo.
+//
+// El estado se escribe sin encolar a Notion SIEMPRE: el dato vino de Notion, devolverlo es el
+// bounce-back. La transicion queda en empresa_estado_historial con origen 'reconciliacion', que
+// es lo mismo que escribe mover_estado con origen "notion". El cambio de owner no tiene tabla
+// propia: lo registra el trigger empresa_auditoria_campo (drizzle/0015) en auditoria_campo con
+// su valor anterior y nuevo, en cualquier UPDATE.
 export function reconciliarNotion(
   paginas: PaginaNotion[],
   idOrganizacion: number,
   aplicar: boolean,
   fecha: string,
 ): ReconciliarNotionResultado {
-  const plan = planReconciliacion(paginas, cuentasParaReconciliar(idOrganizacion));
-  if (!aplicar) return { ...plan, aplicado: false };
+  const previo = planReconciliacion(paginas, cuentasBaseParaReconciliar(idOrganizacion));
+  if (!aplicar) return { ...previo, aplicado: false, respaldo: null, escrito: [] };
+  if (previo.alinear.length === 0) return { ...previo, aplicado: true, respaldo: null, escrito: [] };
 
-  for (const a of plan.alinear) {
-    if (a.estadoA !== null) {
-      // origenTransicion 'reconciliacion': la etapa ya estaba en Notion y la base se puso al
-      // dia. Su FECHA es la de esta corrida, o sea un limite superior y no el dia del cambio;
-      // el dia real de ese tramo lo fecha el snapshot diario, no esto. Por eso 'reconciliacion'
-      // esta fuera de ORIGENES_FECHA_CONFIABLE.
-      actualizarEstadoNotion(a.idEmpresa, a.estadoA, idOrganizacion, fecha, {
-        encolarNotion: false,
-        origenTransicion: 'reconciliacion',
-      });
-    }
-    if (a.ownerA !== null) {
-      db.update(empresa)
-        .set({ owner: a.ownerA })
-        .where(and(eq(empresa.idEmpresa, a.idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+  const respaldo = respaldarBaseAntesDeEscribir('reconciliar-notion');
+  const fuenteUsuarios = `Notion Usuarios Estimados, reconciliar_notion ${fecha}`;
+
+  return db.transaction((tx) => {
+    const plan = planReconciliacion(paginas, cuentasBaseParaReconciliar(idOrganizacion));
+    const ahora = new Date().toISOString();
+    const escrito: CuentaReconciliadaEscrita[] = [];
+
+    for (const a of plan.alinear) {
+      const antes = tx
+        .select({ id: sql<number>`coalesce(max(${empresaEstadoHistorial.id}), 0)` })
+        .from(empresaEstadoHistorial)
+        .get();
+      const idHistorialAntes = Number(antes?.id ?? 0);
+
+      if (a.estadoA !== null) {
+        // origenTransicion 'reconciliacion': la etapa ya estaba en Notion y la base se puso al
+        // dia. Su FECHA es la de esta corrida, o sea un limite superior y no el dia del cambio;
+        // el dia real de ese tramo lo fecha el snapshot diario, no esto.
+        escribirTransicionEstado(tx, a.idEmpresa, a.estadoDe, a.estadoA, idOrganizacion, fecha, 'reconciliacion');
+      }
+
+      const sets: Record<string, unknown> = {};
+      if (a.ownerA !== null) sets.owner = a.ownerA;
+      for (const c of a.campos) {
+        if (c.campo === 'fecha_ultimo_contacto') sets.fechaUltimoContacto = c.a;
+        if (c.campo === 'proximo_paso') sets.proximoPaso = c.a;
+        if (c.campo === 'proximo_follow_up_fecha') sets.proximoFollowUpFecha = c.a;
+        if (c.campo === 'razon_perdida') sets.razonPerdida = c.a;
+      }
+      if (Object.keys(sets).length > 0) {
+        sets.updatedAt = ahora;
+        tx.update(empresa)
+          .set(sets)
+          .where(and(eq(empresa.idEmpresa, a.idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+          .run();
+      }
+
+      const cu = a.campos.find((c) => c.campo === 'usuarios');
+      if (cu) {
+        const n = Number(cu.a);
+        // Notion manda en usuarios. Si la base tiene usuarios_reales distinto, se pisa tambien:
+        // si no, el efectivo (COALESCE(reales, estimados)) se quedaria en el valor viejo. El valor
+        // pisado queda escrito en la fuente para no perder de donde venia.
+        let fuenteReales = fuenteUsuarios;
+        if (cu.pisaUsuariosReales) {
+          const prev = tx
+            .select({ r: empresaUsuarios.usuariosReales, f: empresaUsuarios.usuariosRealesFuente })
+            .from(empresaUsuarios)
+            .where(eq(empresaUsuarios.idEmpresa, a.idEmpresa))
+            .get();
+          fuenteReales = `${fuenteUsuarios} (pisa usuarios_reales=${prev?.r ?? 'null'}, fuente previa: ${prev?.f ?? 'sin fuente'})`;
+          escribirUsuariosEnTx(tx, a.idEmpresa, { usuariosReales: n }, fuenteReales, 'reconciliar_notion', ahora);
+        }
+        escribirUsuariosEnTx(tx, a.idEmpresa, { usuariosEstimados: n }, fuenteUsuarios, 'reconciliar_notion', ahora);
+      }
+
+      const detalle = [
+        a.estadoA !== null ? `estado ${a.estadoDe ?? 'null'} -> ${a.estadoA}` : null,
+        a.ownerA !== null ? `owner ${a.ownerDe ?? 'null'} -> ${a.ownerA}` : null,
+        ...a.campos.map((c) => `${c.campo} ${c.de ?? 'null'} -> ${c.a}`),
+      ]
+        .filter(Boolean)
+        .join('; ');
+      tx.insert(syncCambios)
+        .values({
+          fecha: ahora,
+          corrida: 'reconciliar_notion',
+          fuente: 'notion',
+          entidad: 'empresa',
+          idRegistro: a.idEmpresa,
+          accion: 'update',
+          detalle,
+        })
         .run();
+
+      // Relectura y verificacion dentro de la transaccion: si algo no quedo como el plan decia,
+      // se revierte el lote entero en vez de devolver un plan que no es cierto.
+      const r = leerCuentaReconciliada(tx, a.idEmpresa, idOrganizacion, idHistorialAntes);
+      const fallas: string[] = [];
+      if (a.estadoA !== null && (r.estado !== a.estadoA || r.transicion?.a !== a.estadoA)) fallas.push('estado');
+      if (a.ownerA !== null && r.owner !== a.ownerA) fallas.push('owner');
+      for (const c of a.campos) {
+        const leido =
+          c.campo === 'usuarios'
+            ? r.usuariosEfectivos
+            : c.campo === 'fecha_ultimo_contacto'
+              ? r.fechaUltimoContacto
+              : c.campo === 'proximo_paso'
+                ? r.proximoPaso
+                : c.campo === 'proximo_follow_up_fecha'
+                  ? r.proximoFollowUpFecha
+                  : r.razonPerdida;
+        if (leido !== c.a) fallas.push(c.campo);
+      }
+      if (fallas.length > 0) {
+        throw new Error(
+          `reconciliar_notion: ${a.idEmpresa} (${a.nombre}) no quedo como decia el plan en ${fallas.join(', ')}. ` +
+            'Se revirtio el lote entero; el respaldo previo esta en ' + respaldo,
+        );
+      }
+      escrito.push(r);
     }
-  }
-  return { ...plan, aplicado: true };
+
+    return { ...plan, aplicado: true, respaldo, escrito };
+  });
 }
 
 // --- Que se movio en la herramienta desde una fecha -----------------------------------

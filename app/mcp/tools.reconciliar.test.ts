@@ -3,6 +3,8 @@
 // verdad no escriba, y que alinear NO encole nada hacia Notion.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { crearDbPrueba, borrarDbPrueba } from '../db/test-helpers.ts';
 
@@ -34,7 +36,15 @@ function estadoDe(id: string) {
   return r;
 }
 
-test.after(() => borrarDbPrueba(dbPath));
+const archivosAntes = new Set(fs.readdirSync(path.dirname(dbPath)));
+test.after(() => {
+  // aplicar:true toma un respaldo VACUUM INTO al lado de la base (2026-09-21); se borran los de
+  // este archivo para no llenar el tmp.
+  for (const f of fs.readdirSync(path.dirname(dbPath))) {
+    if (f.startsWith('backup-reconciliar-notion-') && !archivosAntes.has(f)) fs.rmSync(path.join(path.dirname(dbPath), f));
+  }
+  borrarDbPrueba(dbPath);
+});
 
 test('dry-run devuelve el plan y NO escribe: es el default', () => {
   seed('rec-1', 'lead', PAGE, 'Felipe Castro');

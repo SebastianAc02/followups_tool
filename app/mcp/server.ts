@@ -457,7 +457,12 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
         'estas alineando la base a lo que Notion YA dice (reconciliacion) y el cambio se queda ' +
         'aca; usa "herramienta" cuando el movimiento nace en la herramienta y el CRM espejo debe ' +
         'enterarse. Devuelve la empresa RELEIDA y la transicion que quedo escrita con su origen, o ' +
-        'transicion null con motivo sin_cambio si la cuenta ya estaba en esa etapa. Envuelve ' +
+        'transicion null con motivo sin_cambio si la cuenta ya estaba en esa etapa. ' +
+        'UPDATE EN LA MISMA LLAMADA: owner, proximoPaso y fechaProximoPaso son opcionales y se escriben en la ' +
+        'misma transaccion que la etapa (usar esto en vez de mover_estado + actualizar_empresa). Solo escribe ' +
+        'los que vengan; si la cuenta ya estaba en la etapa, igual escribe el update. camposActualizados dice ' +
+        'que columnas cambiaron de verdad; la empresa devuelta los trae releidos. Con origen "herramienta" el ' +
+        'proximo paso y su fecha viajan al outbox junto con la etapa; el owner no viaja. Envuelve ' +
         'actualizarEstadoNotion() del dominio.',
       inputSchema: {
         idEmpresa: z.string().min(1),
@@ -467,10 +472,17 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
           .enum(ORIGENES_CAMBIO)
           .optional()
           .describe('"notion" (el dato ya estaba en Notion, no se devuelve) o "herramienta" (nace aca, se encola a Notion)'),
+        owner: z.string().trim().min(1).optional().describe('Nuevo owner de la cuenta. Omitir si no cambia'),
+        proximoPaso: z.string().trim().min(1).optional().describe('empresa.proximo_paso. Omitir si no cambia; vacio no borra'),
+        fechaProximoPaso: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD')
+          .optional()
+          .describe('YYYY-MM-DD -> empresa.proximo_follow_up_fecha'),
       },
     },
-    async ({ idEmpresa, estado, fecha, origen }) => {
-      const r = moverEstadoTool({ idEmpresa, estado, fecha, origen }, idOrganizacion);
+    async ({ idEmpresa, estado, fecha, origen, owner, proximoPaso, fechaProximoPaso }) => {
+      const r = moverEstadoTool({ idEmpresa, estado, fecha, origen, owner, proximoPaso, fechaProximoPaso }, idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r) }] };
     },
   );
@@ -889,10 +901,19 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     {
       description:
         'Alinea la base a lo que dice Notion, en lote. Recibe las paginas (pageId, estado como lo ' +
-        'escribe Notion, owner) y devuelve el plan. Solo escribe el caso "misma pagina, distinto ' +
-        'estado u owner"; las paginas sin cuenta y las cuentas sin pagina las REPORTA, porque eso ' +
-        'implica decidir identidad. Nunca borra. El estado no se devuelve a Notion. ' +
-        'aplicar es false por defecto: correr primero en seco y mirar el plan.',
+        'escribe Notion, owner y, opcionales, usuarios, fechaUltimoContacto, proximoPaso, fechaProximoPaso, ' +
+        'razonPerdida) y devuelve el plan. Escribe el caso "misma pagina, distinto valor"; las paginas sin ' +
+        'cuenta y las cuentas sin pagina las REPORTA, porque eso implica decidir identidad. Nunca borra: un ' +
+        'campo vacio en Notion no toca la base. Notion gana cuando los dos tienen valor y difieren, y cada ' +
+        'pisada sale en porCampo.<campo>.detallePisadas con valor anterior y nuevo; los llenados de un vacio ' +
+        'solo se cuentan. Usuarios: Notion manda siempre sobre el efectivo; si la base tenia usuarios_reales ' +
+        'distinto, se pisa tambien (pisaUsuariosReales:true) y el valor viejo queda en la fuente. Un cambio de ' +
+        'estado escribe empresa_estado_historial con origen reconciliacion (igual que mover_estado con origen ' +
+        '"notion") y no se devuelve a Notion; el de owner lo registra auditoria_campo. ' +
+        'aplicar es false por defecto: correr primero en seco y mirar porCampo. Con aplicar:true toma un ' +
+        'respaldo VACUUM INTO (ruta en `respaldo`), escribe el lote en UNA transaccion y devuelve en `escrito` ' +
+        'cada cuenta RELEIDA; si una sola no queda como el plan, revierte todo y falla. razonPerdida llega como ' +
+        'la etiqueta de Notion y se guarda como slug; la que no mapea va a razonSinMapeo y no se escribe.',
       inputSchema: {
         paginas: z
           .array(
@@ -901,6 +922,32 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
               estado: z.string().min(1).describe('Tal como lo escribe Notion, ej "Firma y Pago Realizado"'),
               owner: z.string().nullable().optional().describe('Vacio NO borra el owner de la base'),
               nombre: z.string().nullable().optional(),
+              usuarios: z
+                .number()
+                .nullable()
+                .optional()
+                .describe('"Usuarios Estimados" de Notion. Manda sobre produccion siempre. Vacio o <= 0 no escribe'),
+              fechaUltimoContacto: z
+                .string()
+                .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD')
+                .nullable()
+                .optional()
+                .describe('YYYY-MM-DD -> empresa.fecha_ultimo_contacto'),
+              proximoPaso: z.string().nullable().optional().describe('-> empresa.proximo_paso'),
+              fechaProximoPaso: z
+                .string()
+                .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD')
+                .nullable()
+                .optional()
+                .describe('YYYY-MM-DD -> empresa.proximo_follow_up_fecha'),
+              razonPerdida: z
+                .string()
+                .nullable()
+                .optional()
+                .describe(
+                  'Etiqueta de Notion "Razon de Perdida" (Precio, Ya tiene pasarela, No toma decisiones, Timing malo, ' +
+                    'No califica ICP, Sin presupuesto, Disputa interna) -> empresa.razon_perdida como slug',
+                ),
             }),
           )
           .min(1),
