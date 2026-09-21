@@ -11264,8 +11264,13 @@ export function respaldarBaseAntesDeEscribir(etiqueta: string): string {
   if (!archivo || archivo === ':memory:') {
     throw new Error('No se puede respaldar una base en memoria: no hay archivo al lado del cual dejar el respaldo');
   }
+  // El nombre de la base va en el del respaldo (dos bases en la misma carpeta no comparten
+  // respaldos) y un sufijo aleatorio evita el choque de dos corridas en el mismo milisegundo:
+  // VACUUM INTO falla si el archivo destino ya existe.
   const marca = new Date().toISOString().replace(/[:.]/g, '-');
-  const destino = path.join(path.dirname(archivo), `backup-${etiqueta}-${marca}.db`);
+  const base = path.basename(archivo, path.extname(archivo));
+  const sufijo = Math.random().toString(36).slice(2, 8);
+  const destino = path.join(path.dirname(archivo), `backup-${etiqueta}-${base}-${marca}-${sufijo}.db`);
   db.run(sql`VACUUM INTO ${destino}`);
   return destino;
 }

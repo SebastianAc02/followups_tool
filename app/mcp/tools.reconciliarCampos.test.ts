@@ -110,7 +110,7 @@ const backupsAntes = new Set(fs.readdirSync(path.dirname(dbPath)));
 test.after(() => {
   // Los respaldos que dejo ESTE archivo (VACUUM INTO al lado de la base de prueba).
   for (const f of fs.readdirSync(path.dirname(dbPath))) {
-    if (f.startsWith('backup-reconciliar-notion-') && !backupsAntes.has(f)) fs.rmSync(path.join(path.dirname(dbPath), f));
+    if (f.startsWith(`backup-reconciliar-notion-${path.basename(dbPath, '.db')}-`) && !backupsAntes.has(f)) fs.rmSync(path.join(path.dirname(dbPath), f));
   }
   borrarDbPrueba(dbPath);
 });
@@ -304,4 +304,20 @@ test('el respaldo VACUUM INTO queda al lado de la base', async () => {
   const { respaldarBaseAntesDeEscribir } = await import('../db/repository.ts');
   const destino = respaldarBaseAntesDeEscribir('reconciliar-notion');
   assert.ok(fs.existsSync(destino), 'con base en disco el respaldo queda al lado');
+});
+
+test('ultimo contacto: gana la fecha mas reciente; Notion mas vieja no pisa y se reporta', () => {
+  seed('rc-10', P(10), { ultimo: '2026-09-15' });
+  const viejo = reconciliarNotionTool({ paginas: [{ pageId: P(10), estado: 'Lead', fechaUltimoContacto: '2026-09-01' }], aplicar: true }, ORG);
+  assert.equal(viejo.alinear.length, 0);
+  assert.equal(viejo.porCampo.fecha_ultimo_contacto.pisadas, 0);
+  assert.deepEqual(viejo.fechaUltimoContactoMasViejaIgnorada, [
+    { pageId: P(10), idEmpresa: 'rc-10', nombre: 'EMPRESA rc-10', produccion: '2026-09-15', notion: '2026-09-01' },
+  ]);
+  assert.equal(fila('rc-10').fecha_ultimo_contacto, '2026-09-15');
+
+  const nuevo = reconciliarNotionTool({ paginas: [{ pageId: P(10), estado: 'Lead', fechaUltimoContacto: '2026-09-20' }], aplicar: true }, ORG);
+  assert.equal(nuevo.porCampo.fecha_ultimo_contacto.pisadas, 1);
+  assert.equal(nuevo.fechaUltimoContactoMasViejaIgnorada.length, 0);
+  assert.equal(fila('rc-10').fecha_ultimo_contacto, '2026-09-20');
 });

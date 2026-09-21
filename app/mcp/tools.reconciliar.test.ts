@@ -41,7 +41,7 @@ test.after(() => {
   // aplicar:true toma un respaldo VACUUM INTO al lado de la base (2026-09-21); se borran los de
   // este archivo para no llenar el tmp.
   for (const f of fs.readdirSync(path.dirname(dbPath))) {
-    if (f.startsWith('backup-reconciliar-notion-') && !archivosAntes.has(f)) fs.rmSync(path.join(path.dirname(dbPath), f));
+    if (f.startsWith(`backup-reconciliar-notion-${path.basename(dbPath, '.db')}-`) && !archivosAntes.has(f)) fs.rmSync(path.join(path.dirname(dbPath), f));
   }
   borrarDbPrueba(dbPath);
 });

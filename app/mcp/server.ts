@@ -906,7 +906,8 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
         'cuenta y las cuentas sin pagina las REPORTA, porque eso implica decidir identidad. Nunca borra: un ' +
         'campo vacio en Notion no toca la base. Notion gana cuando los dos tienen valor y difieren, y cada ' +
         'pisada sale en porCampo.<campo>.detallePisadas con valor anterior y nuevo; los llenados de un vacio ' +
-        'solo se cuentan. Usuarios: Notion manda siempre sobre el efectivo; si la base tenia usuarios_reales ' +
+        'solo se cuentan. Excepcion: fechaUltimoContacto se queda con la mas reciente de las dos; la de Notion mas vieja ' +
+        'no pisa y sale en fechaUltimoContactoMasViejaIgnorada. Usuarios: Notion manda siempre sobre el efectivo; si la base tenia usuarios_reales ' +
         'distinto, se pisa tambien (pisaUsuariosReales:true) y el valor viejo queda en la fuente. Un cambio de ' +
         'estado escribe empresa_estado_historial con origen reconciliacion (igual que mover_estado con origen ' +
         '"notion") y no se devuelve a Notion; el de owner lo registra auditoria_campo. ' +
@@ -932,7 +933,9 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
                 .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD')
                 .nullable()
                 .optional()
-                .describe('YYYY-MM-DD -> empresa.fecha_ultimo_contacto'),
+                .describe(
+                  'YYYY-MM-DD -> empresa.fecha_ultimo_contacto. Se queda la MAS RECIENTE: si la de Notion es mas vieja no pisa y sale en fechaUltimoContactoMasViejaIgnorada',
+                ),
               proximoPaso: z.string().nullable().optional().describe('-> empresa.proximo_paso'),
               fechaProximoPaso: z
                 .string()

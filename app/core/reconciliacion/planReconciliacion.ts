@@ -98,6 +98,9 @@ export type PlanReconciliacion = {
   // Paginas que traen usuarios en 0 o negativo. No se escriben: un ISP con cero usuarios no es
   // un dato, es un campo que alguien lleno para salir del paso.
   usuariosNoPositivosIgnorados: { pageId: string; idEmpresa: string; usuarios: number }[];
+  // Fecha de ultimo contacto: se queda la MAS RECIENTE (2026-09-21, decision del operador). Si la
+  // de Notion es mas vieja que la de produccion no se pisa y la pagina sale aca.
+  fechaUltimoContactoMasViejaIgnorada: { pageId: string; idEmpresa: string; nombre: string; produccion: string; notion: string }[];
 };
 
 function texto(v: string | null | undefined): string | null {
@@ -156,6 +159,7 @@ export function planReconciliacion(paginas: PaginaNotion[], cuentas: CuentaBase[
       razon_perdida: resumenVacio(),
     },
     usuariosNoPositivosIgnorados: [],
+    fechaUltimoContactoMasViejaIgnorada: [],
   };
   const contar = (campo: keyof PlanReconciliacion['porCampo'], c: CuentaBase, de: string | number | null, a: string | number) => {
     const r = plan.porCampo[campo];
@@ -204,8 +208,22 @@ export function planReconciliacion(paginas: PaginaNotion[], cuentas: CuentaBase[
         }
       }
     }
+    // Ultimo contacto: gana la fecha mas reciente, no Notion por defecto. Comparar YYYY-MM-DD
+    // como texto es comparar fechas.
+    let cambioUltimo = cambioTexto('fecha_ultimo_contacto', cuenta.fechaUltimoContacto, p.fechaUltimoContacto, dia);
+    const ultimoBase = dia(cuenta.fechaUltimoContacto);
+    if (cambioUltimo && ultimoBase !== null && String(cambioUltimo.a) < ultimoBase) {
+      plan.fechaUltimoContactoMasViejaIgnorada.push({
+        pageId: p.pageId,
+        idEmpresa: cuenta.idEmpresa,
+        nombre: cuenta.nombre,
+        produccion: ultimoBase,
+        notion: String(cambioUltimo.a),
+      });
+      cambioUltimo = null;
+    }
     for (const c of [
-      cambioTexto('fecha_ultimo_contacto', cuenta.fechaUltimoContacto, p.fechaUltimoContacto, dia),
+      cambioUltimo,
       cambioTexto('proximo_paso', cuenta.proximoPaso, p.proximoPaso, texto),
       cambioTexto('proximo_follow_up_fecha', cuenta.proximoFollowUpFecha, p.fechaProximoPaso, dia),
       cambioTexto('razon_perdida', cuenta.razonPerdida, p.razonPerdida, texto),
