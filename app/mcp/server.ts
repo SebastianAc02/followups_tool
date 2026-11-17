@@ -64,6 +64,7 @@ import {
   enviarCorreoDirectoTool,
   trackingCorreoTool,
   type SesionLanzamiento,
+  DESTINOS_ESTADO,
 } from './tools';
 import {
   CANALES,
@@ -914,7 +915,14 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
         'aplicar es false por defecto: correr primero en seco y mirar porCampo. Con aplicar:true toma un ' +
         'respaldo VACUUM INTO (ruta en `respaldo`), escribe el lote en UNA transaccion y devuelve en `escrito` ' +
         'cada cuenta RELEIDA; si una sola no queda como el plan, revierte todo y falla. razonPerdida llega como ' +
-        'la etiqueta de Notion y se guarda como slug; la que no mapea va a razonSinMapeo y no se escribe.',
+        'la etiqueta de Notion y se guarda como slug; la que no mapea va a razonSinMapeo y no se escribe. ' +
+        'destinoEstado:"notion" es otro modo: SOLO copia el Estado de la ficha a empresa.estado_ficha_notion ' +
+        '(el espejo, que en `cuentas` sale como estadoFichaNotion) con la hora de lectura, NUNCA toca la etapa ' +
+        'interna (estado) ni escribe empresa_estado_historial, e ignora owner y los campos opcionales. Mapea las ' +
+        'diez etiquetas sin colapsar (Firma Pendiente -> firma_pendiente, Contrato Firmado -> contrato_firmado). ' +
+        'Devuelve escribir (cada cuenta con fichaDe, fichaA, tipo cambia|confirma y difiereDeInterno), ' +
+        'paginasSinCuenta, cuentasSinPagina, paginasDuplicadas y sinMapeo; con aplicar:true, mismo respaldo, ' +
+        'misma transaccion y `escrito` releido con la etapa interna al lado para ver que no se movio.',
       inputSchema: {
         paginas: z
           .array(
@@ -955,10 +963,17 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
           )
           .min(1),
         aplicar: z.boolean().optional().describe('false (default) = dry-run, solo devuelve el plan'),
+        destinoEstado: z
+          .enum(DESTINOS_ESTADO)
+          .optional()
+          .describe(
+            '"interno" (default, lo de siempre): alinea la etapa interna, owner y campos. "notion": solo escribe ' +
+              'el espejo empresa.estado_ficha_notion y su fecha; la etapa interna no se toca',
+          ),
       },
     },
-    async ({ paginas, aplicar }) => {
-      const r = reconciliarNotionTool({ paginas, aplicar }, idOrganizacion);
+    async ({ paginas, aplicar, destinoEstado }) => {
+      const r = reconciliarNotionTool({ paginas, aplicar, destinoEstado }, idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
@@ -1535,7 +1550,10 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     {
       description:
         'Lista minima de cuentas para cruzar contra Notion: idEmpresa, nombre (razon social), ' +
-        'nombreNotion (marca comercial), estado, owner y notionPageId. CRUZA SIEMPRE POR ' +
+        'nombreNotion (marca comercial), estado (la etapa INTERNA de la herramienta), estadoFichaNotion y ' +
+        'estadoFichaNotionFecha (el espejo del Estado de la ficha de Notion y cuando se leyo; null = nunca se ' +
+        'leyo), owner y notionPageId. Que estado y estadoFichaNotion difieran es informacion, no un error: ' +
+        'fichaDistintaDeEstado las cuenta y sinEstadoFicha cuenta las que nunca se leyeron. CRUZA SIEMPRE POR ' +
         'notionPageId, nunca por nombre. Incluye cuentas sin etapa, que `pipeline` no muestra. ' +
         'Con conAliado:true agrega DE QUIEN es cada cuenta, con su evidencia, y el conteo de las ' +
         'que nadie ha verificado.',

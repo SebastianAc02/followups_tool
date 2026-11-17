@@ -218,6 +218,20 @@
       "when": 1785910100000,
       "tag": "0031_auditoria_origen_lead",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1785920000000,
+      "tag": "0032_estado_ficha_notion",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1785920100000,
+      "tag": "0033_auditoria_estado_ficha_notion",
+      "breakpoints": true
     }
   ]
 }

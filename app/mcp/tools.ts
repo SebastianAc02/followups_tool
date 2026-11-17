@@ -72,6 +72,7 @@ import {
   empresaFueraDelPipeline,
   reasignarNit,
   reconciliarNotion,
+  reconciliarEstadoFichaNotion,
   cambiosDesde,
   registrarToque,
   actualizarEstadoNotion,
@@ -204,8 +205,9 @@ import { parsearCadenciaJson } from '../core/cadencia-parser';
 import { calcularMrrEstimado, digitalPctConDefault } from '../core/mrr';
 import { debeEncolarHaciaNotion, type OrigenCambio } from '../core/origen-cambio';
 import { CLAVE_SIN_ETAPA } from '../core/embudo';
-import { mapearEstadoNotion } from '../core/reconciliacion/mapeoEstados';
+import { mapearEstadoNotion, mapearEstadoFichaNotion } from '../core/reconciliacion/mapeoEstados';
 import type { PaginaNotion } from '../core/reconciliacion/planReconciliacion';
+import type { PaginaFicha } from '../core/reconciliacion/planEstadoFicha';
 import { hoy } from '../lib/reloj';
 
 // Unica organizacion real hoy (scripts/seed_organizacion.ts crea "Onepay" como la primera
@@ -487,6 +489,11 @@ export function cuentasTool(input: CuentasInput) {
     // `pipeline` aunque existan.
     sinPageId: filas.filter((f) => !f.notionPageId).length,
     sinEtapa: filas.filter((f) => !f.estado).length,
+    // El espejo de la ficha (estadoFichaNotion). sinEstadoFicha: nunca se leyo de Notion.
+    // fichaDistintaDeEstado: las dos etapas tienen valor y no coinciden, que es la diferencia
+    // que el operador decidio conservar (2026-11-17), no un error a corregir.
+    sinEstadoFicha: filas.filter((f) => !f.estadoFichaNotion).length,
+    fichaDistintaDeEstado: filas.filter((f) => f.estadoFichaNotion && f.estado && f.estadoFichaNotion !== f.estado).length,
     cuentas: filas,
   };
 }
@@ -873,7 +880,13 @@ export type PaginaNotionEntrada = {
 export type ReconciliarNotionInput = {
   paginas: PaginaNotionEntrada[];
   aplicar?: boolean;
+  // "interno" (default, lo de siempre): alinea la etapa interna, owner y campos.
+  // "notion": solo copia el Estado de la ficha a empresa.estado_ficha_notion.
+  destinoEstado?: DestinoEstado;
 };
+
+export const DESTINOS_ESTADO = ['interno', 'notion'] as const;
+export type DestinoEstado = (typeof DESTINOS_ESTADO)[number];
 
 function normalizarEtiqueta(v: string): string {
   return v
@@ -895,7 +908,59 @@ export function mapearRazonPerdidaNotion(v: string): RazonPerdida | null {
   return RAZON_POR_ETIQUETA.get(normalizarEtiqueta(v)) ?? null;
 }
 
+// destinoEstado "notion": el espejo de la ficha. Solo lee pageId y estado de cada pagina; owner y
+// los campos opcionales, si vienen, se ignoran y se cuentan en camposIgnorados para que nadie crea
+// que se escribieron. Mapea con las diez etiquetas (firma_pendiente y contrato_firmado incluidas,
+// sin colapsar). Lo que no mapea va a sinMapeo y no se escribe.
+function reconciliarEstadoFichaTool(input: ReconciliarNotionInput, idOrganizacion: number) {
+  const traducidas: PaginaFicha[] = [];
+  const sinMapeo: { pageId: string; estado: string }[] = [];
+  let camposIgnorados = 0;
+  for (const p of input.paginas) {
+    const estado = mapearEstadoFichaNotion(p.estado);
+    if (estado === null) {
+      sinMapeo.push({ pageId: p.pageId, estado: p.estado });
+      continue;
+    }
+    if (
+      p.owner != null ||
+      p.usuarios != null ||
+      p.fechaUltimoContacto != null ||
+      p.proximoPaso != null ||
+      p.fechaProximoPaso != null ||
+      p.razonPerdida != null
+    ) {
+      camposIgnorados += 1;
+    }
+    traducidas.push({ pageId: p.pageId, estado, nombre: p.nombre ?? null });
+  }
+  const r = reconciliarEstadoFichaNotion(traducidas, idOrganizacion, input.aplicar === true);
+  return { destinoEstado: 'notion' as const, ...r, sinMapeo, paginasConCamposIgnorados: camposIgnorados };
+}
+
+// Sobrecargas: quien llama sin destinoEstado (o con "interno") recibe el tipo de siempre, y el
+// codigo que ya leia alinear/porCampo no se entera del modo nuevo.
+export function reconciliarNotionTool(
+  input: ReconciliarNotionInput & { destinoEstado: 'notion' },
+  idOrganizacion: number,
+): ReturnType<typeof reconciliarEstadoFichaTool>;
+export function reconciliarNotionTool(
+  input: ReconciliarNotionInput & { destinoEstado?: 'interno' },
+  idOrganizacion: number,
+): ReturnType<typeof reconciliarEstadoInternoTool>;
+export function reconciliarNotionTool(
+  input: ReconciliarNotionInput,
+  idOrganizacion: number,
+): ReturnType<typeof reconciliarEstadoFichaTool> | ReturnType<typeof reconciliarEstadoInternoTool>;
 export function reconciliarNotionTool(input: ReconciliarNotionInput, idOrganizacion: number) {
+  if (input.destinoEstado === 'notion') return reconciliarEstadoFichaTool(input, idOrganizacion);
+  if (input.destinoEstado !== undefined && input.destinoEstado !== 'interno') {
+    throw new Error(`destinoEstado desconocido: "${String(input.destinoEstado)}". Valores: interno | notion`);
+  }
+  return reconciliarEstadoInternoTool(input, idOrganizacion);
+}
+
+function reconciliarEstadoInternoTool(input: ReconciliarNotionInput, idOrganizacion: number) {
   const traducidas: PaginaNotion[] = [];
   const sinMapeo: { pageId: string; estado: string }[] = [];
   const razonSinMapeo: { pageId: string; razonPerdida: string }[] = [];
@@ -916,7 +981,7 @@ export function reconciliarNotionTool(input: ReconciliarNotionInput, idOrganizac
   }
   // aplicar por defecto FALSE: se mira el plan antes de escribir.
   const r = reconciliarNotion(traducidas, idOrganizacion, input.aplicar === true, hoy());
-  return { ...r, sinMapeo, razonSinMapeo };
+  return { destinoEstado: 'interno' as const, ...r, sinMapeo, razonSinMapeo };
 }
 
 export type CambiosDesdeInput = { desde: string; idOrganizacion?: number };

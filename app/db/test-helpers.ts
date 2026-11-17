@@ -46,6 +46,9 @@ export function crearDbPrueba() {
       tarea_bloqueante_quien TEXT,
       estado_comercial TEXT NOT NULL,
       estado_notion TEXT,
+      -- Migracion 0032: espejo del Estado de la ficha de Notion, con el mismo CHECK que produccion.
+      estado_ficha_notion TEXT CHECK (estado_ficha_notion IS NULL OR estado_ficha_notion IN ('lead','on_hold','contacto_iniciado','reunion_agendada','oportunidad','cierre_documentacion','enviar_contrato','firma_pendiente','contrato_firmado','firma_pago')),
+      estado_ficha_notion_fecha TEXT,
       prioridad_comercial INTEGER,
       pasarela_actual TEXT,
       categoria TEXT,

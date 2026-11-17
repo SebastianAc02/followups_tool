@@ -73,6 +73,13 @@ export const empresa = sqliteTable('empresa', {
   tareaBloqueanteQuien: text('tarea_bloqueante_quien'),
   estadoComercial: text('estado_comercial').notNull(),
   estadoNotion: text('estado_notion'),
+  // Espejo del Estado de la ficha de Notion (migracion 0032, decision del operador 2026-11-17).
+  // estadoNotion de arriba, pese al nombre, es la etapa INTERNA de la herramienta. Esta solo la
+  // escribe reconciliar_notion con destinoEstado "notion" y nunca mueve a la de arriba: que las
+  // dos difieran es informacion. Diez slugs (ESTADOS_FICHA_NOTION), con firma_pendiente y
+  // contrato_firmado, que la interna no tiene. La fecha es el ISO UTC de la lectura.
+  estadoFichaNotion: text('estado_ficha_notion'),
+  estadoFichaNotionFecha: text('estado_ficha_notion_fecha'),
   prioridadComercial: integer('prioridad_comercial'),
   pasarelaActual: text('pasarela_actual'),
   categoria: text('categoria'),

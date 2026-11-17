@@ -154,19 +154,23 @@ test('el trigger cubre todas las columnas de empresa menos updated_at', () => {
   const cuerpo = todas.slice(todas.lastIndexOf('CREATE TRIGGER `empresa_auditoria_campo`'));
   const cubiertas = new Set([...cuerpo.matchAll(/'empresa', NEW\.id_empresa, '([a-z0-9_]+)'/g)].map((m) => m[1]));
 
+  // Las que NO se auditan a proposito, con su razon en la migracion: updated_at (0015) y
+  // estado_ficha_notion_fecha (0033), las dos cambian en cada escritura aunque el dato no cambie.
+  const SIN_AUDITAR = new Set(['updated_at', 'estado_ficha_notion_fecha']);
   const { db, cerrar } = dbConAuditoria();
   const reales = (db.prepare("SELECT name FROM pragma_table_info('empresa')").all() as { name: string }[])
     .map((r) => r.name)
-    .filter((n) => n !== 'updated_at');
+    .filter((n) => !SIN_AUDITAR.has(n));
   cerrar();
 
   assert.deepEqual(reales.filter((c) => !cubiertas.has(c)), [], 'columnas de empresa sin auditar');
   assert.equal(cubiertas.has('updated_at'), false, 'updated_at NO se audita: seria una fila de ruido por cada UPDATE');
+  assert.equal(cubiertas.has('estado_ficha_notion_fecha'), false, 'la fecha de lectura NO se audita: ruido por corrida');
 
   // Segunda red, contra el schema de Drizzle: pilla la columna que se agrego a schema.ts aunque
   // el DDL de test-helpers se haya quedado atras.
   const mapeadas = Object.values(getTableColumns(empresa))
     .map((c) => c.name)
-    .filter((n) => n !== 'updated_at');
+    .filter((n) => !SIN_AUDITAR.has(n));
   assert.deepEqual(mapeadas.filter((c) => !cubiertas.has(c)), [], 'columnas mapeadas en schema.ts sin auditar');
 });

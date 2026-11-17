@@ -1,0 +1,21 @@
+-- 0032: el espejo del Estado de la ficha de Notion, al lado de la etapa interna.
+--
+-- Decision del operador, 2026-11-17: cada empresa tiene DOS estados y conviven a proposito.
+-- `estado_notion` (pese al nombre, desde la 0000) es la etapa INTERNA de la herramienta: la
+-- mueven mover_estado, los toques y la cadencia. `estado_ficha_notion` es nuevo y solo copia lo
+-- que dice la propiedad Estado de la pagina de Notion. Que los dos difieran es informacion, no
+-- un error: Notion en Contacto Iniciado y la herramienta en On Hold porque nunca se le siguio la
+-- cadencia.
+--
+-- El nombre no puede ser `estado_notion` porque esa columna ya existe y es la interna.
+--
+-- Diez valores y no ocho: Notion tiene Firma Pendiente y Contrato Firmado, que el CHECK de
+-- estado_notion rechaza y la reconciliacion interna colapsa en enviar_contrato. El espejo no
+-- colapsa nada. Una columna nueva lleva su CHECK en el ADD COLUMN sin recrear `empresa`
+-- (lo que obligaria ampliar el CHECK viejo, ver drizzle/manual/0011_estado_notion_check.sql).
+--
+-- `estado_ficha_notion_fecha`: ISO UTC del momento en que reconciliar_notion (destinoEstado
+-- "notion") leyo ese valor. Las dos quedan en NULL: NULL es "nunca se leyo", y se llenan con la
+-- corrida del brain, no con un backfill.
+ALTER TABLE `empresa` ADD `estado_ficha_notion` text CHECK (`estado_ficha_notion` IS NULL OR `estado_ficha_notion` IN ('lead','on_hold','contacto_iniciado','reunion_agendada','oportunidad','cierre_documentacion','enviar_contrato','firma_pendiente','contrato_firmado','firma_pago'));--> statement-breakpoint
+ALTER TABLE `empresa` ADD `estado_ficha_notion_fecha` text;

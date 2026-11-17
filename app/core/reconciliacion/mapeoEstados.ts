@@ -59,3 +59,59 @@ export function mapearEstadoNotion(estadoNotion: string): EstadoNotion {
   // el CHECK de estado_notion en la DB en T10, de forma confusa y tarde.
   throw new Error(`Estado Notion desconocido, sin mapeo a estado_notion: "${estadoNotion}"`);
 }
+
+// --- Espejo de la ficha (empresa.estado_ficha_notion, migracion 0032) ------------------
+//
+// Los diez slugs del espejo. A diferencia de ESTADOS_NOTION (la etapa interna, ocho valores por
+// el CHECK viejo), aca entran firma_pendiente y contrato_firmado tal cual: el espejo copia lo que
+// dice Notion y no colapsa nada. Copia exacta del CHECK de la 0032.
+export const ESTADOS_FICHA_NOTION = [
+  'lead',
+  'on_hold',
+  'contacto_iniciado',
+  'reunion_agendada',
+  'oportunidad',
+  'cierre_documentacion',
+  'enviar_contrato',
+  'firma_pendiente',
+  'contrato_firmado',
+  'firma_pago',
+] as const;
+
+export type EstadoFichaNotion = (typeof ESTADOS_FICHA_NOTION)[number];
+
+// Sin tildes, minusculas, guion bajo y barra como espacio: "Cierre/Documentación",
+// "cierre documentacion" y "cierre_documentacion" son la misma etiqueta. El slug ya escrito
+// tambien se acepta, porque es lo que devuelve `cuentas` y alguien lo va a pasar de vuelta.
+function claveEtiqueta(v: string): string {
+  return v
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[_/\s]+/g, ' ')
+    .trim();
+}
+
+const ETIQUETAS_FICHA: Record<string, EstadoFichaNotion> = {
+  Lead: 'lead',
+  'On Hold': 'on_hold',
+  'Contacto Iniciado': 'contacto_iniciado',
+  'Reunión Agendada': 'reunion_agendada',
+  Oportunidad: 'oportunidad',
+  'Cierre/Documentación': 'cierre_documentacion',
+  'Enviar Contrato': 'enviar_contrato',
+  'Firma Pendiente': 'firma_pendiente',
+  'Contrato Firmado': 'contrato_firmado',
+  'Firma y Pago Realizado': 'firma_pago',
+};
+
+const FICHA_POR_CLAVE = new Map<string, EstadoFichaNotion>([
+  ...Object.entries(ETIQUETAS_FICHA).map(([etiqueta, slug]) => [claveEtiqueta(etiqueta), slug] as [string, EstadoFichaNotion]),
+  ...ESTADOS_FICHA_NOTION.map((slug) => [claveEtiqueta(slug), slug] as [string, EstadoFichaNotion]),
+]);
+
+// null y no excepcion: el caller (reconciliar_notion en modo notion) manda la pagina a sinMapeo
+// y sigue con el resto del lote.
+export function mapearEstadoFichaNotion(etiqueta: string): EstadoFichaNotion | null {
+  return FICHA_POR_CLAVE.get(claveEtiqueta(etiqueta)) ?? null;
+}

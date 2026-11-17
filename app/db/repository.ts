@@ -105,6 +105,8 @@ import { esKdmDesdeNotion } from '../core/reconciliacion/kdmNotion';
 import { normalizarRazonSocial } from '../core/reconciliacion/normalizarRazonSocial';
 import { scoreRazonSocial, UMBRAL_MINIMO_CANDIDATO } from '../core/reconciliacion/matcherGemelos';
 import { ESTADOS_NOTION } from '../core/reconciliacion/mapeoEstados';
+import { planEstadoFicha } from '../core/reconciliacion/planEstadoFicha';
+import type { PaginaFicha, CuentaFicha, PlanEstadoFicha } from '../core/reconciliacion/planEstadoFicha';
 import {
   CATEGORIAS_EMPRESA,
   CATEGORIAS_ESCRIBIBLES,
@@ -11487,6 +11489,148 @@ export function reconciliarNotion(
   });
 }
 
+// --- Espejo del Estado de la ficha de Notion (reconciliar_notion, destinoEstado "notion") ---
+
+// Lo que quedo en la cuenta, RELEIDO dentro de la transaccion. Trae la etapa interna al lado
+// para que se vea en la misma fila que no se movio y en que difiere del espejo.
+export type CuentaFichaEscrita = {
+  idEmpresa: string;
+  nombre: string;
+  estadoInterno: string | null;
+  estadoFichaNotion: string | null;
+  estadoFichaNotionFecha: string | null;
+};
+
+export type ReconciliarEstadoFichaResultado = PlanEstadoFicha & {
+  aplicado: boolean;
+  respaldo: string | null;
+  escrito: CuentaFichaEscrita[];
+};
+
+// Mismo universo que cuentasBaseParaReconciliar (en el embudo o con page id, sin EMPRESA_VIVA),
+// para que paginasSinCuenta y cuentasSinPagina digan lo mismo en los dos modos.
+function cuentasFichaParaReconciliar(idOrganizacion: number): CuentaFicha[] {
+  return db
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      notionPageId: empresa.notionPageId,
+      estadoInterno: empresa.estadoNotion,
+      estadoFicha: empresa.estadoFichaNotion,
+      estadoFichaFecha: empresa.estadoFichaNotionFecha,
+    })
+    .from(empresa)
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        or(isNotNull(empresa.estadoNotion), isNotNull(empresa.notionPageId)),
+      ),
+    )
+    .orderBy(asc(empresa.nombreOficial))
+    .all();
+}
+
+// Copia el Estado de cada ficha a empresa.estado_ficha_notion y la hora de lectura a
+// estado_ficha_notion_fecha. NUNCA toca empresa.estado_notion (la etapa interna) ni escribe
+// empresa_estado_historial: esa tabla es la historia de la etapa interna y el espejo no es una
+// transicion de nadie. El cambio del espejo queda en auditoria_campo por el trigger (0033) y en
+// sync_cambios.
+//
+// Mismo contrato que reconciliarNotion: dry-run por default; con aplicar, respaldo VACUUM INTO,
+// una transaccion para el lote, plan recalculado adentro, relectura de cada cuenta y reversion
+// del lote entero si una sola no quedo como el plan, o si la etapa interna o el historial se
+// movieron.
+//
+// "confirma" (el espejo ya decia eso) tambien se escribe: la fecha es la de la ultima lectura,
+// y una fecha vieja sobre un valor vigente diria que nadie lo ha mirado.
+export function reconciliarEstadoFichaNotion(
+  paginas: PaginaFicha[],
+  idOrganizacion: number,
+  aplicar: boolean,
+): ReconciliarEstadoFichaResultado {
+  const previo = planEstadoFicha(paginas, cuentasFichaParaReconciliar(idOrganizacion));
+  if (!aplicar) return { ...previo, aplicado: false, respaldo: null, escrito: [] };
+  if (previo.escribir.length === 0) return { ...previo, aplicado: true, respaldo: null, escrito: [] };
+
+  const respaldo = respaldarBaseAntesDeEscribir('reconciliar-notion-ficha');
+
+  return db.transaction((tx) => {
+    const plan = planEstadoFicha(paginas, cuentasFichaParaReconciliar(idOrganizacion));
+    const ahora = new Date().toISOString();
+    const historialAntes = tx
+      .select({ n: sql<number>`count(*)`, max: sql<number>`coalesce(max(${empresaEstadoHistorial.id}), 0)` })
+      .from(empresaEstadoHistorial)
+      .get();
+    const escrito: CuentaFichaEscrita[] = [];
+
+    for (const e of plan.escribir) {
+      const r = tx
+        .update(empresa)
+        .set({ estadoFichaNotion: e.fichaA, estadoFichaNotionFecha: ahora })
+        .where(and(eq(empresa.idEmpresa, e.idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+        .run();
+      if (r.changes !== 1) {
+        throw new Error(
+          `reconciliar_notion (destinoEstado notion): ${e.idEmpresa} (${e.nombre}) no se pudo escribir (${r.changes} filas). ` +
+            'Se revirtio el lote entero; el respaldo previo esta en ' + respaldo,
+        );
+      }
+      if (e.tipo === 'cambia') {
+        tx.insert(syncCambios)
+          .values({
+            fecha: ahora,
+            corrida: 'reconciliar_notion_ficha',
+            fuente: 'notion',
+            entidad: 'empresa',
+            idRegistro: e.idEmpresa,
+            accion: 'update',
+            detalle: `estado_ficha_notion ${e.fichaDe ?? 'null'} -> ${e.fichaA} (etapa interna ${e.estadoInterno ?? 'null'}, sin tocar)`,
+          })
+          .run();
+      }
+
+      const leida = tx
+        .select({
+          idEmpresa: empresa.idEmpresa,
+          nombre: empresa.nombreOficial,
+          estadoInterno: empresa.estadoNotion,
+          estadoFichaNotion: empresa.estadoFichaNotion,
+          estadoFichaNotionFecha: empresa.estadoFichaNotionFecha,
+        })
+        .from(empresa)
+        .where(eq(empresa.idEmpresa, e.idEmpresa))
+        .get();
+      const fallas: string[] = [];
+      if (!leida) fallas.push('la cuenta no se pudo releer');
+      else {
+        if (leida.estadoFichaNotion !== e.fichaA) fallas.push('estado_ficha_notion');
+        if (leida.estadoFichaNotionFecha !== ahora) fallas.push('estado_ficha_notion_fecha');
+        if (leida.estadoInterno !== e.estadoInterno) fallas.push('estado_notion (la etapa interna se movio)');
+      }
+      if (fallas.length > 0) {
+        throw new Error(
+          `reconciliar_notion (destinoEstado notion): ${e.idEmpresa} (${e.nombre}) no quedo como decia el plan en ${fallas.join(', ')}. ` +
+            'Se revirtio el lote entero; el respaldo previo esta en ' + respaldo,
+        );
+      }
+      escrito.push(leida!);
+    }
+
+    const historialDespues = tx
+      .select({ n: sql<number>`count(*)`, max: sql<number>`coalesce(max(${empresaEstadoHistorial.id}), 0)` })
+      .from(empresaEstadoHistorial)
+      .get();
+    if (Number(historialDespues?.n) !== Number(historialAntes?.n) || Number(historialDespues?.max) !== Number(historialAntes?.max)) {
+      throw new Error(
+        'reconciliar_notion (destinoEstado notion): empresa_estado_historial cambio durante el lote y este modo no lo escribe. ' +
+          'Se revirtio el lote entero; el respaldo previo esta en ' + respaldo,
+      );
+    }
+
+    return { ...plan, aplicado: true, respaldo, escrito };
+  });
+}
+
 // --- Que se movio en la herramienta desde una fecha -----------------------------------
 
 export type CambioEmpresa = {
@@ -12503,6 +12647,10 @@ export type FilaCuenta = {
   nombre: string;
   nombreNotion: string | null;
   estado: string | null;
+  // El espejo del Estado de la ficha de Notion (0032), al lado de la etapa interna `estado`. Que
+  // difieran es informacion. null = nunca se leyo de Notion con destinoEstado "notion".
+  estadoFichaNotion: string | null;
+  estadoFichaNotionFecha: string | null;
   owner: string | null;
   notionPageId: string | null;
   // Solo cuando se pide (conAliado). Ausente y no null: la lista de reconciliacion no responde
@@ -12527,6 +12675,8 @@ export function cuentasParaReconciliar(idOrganizacion: number, opts: { conAliado
       nombre: empresa.nombreOficial,
       nombreNotion: empresa.nombreNotion,
       estado: empresa.estadoNotion,
+      estadoFichaNotion: empresa.estadoFichaNotion,
+      estadoFichaNotionFecha: empresa.estadoFichaNotionFecha,
       owner: empresa.owner,
       notionPageId: empresa.notionPageId,
       // Se traen SIEMPRE en el select y se descartan abajo si no se pidieron: son cinco columnas
