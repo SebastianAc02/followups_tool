@@ -69,6 +69,8 @@ import {
   type ResultadoInscripcion,
   embudoPipeline,
   cuentasParaReconciliar,
+  coberturaGeografica,
+  CATEGORIAS_EXCLUIDAS_COBERTURA_DEFAULT,
   empresaFueraDelPipeline,
   reasignarNit,
   reconciliarNotion,
@@ -496,6 +498,54 @@ export function cuentasTool(input: CuentasInput) {
     fichaDistintaDeEstado: filas.filter((f) => f.estadoFichaNotion && f.estado && f.estadoFichaNotion !== f.estado).length,
     cuentas: filas,
   };
+}
+
+// --- cobertura_geografica (que ISP venden en un municipio o departamento) --------------
+//
+// Composicion pura sobre coberturaGeografica del Repository. Lo unico que se decide aca es el
+// default del limite y devolver, junto al resultado, los filtros que de verdad se aplicaron:
+// una lista que no dice que excluyo se lee como el universo completo.
+
+// Se re-exporta para que server.ts arme el enum de zod sin importar el Repository.
+export { CATEGORIAS_VISTA } from '../db/repository';
+
+export const LIMITE_COBERTURA_DEFAULT = 100;
+export const LIMITE_COBERTURA_MAXIMO = 500;
+
+export type CoberturaGeograficaInput = {
+  idOrganizacion?: number;
+  municipio?: string;
+  departamento?: string;
+  periodo?: string;
+  accesosMin?: number;
+  incluirDescartadas?: boolean;
+  excluirCategorias?: string[];
+  limite?: number;
+};
+
+export function coberturaGeograficaTool(input: CoberturaGeograficaInput) {
+  const idOrganizacion = resolverOrganizacion(input.idOrganizacion);
+  const filtros = {
+    municipio: input.municipio ?? null,
+    departamento: input.departamento ?? null,
+    periodo: input.periodo ?? null,
+    accesosMin: input.accesosMin ?? 0,
+    incluirDescartadas: input.incluirDescartadas ?? false,
+    excluirCategorias: input.excluirCategorias ?? [...CATEGORIAS_EXCLUIDAS_COBERTURA_DEFAULT],
+    limite: Math.min(input.limite ?? LIMITE_COBERTURA_DEFAULT, LIMITE_COBERTURA_MAXIMO),
+  };
+  const r = coberturaGeografica({
+    idOrganizacion,
+    municipio: input.municipio,
+    departamento: input.departamento,
+    periodo: input.periodo,
+    accesosMin: filtros.accesosMin,
+    incluirDescartadas: filtros.incluirDescartadas,
+    excluirCategorias: filtros.excluirCategorias,
+    limite: filtros.limite,
+  });
+  if ('error' in r) return { organizacion: idOrganizacion, filtros, ...r };
+  return { organizacion: idOrganizacion, filtros: { ...filtros, periodo: r.periodo }, ...r };
 }
 
 // --- mover_estado --------------------------------------------------------------------

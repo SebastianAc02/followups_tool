@@ -23,6 +23,10 @@ import {
   pipeline,
   embudoTool,
   cuentasTool,
+  coberturaGeograficaTool,
+  LIMITE_COBERTURA_DEFAULT,
+  LIMITE_COBERTURA_MAXIMO,
+  CATEGORIAS_VISTA,
   registrarToqueTool,
   moverEstadoTool,
   cambiarCadenciaTool,
@@ -97,6 +101,7 @@ export const TOOLS_LECTURA = [
   'aperturas_whatsapp',
   'buscar_empresa',
   'cambios_desde',
+  'cobertura_geografica',
   'cola',
   'cuentas',
   'dashboard_cro',
@@ -1575,6 +1580,75 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
     },
     async ({ idOrganizacion, conAliado }) => {
       const resultado = cuentasTool({ idOrganizacion, conAliado });
+      return { content: [{ type: 'text', text: JSON.stringify(resultado) }] };
+    },
+  );
+
+  // La lista por ciudad. Antes de esta tool cada una salia de un docker exec contra isps.db
+  // (regla 18 del brain, 2026-11-18): ninguna accion exponia ciudad, departamento ni accesos
+  // por municipio.
+  server.registerTool(
+    'cobertura_geografica',
+    {
+      description:
+        'QUE EMPRESAS VENDEN EN UN MUNICIPIO O DEPARTAMENTO, segun los accesos reportados a MinTIC ' +
+        '(empresa_municipio por codigo DIVIPOLA y periodo). La zona sale de donde la empresa TIENE ' +
+        'ACCESOS, no de su sede: ciudadPrincipal/departamentoSede vienen aparte. Una empresa con sede ' +
+        'en Bogota y accesos en Cartagena sale en Cartagena. Ordenada por accesos en la zona, de mayor ' +
+        'a menor. Por empresa: accesosZona y su periodo, accesosTotales y municipiosTotales (todo el ' +
+        'pais en ese periodo), usuariosReales con su fuente, usuariosEstimados marcado estimado:true ' +
+        '(NO es dato confirmado; el tamano que manda es Usuarios Estimados de Notion), estado ' +
+        'comercial y de Notion, owner, notionPageId, categoria, atacable, contactos (nombre, cargo, ' +
+        'esRepLegal, esGerente, telefono con su fuente) y telefonos de la empresa con su tipo. ' +
+        'Devuelve total, atacables y truncado: si truncado es true LO QUE VES NO ES TODO. ' +
+        'Devuelve tambien `ciegas`: las del departamento sin ciudadPrincipal, que una lista por ' +
+        'ciudad nunca muestra (enLista dice si igual salieron en la lista por accesos), y ' +
+        'sinUbicacionEnNingunaZona, las que no caen en ninguna consulta geografica. ' +
+        'Un nombre de municipio repetido en varios departamentos devuelve error municipio_ambiguo ' +
+        'con los candidatos: se repite con departamento o con el codigo DIVIPOLA.',
+      inputSchema: {
+        idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
+        municipio: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Nombre ("Cartagena", sin importar tildes ni mayusculas) o codigo DIVIPOLA ("13001"). ' +
+              'El nombre es el de MinTIC, no el de la sede. Se requiere municipio, departamento o los dos',
+          ),
+        departamento: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Nombre ("Bolivar") o codigo de dos digitos ("13"). Solo, trae todo el departamento sumado'),
+        periodo: z
+          .string()
+          .regex(/^\d{4}-T[1-4]$/)
+          .optional()
+          .describe('Trimestre MinTIC "AAAA-Tn". Default: el ultimo cargado'),
+        accesosMin: z.number().int().nonnegative().optional().describe('Accesos minimos en la zona. Default: 0'),
+        incluirDescartadas: z
+          .boolean()
+          .optional()
+          .describe('Default false: las de estado comercial descartado no salen'),
+        excluirCategorias: z
+          .array(z.enum(CATEGORIAS_VISTA))
+          .optional()
+          .describe(
+            'Categorias que no salen. Default: telco_grande, carrier, sae_plus, no_isp. ' +
+              'Mandar [] para ver todas. utility y extranjero salen por default con atacable:false',
+          ),
+        limite: z
+          .number()
+          .int()
+          .positive()
+          .max(LIMITE_COBERTURA_MAXIMO)
+          .optional()
+          .describe(`Default ${LIMITE_COBERTURA_DEFAULT}, maximo ${LIMITE_COBERTURA_MAXIMO}`),
+      },
+    },
+    async (args) => {
+      const resultado = coberturaGeograficaTool(args);
       return { content: [{ type: 'text', text: JSON.stringify(resultado) }] };
     },
   );

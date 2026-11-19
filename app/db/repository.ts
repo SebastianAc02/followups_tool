@@ -13734,3 +13734,436 @@ export function inscripcionesEmpujables(sel: SelectorEmpujon, idOrganizacion: nu
     .all()
     .map((f) => ({ ...f, tieneDestinatarioActivo: f.tieneDestinatarioActivo === 1 }));
 }
+
+// --- Cobertura geografica (accesos MinTIC por municipio) -------------------------------
+//
+// Responde "que ISP operan en este municipio o departamento" con la base de produccion, para
+// que una lista por ciudad deje de salir de un docker exec contra isps.db (regla 18 del brain,
+// 2026-11-18). La fuente de la zona es empresa_municipio (accesos reportados a MinTIC por
+// codigo DIVIPOLA y periodo), NO empresa.ciudad_principal: la sede dice donde esta registrada la
+// empresa, los accesos dicen donde vende. En Cartagena 2025-T4, Conexion Digital Express tiene
+// sede en Bogota y 3.125 accesos en Cartagena; una lista por sede la esconde.
+//
+// empresa_municipio, empresa_telefono y empresa_mintic existen en produccion pero no en
+// schema.ts (vienen del seed, no de una migracion de este repo). Se leen con sql crudo AQUI,
+// que es el unico lugar donde vive SQL, en vez de declararlas en schema.ts: declararlas haria
+// que un futuro drizzle-kit generate intente crearlas.
+//
+// Los nombres se resuelven en memoria y no en SQL porque SQLite no quita tildes y los dos lados
+// no se escriben igual ("CARTAGENA" en MinTIC, "Cartagena" en empresa; "Bogotá D.C." contra
+// "BOGOTÁ, D.C."). El catalogo de municipios de un periodo son ~1.100 filas.
+
+// El dominio de empresa_categoria.categoria (la vista), distinto de CATEGORIAS_EMPRESA, que es el de
+// la columna plana empresa.categoria.
+export const CATEGORIAS_VISTA = ['isp', 'utility', 'extranjero', 'telco_grande', 'carrier', 'sae_plus', 'no_isp'] as const;
+export const CATEGORIAS_EXCLUIDAS_COBERTURA_DEFAULT = ['telco_grande', 'carrier', 'sae_plus', 'no_isp'] as const;
+
+export type FiltroCobertura = {
+  idOrganizacion: number;
+  municipio?: string;
+  departamento?: string;
+  periodo?: string;
+  accesosMin?: number;
+  incluirDescartadas?: boolean;
+  excluirCategorias?: readonly string[];
+  limite: number;
+};
+
+export type MunicipioCatalogo = { codigoDivipola: number; municipio: string; departamento: string | null };
+
+export type ErrorCobertura =
+  | { error: 'falta_zona'; detalle: string }
+  | { error: 'sin_cobertura_cargada'; detalle: string }
+  | { error: 'periodo_sin_datos'; periodo: string; periodosDisponibles: string[] }
+  | { error: 'departamento_no_encontrado'; departamento: string; sugerencias: string[] }
+  | { error: 'municipio_no_encontrado'; municipio: string; periodo: string; sugerencias: MunicipioCatalogo[] }
+  | { error: 'municipio_ambiguo'; municipio: string; candidatos: MunicipioCatalogo[] }
+  | { error: 'municipio_fuera_del_departamento'; municipio: string; departamento: string; candidatos: MunicipioCatalogo[] };
+
+export type ContactoCobertura = {
+  idContacto: number;
+  nombre: string | null;
+  cargo: string | null;
+  esRepLegal: boolean;
+  esGerente: boolean;
+  telefono: string | null;
+  telefonoFuente: string | null;
+};
+
+export type TelefonoCobertura = {
+  numero: string;
+  tipo: string;
+  fuente: string;
+  verificado: boolean;
+  esPrincipal: boolean;
+};
+
+export type EmpresaCobertura = {
+  idEmpresa: string;
+  nombre: string;
+  ciudadPrincipal: string | null;
+  departamentoSede: string | null;
+  accesosZona: number;
+  municipiosEnZona: number;
+  periodo: string;
+  accesosTotales: number;
+  municipiosTotales: number;
+  usuariosReales: { valor: number; fuente: string | null } | null;
+  usuariosEstimados: { valor: number; fuente: string | null; estimado: true } | null;
+  estadoComercial: string;
+  estadoNotion: string | null;
+  owner: string | null;
+  notionPageId: string | null;
+  categoria: string;
+  atacable: boolean;
+  contactos: ContactoCobertura[];
+  telefonos: TelefonoCobertura[];
+};
+
+export type CiegaCobertura = {
+  idEmpresa: string;
+  nombre: string;
+  departamentoSede: string | null;
+  // Accesos de la empresa en el departamento en el periodo. 0 = la sede esta en el
+  // departamento pero no reporta accesos ahi.
+  accesosEnDepartamento: number;
+  porQue: 'accesos_en_departamento' | 'sede_en_departamento';
+  enLista: boolean;
+  estadoComercial: string;
+  estadoNotion: string | null;
+  owner: string | null;
+  notionPageId: string | null;
+  categoria: string;
+  atacable: boolean;
+};
+
+export type ResultadoCobertura = {
+  periodo: string;
+  zona: {
+    tipo: 'municipio' | 'departamento';
+    municipio: MunicipioCatalogo | null;
+    departamento: string | null;
+    municipiosEnDepartamento: number;
+  };
+  total: number;
+  atacables: number;
+  devueltas: number;
+  truncado: boolean;
+  empresas: EmpresaCobertura[];
+  ciegas: CiegaCobertura[];
+  // Empresas sin ciudad, sin departamento y sin un solo acceso reportado en ningun periodo: no
+  // caen en ninguna consulta geografica, y el numero es para que no se lean como inexistentes.
+  sinUbicacionEnNingunaZona: number;
+};
+
+export function normalizarNombreGeo(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+function sqlLista(valores: readonly (string | number)[]): SQL {
+  return sql.join(
+    valores.map((v) => sql`${v}`),
+    sql`, `,
+  );
+}
+
+export function coberturaGeografica(f: FiltroCobertura): ResultadoCobertura | ErrorCobertura {
+  const municipioIn = f.municipio?.trim() || undefined;
+  const departamentoIn = f.departamento?.trim() || undefined;
+  if (!municipioIn && !departamentoIn) {
+    return { error: 'falta_zona', detalle: 'Se requiere municipio (nombre o codigo DIVIPOLA), departamento, o los dos' };
+  }
+
+  const periodos = db
+    .all<{ periodo: string }>(sql`SELECT DISTINCT periodo FROM empresa_municipio ORDER BY periodo DESC`)
+    .map((p) => p.periodo);
+  if (periodos.length === 0) {
+    return { error: 'sin_cobertura_cargada', detalle: 'empresa_municipio no tiene filas en ningun periodo' };
+  }
+  const periodo = f.periodo ?? periodos[0];
+  if (!periodos.includes(periodo)) return { error: 'periodo_sin_datos', periodo, periodosDisponibles: periodos };
+
+  const catalogo = db.all<MunicipioCatalogo>(sql`
+    SELECT DISTINCT codigo_divipola AS codigoDivipola, municipio, departamento
+    FROM empresa_municipio WHERE periodo = ${periodo}
+    ORDER BY departamento, municipio
+  `);
+
+  // Departamento: por codigo (los dos primeros digitos del DIVIPOLA) o por nombre normalizado.
+  let enDepto = catalogo;
+  let departamentoZona: string | null = null;
+  if (departamentoIn) {
+    if (/^\d+$/.test(departamentoIn)) {
+      const cod = Number(departamentoIn);
+      enDepto = catalogo.filter((m) => Math.floor(m.codigoDivipola / 1000) === cod);
+    } else {
+      const n = normalizarNombreGeo(departamentoIn);
+      enDepto = catalogo.filter((m) => m.departamento != null && normalizarNombreGeo(m.departamento) === n);
+    }
+    if (enDepto.length === 0) {
+      const n = normalizarNombreGeo(departamentoIn);
+      const sugerencias = [...new Set(catalogo.map((m) => m.departamento).filter((d): d is string => d != null))].filter(
+        (d) => n.length > 0 && (normalizarNombreGeo(d).includes(n) || n.includes(normalizarNombreGeo(d))),
+      );
+      return { error: 'departamento_no_encontrado', departamento: departamentoIn, sugerencias };
+    }
+    departamentoZona = enDepto[0].departamento;
+  }
+
+  let municipioZona: MunicipioCatalogo | null = null;
+  if (municipioIn) {
+    const esCodigo = /^\d+$/.test(municipioIn);
+    const n = normalizarNombreGeo(municipioIn);
+    const coincide = (m: MunicipioCatalogo) =>
+      esCodigo ? m.codigoDivipola === Number(municipioIn) : normalizarNombreGeo(m.municipio) === n;
+    const enZona = enDepto.filter(coincide);
+    if (enZona.length === 0) {
+      const enOtroDepto = departamentoIn ? catalogo.filter(coincide) : [];
+      if (enOtroDepto.length > 0) {
+        return { error: 'municipio_fuera_del_departamento', municipio: municipioIn, departamento: departamentoIn!, candidatos: enOtroDepto };
+      }
+      const sugerencias = esCodigo
+        ? []
+        : enDepto
+            .filter((m) => {
+              const nm = normalizarNombreGeo(m.municipio);
+              return n.length > 0 && (nm.includes(n) || n.includes(nm));
+            })
+            .slice(0, 10);
+      return { error: 'municipio_no_encontrado', municipio: municipioIn, periodo, sugerencias };
+    }
+    if (enZona.length > 1) return { error: 'municipio_ambiguo', municipio: municipioIn, candidatos: enZona };
+    municipioZona = enZona[0];
+    departamentoZona = municipioZona.departamento;
+  }
+
+  const municipiosDelDepto = catalogo.filter(
+    (m) => departamentoZona != null && m.departamento != null && normalizarNombreGeo(m.departamento) === normalizarNombreGeo(departamentoZona),
+  );
+  const codigosZona = municipioZona ? [municipioZona.codigoDivipola] : municipiosDelDepto.map((m) => m.codigoDivipola);
+
+  const excluir = f.excluirCategorias ?? CATEGORIAS_EXCLUIDAS_COBERTURA_DEFAULT;
+  const filtroCategoria = excluir.length > 0 ? sql`AND COALESCE(c.categoria, 'isp') NOT IN (${sqlLista(excluir)})` : sql``;
+  const filtroDescarte = f.incluirDescartadas ? sql`` : sql`AND e.estado_comercial <> 'descartado'`;
+
+  const filas = db.all<{
+    idEmpresa: string;
+    nombre: string;
+    ciudadPrincipal: string | null;
+    departamentoSede: string | null;
+    accesosZona: number;
+    municipiosEnZona: number;
+    accesosTotales: number | null;
+    municipiosTotales: number | null;
+    usuariosReales: number | null;
+    usuariosRealesFuente: string | null;
+    usuariosEstimados: number | null;
+    usuariosEstFuente: string | null;
+    estadoComercial: string;
+    estadoNotion: string | null;
+    owner: string | null;
+    notionPageId: string | null;
+    categoria: string | null;
+    atacable: number | null;
+  }>(sql`
+    WITH zona AS (
+      SELECT id_empresa, SUM(accesos) AS accesos_zona, COUNT(*) AS municipios_zona
+      FROM empresa_municipio
+      WHERE periodo = ${periodo} AND codigo_divipola IN (${sqlLista(codigosZona)})
+      GROUP BY id_empresa
+    ), total AS (
+      SELECT id_empresa, SUM(accesos) AS accesos_totales, COUNT(*) AS municipios_totales
+      FROM empresa_municipio
+      WHERE periodo = ${periodo} AND id_empresa IN (SELECT id_empresa FROM zona)
+      GROUP BY id_empresa
+    )
+    SELECT e.id_empresa AS idEmpresa, e.nombre_oficial AS nombre, e.ciudad_principal AS ciudadPrincipal,
+           e.departamento AS departamentoSede, z.accesos_zona AS accesosZona, z.municipios_zona AS municipiosEnZona,
+           t.accesos_totales AS accesosTotales, t.municipios_totales AS municipiosTotales,
+           u.usuarios_reales AS usuariosReales, u.usuarios_reales_fuente AS usuariosRealesFuente,
+           u.usuarios_estimados AS usuariosEstimados, u.usuarios_est_fuente AS usuariosEstFuente,
+           e.estado_comercial AS estadoComercial, e.estado_notion AS estadoNotion, e.owner AS owner,
+           e.notion_page_id AS notionPageId, c.categoria AS categoria, c.atacable AS atacable
+    FROM zona z
+    JOIN empresa e ON e.id_empresa = z.id_empresa
+    LEFT JOIN total t ON t.id_empresa = z.id_empresa
+    LEFT JOIN empresa_usuarios u ON u.id_empresa = e.id_empresa
+    LEFT JOIN empresa_categoria c ON c.id_empresa = e.id_empresa
+    WHERE e.organizacion_activa_id = ${f.idOrganizacion}
+      AND z.accesos_zona >= ${f.accesosMin ?? 0}
+      ${filtroDescarte}
+      ${filtroCategoria}
+    ORDER BY z.accesos_zona DESC, e.nombre_oficial ASC
+  `);
+
+  const pagina = filas.slice(0, f.limite);
+  const ids = pagina.map((p) => p.idEmpresa);
+
+  const contactosPorEmpresa = new Map<string, ContactoCobertura[]>();
+  const telefonosPorEmpresa = new Map<string, TelefonoCobertura[]>();
+  if (ids.length > 0) {
+    const contactos = db.all<{
+      idEmpresa: string;
+      idContacto: number;
+      nombre: string | null;
+      apellido: string | null;
+      cargo: string | null;
+      esRepLegal: number;
+      esGerente: number;
+      telefono: string | null;
+      telefonoFuente: string | null;
+    }>(sql`
+      SELECT id_empresa AS idEmpresa, id_contacto AS idContacto, nombre, apellido, cargo,
+             es_rep_legal AS esRepLegal, es_gerente AS esGerente, telefono, telefono_fuente AS telefonoFuente
+      FROM contacto WHERE id_empresa IN (${sqlLista(ids)})
+      ORDER BY es_principal DESC, es_rep_legal DESC, es_gerente DESC, id_contacto ASC
+    `);
+    for (const c of contactos) {
+      const nombre = [c.nombre, c.apellido].filter((x) => x && x.trim()).join(' ').trim() || null;
+      const lista = contactosPorEmpresa.get(c.idEmpresa) ?? [];
+      lista.push({
+        idContacto: c.idContacto,
+        nombre,
+        cargo: c.cargo,
+        esRepLegal: c.esRepLegal === 1,
+        esGerente: c.esGerente === 1,
+        telefono: c.telefono,
+        telefonoFuente: c.telefonoFuente,
+      });
+      contactosPorEmpresa.set(c.idEmpresa, lista);
+    }
+
+    const telefonos = db.all<{
+      idEmpresa: string;
+      numero: string;
+      tipo: string;
+      fuente: string;
+      verificado: number;
+      esPrincipal: number;
+    }>(sql`
+      SELECT id_empresa AS idEmpresa, numero, tipo, fuente, verificado, es_principal AS esPrincipal
+      FROM empresa_telefono WHERE id_empresa IN (${sqlLista(ids)})
+      ORDER BY es_principal DESC, verificado DESC, id_telefono ASC
+    `);
+    for (const t of telefonos) {
+      const lista = telefonosPorEmpresa.get(t.idEmpresa) ?? [];
+      lista.push({ numero: t.numero, tipo: t.tipo, fuente: t.fuente, verificado: t.verificado === 1, esPrincipal: t.esPrincipal === 1 });
+      telefonosPorEmpresa.set(t.idEmpresa, lista);
+    }
+  }
+
+  const empresas: EmpresaCobertura[] = pagina.map((p) => ({
+    idEmpresa: p.idEmpresa,
+    nombre: p.nombre,
+    ciudadPrincipal: p.ciudadPrincipal,
+    departamentoSede: p.departamentoSede,
+    accesosZona: p.accesosZona,
+    municipiosEnZona: p.municipiosEnZona,
+    periodo,
+    accesosTotales: p.accesosTotales ?? p.accesosZona,
+    municipiosTotales: p.municipiosTotales ?? p.municipiosEnZona,
+    usuariosReales: p.usuariosReales != null ? { valor: p.usuariosReales, fuente: p.usuariosRealesFuente } : null,
+    usuariosEstimados:
+      p.usuariosEstimados != null ? { valor: p.usuariosEstimados, fuente: p.usuariosEstFuente, estimado: true } : null,
+    estadoComercial: p.estadoComercial,
+    estadoNotion: p.estadoNotion,
+    owner: p.owner,
+    notionPageId: p.notionPageId,
+    categoria: p.categoria ?? 'isp',
+    atacable: (p.atacable ?? 1) === 1,
+    contactos: contactosPorEmpresa.get(p.idEmpresa) ?? [],
+    telefonos: telefonosPorEmpresa.get(p.idEmpresa) ?? [],
+  }));
+
+  // Ciegas: sin ciudad_principal, y en el departamento por una de dos vias, accesos ahi en el
+  // periodo o departamento de sede. Con los mismos filtros de descarte y categoria que la lista,
+  // sin accesosMin (una ciega con pocos accesos sigue siendo una cuenta que nadie ve).
+  let ciegas: CiegaCobertura[] = [];
+  if (departamentoZona != null) {
+    const nDepto = normalizarNombreGeo(departamentoZona);
+    const nombresSede = db
+      .all<{ departamento: string }>(sql`SELECT DISTINCT departamento FROM empresa WHERE departamento IS NOT NULL`)
+      .map((d) => d.departamento)
+      .filter((d) => normalizarNombreGeo(d) === nDepto);
+    const codigosDepto = municipiosDelDepto.map((m) => m.codigoDivipola);
+    const sedeEnDepto = nombresSede.length > 0 ? sql`e.departamento IN (${sqlLista(nombresSede)})` : sql`0`;
+    const enLista = new Set(filas.map((x) => x.idEmpresa));
+    const filasCiegas = db.all<{
+      idEmpresa: string;
+      nombre: string;
+      departamentoSede: string | null;
+      accesosEnDepartamento: number | null;
+      estadoComercial: string;
+      estadoNotion: string | null;
+      owner: string | null;
+      notionPageId: string | null;
+      categoria: string | null;
+      atacable: number | null;
+    }>(sql`
+      WITH depto AS (
+        SELECT id_empresa, SUM(accesos) AS accesos
+        FROM empresa_municipio
+        WHERE periodo = ${periodo} AND codigo_divipola IN (${sqlLista(codigosDepto.length > 0 ? codigosDepto : [-1])})
+        GROUP BY id_empresa
+      )
+      SELECT e.id_empresa AS idEmpresa, e.nombre_oficial AS nombre, e.departamento AS departamentoSede,
+             d.accesos AS accesosEnDepartamento, e.estado_comercial AS estadoComercial, e.estado_notion AS estadoNotion,
+             e.owner AS owner, e.notion_page_id AS notionPageId, c.categoria AS categoria, c.atacable AS atacable
+      FROM empresa e
+      LEFT JOIN depto d ON d.id_empresa = e.id_empresa
+      LEFT JOIN empresa_categoria c ON c.id_empresa = e.id_empresa
+      WHERE e.organizacion_activa_id = ${f.idOrganizacion}
+        AND (e.ciudad_principal IS NULL OR TRIM(e.ciudad_principal) = '')
+        AND (d.id_empresa IS NOT NULL OR ${sedeEnDepto})
+        ${filtroDescarte}
+        ${filtroCategoria}
+      ORDER BY COALESCE(d.accesos, 0) DESC, e.nombre_oficial ASC
+    `);
+    ciegas = filasCiegas.map((c) => ({
+      idEmpresa: c.idEmpresa,
+      nombre: c.nombre,
+      departamentoSede: c.departamentoSede,
+      accesosEnDepartamento: c.accesosEnDepartamento ?? 0,
+      porQue: c.accesosEnDepartamento != null ? 'accesos_en_departamento' : 'sede_en_departamento',
+      enLista: enLista.has(c.idEmpresa),
+      estadoComercial: c.estadoComercial,
+      estadoNotion: c.estadoNotion,
+      owner: c.owner,
+      notionPageId: c.notionPageId,
+      categoria: c.categoria ?? 'isp',
+      atacable: (c.atacable ?? 1) === 1,
+    }));
+  }
+
+  const sinUbicacion = db.get<{ n: number }>(sql`
+    SELECT COUNT(*) AS n FROM empresa e
+    LEFT JOIN empresa_categoria c ON c.id_empresa = e.id_empresa
+    WHERE e.organizacion_activa_id = ${f.idOrganizacion}
+      AND (e.ciudad_principal IS NULL OR TRIM(e.ciudad_principal) = '')
+      AND (e.departamento IS NULL OR TRIM(e.departamento) = '')
+      AND NOT EXISTS (SELECT 1 FROM empresa_municipio m WHERE m.id_empresa = e.id_empresa)
+      ${filtroDescarte}
+      ${filtroCategoria}
+  `);
+
+  return {
+    periodo,
+    zona: {
+      tipo: municipioZona ? 'municipio' : 'departamento',
+      municipio: municipioZona,
+      departamento: departamentoZona,
+      municipiosEnDepartamento: municipiosDelDepto.length,
+    },
+    total: filas.length,
+    atacables: filas.filter((x) => (x.atacable ?? 1) === 1).length,
+    devueltas: empresas.length,
+    truncado: filas.length > empresas.length,
+    empresas,
+    ciegas,
+    sinUbicacionEnNingunaZona: sinUbicacion?.n ?? 0,
+  };
+}
