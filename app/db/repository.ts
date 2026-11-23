@@ -12640,6 +12640,819 @@ export function reasignarNit(idViejo: string, nitNuevo: string, idOrganizacion: 
   });
 }
 
+// --- Fusionar cuentas duplicadas en la que tiene NIT ------------------------------------
+
+// La misma empresa vive dos o tres veces en la base, casi siempre una con NIT real y otra con id
+// provisional (999xxxxxxx o ntn-) que nacio de Notion antes de que se supiera el NIT. reasignarNit
+// no sirve para esto a proposito: falla si el NIT destino ya existe, porque eso es una fusion. Esta
+// es esa fusion, con el operador decidiendo cuales son la misma (2026-11-23, caso AlpaSurfnet:
+// 9990000021, 9990000148 y 828000170 son una sola empresa).
+//
+// Por que el origen se MARCA (opera_bajo_id) y no se borra. Tres razones, medidas:
+//   1. El id provisional sigue citado por fuera de la base (front matter del brain, sync_cambios,
+//      auditoria_campo). Con la lapida, buscarlo responde "absorbida por X" en vez de "no existe",
+//      que es el error que ya costo caro el 2026-07-25 (crear cuentas que solo habia que enlazar).
+//   2. Es la convencion que el resto del codigo ya entiende: EMPRESA_VIVA filtra la lapida y
+//      sacar_de_cadencia / correr_cadencia la rechazan con el id correcto.
+//   3. Nada se borra en produccion: las FK son ON DELETE CASCADE, y un DELETE que se olvide una
+//      tabla hija se lleva filas en silencio.
+// Lo que SI se limpia en la lapida es lo que la haria pasar por cuenta viva en las lecturas que no
+// aplican EMPRESA_VIVA a proposito (cuentas, reconciliar_notion): page id, etapa, owner y proximo
+// paso. Medido en produccion el 2026-11-23: de 15 lapidas que dejo fundirEmpresas, 13 conservan
+// estado_notion y 3 notion_page_id, asi que siguen apareciendo en la lista de reconciliacion como si
+// fueran cuentas. El valor previo de cada campo limpiado queda en auditoria_campo por el trigger.
+
+export type FusionarEmpresasInput = {
+  idDestino: string;
+  idsOrigen: string[];
+  aplicar?: boolean;
+  // Solo cuando entre destino y origenes hay MAS de un page id distinto: cual de ellos queda. Sin
+  // este campo ese caso falla, porque elegir la ficha viva no lo decide la tool.
+  notionPageId?: string;
+};
+
+export type CampoFusion = {
+  tabla: string;
+  campo: string;
+  anterior: unknown;
+  nuevo: unknown;
+  // De que cuenta sale el valor nuevo.
+  desde: string;
+};
+
+export type OrigenFusion = {
+  idEmpresa: string;
+  nombre: string;
+  estado: string | null;
+  owner: string | null;
+  notionPageId: string | null;
+  toques: number;
+  contactos: number;
+};
+
+export type DestinoFusionLeido = {
+  idEmpresa: string;
+  tipoId: string;
+  nombre: string;
+  nombreNotion: string | null;
+  estado: string | null;
+  estadoFichaNotion: string | null;
+  owner: string | null;
+  proximoPaso: string | null;
+  proximoFollowUpFecha: string | null;
+  proximoCanal: string | null;
+  notionPageId: string | null;
+  toques: number;
+  contactos: number;
+  alias: string[];
+};
+
+export type FusionarEmpresasResultado = {
+  aplicado: boolean;
+  respaldo: string | null;
+  idDestino: string;
+  origenes: OrigenFusion[];
+  // Filas hijas que pasan del origen al destino, por tabla y por origen.
+  filasMovidas: Record<string, Record<string, number>>;
+  // Filas que se quedan colgando de la lapida y por que: el destino ya tenia esa fila (tabla 1 a 1 o
+  // llave compuesta) o la tabla es historia del id y no se mezcla.
+  filasQueQuedanEnOrigen: { tabla: string; idOrigen: string; filas: number; motivo: string }[];
+  // Cada campo del destino que cambia, con su valor anterior. Incluye empresa y las tablas 1 a 1.
+  camposDestino: CampoFusion[];
+  // Contactos/telefonos/correos principales del origen que bajan a no principal porque el destino ya
+  // tiene uno (indice unico parcial).
+  principalesDegradados: { tabla: string; idOrigen: string; filas: number }[];
+  aliasAgregados: string[];
+  notionPage: { final: string | null; descartados: string[] };
+  transicion: { de: string | null; a: string } | null;
+  // Lo que se limpia en cada origen al marcarlo fusionado. Nada se borra.
+  origenesMarcados: { idEmpresa: string; operaBajoId: string; camposLimpiados: { campo: string; anterior: unknown }[] }[];
+  conteos: {
+    antes: { toques: number; contactos: number };
+    despues: { toques: number; contactos: number };
+  };
+  // El destino releido DESPUES de escribir, dentro de la misma transaccion. En seco es como
+  // quedaria; con aplicar es como quedo.
+  destino: DestinoFusionLeido;
+  avisos: string[];
+};
+
+// La foto de una empresa en el embudo no es un historial: es una fila por id y por dia. Mezclar la
+// serie del origen con la del destino daria dos fotos del mismo dia para la misma cuenta (y el indice
+// unico lo impide). Se queda colgando de la lapida, que es lo que fue.
+const TABLAS_FUSION_NO_SE_MUEVEN: Record<string, string> = {
+  empresa_estado_snapshot: 'foto diaria del id: es historia de la lapida, no se mezcla con la del destino',
+};
+
+// Tablas sin PK en id_empresa pero con un unico que, si choca, significa lo mismo dos veces (la misma
+// exclusion del mismo segmento). El duplicado se queda en la lapida en vez de fallar.
+const TABLAS_FUSION_DUPLICADO_EQUIVALENTE = new Set(['segmento_exclusion']);
+
+// Tablas con un unico (id_empresa, llave) donde la fila del destino y la del origen pueden decir
+// cosas distintas y no hay regla para mezclarlas: manda la del destino y la del origen se queda en
+// la lapida, con aviso si no coinciden. canal_estado es una fila por (empresa, canal): si las dos
+// cuentas tienen marcado el mismo canal, el UPDATE plano chocaba con el unico y la fusion fallaba
+// con un mensaje que hablaba de inscripciones (revision 2026-11-23).
+const TABLAS_FUSION_DESTINO_GANA: Record<string, string> = {
+  canal_estado: 'el destino ya tenia estado para ese canal: manda el del destino y el del origen queda en la lapida',
+};
+
+// Columnas de empresa que NO se rellenan desde el origen: la identidad del destino (que es el que
+// tiene el NIT), lo que se resuelve con regla propia (etapa, page id y lo que viaja con la ficha), y
+// los metadatos de la fila.
+const COLUMNAS_EMPRESA_NO_RELLENABLES = new Set([
+  'id_empresa',
+  'tipo_id',
+  'nombre_oficial',
+  'nombre_normalizado',
+  'nombre_legal',
+  'opera_bajo_id',
+  'id_empresa_matriz',
+  'organizacion_activa_id',
+  'created_at',
+  'updated_at',
+  'estado_notion',
+  'notion_page_id',
+  'nombre_notion',
+  'estado_ficha_notion',
+  'estado_ficha_notion_fecha',
+]);
+
+// Lo que se limpia en la lapida (ver el comentario de arriba).
+const COLUMNAS_LIMPIAR_EN_ORIGEN = [
+  'notion_page_id',
+  'estado_notion',
+  'estado_ficha_notion',
+  'estado_ficha_notion_fecha',
+  'owner',
+  'proximo_paso',
+  'proximo_follow_up_fecha',
+  'proximo_canal',
+] as const;
+
+// Orden del embudo de FUNNEL_ETAPAS (app/db/funnel.ts), el mismo de toda la app.
+const RANGO_ETAPA_FUSION: Record<string, number> = {
+  lead: 1,
+  contacto_iniciado: 2,
+  reunion_agendada: 3,
+  oportunidad: 4,
+  cierre_documentacion: 5,
+  enviar_contrato: 6,
+  firma_pago: 7,
+};
+
+// La etapa que queda: la mas avanzada del embudo entre destino y origenes. Se aplica tambien cuando
+// el destino ya tiene etapa, porque quedarse con la del destino bajaria a la cuenta que se esta
+// trabajando (AlpaSurfnet: el destino con NIT esta en contacto_iniciado y la cuenta viva en
+// oportunidad). on_hold no tiene lugar en ese orden: le gana a lead (hubo conversacion), pero frente a
+// cualquier etapa activa no hay regla, y en vez de inventarla se falla.
+function etapaFinalFusion(estados: (string | null)[]): string | null {
+  const vals = [...new Set(estados.filter((e): e is string => e != null))];
+  if (vals.length === 0) return null;
+  if (vals.includes('on_hold')) {
+    const otras = vals.filter((e) => e !== 'on_hold' && e !== 'lead');
+    if (otras.length > 0) {
+      throw new Error(
+        `fusionar_empresas: las cuentas estan en on_hold y en ${otras.join(', ')}. No hay regla para decidir cual etapa queda; ` +
+          'mueve primero la etapa con mover_estado para que coincidan y vuelve a correr la fusion.',
+      );
+    }
+    return 'on_hold';
+  }
+  for (const v of vals) {
+    if (!(v in RANGO_ETAPA_FUSION)) throw new Error(`fusionar_empresas: etapa desconocida "${v}"`);
+  }
+  return vals.reduce((a, b) => (RANGO_ETAPA_FUSION[b] > RANGO_ETAPA_FUSION[a] ? b : a));
+}
+
+function rangoParaOrdenar(estado: unknown): number {
+  if (estado === 'on_hold') return 1.5;
+  return typeof estado === 'string' ? (RANGO_ETAPA_FUSION[estado] ?? 0) : 0;
+}
+
+type FilaCruda = Record<string, unknown>;
+
+function contarEn(tx: Tx, tabla: string, idEmpresa: string): number {
+  const r = tx.get<{ n: number }>(
+    sql`SELECT count(*) AS n FROM ${sql.identifier(tabla)} WHERE id_empresa = ${idEmpresa}`,
+  );
+  return Number(r?.n ?? 0);
+}
+
+function columnasDe(tx: Tx, tabla: string): { name: string; pk: number; hidden: number }[] {
+  return tx.all<{ name: string; pk: number; hidden: number }>(
+    sql`SELECT name, pk, hidden FROM pragma_table_xinfo(${tabla})`,
+  );
+}
+
+function setDeColumnas(valores: [string, unknown][]) {
+  return sql.join(
+    valores.map(([c, v]) => sql`${sql.identifier(c)} = ${v as string | number | null}`),
+    sql`, `,
+  );
+}
+
+class SimulacionFusion extends Error {
+  resultado: FusionarEmpresasResultado;
+  constructor(resultado: FusionarEmpresasResultado) {
+    super('simulacion de fusion, se revierte a proposito');
+    this.resultado = resultado;
+  }
+}
+
+// Validacion que no depende de escribir. Corre dentro de la transaccion para leer el estado vigente.
+function validarFusion(
+  tx: Tx,
+  idDestino: string,
+  idsOrigen: string[],
+  idOrganizacion: number,
+  notionPageId: string | undefined,
+): { destino: FilaCruda; origenes: FilaCruda[]; pageFinal: string | null; descartados: string[]; etapaFinal: string | null } {
+  if (idsOrigen.length === 0) throw new Error('fusionar_empresas: idsOrigen vacio, no hay nada que fusionar');
+  if (idsOrigen.includes(idDestino)) throw new Error(`fusionar_empresas: ${idDestino} no puede ser destino y origen a la vez`);
+
+  const destino = tx.get<FilaCruda>(sql`SELECT * FROM empresa WHERE id_empresa = ${idDestino}`);
+  if (!destino || destino.organizacion_activa_id !== idOrganizacion) {
+    throw new Error(`empresa_no_encontrada: destino ${idDestino} en la organizacion ${idOrganizacion}`);
+  }
+  if (esIdSintetico(idDestino) || !esNitValido(idDestino) || destino.tipo_id !== 'nit') {
+    throw new Error(
+      `fusionar_empresas: el destino ${idDestino} no tiene NIT real (tipo_id ${String(destino.tipo_id)}). ` +
+        'La cuenta que sobrevive tiene que ser la del NIT: pasa el NIT de la empresa como idDestino, o si la empresa ' +
+        'todavia no existe con NIT, corre primero reasignar_nit sobre una de las provisionales.',
+    );
+  }
+  if (destino.opera_bajo_id != null) {
+    throw new Error(
+      `fusionar_empresas: el destino ${idDestino} ya esta fusionado en ${String(destino.opera_bajo_id)}. Usa ${String(destino.opera_bajo_id)} como destino.`,
+    );
+  }
+
+  const origenes: FilaCruda[] = [];
+  const faltan: string[] = [];
+  for (const id of idsOrigen) {
+    const o = tx.get<FilaCruda>(sql`SELECT * FROM empresa WHERE id_empresa = ${id}`);
+    if (!o || o.organizacion_activa_id !== idOrganizacion) {
+      faltan.push(id);
+      continue;
+    }
+    if (o.opera_bajo_id != null) {
+      throw new Error(`fusionar_empresas: el origen ${id} ya esta fusionado en ${String(o.opera_bajo_id)}; no se fusiona dos veces.`);
+    }
+    if (!esIdSintetico(id)) {
+      throw new Error(
+        `fusionar_empresas: el origen ${id} tiene NIT real. Dos NIT son dos razones sociales y esta accion no las funde ` +
+          '(el caso Fibermax/Fibermat). Solo se absorben ids provisionales (ntn- o 999xxxxxxx).',
+      );
+    }
+    origenes.push(o);
+  }
+  if (faltan.length > 0) {
+    throw new Error(`empresa_no_encontrada: origen ${faltan.join(', ')} en la organizacion ${idOrganizacion}`);
+  }
+
+  const pages = [destino, ...origenes]
+    .map((f) => f.notion_page_id as string | null)
+    .filter((p): p is string => p != null);
+  const distintas = [...new Set(pages)];
+  let pageFinal: string | null;
+  if (notionPageId !== undefined) {
+    const elegido = notionPageId.trim();
+    if (!distintas.includes(elegido)) {
+      throw new Error(
+        `fusionar_empresas: notionPageId ${elegido} no es de ninguna de las cuentas. Page ids presentes: ${distintas.join(', ') || 'ninguno'}.`,
+      );
+    }
+    pageFinal = elegido;
+  } else if (distintas.length > 1) {
+    const quien = [destino, ...origenes]
+      .filter((f) => f.notion_page_id != null)
+      .map((f) => `${String(f.id_empresa)} -> ${String(f.notion_page_id)}`)
+      .join('; ');
+    throw new Error(
+      `fusionar_empresas: page ids de Notion en conflicto (${quien}). Una cuenta solo puede quedar enlazada a una ficha: ` +
+        'pasa notionPageId con la ficha viva y la otra queda sin cuenta en la base.',
+    );
+  } else {
+    pageFinal = distintas[0] ?? null;
+  }
+  const descartados = distintas.filter((p) => p !== pageFinal);
+
+  const etapaFinal = etapaFinalFusion([destino.estado_notion as string | null, ...origenes.map((o) => o.estado_notion as string | null)]);
+
+  // El mas avanzado en el embudo primero: es de quien se rellenan los huecos del destino.
+  const ordenados = origenes
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => rangoParaOrdenar(b.o.estado_notion) - rangoParaOrdenar(a.o.estado_notion) || a.i - b.i)
+    .map((x) => x.o);
+
+  return { destino, origenes: ordenados, pageFinal, descartados, etapaFinal };
+}
+
+function ejecutarFusion(
+  tx: Tx,
+  idDestino: string,
+  idsOrigen: string[],
+  idOrganizacion: number,
+  notionPageId: string | undefined,
+  respaldo: string | null,
+  aplicado: boolean,
+): FusionarEmpresasResultado {
+  const { destino, origenes, pageFinal, descartados, etapaFinal } = validarFusion(
+    tx,
+    idDestino,
+    idsOrigen,
+    idOrganizacion,
+    notionPageId,
+  );
+  const ahora = new Date().toISOString();
+  const avisos: string[] = [];
+  const ids = [idDestino, ...origenes.map((o) => String(o.id_empresa))];
+  const idsO = origenes.map((o) => String(o.id_empresa));
+
+  const tablas = tablasConIdEmpresa(tx);
+  const antesPorTabla = new Map<string, Map<string, number>>();
+  for (const t of tablas) antesPorTabla.set(t, new Map(ids.map((id) => [id, contarEn(tx, t, id)])));
+  const nAntes = (t: string, id: string) => antesPorTabla.get(t)?.get(id) ?? 0;
+  const conteosAntes = {
+    toques: ids.reduce((s, id) => s + nAntes('toque', id), 0),
+    contactos: ids.reduce((s, id) => s + nAntes('contacto', id), 0),
+  };
+
+  const filasMovidas: Record<string, Record<string, number>> = {};
+  const sumarMovidas = (t: string, o: string, n: number) => {
+    if (n <= 0) return;
+    filasMovidas[t] ??= {};
+    filasMovidas[t][o] = (filasMovidas[t][o] ?? 0) + n;
+  };
+  const filasQueQuedanEnOrigen: FusionarEmpresasResultado['filasQueQuedanEnOrigen'] = [];
+  const camposDestino: CampoFusion[] = [];
+  const principalesDegradados: FusionarEmpresasResultado['principalesDegradados'] = [];
+  const auditar = (tabla: string, idRegistro: string, campo: string, anterior: unknown, nuevo: unknown) => {
+    tx.run(sql`INSERT INTO auditoria_campo (tabla, id_registro, campo, valor_anterior, valor_nuevo, cambiado_en, id_organizacion)
+               VALUES (${tabla}, ${idRegistro}, ${campo}, ${anterior == null ? null : String(anterior)},
+                       ${nuevo == null ? null : String(nuevo)}, ${ahora}, ${idOrganizacion})`);
+  };
+
+  // 1. Filas hijas. La lista de tablas se le pregunta al esquema (tablasConIdEmpresa), igual que
+  // reasignarNit, para que una tabla nueva no quede apuntando a la lapida en silencio.
+  for (const t of tablas) {
+    if (t in TABLAS_FUSION_NO_SE_MUEVEN) {
+      for (const o of idsO) {
+        const n = nAntes(t, o);
+        if (n > 0) filasQueQuedanEnOrigen.push({ tabla: t, idOrigen: o, filas: n, motivo: TABLAS_FUSION_NO_SE_MUEVEN[t] });
+      }
+      continue;
+    }
+    const cols = columnasDe(tx, t);
+    const pk = cols.filter((c) => c.pk > 0).map((c) => c.name);
+    const unoAUno = pk.length === 1 && pk[0] === 'id_empresa';
+    const toleraDuplicado =
+      (pk.includes('id_empresa') && pk.length > 1) || TABLAS_FUSION_DUPLICADO_EQUIVALENTE.has(t) || t in TABLAS_FUSION_DESTINO_GANA;
+    const tienePrincipal = cols.some((c) => c.name === 'es_principal');
+
+    if (unoAUno) {
+      for (const o of idsO) {
+        if (contarEn(tx, t, o) === 0) continue;
+        if (contarEn(tx, t, idDestino) === 0) {
+          const r = tx.run(sql`UPDATE ${sql.identifier(t)} SET id_empresa = ${idDestino} WHERE id_empresa = ${o}`);
+          sumarMovidas(t, o, r.changes);
+          continue;
+        }
+        // El destino ya tiene su fila: se rellenan sus huecos con la del origen y la del origen se queda.
+        const filaD = tx.get<FilaCruda>(sql`SELECT * FROM ${sql.identifier(t)} WHERE id_empresa = ${idDestino}`)!;
+        const filaO = tx.get<FilaCruda>(sql`SELECT * FROM ${sql.identifier(t)} WHERE id_empresa = ${o}`)!;
+        const rellenos: [string, unknown][] = [];
+        for (const c of cols) {
+          if (c.name === 'id_empresa' || c.hidden !== 0) continue; // generadas: las calcula SQLite
+          if (filaD[c.name] == null && filaO[c.name] != null) rellenos.push([c.name, filaO[c.name]]);
+        }
+        if (rellenos.length > 0) {
+          tx.run(sql`UPDATE ${sql.identifier(t)} SET ${setDeColumnas(rellenos)} WHERE id_empresa = ${idDestino}`);
+          for (const [campo, v] of rellenos) {
+            camposDestino.push({ tabla: t, campo, anterior: null, nuevo: v, desde: o });
+            auditar(t, idDestino, campo, null, v);
+          }
+        }
+        filasQueQuedanEnOrigen.push({
+          tabla: t,
+          idOrigen: o,
+          filas: 1,
+          motivo: rellenos.length > 0
+            ? `el destino ya tenia su fila; se rellenaron sus huecos (${rellenos.map(([c]) => c).join(', ')})`
+            : 'el destino ya tenia su fila y no tenia huecos que esta llenara',
+        });
+      }
+      continue;
+    }
+
+    for (const o of idsO) {
+      if (tienePrincipal && contarEn(tx, t, o) > 0) {
+        const destinoTienePrincipal = tx.get<{ n: number }>(
+          sql`SELECT count(*) AS n FROM ${sql.identifier(t)} WHERE id_empresa = ${idDestino} AND es_principal = 1`,
+        );
+        if (Number(destinoTienePrincipal?.n ?? 0) > 0) {
+          const r = tx.run(
+            sql`UPDATE ${sql.identifier(t)} SET es_principal = 0 WHERE id_empresa = ${o} AND es_principal = 1`,
+          );
+          if (r.changes > 0) principalesDegradados.push({ tabla: t, idOrigen: o, filas: r.changes });
+        }
+      }
+      if (toleraDuplicado) {
+        const r = tx.run(sql`UPDATE OR IGNORE ${sql.identifier(t)} SET id_empresa = ${idDestino} WHERE id_empresa = ${o}`);
+        sumarMovidas(t, o, r.changes);
+        const quedan = contarEn(tx, t, o);
+        if (quedan > 0) {
+          filasQueQuedanEnOrigen.push({
+            tabla: t,
+            idOrigen: o,
+            filas: quedan,
+            motivo: TABLAS_FUSION_DESTINO_GANA[t] ?? 'el destino ya tenia esa misma fila (misma llave)',
+          });
+          if (t === 'canal_estado') {
+            const distintos = tx.all<{ canal: string; eo: string; ed: string }>(sql`
+              SELECT o.canal AS canal, o.estado AS eo, d.estado AS ed
+              FROM canal_estado o JOIN canal_estado d
+                ON d.canal = o.canal AND d.id_organizacion = o.id_organizacion AND d.id_empresa = ${idDestino}
+              WHERE o.id_empresa = ${o} AND o.estado <> d.estado`);
+            for (const x of distintos) {
+              avisos.push(`canal ${x.canal}: el destino lo tiene ${x.ed} y ${o} lo tenia ${x.eo}; queda ${x.ed}. Si el del origen es el correcto, marcalo de nuevo en el destino`);
+            }
+          }
+        }
+        continue;
+      }
+      try {
+        const r = tx.run(sql`UPDATE ${sql.identifier(t)} SET id_empresa = ${idDestino} WHERE id_empresa = ${o}`);
+        sumarMovidas(t, o, r.changes);
+      } catch (e) {
+        // Drizzle envuelve el error de SQLite: el UNIQUE viene en la causa, no en el mensaje.
+        const causa = e instanceof Error && e.cause instanceof Error ? e.cause : e;
+        const msg = causa instanceof Error ? causa.message : String(causa);
+        if (!/UNIQUE/i.test(msg)) throw e;
+        throw new Error(
+          `fusionar_empresas: ${o} y ${idDestino} chocan en ${t} (${msg}). Las dos tienen la misma fila viva ` +
+            '(una inscripcion activa, un toque planeado el mismo dia o el mismo canal): resuelvela en una de las dos y vuelve a correr.',
+        );
+      }
+    }
+  }
+
+  // 2. Autorreferencias de empresa: lo que colgaba de un origen pasa a colgar del destino.
+  for (const o of idsO) {
+    const rM = tx.run(
+      sql`UPDATE empresa SET id_empresa_matriz = ${idDestino} WHERE id_empresa_matriz = ${o} AND id_empresa <> ${idDestino}`,
+    );
+    sumarMovidas('empresa.id_empresa_matriz', o, rM.changes);
+    const rO = tx.run(sql`UPDATE empresa SET opera_bajo_id = ${idDestino} WHERE opera_bajo_id = ${o}`);
+    sumarMovidas('empresa.opera_bajo_id', o, rO.changes);
+  }
+  if (destino.id_empresa_matriz != null && idsO.includes(String(destino.id_empresa_matriz))) {
+    avisos.push(`el destino tenia como matriz a ${String(destino.id_empresa_matriz)}, que se absorbe; la matriz queda vacia`);
+  }
+
+  // 3. Alias: el nombre de cada origen queda como alias del destino, para que buscar_empresa lo encuentre.
+  const aliasAgregados: string[] = [];
+  const aliasDe = () =>
+    new Set(
+      tx
+        .all<{ alias: string }>(sql`SELECT alias FROM empresa_alias WHERE id_empresa = ${idDestino}`)
+        .map((a) => a.alias.trim().toLowerCase()),
+    );
+  for (const o of origenes) {
+    for (const nombre of [o.nombre_oficial, o.nombre_notion]) {
+      if (typeof nombre !== 'string' || !nombre.trim()) continue;
+      if (aliasDe().has(nombre.trim().toLowerCase())) continue;
+      tx.run(sql`INSERT INTO empresa_alias (id_empresa, alias, fuente, confianza, created_at)
+                 VALUES (${idDestino}, ${nombre.trim()}, 'fusion', 'alta', ${ahora})`);
+      aliasAgregados.push(nombre.trim());
+    }
+  }
+
+  // 4. Marcar los origenes. Va ANTES de escribir el destino: el page id tiene indice unico y tiene
+  // que soltarse del origen antes de que el destino lo tome.
+  const origenesMarcados: FusionarEmpresasResultado['origenesMarcados'] = [];
+  for (const o of origenes) {
+    const id = String(o.id_empresa);
+    const camposLimpiados = COLUMNAS_LIMPIAR_EN_ORIGEN.filter((c) => o[c] != null).map((c) => ({ campo: c, anterior: o[c] }));
+    tx.run(sql`UPDATE empresa SET ${setDeColumnas([
+      ['opera_bajo_id', idDestino],
+      ...COLUMNAS_LIMPIAR_EN_ORIGEN.map((c): [string, unknown] => [c, null]),
+      ['updated_at', ahora],
+    ])} WHERE id_empresa = ${id}`);
+    origenesMarcados.push({ idEmpresa: id, operaBajoId: idDestino, camposLimpiados });
+  }
+
+  // 5. Etapa del destino, con su transicion en el historial (origen 'fusion'): una etapa que cambia
+  // sin fila en el historial es el hueco de Global IP.
+  let transicion: FusionarEmpresasResultado['transicion'] = null;
+  const etapaAntes = (destino.estado_notion as string | null) ?? null;
+  if (etapaFinal !== null && etapaFinal !== etapaAntes) {
+    escribirTransicionEstado(tx, idDestino, etapaAntes, etapaFinal, idOrganizacion, fechaBogotaISO(), 'fusion');
+    transicion = { de: etapaAntes, a: etapaFinal };
+    const fuenteEtapa = origenes.find((o) => o.estado_notion === etapaFinal);
+    camposDestino.push({ tabla: 'empresa', campo: 'estado_notion', anterior: etapaAntes, nuevo: etapaFinal, desde: String(fuenteEtapa?.id_empresa ?? idDestino) });
+  }
+
+  // 6. El resto de empresa: la ficha (page id y lo que viaja con ella) y los huecos del destino,
+  // rellenados desde el origen mas avanzado. Lo que el destino ya tiene no se pisa.
+  const sets: [string, unknown][] = [];
+  const empujar = (campo: string, nuevo: unknown, desde: string) => {
+    sets.push([campo, nuevo]);
+    camposDestino.push({ tabla: 'empresa', campo, anterior: destino[campo] ?? null, nuevo, desde });
+  };
+  if (pageFinal !== (destino.notion_page_id ?? null)) {
+    const duenoPage = origenes.find((o) => o.notion_page_id === pageFinal)!;
+    const desde = String(duenoPage.id_empresa);
+    empujar('notion_page_id', pageFinal, desde);
+    // Lo que describe la ficha viaja con ella: el nombre en Notion y el espejo de su Estado.
+    for (const c of ['nombre_notion', 'estado_ficha_notion', 'estado_ficha_notion_fecha']) {
+      if ((duenoPage[c] ?? null) !== (destino[c] ?? null)) empujar(c, duenoPage[c] ?? null, desde);
+    }
+  }
+  const columnasEmpresa = columnasDe(tx, 'empresa');
+  for (const c of columnasEmpresa) {
+    if (COLUMNAS_EMPRESA_NO_RELLENABLES.has(c.name) || c.hidden !== 0) continue;
+    if (destino[c.name] != null) continue;
+    const fuente = origenes.find((o) => o[c.name] != null);
+    if (fuente) empujar(c.name, fuente[c.name], String(fuente.id_empresa));
+  }
+  if (destino.id_empresa_matriz != null && idsO.includes(String(destino.id_empresa_matriz))) {
+    empujar('id_empresa_matriz', null, idDestino);
+  }
+  // Owner y proximo paso del destino no se pisan (cambiar owner pide el ok del operador), pero el
+  // valor distinto del origen se limpia en la lapida: se avisa para que no se pierda en silencio,
+  // sobre todo cuando la etapa viene del origen y el proximo paso del destino es de una etapa anterior.
+  for (const c of ['owner', 'proximo_paso', 'proximo_follow_up_fecha', 'proximo_canal']) {
+    if (destino[c] == null) continue;
+    for (const o of origenes) {
+      if (o[c] != null && o[c] !== destino[c]) {
+        avisos.push(
+          `${c}: queda el del destino (${String(destino[c])}); ${String(o.id_empresa)} tenia ${String(o[c])}, que se limpia en la lapida`,
+        );
+      }
+    }
+  }
+  if (sets.length > 0) {
+    tx.run(sql`UPDATE empresa SET ${setDeColumnas([...sets, ['updated_at', ahora]])} WHERE id_empresa = ${idDestino}`);
+  }
+
+  // 7. Movimientos de filas hijas en auditoria_campo (el trigger solo ve UPDATE sobre empresa) y una
+  // fila por origen en sync_cambios con el detalle.
+  for (const [t, porOrigen] of Object.entries(filasMovidas)) {
+    for (const [o, n] of Object.entries(porOrigen)) auditar(t, o, `id_empresa (${n} filas)`, o, idDestino);
+  }
+  for (const o of idsO) {
+    const movidasO = Object.fromEntries(
+      Object.entries(filasMovidas).filter(([, p]) => p[o]).map(([t, p]) => [t, p[o]]),
+    );
+    tx.insert(syncCambios)
+      .values({
+        fecha: ahora,
+        corrida: 'fusionar_empresas',
+        fuente: 'mcp',
+        entidad: 'empresa',
+        idRegistro: o,
+        accion: `fusionar_en:${idDestino}`,
+        detalle: JSON.stringify({ movidas: movidasO, notionPageFinal: pageFinal, descartados }),
+      })
+      .run();
+  }
+
+  // 8. Relectura y verificacion dentro de la transaccion. Si algo no cuadra se revierte todo.
+  const fallas: string[] = [];
+  // Filas que esta accion CREA en el destino (no las mueve): los alias nuevos y la transicion de etapa.
+  const creadas: Record<string, number> = {
+    empresa_alias: aliasAgregados.length,
+    empresa_estado_historial: transicion ? 1 : 0,
+  };
+  for (const t of tablas) {
+    if (t in TABLAS_FUSION_NO_SE_MUEVEN) continue;
+    const movidasT = Object.values(filasMovidas[t] ?? {}).reduce((s, n) => s + n, 0);
+    const esperadoD = nAntes(t, idDestino) + movidasT + (creadas[t] ?? 0);
+    const dDespues = contarEn(tx, t, idDestino);
+    if (dDespues !== esperadoD) {
+      fallas.push(`${t}: al destino se esperaban ${esperadoD} filas y tiene ${dDespues}`);
+    }
+    for (const o of idsO) {
+      const esperado = nAntes(t, o) - (filasMovidas[t]?.[o] ?? 0);
+      const real = contarEn(tx, t, o);
+      if (real !== esperado) fallas.push(`${t}: al origen ${o} le quedan ${real}, se esperaban ${esperado}`);
+    }
+  }
+  const leer = tx.get<FilaCruda>(sql`SELECT * FROM empresa WHERE id_empresa = ${idDestino}`)!;
+  for (const c of camposDestino.filter((x) => x.tabla === 'empresa')) {
+    if ((leer[c.campo] ?? null) !== (c.nuevo ?? null)) fallas.push(`empresa.${c.campo}: quedo ${String(leer[c.campo])}, el plan decia ${String(c.nuevo)}`);
+  }
+  if ((leer.notion_page_id ?? null) !== pageFinal) fallas.push(`notion_page_id quedo ${String(leer.notion_page_id)}`);
+  if ((leer.estado_notion ?? null) !== (etapaFinal ?? etapaAntes)) fallas.push(`estado_notion quedo ${String(leer.estado_notion)}`);
+  if (leer.opera_bajo_id != null) fallas.push('el destino quedo marcado como fusionado');
+  for (const o of idsO) {
+    const lo = tx.get<FilaCruda>(sql`SELECT opera_bajo_id, notion_page_id, estado_notion FROM empresa WHERE id_empresa = ${o}`);
+    if (!lo || lo.opera_bajo_id !== idDestino || lo.notion_page_id != null || lo.estado_notion != null) {
+      fallas.push(`el origen ${o} no quedo marcado como fusionado en ${idDestino}`);
+    }
+  }
+  const conteosDespues = { toques: contarEn(tx, 'toque', idDestino), contactos: contarEn(tx, 'contacto', idDestino) };
+  if (conteosDespues.toques !== conteosAntes.toques) fallas.push(`toques: antes ${conteosAntes.toques}, despues ${conteosDespues.toques}`);
+  if (conteosDespues.contactos !== conteosAntes.contactos) {
+    fallas.push(`contactos: antes ${conteosAntes.contactos}, despues ${conteosDespues.contactos}`);
+  }
+  if (fallas.length > 0) {
+    throw new Error(
+      `fusionar_empresas: la relectura no cuadra (${fallas.join('; ')}). Se revirtio todo` +
+        (respaldo ? `; el respaldo previo esta en ${respaldo}` : ''),
+    );
+  }
+
+  if (descartados.length > 0) {
+    avisos.push(
+      `la ficha de Notion ${descartados.join(', ')} queda sin cuenta en la base: archivarla en Notion o reconciliar_notion la va a reportar como pagina sin cuenta`,
+    );
+  }
+
+  const alias = tx
+    .all<{ alias: string }>(sql`SELECT alias FROM empresa_alias WHERE id_empresa = ${idDestino} ORDER BY id_alias`)
+    .map((a) => a.alias);
+
+  return {
+    aplicado,
+    respaldo,
+    idDestino,
+    origenes: origenes.map((o) => ({
+      idEmpresa: String(o.id_empresa),
+      nombre: String(o.nombre_oficial),
+      estado: (o.estado_notion as string | null) ?? null,
+      owner: (o.owner as string | null) ?? null,
+      notionPageId: (o.notion_page_id as string | null) ?? null,
+      toques: nAntes('toque', String(o.id_empresa)),
+      contactos: nAntes('contacto', String(o.id_empresa)),
+    })),
+    filasMovidas,
+    filasQueQuedanEnOrigen,
+    camposDestino,
+    principalesDegradados,
+    aliasAgregados,
+    notionPage: { final: pageFinal, descartados },
+    transicion,
+    origenesMarcados,
+    conteos: { antes: conteosAntes, despues: conteosDespues },
+    destino: {
+      idEmpresa: String(leer.id_empresa),
+      tipoId: String(leer.tipo_id),
+      nombre: String(leer.nombre_oficial),
+      nombreNotion: (leer.nombre_notion as string | null) ?? null,
+      estado: (leer.estado_notion as string | null) ?? null,
+      estadoFichaNotion: (leer.estado_ficha_notion as string | null) ?? null,
+      owner: (leer.owner as string | null) ?? null,
+      proximoPaso: (leer.proximo_paso as string | null) ?? null,
+      proximoFollowUpFecha: (leer.proximo_follow_up_fecha as string | null) ?? null,
+      proximoCanal: (leer.proximo_canal as string | null) ?? null,
+      notionPageId: (leer.notion_page_id as string | null) ?? null,
+      toques: conteosDespues.toques,
+      contactos: conteosDespues.contactos,
+      alias,
+    },
+    avisos,
+  };
+}
+
+// Funde idsOrigen en idDestino. En seco por default: corre la fusion entera dentro de una
+// transaccion y la revierte, asi que el plan que devuelve es exactamente lo que haria, choques de
+// unicidad incluidos, y no una estimacion aparte que se pueda desincronizar del camino real.
+//
+// Con aplicar:true: primero la misma simulacion (si el estado no permite la fusion, falla ANTES de
+// tomar respaldo), despues respaldo VACUUM INTO, despues una sola transaccion que escribe, relee y
+// compara contra el plan. Si algo no cuadra, se revierte entera.
+export function fusionarEmpresas(input: FusionarEmpresasInput, idOrganizacion: number): FusionarEmpresasResultado {
+  const idDestino = input.idDestino.trim();
+  const idsOrigen = [...new Set(input.idsOrigen.map((i) => i.trim()).filter(Boolean))];
+
+  const simular = (): FusionarEmpresasResultado => {
+    try {
+      db.transaction((tx) => {
+        throw new SimulacionFusion(ejecutarFusion(tx, idDestino, idsOrigen, idOrganizacion, input.notionPageId, null, false));
+      });
+    } catch (e) {
+      if (e instanceof SimulacionFusion) return e.resultado;
+      throw e;
+    }
+    throw new Error('fusionar_empresas: la simulacion no devolvio plan');
+  };
+
+  const plan = simular();
+  if (!input.aplicar) return plan;
+
+  const respaldo = respaldarBaseAntesDeEscribir('fusionar-empresas');
+  return db.transaction((tx) =>
+    ejecutarFusion(tx, idDestino, idsOrigen, idOrganizacion, input.notionPageId, respaldo, true),
+  );
+}
+
+// --- Quitar un alias mal puesto ---------------------------------------------------------
+
+// Un alias que es de OTRA empresa hace que buscar_empresa devuelva la cuenta equivocada con
+// confianza alta (caso real: INTERCOL WISP 901269582 con "Isaac Network", que es ISAAC-NETWORK,
+// 901915653). Esta accion borra UNA fila de empresa_alias y nada mas.
+//
+// En seco por default: corre el DELETE dentro de una transaccion y la revierte, asi el plan es el
+// camino real. Falla si la cuenta no existe en la organizacion, si el alias no esta en ESA cuenta, o
+// si el texto calza con mas de una fila de la cuenta (no se elige una sola). La fila borrada queda
+// entera en auditoria_campo (valor_anterior en JSON), que es lo que permite reponerla.
+export type QuitarAliasInput = { idEmpresa: string; alias: string; aplicar?: boolean };
+
+export type QuitarAliasResultado = {
+  aplicado: boolean;
+  idEmpresa: string;
+  nombreOficial: string;
+  quitado: { idAlias: number; alias: string; fuente: string; confianza: string; createdAt: string | null };
+  aliasAntes: string[];
+  aliasDespues: string[];
+};
+
+class SimulacionQuitarAlias extends Error {
+  resultado: QuitarAliasResultado;
+  constructor(resultado: QuitarAliasResultado) {
+    super('simulacion quitar_alias');
+    this.resultado = resultado;
+  }
+}
+
+export function quitarAlias(input: QuitarAliasInput, idOrganizacion: number): QuitarAliasResultado {
+  const idEmpresa = input.idEmpresa.trim();
+  const buscado = input.alias.trim();
+  const aplicar = input.aplicar === true;
+  if (!idEmpresa) throw new Error('quitar_alias: idEmpresa vacio');
+  if (!buscado) throw new Error('quitar_alias: alias vacio');
+
+  const correr = (): QuitarAliasResultado =>
+    db.transaction((tx) => {
+      const emp = tx
+        .select({ nombre: empresa.nombreOficial })
+        .from(empresa)
+        .where(and(eq(empresa.idEmpresa, idEmpresa), eq(empresa.organizacionActivaId, idOrganizacion)))
+        .get();
+      if (!emp) throw new Error(`quitar_alias: empresa_no_encontrada: ${idEmpresa} en la organizacion ${idOrganizacion}`);
+
+      const leerAlias = () =>
+        tx.all<{ id_alias: number; alias: string; fuente: string; confianza: string; created_at: string | null }>(
+          sql`SELECT id_alias, alias, fuente, confianza, created_at FROM empresa_alias WHERE id_empresa = ${idEmpresa} ORDER BY id_alias`,
+        );
+      const antes = leerAlias();
+      const calzan = antes.filter((a) => a.alias.trim().toLowerCase() === buscado.toLowerCase());
+      if (calzan.length === 0) {
+        throw new Error(
+          `quitar_alias: "${buscado}" no es alias de ${idEmpresa} (${emp.nombre}). Alias de la cuenta: ` +
+            (antes.length ? antes.map((a) => `"${a.alias}"`).join(', ') : 'ninguno'),
+        );
+      }
+      if (calzan.length > 1) {
+        throw new Error(
+          `quitar_alias: "${buscado}" calza con ${calzan.length} filas de ${idEmpresa} (id_alias ${calzan
+            .map((a) => a.id_alias)
+            .join(', ')}). La accion borra una sola fila y no elige cual: revisalo a mano.`,
+        );
+      }
+      const fila = calzan[0];
+
+      const r = tx.run(sql`DELETE FROM empresa_alias WHERE id_alias = ${fila.id_alias} AND id_empresa = ${idEmpresa}`);
+      if (r.changes !== 1) throw new Error(`quitar_alias: el DELETE afecto ${r.changes} filas, se esperaba 1. Se revirtio.`);
+
+      tx.run(sql`INSERT INTO auditoria_campo (tabla, id_registro, campo, valor_anterior, valor_nuevo, cambiado_en, id_organizacion)
+                 VALUES ('empresa_alias', ${idEmpresa}, 'alias', ${JSON.stringify(fila)}, ${null},
+                         ${new Date().toISOString()}, ${idOrganizacion})`);
+
+      const despues = leerAlias();
+      if (despues.length !== antes.length - 1 || despues.some((a) => a.id_alias === fila.id_alias)) {
+        throw new Error('quitar_alias: la relectura no cuadra con el borrado. Se revirtio.');
+      }
+
+      const resultado: QuitarAliasResultado = {
+        aplicado: aplicar,
+        idEmpresa,
+        nombreOficial: emp.nombre,
+        quitado: {
+          idAlias: fila.id_alias,
+          alias: fila.alias,
+          fuente: fila.fuente,
+          confianza: fila.confianza,
+          createdAt: fila.created_at,
+        },
+        aliasAntes: antes.map((a) => a.alias),
+        aliasDespues: despues.map((a) => a.alias),
+      };
+      if (!aplicar) throw new SimulacionQuitarAlias(resultado);
+      return resultado;
+    });
+
+  try {
+    return correr();
+  } catch (e) {
+    if (e instanceof SimulacionQuitarAlias) return e.resultado;
+    throw e;
+  }
+}
+
 // --- Cuentas para reconciliar contra Notion ------------------------------------------
 
 export type FilaCuenta = {

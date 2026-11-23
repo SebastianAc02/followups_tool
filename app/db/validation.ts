@@ -426,6 +426,10 @@ export const EJECUTOR_POR_DEFECTO = 'Sebastian Acosta Molina';
 //                    dice jueves. Por eso queda fuera de ORIGENES_FECHA_CONFIABLE y por eso
 //                    existe el snapshot.
 //   backfill       - corrida de script sobre muchas filas. Ruido puro para el ciclo.
+//   fusion         - fusionar_empresas: el destino con NIT adopta la etapa mas avanzada de la
+//                    cuenta duplicada que absorbe. La fecha es la de la fusion, no la del cambio
+//                    comercial (ese quedo en el historial del origen, que se mueve al destino), asi
+//                    que tampoco es fecha confiable.
 // NULL = no lo dijo. Las 63 filas anteriores a esta columna quedan asi y no se rellenan.
 export const ORIGENES_TRANSICION = [
   'toque',
@@ -434,6 +438,7 @@ export const ORIGENES_TRANSICION = [
   'snapshot',
   'reconciliacion',
   'backfill',
+  'fusion',
 ] as const;
 export type OrigenTransicion = (typeof ORIGENES_TRANSICION)[number];
 

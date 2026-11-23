@@ -45,6 +45,8 @@ import {
   crearContactoTool,
   actualizarContactoTool,
   reasignarNitTool,
+  fusionarEmpresasTool,
+  quitarAliasTool,
   reconciliarNotionTool,
   cambiosDesdeTool,
   actividadTool,
@@ -130,6 +132,7 @@ export const TOOLS_ESCRITURA = [
   'empujar_envios',
   'enviar_correo_directo',
   'enviar_whatsapp_directo',
+  'fusionar_empresas',
   'lanzar_campana',
   'marcar_aliado',
   'marcar_canal',
@@ -141,6 +144,7 @@ export const TOOLS_ESCRITURA = [
   'mover_estado',
   'planear_dia',
   'programar_envios',
+  'quitar_alias',
   'reasignar_nit',
   'reconciliar_notion',
   'registrar_toque',
@@ -1153,6 +1157,67 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
     async ({ idEmpresa, nit }) => {
       const r = reasignarNitTool({ idEmpresa, nit }, idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'fusionar_empresas',
+    {
+      description:
+        'Funde cuentas duplicadas de la MISMA empresa en la que tiene NIT real. Usala cuando la empresa existe dos o mas ' +
+        'veces (casi siempre una con NIT y otra con id provisional 999xxxxxxx o ntn-) y el operador confirmo que son la ' +
+        'misma. reasignar_nit no sirve para esto: falla si el NIT ya existe. EN SECO POR DEFAULT: sin aplicar:true corre ' +
+        'la fusion dentro de una transaccion y la revierte, y devuelve el plan exacto: filas que se mueven por tabla y ' +
+        'origen, filas que se quedan en el origen y por que, cada campo del destino que cambia con su valor anterior, ' +
+        'alias nuevos, la ficha de Notion que queda y las que se descartan, y la transicion de etapa. Reglas: el destino ' +
+        'tiene que tener NIT real; los origenes tienen que ser provisionales (dos NIT no se funden); toques, contactos, ' +
+        'historial, cadencias, alias, tracking y toda tabla con id_empresa pasan al destino; los nombres de los origenes ' +
+        'quedan como alias; la etapa que queda es la mas avanzada del embudo entre todas (on_hold contra una etapa activa ' +
+        'falla); owner, proximo paso y cualquier otro campo vacio del destino se llenan desde el origen mas avanzado, y lo ' +
+        'que el destino ya tiene no se pisa. Si hay mas de un page id de Notion distinto falla, salvo que pases ' +
+        'notionPageId con la ficha viva. Los origenes NO se borran: quedan marcados como fusionados (opera_bajo_id) y sin ' +
+        'page id, etapa, owner ni proximo paso. Con aplicar:true toma respaldo VACUUM INTO, escribe en una transaccion, ' +
+        'relee el destino con conteos de toques y contactos antes y despues, y revierte si algo no cuadra.',
+      inputSchema: {
+        idDestino: z.string().min(1).describe('NIT de la cuenta que sobrevive (8 a 10 digitos, sin digito de verificacion)'),
+        idsOrigen: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe('Ids provisionales (999... o ntn-...) que se absorben en el destino'),
+        aplicar: z.boolean().optional().describe('true escribe produccion. Default false: plan en seco'),
+        notionPageId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('Solo si hay mas de un page id distinto entre las cuentas: cual ficha queda enlazada al destino'),
+      },
+    },
+    async ({ idDestino, idsOrigen, aplicar, notionPageId }) => {
+      const r = fusionarEmpresasTool({ idDestino, idsOrigen, aplicar, notionPageId }, idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'quitar_alias',
+    {
+      description:
+        'Borra UN alias (nombre alternativo) mal puesto en una cuenta. Usala cuando un alias es de otra empresa y hace que ' +
+        'buscar_empresa devuelva la cuenta equivocada. EN SECO POR DEFAULT: sin aplicar:true corre el borrado en una ' +
+        'transaccion y la revierte, y devuelve la fila que se borraria (id_alias, fuente, confianza) y los alias antes y ' +
+        'despues. Con aplicar:true borra solo esa fila en una transaccion, deja la fila completa en auditoria_campo y ' +
+        'devuelve los alias de la cuenta RELEIDOS. El alias se compara sin mayusculas ni espacios de borde. Falla si la ' +
+        'cuenta no existe en la organizacion, si el alias no esta en ESA cuenta (y lista los que si tiene) o si calza con ' +
+        'mas de una fila. No toca la otra empresa ni crea alias en ningun lado.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa de la cuenta que tiene el alias mal puesto'),
+        alias: z.string().min(1).describe('El alias a borrar, tal como aparece en la cuenta'),
+        aplicar: z.boolean().optional().describe('true escribe produccion. Default false: plan en seco'),
+      },
+    },
+    async ({ idEmpresa, alias, aplicar }) => {
+      const r = quitarAliasTool({ idEmpresa, alias, aplicar }, idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );

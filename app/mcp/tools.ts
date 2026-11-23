@@ -73,6 +73,10 @@ import {
   CATEGORIAS_EXCLUIDAS_COBERTURA_DEFAULT,
   empresaFueraDelPipeline,
   reasignarNit,
+  fusionarEmpresas,
+  type FusionarEmpresasResultado,
+  quitarAlias,
+  type QuitarAliasResultado,
   reconciliarNotion,
   reconciliarEstadoFichaNotion,
   cambiosDesde,
@@ -1070,6 +1074,39 @@ export type ReasignarNitInput = { idEmpresa: string; nit: string };
 
 export function reasignarNitTool(input: ReasignarNitInput, idOrganizacion: number) {
   return reasignarNit(input.idEmpresa, input.nit, idOrganizacion);
+}
+
+// --- fusionar_empresas (duplicados de la misma empresa en una sola cuenta con NIT) -------
+
+export type FusionarEmpresasToolInput = {
+  idDestino: string;
+  idsOrigen: string[];
+  aplicar?: boolean;
+  notionPageId?: string;
+};
+
+// Composicion pura: la regla entera vive en el Repository. aplicar se normaliza a false aca para
+// que el seco sea el default tambien cuando el cliente manda el campo vacio.
+export function fusionarEmpresasTool(input: FusionarEmpresasToolInput, idOrganizacion: number): FusionarEmpresasResultado {
+  return fusionarEmpresas(
+    {
+      idDestino: input.idDestino,
+      idsOrigen: input.idsOrigen,
+      aplicar: input.aplicar === true,
+      notionPageId: input.notionPageId,
+    },
+    idOrganizacion,
+  );
+}
+
+// --- quitar_alias (borra un nombre alternativo mal puesto en una cuenta) -----------------
+
+export type QuitarAliasToolInput = { idEmpresa: string; alias: string; aplicar?: boolean };
+
+// Composicion pura: la regla vive en el Repository. aplicar se normaliza a false para que el seco
+// sea el default tambien cuando el cliente manda el campo vacio.
+export function quitarAliasTool(input: QuitarAliasToolInput, idOrganizacion: number): QuitarAliasResultado {
+  return quitarAlias({ idEmpresa: input.idEmpresa, alias: input.alias, aplicar: input.aplicar === true }, idOrganizacion);
 }
 
 // --- actividad (que se hizo y que no se hizo en un periodo) ---------------------------
