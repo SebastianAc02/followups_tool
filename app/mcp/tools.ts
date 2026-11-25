@@ -87,6 +87,9 @@ import {
   marcarAliado,
   type MarcarAliadoInput,
   type MarcarAliadoResultado,
+  marcarGrupo,
+  type MarcarGrupoInput,
+  type MarcarGrupoResultado,
   marcarDescarte,
   cuentasParaTandas,
   toquesParaActividadCanal,
@@ -525,6 +528,7 @@ export type CoberturaGeograficaInput = {
   incluirDescartadas?: boolean;
   excluirCategorias?: string[];
   limite?: number;
+  agruparPorMatriz?: boolean;
 };
 
 export function coberturaGeograficaTool(input: CoberturaGeograficaInput) {
@@ -537,6 +541,9 @@ export function coberturaGeograficaTool(input: CoberturaGeograficaInput) {
     incluirDescartadas: input.incluirDescartadas ?? false,
     excluirCategorias: input.excluirCategorias ?? [...CATEGORIAS_EXCLUIDAS_COBERTURA_DEFAULT],
     limite: Math.min(input.limite ?? LIMITE_COBERTURA_DEFAULT, LIMITE_COBERTURA_MAXIMO),
+    // Default true: es una lista de prospeccion, y dos satelites del mismo grupo en dos filas se
+    // llaman dos veces por la misma decision.
+    agruparPorMatriz: input.agruparPorMatriz ?? true,
   };
   const r = coberturaGeografica({
     idOrganizacion,
@@ -547,6 +554,7 @@ export function coberturaGeograficaTool(input: CoberturaGeograficaInput) {
     incluirDescartadas: filtros.incluirDescartadas,
     excluirCategorias: filtros.excluirCategorias,
     limite: filtros.limite,
+    agruparPorMatriz: filtros.agruparPorMatriz,
   });
   if ('error' in r) return { organizacion: idOrganizacion, filtros, ...r };
   return { organizacion: idOrganizacion, filtros: { ...filtros, periodo: r.periodo }, ...r };
@@ -607,6 +615,13 @@ export function marcarPerdidaTool(input: MarcarPerdidaInput, idOrganizacion: num
 // que quedo escrito y con que procedencia, que es el dato que hace auditable la lista despues.
 export function marcarAliadoTool(input: MarcarAliadoInput, idOrganizacion: number): MarcarAliadoResultado {
   return marcarAliado(input, idOrganizacion);
+}
+
+// A que grupo pertenece la cuenta. Devuelve el grupo RELEIDO (matriz e integrantes con id y
+// nombre) y, si salio de otro, ese otro releido tambien: quien marca tiene que poder ver que la
+// cuenta ya no esta donde estaba.
+export function marcarGrupoTool(input: MarcarGrupoInput, idOrganizacion: number): MarcarGrupoResultado {
+  return marcarGrupo(input, idOrganizacion);
 }
 
 // Por que la cuenta no entra a la lista. Devuelve la clasificacion releida, que ya trae resuelto

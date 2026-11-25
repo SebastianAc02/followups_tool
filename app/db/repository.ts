@@ -1537,7 +1537,110 @@ export type MarcarAliadoInput = z.input<typeof marcarAliadoSchema>;
 export type MarcarAliadoResultado = {
   idEmpresa: string;
   clasificacion: ClasificacionAliado;
+  // Lo que quedo en empresa_clasificacion.alianza_sae_plus, releido. Es el flag que lee la vista
+  // empresa_categoria: sin esto, marcar ninguno_verificado decia "no es aliado" en empresa.aliado
+  // mientras la vista seguia diciendo sae_plus y sacando la cuenta de cobertura_geografica.
+  clasificacionInterna: ClasificacionInternaAliado;
+  // La categoria de la vista despues de escribir, releida. Es la prueba de que las dos lecturas
+  // ya no se contradicen.
+  categoria: string;
 };
+
+export type ClasificacionInternaAliado = {
+  // null = la cuenta no tiene fila en empresa_clasificacion (la vista la lee como isp).
+  alianzaSaePlus: boolean | null;
+  motivo: string | null;
+  fuente: string | null;
+  actualizadoEn: string | null;
+  actualizadoPor: string | null;
+  // true cuando esta llamada cambio el flag; false cuando ya estaba como tenia que quedar o cuando
+  // el aliado marcado no decide nada sobre SAE Plus (ultimo_kilometro, integrapay).
+  tocada: boolean;
+};
+
+// Que le hace cada aliado al flag alianza_sae_plus. undefined = no lo toca.
+//
+// ultimo_kilometro e integrapay NO apagan el flag, a proposito: con el flag en 1 la vista deja la
+// cuenta en atacable=0, que es lo correcto para una cuenta de cualquier aliado. Apagarlo la
+// devolveria a 'isp' atacable, y la vista no tiene una categoria para esos dos aliados.
+function alianzaSaePlusPara(aliado: Aliado): 0 | 1 | undefined {
+  if (aliado === 'sae_plus') return 1;
+  if (aliado === 'ninguno_verificado' || aliado === 'sin_verificar') return 0;
+  return undefined;
+}
+
+function leerClasificacionInterna(lector: typeof db | Tx, idEmpresa: string) {
+  return lector
+    .select({
+      alianzaSaePlus: empresaClasificacion.alianzaSaePlus,
+      esCarrier: empresaClasificacion.esCarrier,
+      esCorporativoGrande: empresaClasificacion.esCorporativoGrande,
+      esUtilityNoIsp: empresaClasificacion.esUtilityNoIsp,
+      esExtranjero: empresaClasificacion.esExtranjero,
+      esNoIspConfirmado: empresaClasificacion.esNoIspConfirmado,
+      motivo: empresaClasificacion.motivo,
+      fuente: empresaClasificacion.fuente,
+      actualizadoEn: empresaClasificacion.actualizadoEn,
+      actualizadoPor: empresaClasificacion.actualizadoPor,
+    })
+    .from(empresaClasificacion)
+    .where(eq(empresaClasificacion.idEmpresa, idEmpresa))
+    .get();
+}
+
+// Lleva empresa_clasificacion.alianza_sae_plus al valor que pide el aliado marcado, dentro de la
+// transaccion de marcarAliado. Escribe solo si el flag cambia: un no-op no deja rastro ni pisa el
+// motivo de otra clasificacion.
+//
+// `motivo` es UNA columna para toda la fila, compartida con los otros flags (carrier, utility...).
+// Si alguno de esos sigue prendido, el motivo viejo explica ESE flag y no se pisa: se le agrega el
+// nuevo al final. Si no queda ningun otro prendido, el motivo nuevo lo reemplaza.
+function sincronizarAlianzaSaePlus(
+  tx: Tx,
+  idEmpresa: string,
+  aliado: Aliado,
+  p: { fuente: string; quien: string; fecha: string; nota?: string; instante: Date },
+): boolean {
+  const objetivo = alianzaSaePlusPara(aliado);
+  if (objetivo === undefined) return false;
+
+  const antes = leerClasificacionInterna(tx, idEmpresa);
+  // Apagar un flag que no existe no es un cambio: la vista ya lee esa cuenta como isp.
+  if (!antes && objetivo === 0) return false;
+  if (antes && antes.alianzaSaePlus === objetivo) return false;
+
+  const textoNuevo =
+    `aliado=${aliado} (marcar_aliado, verificado ${p.fecha}, fuente ${p.fuente}, lo dijo ${p.quien})` +
+    (p.nota ? `: ${p.nota}` : '');
+  const otrosPrendidos =
+    antes != null &&
+    antes.esCarrier + antes.esCorporativoGrande + antes.esUtilityNoIsp + antes.esExtranjero + antes.esNoIspConfirmado > 0;
+  const motivo = otrosPrendidos && antes?.motivo ? `${antes.motivo} | ${textoNuevo}` : textoNuevo;
+  const ahora = p.instante.toISOString();
+
+  tx.insert(empresaClasificacion)
+    .values({ idEmpresa, alianzaSaePlus: objetivo, motivo, fuente: p.fuente, actualizadoEn: ahora, actualizadoPor: p.quien })
+    .onConflictDoUpdate({
+      target: empresaClasificacion.idEmpresa,
+      set: { alianzaSaePlus: objetivo, motivo, fuente: p.fuente, actualizadoEn: ahora, actualizadoPor: p.quien },
+    })
+    .run();
+
+  tx.insert(syncCambios)
+    .values({
+      fecha: ahora,
+      corrida: 'cockpit',
+      fuente: 'cockpit',
+      entidad: 'empresa_clasificacion',
+      idRegistro: idEmpresa,
+      accion: antes ? 'update' : 'insert',
+      detalle:
+        `alianza_sae_plus: ${antes ? antes.alianzaSaePlus : 'sin fila'} -> ${objetivo} | por marcar_aliado ${aliado} | ` +
+        `fuente ${p.fuente} | lo dijo ${p.quien} | motivo anterior: ${antes?.motivo ?? 'ninguno'}`,
+    })
+    .run();
+  return true;
+}
 
 export function marcarAliado(input: MarcarAliadoInput, idOrganizacion: number): MarcarAliadoResultado {
   const parsed = marcarAliadoSchema.parse(input);
@@ -1575,9 +1678,35 @@ export function marcarAliado(input: MarcarAliadoInput, idOrganizacion: number): 
       })
       .run();
 
+    // La otra mitad del mismo hecho: el flag que lee la vista empresa_categoria. En la misma
+    // transaccion, para que nunca quede escrita una sin la otra.
+    const tocada = sincronizarAlianzaSaePlus(tx, parsed.idEmpresa, parsed.aliado, {
+      fuente: parsed.fuente,
+      quien: parsed.quien,
+      fecha,
+      nota: parsed.nota,
+      instante,
+    });
+
     // Relectura desde la fila escrita, no desde el input. Se reusa la traduccion de
     // clasificarAliado para que la escritura y la lectura no puedan divergir.
     const escrita = leerFilaAliado(tx, parsed.idEmpresa, idOrganizacion)!;
+    const interna = leerClasificacionInterna(tx, parsed.idEmpresa);
+    const vista = tx
+      .select({ categoria: empresaCategoriaView.categoria })
+      .from(empresaCategoriaView)
+      .where(eq(empresaCategoriaView.idEmpresa, parsed.idEmpresa))
+      .get();
+    const categoria = vista?.categoria ?? 'isp';
+    // Si la vista contradice lo que se acaba de escribir, se revierte todo en vez de devolver una
+    // cuenta que una lectura llama propia y otra llama de SAE Plus.
+    const objetivo = alianzaSaePlusPara(parsed.aliado);
+    if (objetivo === 1 && categoria !== 'sae_plus') {
+      throw new Error(`marcar_aliado: la vista dejo ${parsed.idEmpresa} en ${categoria} despues de encender sae_plus. Se revirtio.`);
+    }
+    if (objetivo === 0 && categoria === 'sae_plus') {
+      throw new Error(`marcar_aliado: la vista sigue clasificando ${parsed.idEmpresa} como sae_plus. Se revirtio.`);
+    }
     return {
       idEmpresa: parsed.idEmpresa,
       clasificacion: {
@@ -1587,6 +1716,249 @@ export function marcarAliado(input: MarcarAliadoInput, idOrganizacion: number): 
         heredadoDe: null,
         evidencia: evidenciaDe(escrita),
       },
+      clasificacionInterna: {
+        alianzaSaePlus: interna ? interna.alianzaSaePlus === 1 : null,
+        motivo: interna?.motivo ?? null,
+        fuente: interna?.fuente ?? null,
+        actualizadoEn: interna?.actualizadoEn ?? null,
+        actualizadoPor: interna?.actualizadoPor ?? null,
+        tocada,
+      },
+      categoria,
+    };
+  });
+}
+
+// --- grupo (matriz y satelites) ------------------------------------------------------
+//
+// empresa.id_empresa_matriz junta cuentas VIVAS que pertenecen al mismo grupo empresarial, cada
+// una con su propio deal (ver schema.ts). Distinto de opera_bajo_id, que marca una identidad
+// muerta absorbida por una fusion. Un grupo tiene UN nivel: la matriz no tiene matriz, y una
+// cuenta que es matriz de otras no puede volverse satelite. Sin esa regla un ranking que colapsa
+// por COALESCE(id_empresa_matriz, id_empresa) partiria el mismo grupo en dos filas.
+
+export type IntegranteGrupo = {
+  idEmpresa: string;
+  nombre: string;
+  esMatriz: boolean;
+  usuariosEfectivos: number | null;
+};
+
+export type GrupoEmpresas = {
+  // COALESCE(id_empresa_matriz, id_empresa): la llave por la que colapsan los rankings.
+  idGrupo: string;
+  matriz: { idEmpresa: string; nombre: string };
+  // Matriz primero, despues los satelites por nombre. Solo cuentas vivas (sin opera_bajo_id).
+  integrantes: IntegranteGrupo[];
+  // Suma de usuarios_efectivos de los integrantes que tienen el dato. null si ninguno lo tiene:
+  // un grupo sin tamano no es un grupo de cero usuarios.
+  usuariosEfectivosGrupo: number | null;
+  integrantesSinTamano: number;
+};
+
+// Los grupos de las llaves pedidas, en DOS queries para todas. Una llave que no es matriz de
+// nadie devuelve un grupo de uno, para que el que agrupa no tenga que distinguir el caso.
+export function gruposPorMatriz(lector: typeof db | Tx, idOrganizacion: number, llaves: string[]): Map<string, GrupoEmpresas> {
+  const mapa = new Map<string, GrupoEmpresas>();
+  const unicas = [...new Set(llaves)];
+  if (unicas.length === 0) return mapa;
+
+  const filas = lector
+    .select({
+      idEmpresa: empresa.idEmpresa,
+      nombre: empresa.nombreOficial,
+      idEmpresaMatriz: empresa.idEmpresaMatriz,
+      usuariosEfectivos: empresaUsuarios.usuariosEfectivos,
+    })
+    .from(empresa)
+    .leftJoin(empresaUsuarios, eq(empresaUsuarios.idEmpresa, empresa.idEmpresa))
+    .where(
+      and(
+        eq(empresa.organizacionActivaId, idOrganizacion),
+        EMPRESA_VIVA,
+        or(inArray(empresa.idEmpresa, unicas), inArray(empresa.idEmpresaMatriz, unicas)),
+      ),
+    )
+    .orderBy(asc(empresa.nombreOficial))
+    .all();
+
+  const porLlave = new Map<string, typeof filas>();
+  for (const f of filas) {
+    // Una fila entra por ser la llave (la matriz) o por apuntar a ella (un satelite).
+    const llave = f.idEmpresaMatriz != null && unicas.includes(f.idEmpresaMatriz) ? f.idEmpresaMatriz : f.idEmpresa;
+    if (!unicas.includes(llave)) continue;
+    const lista = porLlave.get(llave) ?? [];
+    lista.push(f);
+    porLlave.set(llave, lista);
+  }
+
+  for (const [llave, miembros] of porLlave) {
+    const matrizFila = miembros.find((m) => m.idEmpresa === llave);
+    const integrantes: IntegranteGrupo[] = miembros
+      .map((m) => ({
+        idEmpresa: m.idEmpresa,
+        nombre: m.nombre,
+        esMatriz: m.idEmpresa === llave,
+        usuariosEfectivos: m.usuariosEfectivos ?? null,
+      }))
+      .sort((a, b) => Number(b.esMatriz) - Number(a.esMatriz) || a.nombre.localeCompare(b.nombre));
+    const conTamano = integrantes.filter((i) => i.usuariosEfectivos != null);
+    mapa.set(llave, {
+      idGrupo: llave,
+      // Si la matriz no aparece (otra organizacion o fusionada), el grupo igual se reporta con su
+      // id: esconderlo haria que el satelite se lea como cuenta suelta.
+      matriz: { idEmpresa: llave, nombre: matrizFila?.nombre ?? llave },
+      integrantes,
+      usuariosEfectivosGrupo: conTamano.length === 0 ? null : conTamano.reduce((acc, i) => acc + (i.usuariosEfectivos ?? 0), 0),
+      integrantesSinTamano: integrantes.length - conTamano.length,
+    });
+  }
+  return mapa;
+}
+
+export type FilaAgrupable = { idEmpresa: string; idEmpresaMatriz: string | null };
+
+export type FilaColapsada<T> = { idGrupo: string; representante: T; miembros: T[]; peso: number };
+
+// Una fila por COALESCE(id_empresa_matriz, id_empresa), pura y sin base. `peso` es lo que ordena
+// el ranking (usuarios, accesos); el grupo pesa la suma de sus miembros en la lista.
+//
+// El representante es la matriz cuando esta en la lista, porque es donde se decide; si no esta,
+// la fila mas pesada del grupo. El orden de salida es por peso del grupo, de mayor a menor, y a
+// igual peso se respeta el orden de entrada para que dos corridas den lo mismo.
+export function colapsarPorMatriz<T extends FilaAgrupable>(filas: T[], peso: (f: T) => number): FilaColapsada<T>[] {
+  const grupos = new Map<string, { miembros: T[]; primero: number }>();
+  filas.forEach((f, i) => {
+    const llave = f.idEmpresaMatriz ?? f.idEmpresa;
+    const g = grupos.get(llave);
+    if (g) g.miembros.push(f);
+    else grupos.set(llave, { miembros: [f], primero: i });
+  });
+  return [...grupos.entries()]
+    .map(([idGrupo, g]) => {
+      const matriz = g.miembros.find((m) => m.idEmpresa === idGrupo);
+      const masPesada = g.miembros.reduce((a, b) => (peso(b) > peso(a) ? b : a));
+      return {
+        idGrupo,
+        representante: matriz ?? masPesada,
+        miembros: g.miembros,
+        peso: g.miembros.reduce((acc, m) => acc + peso(m), 0),
+        primero: g.primero,
+      };
+    })
+    .sort((a, b) => b.peso - a.peso || a.primero - b.primero)
+    .map(({ primero: _primero, ...r }) => r);
+}
+
+// fuente y quien obligatorios por la misma regla de procedencia que marcarAliado. idMatriz null
+// DESMARCA: es como se corrige un grupo mal armado sin tocar SQL.
+const marcarGrupoSchema = z.object({
+  idEmpresa: z.string().min(1),
+  idMatriz: z.string().min(1).nullable(),
+  fuente: z.string().min(1),
+  quien: z.string().min(1),
+  nota: z.string().min(1).optional(),
+});
+export type MarcarGrupoInput = z.input<typeof marcarGrupoSchema>;
+
+export type MarcarGrupoResultado = {
+  idEmpresa: string;
+  matrizAntes: string | null;
+  matrizDespues: string | null;
+  // false cuando la cuenta ya estaba como se pidio: no se escribe ni se deja rastro.
+  cambio: boolean;
+  // El grupo de la cuenta DESPUES de escribir, releido. null cuando quedo suelta.
+  grupo: GrupoEmpresas | null;
+  // El grupo del que salio, releido despues de escribir, cuando cambio de grupo o se desmarco.
+  // Es la prueba de que ya no esta ahi.
+  grupoAnterior: GrupoEmpresas | null;
+};
+
+export function marcarGrupo(input: MarcarGrupoInput, idOrganizacion: number): MarcarGrupoResultado {
+  const parsed = marcarGrupoSchema.parse(input);
+  const instante = new Date();
+
+  return db.transaction((tx) => {
+    const leer = (id: string) =>
+      tx
+        .select({ idEmpresa: empresa.idEmpresa, operaBajoId: empresa.operaBajoId, idEmpresaMatriz: empresa.idEmpresaMatriz })
+        .from(empresa)
+        .where(and(eq(empresa.idEmpresa, id), eq(empresa.organizacionActivaId, idOrganizacion)))
+        .get();
+
+    const cuenta = leer(parsed.idEmpresa);
+    if (!cuenta) throw new Error(`marcar_grupo: la empresa ${parsed.idEmpresa} no existe o no esta activa en la organizacion ${idOrganizacion}`);
+    if (cuenta.operaBajoId) {
+      throw new Error(
+        `marcar_grupo: ${parsed.idEmpresa} esta fusionada en ${cuenta.operaBajoId} (opera_bajo_id), es una identidad muerta. ` +
+          `El grupo se marca sobre ${cuenta.operaBajoId}.`,
+      );
+    }
+
+    if (parsed.idMatriz != null) {
+      if (parsed.idMatriz === parsed.idEmpresa) throw new Error('marcar_grupo: una cuenta no puede ser su propia matriz');
+      const matriz = leer(parsed.idMatriz);
+      if (!matriz) throw new Error(`marcar_grupo: la matriz ${parsed.idMatriz} no existe o no esta activa en la organizacion ${idOrganizacion}`);
+      if (matriz.operaBajoId) {
+        throw new Error(
+          `marcar_grupo: la matriz ${parsed.idMatriz} esta fusionada en ${matriz.operaBajoId}. Usa ${matriz.operaBajoId} como matriz.`,
+        );
+      }
+      if (matriz.idEmpresaMatriz != null) {
+        throw new Error(
+          `marcar_grupo: ${parsed.idMatriz} ya es satelite de ${matriz.idEmpresaMatriz}; una matriz no puede tener matriz. ` +
+            `Marca ${parsed.idEmpresa} con idMatriz ${matriz.idEmpresaMatriz}.`,
+        );
+      }
+      const satelites = tx
+        .select({ idEmpresa: empresa.idEmpresa })
+        .from(empresa)
+        .where(and(eq(empresa.idEmpresaMatriz, parsed.idEmpresa), EMPRESA_VIVA))
+        .all();
+      if (satelites.length > 0) {
+        throw new Error(
+          `marcar_grupo: ${parsed.idEmpresa} es matriz de ${satelites.map((x) => x.idEmpresa).join(', ')}; no puede volverse ` +
+            `satelite sin armar una cadena. Mueve primero esos satelites o marca ${parsed.idMatriz} como satelite de ${parsed.idEmpresa}.`,
+        );
+      }
+    }
+
+    const antes = cuenta.idEmpresaMatriz;
+    const cambio = antes !== parsed.idMatriz;
+    if (cambio) {
+      tx.update(empresa)
+        .set({ idEmpresaMatriz: parsed.idMatriz, updatedAt: sql`datetime('now')` })
+        .where(eq(empresa.idEmpresa, parsed.idEmpresa))
+        .run();
+      tx.insert(syncCambios)
+        .values({
+          fecha: instante.toISOString(),
+          corrida: 'cockpit',
+          fuente: 'cockpit',
+          entidad: 'empresa',
+          idRegistro: parsed.idEmpresa,
+          accion: 'update',
+          detalle:
+            `id_empresa_matriz: ${antes ?? 'ninguna'} -> ${parsed.idMatriz ?? 'ninguna'} | fuente ${parsed.fuente} | ` +
+            `lo dijo ${parsed.quien}${parsed.nota ? ` | ${parsed.nota}` : ''}`,
+        })
+        .run();
+    }
+
+    // Relectura desde la base, no desde el input.
+    const escrita = leer(parsed.idEmpresa)!;
+    if (escrita.idEmpresaMatriz !== parsed.idMatriz) {
+      throw new Error('marcar_grupo: la relectura no cuadra con lo escrito. Se revirtio.');
+    }
+    const llaves = [escrita.idEmpresaMatriz, antes].filter((x): x is string => x != null);
+    const grupos = gruposPorMatriz(tx, idOrganizacion, llaves);
+    return {
+      idEmpresa: parsed.idEmpresa,
+      matrizAntes: antes,
+      matrizDespues: escrita.idEmpresaMatriz,
+      cambio,
+      grupo: escrita.idEmpresaMatriz ? (grupos.get(escrita.idEmpresaMatriz) ?? null) : null,
+      grupoAnterior: antes && antes !== escrita.idEmpresaMatriz ? (grupos.get(antes) ?? null) : null,
     };
   });
 }
@@ -13466,6 +13838,10 @@ export type FilaCuenta = {
   estadoFichaNotionFecha: string | null;
   owner: string | null;
   notionPageId: string | null;
+  // La matriz del grupo (id_empresa_matriz), null si la cuenta no es satelite de nadie. Viaja en
+  // cada fila y la lista NO se colapsa: esta tool es para cruzar por notionPageId, y cada
+  // satelite tiene su propia pagina. Agrupar es trabajo del que rankea.
+  idEmpresaMatriz: string | null;
   // Solo cuando se pide (conAliado). Ausente y no null: la lista de reconciliacion no responde
   // esta pregunta, y una llave en null diria que la cuenta no tiene aliado en vez de que nadie
   // la pregunto. El mismo error de leer el vacio como dato, un nivel mas arriba.
@@ -13524,7 +13900,8 @@ export function cuentasParaReconciliar(idOrganizacion: number, opts: { conAliado
   const matrices = [...new Set(filas.map((f) => f.idEmpresaMatriz).filter((m): m is string => m != null))];
   const hermanas = opts.conAliado ? hermanasConfirmadas(db, matrices) : new Map<string, FilaAliado>();
 
-  return filas.map(({ aliadoCol, aliadoFuente, aliadoFecha, aliadoQuien, idEmpresaMatriz, ...cuenta }) => {
+  return filas.map(({ aliadoCol, aliadoFuente, aliadoFecha, aliadoQuien, ...cuenta }) => {
+    const idEmpresaMatriz = cuenta.idEmpresaMatriz;
     if (!opts.conAliado) return cuenta;
     const propia: FilaAliado = {
       idEmpresa: cuenta.idEmpresa,
@@ -14580,6 +14957,9 @@ export type FiltroCobertura = {
   incluirDescartadas?: boolean;
   excluirCategorias?: readonly string[];
   limite: number;
+  // Default true: una fila por grupo (COALESCE(id_empresa_matriz, id_empresa)), ordenada por la
+  // suma de accesos del grupo en la zona. false devuelve una fila por empresa, como antes.
+  agruparPorMatriz?: boolean;
 };
 
 export type MunicipioCatalogo = { codigoDivipola: number; municipio: string; departamento: string | null };
@@ -14631,6 +15011,18 @@ export type EmpresaCobertura = {
   atacable: boolean;
   contactos: ContactoCobertura[];
   telefonos: TelefonoCobertura[];
+  idEmpresaMatriz: string | null;
+  // null cuando la cuenta no tiene grupo (es un grupo de uno). Con agruparPorMatriz, la fila es el
+  // representante del grupo y los demas integrantes no salen como filas propias.
+  grupo: GrupoCobertura | null;
+};
+
+export type GrupoCobertura = GrupoEmpresas & {
+  // Suma de accesos en la zona de los integrantes que salieron en la lista. Es lo que ordena
+  // cuando se agrupa.
+  accesosZonaGrupo: number;
+  // Que integrantes tienen accesos en la zona (y pasaron los filtros).
+  integrantesEnZona: string[];
 };
 
 export type CiegaCobertura = {
@@ -14658,7 +15050,10 @@ export type ResultadoCobertura = {
     departamento: string | null;
     municipiosEnDepartamento: number;
   };
+  // Con agruparPorMatriz, total y atacables cuentan GRUPOS; totalEmpresas cuenta empresas.
+  agrupadoPorMatriz: boolean;
   total: number;
+  totalEmpresas: number;
   atacables: number;
   devueltas: number;
   truncado: boolean;
@@ -14782,6 +15177,7 @@ export function coberturaGeografica(f: FiltroCobertura): ResultadoCobertura | Er
     notionPageId: string | null;
     categoria: string | null;
     atacable: number | null;
+    idEmpresaMatriz: string | null;
   }>(sql`
     WITH zona AS (
       SELECT id_empresa, SUM(accesos) AS accesos_zona, COUNT(*) AS municipios_zona
@@ -14800,7 +15196,8 @@ export function coberturaGeografica(f: FiltroCobertura): ResultadoCobertura | Er
            u.usuarios_reales AS usuariosReales, u.usuarios_reales_fuente AS usuariosRealesFuente,
            u.usuarios_estimados AS usuariosEstimados, u.usuarios_est_fuente AS usuariosEstFuente,
            e.estado_comercial AS estadoComercial, e.estado_notion AS estadoNotion, e.owner AS owner,
-           e.notion_page_id AS notionPageId, c.categoria AS categoria, c.atacable AS atacable
+           e.notion_page_id AS notionPageId, c.categoria AS categoria, c.atacable AS atacable,
+           e.id_empresa_matriz AS idEmpresaMatriz
     FROM zona z
     JOIN empresa e ON e.id_empresa = z.id_empresa
     LEFT JOIN total t ON t.id_empresa = z.id_empresa
@@ -14813,8 +15210,26 @@ export function coberturaGeografica(f: FiltroCobertura): ResultadoCobertura | Er
     ORDER BY z.accesos_zona DESC, e.nombre_oficial ASC
   `);
 
-  const pagina = filas.slice(0, f.limite);
+  // El colapso va ANTES del limite: el limite corta grupos, no empresas, para que un grupo no
+  // quede partido entre la pagina y lo truncado.
+  const agrupar = f.agruparPorMatriz ?? true;
+  const colapsadas = colapsarPorMatriz(filas, (x) => x.accesosZona);
+  const lista = agrupar ? colapsadas.map((c) => c.representante) : filas;
+  const miembrosEnZona = new Map(colapsadas.map((c) => [c.idGrupo, c.miembros]));
+  const pagina = lista.slice(0, f.limite);
   const ids = pagina.map((p) => p.idEmpresa);
+  const grupos = gruposPorMatriz(db, f.idOrganizacion, pagina.map((p) => p.idEmpresaMatriz ?? p.idEmpresa));
+  const grupoDe = (p: (typeof filas)[number]): GrupoCobertura | null => {
+    const llave = p.idEmpresaMatriz ?? p.idEmpresa;
+    const g = grupos.get(llave);
+    if (!g || g.integrantes.length < 2) return null;
+    const enZona = miembrosEnZona.get(llave) ?? [p];
+    return {
+      ...g,
+      accesosZonaGrupo: enZona.reduce((acc, m) => acc + m.accesosZona, 0),
+      integrantesEnZona: enZona.map((m) => m.idEmpresa),
+    };
+  };
 
   const contactosPorEmpresa = new Map<string, ContactoCobertura[]>();
   const telefonosPorEmpresa = new Map<string, TelefonoCobertura[]>();
@@ -14890,6 +15305,8 @@ export function coberturaGeografica(f: FiltroCobertura): ResultadoCobertura | Er
     atacable: (p.atacable ?? 1) === 1,
     contactos: contactosPorEmpresa.get(p.idEmpresa) ?? [],
     telefonos: telefonosPorEmpresa.get(p.idEmpresa) ?? [],
+    idEmpresaMatriz: p.idEmpresaMatriz,
+    grupo: grupoDe(p),
   }));
 
   // Ciegas: sin ciudad_principal, y en el departamento por una de dos vias, accesos ahi en el
@@ -14971,10 +15388,12 @@ export function coberturaGeografica(f: FiltroCobertura): ResultadoCobertura | Er
       departamento: departamentoZona,
       municipiosEnDepartamento: municipiosDelDepto.length,
     },
-    total: filas.length,
-    atacables: filas.filter((x) => (x.atacable ?? 1) === 1).length,
+    agrupadoPorMatriz: agrupar,
+    total: lista.length,
+    totalEmpresas: filas.length,
+    atacables: lista.filter((x) => (x.atacable ?? 1) === 1).length,
     devueltas: empresas.length,
-    truncado: filas.length > empresas.length,
+    truncado: lista.length > empresas.length,
     empresas,
     ciegas,
     sinUbicacionEnNingunaZona: sinUbicacion?.n ?? 0,

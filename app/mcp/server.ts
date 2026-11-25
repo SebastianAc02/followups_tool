@@ -32,6 +32,7 @@ import {
   cambiarCadenciaTool,
   marcarPerdidaTool,
   marcarAliadoTool,
+  marcarGrupoTool,
   marcarDescarteTool,
   marcarCanalTool,
   marcarTareaBloqueanteTool,
@@ -138,6 +139,7 @@ export const TOOLS_ESCRITURA = [
   'marcar_canal',
   'marcar_descarte',
   'marcar_fuente_lead',
+  'marcar_grupo',
   'marcar_tarea_bloqueante',
   'marcar_no_ejecutado',
   'marcar_perdida',
@@ -625,7 +627,11 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
         'propia; una cuenta sin marcar significa que NADIE MIRO, y eso no es lo mismo. Nunca marques ' +
         'ninguno_verificado para "limpiar" una cuenta sobre la que no tengas la verificacion: asi ' +
         'entraron dos cuentas de SAE Plus a una lista de llamadas el 2026-08-04. ' +
-        'Envuelve marcarAliado() del dominio.',
+        'En la misma transaccion lleva la clasificacion interna (alianza_sae_plus, la que decide la ' +
+        'categoria sae_plus en cobertura_geografica y en los segmentos): sae_plus la enciende, ' +
+        'ninguno_verificado y sin_verificar la apagan, ultimo_kilometro e integrapay no la tocan. ' +
+        'Devuelve clasificacionInterna y categoria releidas; si la categoria no cuadra con lo marcado, ' +
+        'falla y no escribe nada. Envuelve marcarAliado() del dominio.',
       inputSchema: {
         idEmpresa: z.string().min(1).describe('empresa.id_empresa'),
         aliado: z
@@ -646,6 +652,40 @@ function registrarWriteTools(server: McpServer, idOrganizacion: number, sesion?:
     },
     async (input) => {
       const r = marcarAliadoTool(input as Parameters<typeof marcarAliadoTool>[0], idOrganizacion);
+      return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    'marcar_grupo',
+    {
+      description:
+        'Dice a QUE GRUPO EMPRESARIAL pertenece una cuenta: la deja como satelite de una matriz ' +
+        '(empresa.id_empresa_matriz), o la suelta con idMatriz:null. Las dos cuentas siguen VIVAS, cada ' +
+        'una con su deal y su ficha: esto no es fusionar_empresas (que absorbe un duplicado). Sirve para ' +
+        'que los rankings de prospeccion cuenten el grupo una sola vez y para que el aliado de la matriz ' +
+        'se herede a los satelites. Un grupo tiene UN nivel: falla si la matriz ya tiene matriz, si la ' +
+        'cuenta ya es matriz de otras, si alguna de las dos esta fusionada (opera_bajo_id) o no existe. ' +
+        'Deja rastro en la bitacora con el antes y el despues. Devuelve el grupo RELEIDO (matriz e ' +
+        'integrantes con id, nombre y usuarios) y, si la cuenta salio de otro grupo, ese grupo releido. ' +
+        'Envuelve marcarGrupo() del dominio.',
+      inputSchema: {
+        idEmpresa: z.string().min(1).describe('empresa.id_empresa de la cuenta que se mete al grupo (o se suelta)'),
+        idMatriz: z
+          .string()
+          .min(1)
+          .nullable()
+          .describe('empresa.id_empresa de la matriz del grupo. null SUELTA la cuenta de su grupo'),
+        fuente: z
+          .string()
+          .min(1)
+          .describe('De donde salio el dato: notion, RUES, operador, el cliente. OBLIGATORIO'),
+        quien: z.string().min(1).describe('Quien lo dijo, con nombre. OBLIGATORIO'),
+        nota: z.string().min(1).optional().describe('El detalle en prosa, que queda en la bitacora'),
+      },
+    },
+    async (input) => {
+      const r = marcarGrupoTool(input as Parameters<typeof marcarGrupoTool>[0], idOrganizacion);
       return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }] };
     },
   );
@@ -1622,7 +1662,8 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
         'Lista minima de cuentas para cruzar contra Notion: idEmpresa, nombre (razon social), ' +
         'nombreNotion (marca comercial), estado (la etapa INTERNA de la herramienta), estadoFichaNotion y ' +
         'estadoFichaNotionFecha (el espejo del Estado de la ficha de Notion y cuando se leyo; null = nunca se ' +
-        'leyo), owner y notionPageId. Que estado y estadoFichaNotion difieran es informacion, no un error: ' +
+        'leyo), owner, notionPageId e idEmpresaMatriz (la matriz de su grupo, null si no es satelite; la ' +
+        'lista NO se colapsa por grupo porque cada satelite tiene su ficha). Que estado y estadoFichaNotion difieran es informacion, no un error: ' +
         'fichaDistintaDeEstado las cuenta y sinEstadoFicha cuenta las que nunca se leyeron. CRUZA SIEMPRE POR ' +
         'notionPageId, nunca por nombre. Incluye cuentas sin etapa, que `pipeline` no muestra. ' +
         'Con conAliado:true agrega DE QUIEN es cada cuenta, con su evidencia, y el conteo de las ' +
@@ -1670,7 +1711,12 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
         'ciudad nunca muestra (enLista dice si igual salieron en la lista por accesos), y ' +
         'sinUbicacionEnNingunaZona, las que no caen en ninguna consulta geografica. ' +
         'Un nombre de municipio repetido en varios departamentos devuelve error municipio_ambiguo ' +
-        'con los candidatos: se repite con departamento o con el codigo DIVIPOLA.',
+        'con los candidatos: se repite con departamento o con el codigo DIVIPOLA. ' +
+        'POR DEFAULT AGRUPA POR MATRIZ: una fila por grupo empresarial (COALESCE(id_empresa_matriz, ' +
+        'id_empresa)), ordenada por la suma de accesos del grupo en la zona; la fila es la matriz si ' +
+        'tiene accesos ahi, si no el integrante con mas accesos, y trae `grupo` con la matriz, los ' +
+        'integrantes, usuariosEfectivosGrupo (suma del grupo entero) y accesosZonaGrupo. total y ' +
+        'atacables cuentan grupos; totalEmpresas cuenta empresas.',
       inputSchema: {
         idOrganizacion: z.number().int().positive().optional().describe('Default: 1 (Onepay)'),
         municipio: z
@@ -1710,6 +1756,13 @@ export function crearMcpServer(opts: { escritura?: boolean; idOrganizacion?: num
           .max(LIMITE_COBERTURA_MAXIMO)
           .optional()
           .describe(`Default ${LIMITE_COBERTURA_DEFAULT}, maximo ${LIMITE_COBERTURA_MAXIMO}`),
+        agruparPorMatriz: z
+          .boolean()
+          .optional()
+          .describe(
+            'Default true: una fila por grupo empresarial. false devuelve una fila por empresa (cada ' +
+              'satelite aparte, con su idEmpresaMatriz y su grupo al lado)',
+          ),
       },
     },
     async (args) => {
